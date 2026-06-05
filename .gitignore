@@ -12,8 +12,6 @@ build/
 .env
 .env.*
 !.env.example
-.npmrc
-!.npmrc.example
 .netrc
 .yarnrc.yml
 *.pem
