@@ -1,4 +1,4 @@
-import { inet, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { bigint, inet, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
 // Typed table definitions for query building. The authoritative DDL — including RLS
 // policies, FORCE RLS, indexes and grants — lives in ./migrations/*.sql (Drizzle's schema
@@ -47,6 +47,39 @@ export const keyBackups = pgTable('key_backups', {
   backup: text('backup').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Messaging (roadmap 25) — CIPHERTEXT ONLY for content. RLS + grants in 0007. See messaging-schema.md.
+// A conversation / MLS group — metadata only (no name/title: that would be plaintext metadata).
+export const conversations = pgTable('conversations', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  createdBy: uuid('created_by').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// User-level membership; drives app-layer send/read authz (26).
+export const conversationMembers = pgTable('conversation_members', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  conversationId: uuid('conversation_id').notNull(),
+  userId: uuid('user_id').notNull(),
+  joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Messages — `ciphertext` is the opaque base64 MLS blob (never decrypted server-side); the rest is
+// routing/version/dedup metadata. No plaintext-bearing column.
+export const messages = pgTable('messages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  conversationId: uuid('conversation_id').notNull(),
+  senderUserId: uuid('sender_user_id').notNull(),
+  clientMessageId: uuid('client_message_id').notNull(),
+  ciphertext: text('ciphertext').notNull(),
+  alg: text('alg').notNull(),
+  epoch: bigint('epoch', { mode: 'bigint' }).notNull(),
+  attachmentObjectKey: text('attachment_object_key'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 // Append-only audit log (IDs + metadata only — never content/secrets). RLS + grants in 0002.

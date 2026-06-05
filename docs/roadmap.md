@@ -67,7 +67,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (ro
 
 > Goal: send and receive encrypted messages in real time.
 
-- [ ] 25. **Schema** — `conversations`, `conversation_members`, `messages` (RLS, ciphertext only) 🔒
+- [x] 25. **Schema** — `conversations`, `conversation_members`, `messages` (RLS, ciphertext only) 🔒 — _PR #48; migration `0007_messaging.sql` — three tenant-scoped tables, all ENABLE+FORCE RLS + WITH CHECK + leading-`tenant_id` indexes; `messages` is **ciphertext-only** (opaque base64 + routing metadata, no plaintext column) and **append-only** (select/insert grant). Composite-FK tenant pinning beneath RLS; idempotency unique index. 9-test live-DB RLS spec (cross-tenant isolation, WITH CHECK, append-only, composite-FK, fail-closed) green. `security-boundary-auditor` PASS. Threat model `messaging-schema.md`. Intra-tenant membership authz is the app layer's job (26)._
 - [ ] 26. **Send API** — membership authz + Zod I/O + store ciphertext (no plaintext server-side) 🔒
 - [ ] 27. **End-to-end text** — client MLS-encrypts → stored → recipient fetches → decrypts
 - [ ] 28. **WebSocket gateway** — authenticated connections; real-time ciphertext delivery
