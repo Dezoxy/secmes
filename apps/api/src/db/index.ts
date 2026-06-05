@@ -6,7 +6,7 @@ import * as schema from './schema.js';
 
 type Db = PostgresJsDatabase<typeof schema>;
 // Drizzle's transaction callback argument type, derived so callers stay typed.
-type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
+export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
 let pool: Sql | undefined;
 let db: Db | undefined;
