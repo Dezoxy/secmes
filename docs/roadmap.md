@@ -1,16 +1,24 @@
 # secmes — Build Roadmap (checkpoints)
 
-Living checklist. Check items off as they land. Each checkpoint states its **done-when** so "complete" is objective. Sizing target: ~0.5–2 days each.
+Living checklist. Check items off as they land. Each checkpoint states its **done-when** so "complete" is objective. **Effort is per-item, not flat** — most are ~½–2 days, but a few (notably #41 core UX, #42, #43) are *weeks*; don't plan runway against an average. The implied "~10–12 weeks" is realistically **6–9 months solo**.
 
 **Reality notes**
 
 - Checkpoints **17–32 (crypto + messaging) are the hard, high-risk core** — most of the effort and all of the "is this actually secure" risk lives there. Don't rush them.
 - Two GA gates (**G4 crypto review, G5 pen test**) are **external and paid** — schedule and budget them early; they block launch.
 - This is a genuine multi-month solo effort. That's expected — the list just makes it honest.
+- **Front-load the unknowns** (spikes S1–S2 below): the hardest thing (MLS) and the longest-lead-time thing (paid audits) start _now_, not in sequence.
+- This roadmap is **canonical** for phasing; `secure_messaging_platform_plan.md` §17 is an earlier, looser cut — defer to this file when they disagree.
+- Each phase is gated by its `docs/threat-models/*.md` note (rls-tenant-isolation, key-directory, key-backup, attachments) — ratify the note before the code.
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (route through the matching reviewer).
 
 ---
+
+## Front-load — start now, parallel to Phase 0
+
+- [ ] S1. **MLS spike** (laptop, no cluster) — `ts-mls` two-party encrypt/decrypt + add-member, run RFC 9420 interop vectors, measure gzipped bundle size, **prove it on a real iOS-Safari installed PWA**, sketch an IndexedDB keystore. Ratifies `docs/mls-library-selection.md`. _Highest-leverage de-risking action — do it this week._ 🔒
+- [ ] S2. **Book the paid GA gates** — quotes + provisional calendar holds for G4 (crypto review) and G5 (pen test), ~2 months out. Lead time is the schedule risk, not the audits.
 
 ## Phase 0 — Platform foundation (cluster + pipeline)
 
@@ -24,6 +32,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (ro
 - [ ] 6. **CI green on a PR** — lint/format/typecheck/test/build pass; GitHub→ACR via OIDC
 - [ ] 7. **Hello-world `api` live** end-to-end over HTTPS via GitOps
 - [ ] 8. **Secrets via Key Vault** + Secrets Store CSI mounted in the `api` pod 🔒
+- [ ] 8a. **Staging + prod environments** stood up (namespaces, per-env Helm values, first GitOps sync, `vars.STAGING_URL` registered) — the GitOps prod gate and nightly DAST both require this, and no other checkpoint creates it.
 
 ## Phase 1 — Identity & tenancy
 
@@ -42,6 +51,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (ro
 
 > Goal: the hard part. E2EE keys generated, published, and recoverable.
 
+- [ ] 16a. **Headless 2-device test harness** — a CLI/Node oracle doing encrypt→send→fetch→decrypt across two simulated devices, so checkpoints 17–38 (all _client_ behavior, but no client exists until #39) have a repeatable pass/fail instead of hand-verification. 🔒
 - [ ] 17. **MLS integrated** in `packages/crypto` — local encrypt/decrypt smoke test passes 🔒
 - [ ] 18. **Device keys** generated client-side, stored in IndexedDB
 - [ ] 19. **Key directory** — `devices` + `key_packages` tables (RLS); publish/fetch public KeyPackages 🔒
