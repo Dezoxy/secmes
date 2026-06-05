@@ -95,6 +95,6 @@ create unique index if not exists messages_idempotency_idx
 
 -- Conversations + members are mutable membership; messages are APPEND-ONLY (no update/delete grant —
 -- edits/retention are later features). Deletes cascade from tenants/conversations via the owner role.
-grant select, insert on conversations to argus_app;
-grant select, insert, delete on conversation_members to argus_app;
-grant select, insert on messages to argus_app;
+grant select, insert on conversations to secmes_app;
+grant select, insert, delete on conversation_members to secmes_app;
+grant select, insert on messages to secmes_app;

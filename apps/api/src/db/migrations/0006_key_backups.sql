@@ -18,4 +18,4 @@ create policy key_backups_tenant_isolation on key_backups
 create unique index if not exists key_backups_user_idx on key_backups (tenant_id, user_id);
 
 -- Upsert (store/replace) + select (restore). No delete — rotation overwrites the row.
-grant select, insert, update on key_backups to argus_app;
+grant select, insert, update on key_backups to secmes_app;

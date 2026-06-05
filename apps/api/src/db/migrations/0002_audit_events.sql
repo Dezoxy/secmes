@@ -21,4 +21,4 @@ create index if not exists audit_events_tenant_idx on audit_events (tenant_id, c
 
 -- Append-only for the runtime: INSERT + SELECT only, NO update/delete → the app cannot rewrite
 -- history. Retention (90-day prune) runs out-of-band as a maintenance/worker job, tenant-by-tenant.
-grant select, insert on audit_events to argus_app;
+grant select, insert on audit_events to secmes_app;

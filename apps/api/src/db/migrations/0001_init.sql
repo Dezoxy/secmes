@@ -1,14 +1,14 @@
 -- 0001_init — runtime role + tenants + users with RLS.
 -- Applied by the OWNER/superuser (migrations). The app connects (or SET LOCAL ROLE) as
--- the non-bypass argus_app role so RLS is actually enforced.
+-- the non-bypass secmes_app role so RLS is actually enforced.
 
--- Non-bypass runtime role. NOLOGIN here (the app does SET LOCAL ROLE argus_app so RLS
+-- Non-bypass runtime role. NOLOGIN here (the app does SET LOCAL ROLE secmes_app so RLS
 -- applies even on a superuser connection in dev). Prod grants it LOGIN + a Key Vault
 -- password out-of-band.
 do $$
 begin
-  if not exists (select from pg_roles where rolname = 'argus_app') then
-    create role argus_app nologin nosuperuser nobypassrls noinherit;
+  if not exists (select from pg_roles where rolname = 'secmes_app') then
+    create role secmes_app nologin nosuperuser nobypassrls noinherit;
   end if;
 end
 $$;
@@ -48,8 +48,8 @@ create unique index if not exists users_tenant_external_idx on users (tenant_id,
 -- Runtime role gets DML only (no DDL, no bypass). Each future tenant table must add its own
 -- grant here — explicit per-table grants (not ALTER DEFAULT PRIVILEGES) so a new table is
 -- unreadable by the app until deliberately exposed (fail-closed, not fail-open).
-grant usage on schema public to argus_app;
-grant select, insert, update, delete on tenants, users to argus_app;
+grant usage on schema public to secmes_app;
+grant select, insert, update, delete on tenants, users to secmes_app;
 
 -- The runtime role must never create objects. (PG15+ already revokes CREATE from PUBLIC by
 -- default; explicit here so the guarantee is self-documenting and survives older engines.)
