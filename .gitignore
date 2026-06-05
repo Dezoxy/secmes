@@ -3,6 +3,9 @@ node_modules/
 .pnpm-store/
 .venv/
 
+# throwaway spikes — never product code
+/spike/
+
 # build output
 dist/
 build/

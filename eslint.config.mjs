@@ -13,6 +13,7 @@ export default tseslint.config(
       'charts/**',
       '.claude/**',
       '.venv/**',
+      'spike/**',
     ],
   },
   js.configs.recommended,
