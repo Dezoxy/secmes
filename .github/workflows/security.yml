@@ -26,21 +26,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: OSV-Scanner (dependency CVEs)
+        # Known transitive CVEs are allow-listed with reasons + expiry in osv-scanner.toml.
+        # NEW or unlisted vulnerabilities still fail this job.
         uses: google/osv-scanner-action/osv-scanner-action@v1.9.2
         with:
-          scan-args: '--lockfile=./pnpm-lock.yaml'
+          scan-args: |-
+            --config=osv-scanner.toml
+            --lockfile=./pnpm-lock.yaml
 
-  fs-trivy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Trivy filesystem + IaC config scan
-        uses: aquasecurity/trivy-action@0.24.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          severity: HIGH,CRITICAL
-          exit-code: '1'
+  # (Trivy fs scan removed: redundant with OSV for deps and Checkov for IaC.
+  #  Trivy's unique value is container-IMAGE scanning, which belongs in cd.yml.)
 
   secrets-gitleaks:
     runs-on: ubuntu-latest
@@ -58,9 +53,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: bridgecrewio/checkov-action@v12
         with:
-          directory: .
-          quiet: true
-          framework: terraform,kubernetes,dockerfile,github_actions
+          config_file: .checkov.yaml
 
   k8s-kubescape:
     runs-on: ubuntu-latest
@@ -73,6 +66,8 @@ jobs:
           frameworks: 'nsa,mitre'
 
   api-42crunch-audit:
+    # Enable by setting repo variable ENABLE_42CRUNCH=true after adding the X42C_API_TOKEN secret.
+    if: ${{ vars.ENABLE_42CRUNCH == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

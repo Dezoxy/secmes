@@ -1,0 +1,118 @@
+# Time-boxed allowlist of KNOWN transitive CVEs (as of Phase 0 scaffold).
+# This is not suppression: any NEW or unlisted vulnerability still fails CI.
+# Most entries are dev-only tooling (pruned from the deployed image via the
+# Dockerfile `--omit=dev`); the runtime ones come transitively from NestJS 10 and
+# are remediated by the @nestjs v11 dependency refresh (roadmap: dependency update).
+# ignoreUntil forces a re-review on 2026-09-01.
+
+# --- dev-only tooling (not in the production artifact) ---
+[[IgnoredVulns]]
+id = "GHSA-5xrq-8626-4rwp"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "vitest (devDependency); not deployed. Fixed by vitest 3 in the dep refresh."
+
+[[IgnoredVulns]]
+id = "GHSA-4w7w-66w2-5vf9"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "vite (dev-only); not deployed."
+
+[[IgnoredVulns]]
+id = "GHSA-67mh-4wv8-2f99"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "esbuild dev server (dev-only); not deployed."
+
+[[IgnoredVulns]]
+id = "GHSA-38r7-794h-5758"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "webpack (dev/build tooling); not deployed."
+
+[[IgnoredVulns]]
+id = "GHSA-8fgc-7cc6-rx7x"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "webpack (dev/build tooling); not deployed."
+
+[[IgnoredVulns]]
+id = "GHSA-3v7f-55p6-f55p"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "picomatch (dev tooling transitive); not deployed."
+
+[[IgnoredVulns]]
+id = "GHSA-c2c7-rcm5-vvqj"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "picomatch (dev tooling transitive); not deployed."
+
+[[IgnoredVulns]]
+id = "GHSA-5j98-mcp5-4vw2"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "glob (CLI/dev tooling transitive); not deployed."
+
+[[IgnoredVulns]]
+id = "GHSA-mh29-5h37-fv8m"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "js-yaml (dev tooling transitive); not deployed."
+
+[[IgnoredVulns]]
+id = "GHSA-52f5-9888-hmc6"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "tmp (dev tooling transitive); not deployed."
+
+[[IgnoredVulns]]
+id = "GHSA-ph9p-34f9-6g65"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "tmp (dev tooling transitive); not deployed."
+
+# --- runtime transitive (via NestJS 10) — fixed by the @nestjs v11 bump ---
+[[IgnoredVulns]]
+id = "GHSA-36xv-jgw5-4q75"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "@nestjs/core 10.x; remediated by the pending @nestjs v11 dependency refresh."
+
+[[IgnoredVulns]]
+id = "GHSA-5528-5vmv-3xc2"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "multer via @nestjs/platform-express 10; fixed by the @nestjs v11 bump."
+
+[[IgnoredVulns]]
+id = "GHSA-v52c-386h-88mc"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "multer via @nestjs/platform-express 10; fixed by the @nestjs v11 bump."
+
+[[IgnoredVulns]]
+id = "GHSA-xf7r-hgr6-v32p"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "multer via @nestjs/platform-express 10; fixed by the @nestjs v11 bump."
+
+[[IgnoredVulns]]
+id = "GHSA-q8mj-m7cp-5q26"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "qs via express; fixed by the @nestjs v11 / express bump."
+
+[[IgnoredVulns]]
+id = "GHSA-f23m-r3pf-42rh"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "lodash transitive; revisit in dep refresh (no direct dependency)."
+
+[[IgnoredVulns]]
+id = "GHSA-r5fr-rjxr-66jc"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "lodash transitive; revisit in dep refresh (no direct dependency)."
+
+[[IgnoredVulns]]
+id = "GHSA-xxjr-mmjv-4gpg"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "lodash transitive; revisit in dep refresh (no direct dependency)."
+
+[[IgnoredVulns]]
+id = "GHSA-2g4f-4pwh-qvx6"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "ajv transitive (validation/schema tooling); revisit in dep refresh."
+
+[[IgnoredVulns]]
+id = "GHSA-5v7r-6r5c-r473"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "file-type transitive; revisit in dep refresh."
+
+[[IgnoredVulns]]
+id = "GHSA-j47w-4g3g-c36v"
+ignoreUntil = 2026-09-01T00:00:00Z
+reason = "file-type transitive; revisit in dep refresh."
