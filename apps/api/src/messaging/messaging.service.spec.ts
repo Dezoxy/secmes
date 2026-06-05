@@ -22,6 +22,7 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
   let bobAuth: VerifiedAuth; // tenant A, member
   let daveAuth: VerifiedAuth; // tenant A, NOT a member
   let carolAuth: VerifiedAuth; // tenant B, other tenant
+  let frankAuth: VerifiedAuth; // tenant A, SUSPENDED (soft-deleted)
 
   const msg = (over: Partial<SendMessage> = {}): SendMessage => ({
     clientMessageId: crypto.randomUUID(),
@@ -42,11 +43,14 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantA}, 'm-dave', 'dave@a.test')`;
     [{ id: carolId }] =
       await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantB}, 'm-carol', 'c@b.test') returning id`;
+    await sql`insert into users (tenant_id, external_identity_id, email, status)
+              values (${tenantA}, 'm-frank', 'frank@a.test', 'suspended')`;
 
     aliceAuth = { sub: 'm-alice', tenantId: tenantA };
     bobAuth = { sub: 'm-bob', tenantId: tenantA };
     daveAuth = { sub: 'm-dave', tenantId: tenantA };
     carolAuth = { sub: 'm-carol', tenantId: tenantB };
+    frankAuth = { sub: 'm-frank', tenantId: tenantA };
   });
 
   afterAll(async () => {
@@ -118,6 +122,16 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     expect(a.deduplicated).toBe(false);
     expect(b.deduplicated).toBe(false); // different conversation → not a dup, stored separately
     expect(a.messageId).not.toBe(b.messageId);
+  });
+
+  it('a suspended (soft-deleted) caller cannot create or send, even with a valid token', async () => {
+    await expect(svc.createConversation(frankAuth, [bobId])).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    const conv = await newConversation();
+    await expect(svc.sendMessage(frankAuth, conv, msg())).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
   });
 
   it('sending to a non-existent conversation returns 404', async () => {

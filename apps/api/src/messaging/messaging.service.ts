@@ -18,14 +18,18 @@ export interface SentMessage {
 
 @Injectable()
 export class MessagingService {
-  /** Resolve the VERIFIED caller (OIDC sub) to a tenant user id. Never trusts a client-supplied id. */
+  /**
+   * Resolve the VERIFIED caller (OIDC sub) to a tenant user id. Never trusts a client-supplied id, and
+   * only resolves an **active** user — a soft-deleted/suspended member (offboarding sets `users.status`)
+   * with a still-valid bearer token cannot create conversations or send, matching the directory filter.
+   */
   private async requireUser(tx: Tx, sub: string): Promise<string> {
     const [user] = await tx
       .select({ id: schema.users.id })
       .from(schema.users)
-      .where(eq(schema.users.externalIdentityId, sub))
+      .where(and(eq(schema.users.externalIdentityId, sub), eq(schema.users.status, 'active')))
       .limit(1);
-    if (!user) throw new BadRequestException('user not provisioned; sign in first');
+    if (!user) throw new BadRequestException('user not provisioned or not active');
     return user.id;
   }
 
