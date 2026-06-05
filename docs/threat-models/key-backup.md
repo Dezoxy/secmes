@@ -33,6 +33,10 @@ The server stores **only ciphertext it cannot open** (no passphrase). This exist
 - **Rotation:** after recovery on a new device, or on suspected compromise, **rotate**: generate a new device key, publish a new KeyPackage, mark the old device revoked (ties to `device-lifecycle.md`).
 - **AEAD:** encrypt the key material with the ciphersuite AEAD (e.g. AES-256-GCM / XChaCha20-Poly1305) under `backupKey`, random nonce, stored with the ciphertext.
 
+## Implementation — sealing primitive (checkpoint 21)
+
+`@secmes/crypto` `sealBackup(plaintext, passphrase, params?)` / `openBackup(blob, passphrase)`: **Argon2id** (`@noble/hashes`, audited) → 32-byte key → **AES-256-GCM** (WebCrypto). `DEFAULT_ARGON2 = { m: 65536 KiB (64 MiB), t: 3, p: 1 }`; **fresh 16-byte salt + 12-byte IV per seal** (CSPRNG); params/salt/iv recorded in the versioned `SealedBackup` blob so cost can be raised later. `openBackup` throws on a wrong passphrase or any tampering (GCM auth). The primitive is **generic over bytes** — the caller serializes the identity material to back up (scope = identity-only per §4). Server storage + backup/restore API is checkpoint 22; running Argon2id in a Web Worker (so 64 MiB doesn't block the UI) is a Phase-5 UX follow-up.
+
 ## 5. Invariant check
 
 Upholds #1 (server stores ciphertext only, never the passphrase or plaintext keys), #2 (passphrase/keys never logged). The FS nuance is the only tension — resolved by the identity-only default.
