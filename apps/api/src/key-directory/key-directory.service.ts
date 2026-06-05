@@ -1,0 +1,137 @@
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { and, eq, isNull, sql } from 'drizzle-orm';
+import { z } from 'zod';
+
+import { AuditService } from '../audit/audit.service.js';
+import type { VerifiedAuth } from '../auth/auth.service.js';
+import { schema, withTenant } from '../db/index.js';
+
+/** Max un-claimed KeyPackages per device — bounds pool growth until GC exists (cf. audit retention). */
+const MAX_AVAILABLE_PER_DEVICE = 200;
+
+/** Validates the raw one-time-use claim row so a schema drift on this security path fails loudly. */
+const ClaimRowSchema = z.object({
+  device_id: z.string().uuid(),
+  key_package: z.string(),
+});
+
+export interface PublishResult {
+  deviceId: string;
+  published: number;
+}
+
+export interface ClaimedKeyPackage {
+  deviceId: string;
+  signaturePublicKey: string;
+  keyPackage: string;
+}
+
+@Injectable()
+export class KeyDirectoryService {
+  constructor(private readonly audit: AuditService) {}
+
+  /**
+   * Register (upsert) the caller's device and add a batch of its one-time-use KeyPackages.
+   * Everything is bound to the VERIFIED caller — a user can only publish for their own device.
+   */
+  async publish(
+    auth: VerifiedAuth,
+    signaturePublicKey: string,
+    keyPackages: string[],
+  ): Promise<PublishResult> {
+    return withTenant(auth.tenantId, async (tx) => {
+      const [user] = await tx
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(eq(schema.users.externalIdentityId, auth.sub))
+        .limit(1);
+      if (!user) throw new BadRequestException('user not provisioned; sign in first');
+
+      const [device] = await tx
+        .insert(schema.devices)
+        .values({ tenantId: auth.tenantId, userId: user.id, signaturePublicKey })
+        .onConflictDoUpdate({
+          target: [
+            schema.devices.tenantId,
+            schema.devices.userId,
+            schema.devices.signaturePublicKey,
+          ],
+          set: { signaturePublicKey }, // no-op update so the existing row is returned (idempotent re-register)
+        })
+        .returning({ id: schema.devices.id });
+      if (!device) throw new Error('device upsert returned no row');
+
+      // Bound pool growth: cap un-claimed packages per device (no GC yet).
+      const available = await tx
+        .select({ n: sql<number>`count(*)::int` })
+        .from(schema.keyPackages)
+        .where(
+          and(eq(schema.keyPackages.deviceId, device.id), isNull(schema.keyPackages.claimedAt)),
+        );
+      if ((available[0]?.n ?? 0) + keyPackages.length > MAX_AVAILABLE_PER_DEVICE) {
+        throw new BadRequestException(
+          `too many unclaimed key packages (max ${MAX_AVAILABLE_PER_DEVICE} per device)`,
+        );
+      }
+
+      await tx.insert(schema.keyPackages).values(
+        keyPackages.map((kp) => ({
+          tenantId: auth.tenantId,
+          deviceId: device.id,
+          keyPackage: kp,
+        })),
+      );
+      return { deviceId: device.id, published: keyPackages.length };
+    });
+  }
+
+  /**
+   * Atomically claim the oldest AVAILABLE KeyPackage for `targetUserId` (one-time-use). Returns the
+   * package + the device's signature key (so the client can verify the fingerprint). null if the pool
+   * is empty — callers must NOT silently reuse; they prompt the target's client to replenish.
+   */
+  async claim(auth: VerifiedAuth, targetUserId: string): Promise<ClaimedKeyPackage | null> {
+    const claimed = await withTenant(auth.tenantId, async (tx) => {
+      // SELECT ... FOR UPDATE SKIP LOCKED inside the UPDATE makes concurrent claims pick different rows.
+      const rows = (await tx.execute(sql`
+        update key_packages set claimed_at = now()
+        where id = (
+          select kp.id
+          from key_packages kp
+          join devices d on d.id = kp.device_id
+          where d.user_id = ${targetUserId} and kp.claimed_at is null
+          order by kp.created_at asc
+          limit 1
+          for update skip locked
+        )
+        returning device_id, key_package
+      `)) as unknown as unknown[];
+
+      if (rows.length === 0) return null;
+      const row = ClaimRowSchema.parse(rows[0]); // fail loudly if the raw row shape ever drifts
+
+      const [device] = await tx
+        .select({ sig: schema.devices.signaturePublicKey })
+        .from(schema.devices)
+        .where(eq(schema.devices.id, row.device_id))
+        .limit(1);
+      if (!device) return null;
+
+      return {
+        deviceId: row.device_id,
+        signaturePublicKey: device.sig,
+        keyPackage: row.key_package,
+      };
+    });
+
+    // Audit each successful claim (separate tx) so pool-drain attempts are detectable. Per-resource
+    // rate-limiting is deferred to checkpoint 46; see docs/threat-models/key-directory.md §3/§6.
+    if (claimed) {
+      await this.audit.record(auth.tenantId, {
+        eventType: 'keydir.key_package_claimed',
+        actorSub: auth.sub,
+      });
+    }
+    return claimed;
+  }
+}
