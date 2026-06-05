@@ -20,6 +20,10 @@ import { openDB, type IDBPDatabase } from 'idb';
 // a leaked backup can't decrypt a retained Welcome (forward secrecy, key-backup.md §4). The full at-rest
 // blob is never uploaded. See docs/threat-models/device-keystore.md + key-backup.md §4.
 
+// Renamed from 'secmes-keystore' during the pre-launch rebrand. Safe to rename now: the web client is
+// not shipped, so no real browser holds a 'secmes-keystore' to strand. If a client is EVER released
+// under the old name before this lands, add a one-time copy-migration (open the old DB, copy device/self
+// into this one, delete the old) BEFORE getOrCreateDevice mints a fresh device. See device-keystore.md.
 const DB_NAME = 'argus-keystore';
 // v1 stored an UNSEALED `{ identity, keys }` record at the same DB/store/key. v2 stores only the sealed
 // blob. The shapes are incompatible: a stale v1 record would be misread as a sealed device and fail to

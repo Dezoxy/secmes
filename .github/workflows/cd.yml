@@ -67,6 +67,12 @@ jobs:
           cosign sign --yes "$ACR_LOGIN_SERVER/argus-api:$IMAGE_TAG"
           cosign attest --yes --predicate sbom.spdx.json --type spdxjson "$ACR_LOGIN_SERVER/argus-api:$IMAGE_TAG"
 
+      # ⚠️ DEPLOY ORDERING: DB migrations are NOT yet run by this pipeline (Phase-0, no live cluster).
+      # Bumping the tag is what makes Argo roll out the new image. A migration that the new image REQUIRES
+      # (e.g. 0009 renaming the runtime role secmes_app → argus_app) MUST be applied to the database
+      # BEFORE the rollout, or tenant-scoped requests fail at SET LOCAL ROLE. Until the pre-upgrade
+      # migration Job lands (roadmap Phase-0, checkpoint 7a), run `pnpm --filter @argus/api db:migrate`
+      # (owner connection) before promoting an image that needs a new migration.
       - name: Bump image tag in GitOps values
         run: |
           set -euo pipefail

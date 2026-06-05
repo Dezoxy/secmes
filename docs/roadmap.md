@@ -33,6 +33,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (ro
 - [ ] 5. **Argo CD** installed — app-of-apps syncs `charts/argus`
 - [~] 6. **CI green on a PR** — lint/format/typecheck/test/build pass; GitHub→ACR via OIDC — _CI green (ci · security · codeql); ACR push via OIDC awaits the cluster (Phase-0/Azure)._
 - [ ] 7. **Hello-world `api` live** end-to-end over HTTPS via GitOps
+- [ ] 7a. **DB migrations run on deploy** — a Helm **pre-upgrade/pre-install hook Job** that runs `db:migrate` (owner/migration credential from Key Vault, NOT the runtime `argus_app` role) **before** the Deployment rolls out, so a breaking migration (e.g. `0009` role rename) can never serve traffic ahead of its schema. Until this lands, migrations are manual and MUST precede any image promotion that needs them (see `cd.yml` note). 🔒
 - [ ] 8. **Secrets via Key Vault** + Secrets Store CSI mounted in the `api` pod 🔒
 - [ ] 8a. **Staging + prod environments** stood up (namespaces, per-env Helm values, first GitOps sync, `vars.STAGING_URL` registered) — the GitOps prod gate and nightly DAST both require this, and no other checkpoint creates it.
 
