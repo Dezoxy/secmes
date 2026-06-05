@@ -37,12 +37,91 @@ Time-box 2–3 days on a laptop, no cluster:
 
 ## Spike result — Node portion VERIFIED (2026-06-05)
 
-Step 1 passed against **`ts-mls` 1.6.2**: full 2-party flow in Node — `keyPackage → createGroup → createCommit add(bob) → joinGroup (via Welcome) → createApplicationMessage → processMessage (decrypt)`. Ciphertext ≈331 B, ≈35 ms round trip. The spike code itself is a deliberate **throwaway, not committed** (gitignored), so this section is the in-repo record — reproduce it standalone:
+Step 1 passed against **`ts-mls` 1.6.2**: full 2-party flow in Node — `keyPackage → createGroup → createCommit add(bob) → joinGroup (via Welcome) → createApplicationMessage → processMessage (decrypt)`. Ciphertext ≈331 B, ≈35 ms round trip. The spike code is a deliberate throwaway (not committed); the **exact runnable script is inlined below** so the result is reproducible and auditable from this repo alone.
+
+**Reproduce (standalone, outside the pnpm workspace):**
 
 ```sh
 mkdir mls-poc && cd mls-poc && pnpm init
 pnpm install --ignore-workspace ts-mls@1.6.2 @noble/hashes @noble/curves @noble/ciphers
-# then run the flow below
+# save the script below as flow.mjs, then:
+node flow.mjs        # expect: "PASS ✅"
+```
+
+`flow.mjs` (verbatim, as verified):
+
+```js
+// 2-party MLS flow (ts-mls 1.6.2 — positional API, verified against the installed exports).
+import {
+  getCiphersuiteImpl,
+  getCiphersuiteFromName,
+  generateKeyPackage,
+  createGroup,
+  createCommit,
+  joinGroup,
+  createApplicationMessage,
+  processMessage,
+  defaultCapabilities,
+  defaultLifetime,
+  emptyPskIndex,
+  acceptAll,
+  encodeMlsMessage,
+} from 'ts-mls';
+
+const SUITE = 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519';
+const enc = (s) => new TextEncoder().encode(s);
+const dec = (b) => new TextDecoder().decode(b);
+const call = (x, ...a) => (typeof x === 'function' ? x(...a) : x); // some defaults are fns, some values
+
+const impl = await getCiphersuiteImpl(getCiphersuiteFromName(SUITE));
+
+const mkKp = (name) =>
+  generateKeyPackage(
+    { credentialType: 'basic', identity: enc(name) },
+    call(defaultCapabilities),
+    call(defaultLifetime),
+    [],
+    impl,
+  );
+const alice = await mkKp('alice');
+const bob = await mkKp('bob');
+
+let aliceGroup = await createGroup(
+  enc('spike-group-1'),
+  alice.publicPackage,
+  alice.privatePackage,
+  [],
+  impl,
+);
+
+const addBob = { proposalType: 'add', add: { keyPackage: bob.publicPackage } };
+const commit = await createCommit({ state: aliceGroup, cipherSuite: impl }, { extraProposals: [addBob] });
+aliceGroup = commit.newState;
+
+let bobGroup = await joinGroup(
+  commit.welcome,
+  bob.publicPackage,
+  bob.privatePackage,
+  call(emptyPskIndex),
+  impl,
+  aliceGroup.ratchetTree,
+);
+
+const plaintext = 'hello bob — this is E2EE over MLS';
+const made = await createApplicationMessage(aliceGroup, enc(plaintext), impl);
+const wire = encodeMlsMessage({
+  wireformat: 'mls_private_message',
+  version: 'mls10',
+  privateMessage: made.privateMessage,
+});
+
+const wireMsg = { wireformat: 'mls_private_message', version: 'mls10', privateMessage: made.privateMessage };
+const res = await processMessage(wireMsg, bobGroup, call(emptyPskIndex), acceptAll, impl);
+const got = dec(res.message);
+
+const ok = got === plaintext;
+console.log(ok ? `PASS ✅  ${wire.length} B ciphertext` : `FAIL: got "${got}"`);
+process.exit(ok ? 0 : 1);
 ```
 
 **API notes (published 1.6.2 differs from the `main` README):** it uses **positional args** + **string discriminants** (`credentialType:'basic'`, `proposalType:'add'`) — not the options-objects the README shows. Needs the `@noble/{hashes,curves,ciphers}` peers. `keyPackage` returns `{publicPackage, privatePackage}`; `processMessage` returns `{kind, message, newState, consumed}`. These shapes feed the `messages.ciphertext` envelope and the key-directory spec.
