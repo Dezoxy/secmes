@@ -21,7 +21,7 @@ describe('DeviceKeystore (checkpoint 18)', () => {
 
     // A fresh keystore over the same IndexedDB loads the persisted device.
     const reopened = await DeviceKeystore.open(engine);
-    const loaded = await reopened.loadDevice();
+    const loaded = await reopened.loadDevice('alice-device');
     if (!loaded) throw new Error('expected a persisted device');
 
     // The reloaded keys must actually work for MLS (structured-clone round trip preserved them).
@@ -48,5 +48,8 @@ describe('DeviceKeystore (checkpoint 18)', () => {
     const ks = await DeviceKeystore.open(engine);
     await ks.getOrCreateDevice('first-identity');
     await expect(ks.getOrCreateDevice('other-identity')).rejects.toThrow();
+    // loadDevice must not hand another identity the stored private keys.
+    await expect(ks.loadDevice('other-identity')).rejects.toThrow();
+    expect(await ks.loadDevice('first-identity')).toBeDefined();
   });
 });

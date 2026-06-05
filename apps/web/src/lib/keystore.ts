@@ -63,9 +63,14 @@ export class DeviceKeystore {
     return assertIdentity(record, identity);
   }
 
-  /** The persisted device keys, or undefined if none has been created yet. */
-  async loadDevice(): Promise<DeviceKeys | undefined> {
+  /**
+   * The persisted device keys for `identity`, or undefined if none yet. Throws if the profile holds
+   * a device for a DIFFERENT identity (e.g. the browser profile is reused by another logged-in user)
+   * — never hand one identity another's private keys. (Logout should clear the keystore; tracked.)
+   */
+  async loadDevice(identity: string): Promise<DeviceKeys | undefined> {
     const stored = (await this.db.get(STORE, SELF)) as StoredDevice | undefined;
-    return stored?.keys;
+    if (!stored) return undefined;
+    return assertIdentity(stored, identity);
   }
 }

@@ -31,4 +31,5 @@ On first use a device generates its MLS key material via `@secmes/crypto` (`MlsE
 ## 6. Residual risk
 
 - **Unsealed at rest until 21–22** — accepted only for the dev/beta window with no real message-bearing keys; this is the single largest open item and is gated, not ignored.
+- **Shared browser profile reused by another identity** — both `getOrCreateDevice` and `loadDevice` are identity-checked and **throw** rather than hand one identity another's stored private keys. The complete fix is **logout clearing the keystore** (tracked, with the session work) so a switched identity starts clean.
 - Structured-clone persistence assumes the ts-mls key objects are clonable (verified by the round-trip test); if a future ts-mls version changes that, switch to an explicit serializer.
