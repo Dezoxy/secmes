@@ -1,0 +1,41 @@
+name: dast
+# Dynamic scans against the deployed staging API. Verify action versions + config before first run.
+# Vars: STAGING_URL. Secrets: X42C_API_TOKEN. Requires a reachable staging deployment.
+on:
+  schedule:
+    - cron: '0 2 * * *' # nightly
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  zap-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: OWASP ZAP baseline
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ vars.STAGING_URL }}
+
+  api-conformance-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Generate OpenAPI spec
+        run: pnpm --filter @secmes/api openapi
+      - name: 42Crunch Conformance Scan
+        uses: 42Crunch/api-security-scan-action@v1
+        with:
+          api-token: ${{ secrets.X42C_API_TOKEN }}
+          target-url: ${{ vars.STAGING_URL }}
+          log-level: info

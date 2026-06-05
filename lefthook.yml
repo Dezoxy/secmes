@@ -1,0 +1,23 @@
+# Local pre-commit / pre-push gates (Layer 2). Run `pnpm prepare` once to install.
+pre-commit:
+  parallel: true
+  commands:
+    gitleaks:
+      run: gitleaks protect --staged --redact --no-banner
+    eslint:
+      glob: '*.{ts,tsx}'
+      run: pnpm exec eslint {staged_files}
+    prettier:
+      glob: '*.{ts,tsx,json,md,yml,yaml}'
+      run: pnpm exec prettier --check {staged_files}
+    semgrep:
+      glob: '*.{ts,tsx}'
+      run: .venv/bin/semgrep --error --quiet --config .semgrep {staged_files}
+
+pre-push:
+  parallel: false
+  commands:
+    typecheck:
+      run: pnpm -r typecheck
+    test:
+      run: pnpm -r test

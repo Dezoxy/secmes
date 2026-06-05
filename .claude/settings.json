@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Read",
+      "Grep",
+      "Glob",
+      "Bash(pnpm install*)",
+      "Bash(pnpm -r test*)",
+      "Bash(pnpm test*)",
+      "Bash(pnpm -r build*)",
+      "Bash(pnpm build*)",
+      "Bash(pnpm -r typecheck*)",
+      "Bash(pnpm lint*)",
+      "Bash(pnpm --filter * test*)",
+      "Bash(terraform fmt*)",
+      "Bash(terraform -chdir=* fmt*)",
+      "Bash(terraform validate*)",
+      "Bash(terraform -chdir=* validate*)",
+      "Bash(terraform plan*)",
+      "Bash(terraform -chdir=* plan*)",
+      "Bash(terraform init*)",
+      "Bash(helm lint*)",
+      "Bash(helm template*)",
+      "Bash(kubectl get*)",
+      "Bash(kubectl describe*)",
+      "Bash(kubectl logs*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(semgrep*)",
+      "Bash(trivy*)",
+      "Bash(gitleaks*)",
+      "Bash(osv-scanner*)",
+      "Bash(kubescape*)"
+    ],
+    "ask": [
+      "Bash(terraform apply*)",
+      "Bash(terraform -chdir=* apply*)",
+      "Bash(helm upgrade*)",
+      "Bash(helm install*)",
+      "Bash(kubectl apply*)",
+      "Bash(docker push*)",
+      "Bash(git push*)"
+    ],
+    "deny": [
+      "Bash(terraform destroy*)",
+      "Bash(terraform -chdir=* destroy*)",
+      "Bash(kubectl delete*)",
+      "Bash(rm -rf*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Read(./.env)",
+      "Read(./**/.env)",
+      "Read(./**/*.tfvars)",
+      "Read(./**/kubeconfig)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-bash.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/check-ts.sh\"",
+            "timeout": 15
+          },
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/check-iac.sh\"",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/api-spec-reminder.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

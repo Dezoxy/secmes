@@ -1,0 +1,55 @@
+version: 2
+
+updates:
+  # JavaScript / TypeScript — pnpm workspace (root lockfile + each package.json)
+  - package-ecosystem: 'npm'
+    directories:
+      - '/'
+      - '/apps/api'
+      - '/packages/contracts'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    open-pull-requests-limit: 8
+    labels: ['dependencies']
+    commit-message:
+      prefix: 'chore(deps)'
+      prefix-development: 'chore(dev-deps)'
+    groups:
+      # Bundle low-risk bumps into one PR; majors still come individually.
+      npm-minor-patch:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+
+  # Pinned action versions in .github/workflows/*
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    labels: ['dependencies']
+    commit-message:
+      prefix: 'ci(deps)'
+    groups:
+      github-actions:
+        patterns: ['*']
+
+  # Terraform providers/modules (azurerm)
+  - package-ecosystem: 'terraform'
+    directory: '/infra/terraform'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    labels: ['dependencies']
+    commit-message:
+      prefix: 'chore(infra-deps)'
+
+  # Container base image (apps/api/Dockerfile)
+  - package-ecosystem: 'docker'
+    directory: '/apps/api'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    labels: ['dependencies']
+    commit-message:
+      prefix: 'chore(docker-deps)'

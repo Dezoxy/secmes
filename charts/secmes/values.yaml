@@ -1,0 +1,23 @@
+api:
+  image:
+    # Set by CD: <acr-login-server>/secmes-api
+    repository: REPLACE_ME.azurecr.io/secmes-api
+    tag: "dev"
+    pullPolicy: IfNotPresent
+  replicas: 2
+  port: 3000
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+ingress:
+  enabled: true
+  className: nginx
+  host: api.secmes.example   # TODO: real DNS
+  tls:
+    enabled: true
+    clusterIssuer: letsencrypt-prod   # provided by cert-manager (see infra/bootstrap)

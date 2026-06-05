@@ -1,0 +1,11 @@
+**/dist
+**/node_modules
+.venv
+pnpm-lock.yaml
+charts/**
+infra/**
+*.tfvars
+apps/api/openapi.json
+
+# markdown is prose — not worth prettier churn
+**/*.md

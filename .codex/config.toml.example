@@ -1,0 +1,21 @@
+# secmes — recommended Codex configuration.
+# Codex reads GLOBAL ~/.codex/config.toml (not a repo file), so copy/merge this there.
+# AGENTS.md is read automatically from the repo root — no config needed for the rules.
+
+# model = "gpt-5-codex"          # set to your available Codex model
+
+# Approval + sandbox are how Codex enforces the secmes boundary
+# (the equivalent of Claude Code's destructive-command hooks):
+approval_policy = "on-request"   # ask before running risky/destructive commands
+sandbox_mode    = "workspace-write"  # writes confined to the repo
+
+[sandbox_workspace_write]
+network_access = false           # no surprise network from the agent; approve explicitly
+
+# Optional: same MCP servers you use elsewhere. Example shape:
+# [mcp_servers.cloudflare]
+# command = "npx"
+# args = ["-y", "@cloudflare/mcp-server"]
+
+# Optional: install the secmes prompt files so they appear as /db-migration etc.
+#   ln -s "$PWD/.codex/prompts/"*.md ~/.codex/prompts/

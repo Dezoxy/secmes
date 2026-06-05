@@ -1,0 +1,48 @@
+rules:
+  - id: secmes-no-insecure-random
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >
+      Math.random() is not a CSPRNG. Use crypto-grade randomness from packages/crypto
+      for anything security-relevant (keys, nonces, IDs, tokens).
+    paths:
+      exclude: ['**/*.spec.ts', '**/*.test.ts']
+    pattern: Math.random()
+
+  - id: secmes-crypto-only-in-crypto-package
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >
+      Cryptographic primitives must live in packages/crypto and go through the MLS wrapper.
+      Hand-rolled crypto elsewhere is forbidden.
+    paths:
+      exclude: ['packages/crypto/**', '**/*.spec.ts', '**/*.test.ts']
+    patterns:
+      - pattern-regex: \b(crypto\.subtle|createCipheriv|createDecipheriv|createHmac|pbkdf2Sync?|scryptSync?|tweetnacl|libsodium)\b
+
+  - id: secmes-no-secret-logging
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >
+      Do not log secrets, keys, tokens, or message content. Logs carry IDs and metadata only.
+    paths:
+      exclude: ['**/*.spec.ts', '**/*.test.ts']
+    patterns:
+      - pattern-regex: (console\.(log|info|warn|error|debug)|logger\.(log|info|warn|error|debug|verbose))\s*\([^)]*\b(password|passphrase|private[_]?[Kk]ey|secret|bearer|authorization|ciphertext|plaintext|sessionKey|messageKey)\b
+
+  - id: secmes-no-sql-string-interpolation
+    languages: [typescript, javascript]
+    severity: WARNING
+    message: >
+      Possible SQL injection — use parameterized queries, never template-string interpolation
+      into SQL. Also confirm the query runs under the tenant RLS context.
+    pattern-regex: (SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM)\b[^;`]*\$\{
+
+  - id: secmes-no-hardcoded-secret
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >
+      Hardcoded secret-looking value. Secrets come from Key Vault via Workload ID, never source.
+    paths:
+      exclude: ['**/*.spec.ts', '**/*.test.ts']
+    pattern-regex: (?i)(api[_-]?key|secret|password|token)\s*[:=]\s*['"][A-Za-z0-9_\-]{16,}['"]

@@ -1,0 +1,77 @@
+name: cd
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/api/**'
+      - 'charts/secmes/**'
+      - '.github/workflows/cd.yml'
+
+# Least privilege. id-token for Azure OIDC (no stored cloud creds);
+# contents:write only to bump the image tag in the GitOps values file.
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    env:
+      # github.sha is trusted (not attacker-controllable). Use via env per hardening guidance.
+      IMAGE_TAG: ${{ github.sha }}
+      ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }} # e.g. secmesacr.azurecr.io
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR login
+        run: az acr login --name "${ACR_LOGIN_SERVER%%.*}"
+
+      - name: Build and push api image
+        run: |
+          docker build -t "$ACR_LOGIN_SERVER/secmes-api:$IMAGE_TAG" apps/api
+          docker push "$ACR_LOGIN_SERVER/secmes-api:$IMAGE_TAG"
+
+      - name: Generate SBOM (syft)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.ACR_LOGIN_SERVER }}/secmes-api:${{ env.IMAGE_TAG }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image + attest SBOM (keyless via OIDC)
+        run: |
+          cosign sign --yes "$ACR_LOGIN_SERVER/secmes-api:$IMAGE_TAG"
+          cosign attest --yes --predicate sbom.spdx.json --type spdxjson "$ACR_LOGIN_SERVER/secmes-api:$IMAGE_TAG"
+
+      - name: Bump image tag in GitOps values
+        run: |
+          set -euo pipefail
+          curl -sSLo /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x /usr/local/bin/yq
+          yq -i ".api.image.repository = \"$ACR_LOGIN_SERVER/secmes-api\" | .api.image.tag = \"$IMAGE_TAG\"" charts/secmes/values.yaml
+
+      - name: Commit tag bump
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "no change"; exit 0
+          fi
+          git commit -am "ci: deploy secmes-api $IMAGE_TAG [skip ci]"
+          git push

@@ -1,0 +1,80 @@
+name: secmes-local
+
+# Local dev stack — stands in for the managed Azure services. NOT for production.
+# Credentials below are LOCAL-ONLY throwaway defaults, never real secrets.
+#   postgres -> Azure DB for PostgreSQL | redis -> Azure Cache | minio -> Azure Blob
+# Start:  make up      Stop: make down      Wipe data: make reset
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: secmes
+      POSTGRES_PASSWORD: secmes_local_dev # local-only, not a secret
+      POSTGRES_DB: secmes
+    ports: ['5432:5432']
+    volumes: ['pgdata:/var/lib/postgresql/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U secmes -d secmes']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    ports: ['6379:6379']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: secmes
+      MINIO_ROOT_PASSWORD: secmes_local_dev # local-only, not a secret
+    ports: ['9000:9000', '9001:9001'] # API + web console
+    volumes: ['miniodata:/data']
+
+  # One-shot: create the attachments bucket, then exit.
+  createbuckets:
+    image: minio/mc:latest
+    depends_on: [minio]
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 secmes secmes_local_dev; do echo 'waiting for minio'; sleep 1; done &&
+      mc mb -p local/secmes-attachments &&
+      mc anonymous set none local/secmes-attachments &&
+      echo 'bucket ready'
+      "
+
+  api:
+    build:
+      context: ./apps/api
+    environment:
+      NODE_ENV: development # enables Swagger UI at /docs locally
+      PORT: '3000'
+      # Wired now, consumed from Phase 1 onward:
+      DATABASE_URL: postgres://secmes:secmes_local_dev@postgres:5432/secmes
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: secmes-attachments
+      S3_ACCESS_KEY: secmes
+      S3_SECRET_KEY: secmes_local_dev
+    ports: ['3000:3000']
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/healthz || exit 1']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  pgdata:
+  miniodata:

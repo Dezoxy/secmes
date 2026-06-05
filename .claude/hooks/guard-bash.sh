@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# PreToolUse(Bash) guard for secmes. Emits a permission decision for dangerous commands.
+# deny  = hard block (destructive / secret exposure)
+# ask   = require explicit user confirmation (mutating infra/deploy/push)
+set -euo pipefail
+input="$(cat)"
+cmd="$(printf '%s' "$input" | jq -r '.tool_input.command // empty' 2>/dev/null || true)"
+[ -z "$cmd" ] && exit 0
+
+decide() { # $1=decision $2=reason
+  jq -nc --arg d "$1" --arg r "$2" \
+    '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:$d,permissionDecisionReason:$r}}'
+  exit 0
+}
+
+shopt -s nocasematch
+
+# ---- hard denies ----
+[[ "$cmd" =~ rm[[:space:]]+-[a-z]*r[a-z]*f?[[:space:]]+(/|~|\$HOME|\.\.($|/)) ]] && \
+  decide deny "Recursive force-delete of a sensitive path. Run it yourself if truly intended."
+[[ "$cmd" =~ terraform[[:space:]].*destroy ]] && \
+  decide deny "terraform destroy is destructive — run manually after confirming workspace/target."
+[[ "$cmd" =~ kubectl[[:space:]].*delete ]] && \
+  decide deny "kubectl delete is destructive — prefer GitOps, or run manually with the right context."
+[[ "$cmd" =~ git[[:space:]]+push[[:space:]].*(--force([[:space:]]|=|$)|-f([[:space:]]|$)) ]] && \
+  decide deny "Force-push can rewrite shared history. Run manually with --force-with-lease if you must."
+[[ "$cmd" =~ (cat|less|bat|more|head|tail|echo|printf|xxd|base64|strings)[[:space:]].*(\.env($|[^.a-zA-Z])|\.tfvars($|[^.])|kubeconfig|\.pem($|[^a-zA-Z])|id_rsa|id_ed25519) ]] && \
+  decide deny "That would print secret material to the transcript (.env/tfvars/kubeconfig/keys)."
+[[ "$cmd" =~ az[[:space:]].*(group|aks|keyvault|postgres)[[:space:]].*delete ]] && \
+  decide deny "Azure resource delete is destructive — run manually after confirming subscription/resource."
+
+# ---- confirmations ----
+[[ "$cmd" =~ terraform[[:space:]].*apply ]] && \
+  decide ask "terraform apply mutates cloud infra — confirm plan/workspace first."
+[[ "$cmd" =~ helm[[:space:]]+(upgrade|install|uninstall|rollback) ]] && \
+  decide ask "Helm release change — prefer GitOps; confirm namespace/context."
+[[ "$cmd" =~ kubectl[[:space:]].*apply ]] && \
+  decide ask "Direct kubectl apply bypasses GitOps — confirm context/namespace."
+[[ "$cmd" =~ docker[[:space:]].*push ]] && \
+  decide ask "Pushing an image to a registry — confirm tag/registry."
+[[ "$cmd" =~ git[[:space:]]+push ]] && \
+  decide ask "Pushing to a remote — confirm branch/remote."
+
+exit 0

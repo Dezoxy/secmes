@@ -1,0 +1,12 @@
+title = "secmes gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Ignore documented placeholders only (value-level, NOT whole files)"
+# Files are still fully scanned; only these exact placeholder values are ignored.
+regexes = [
+  '''00000000-0000-0000-0000-000000000000''',
+  '''REPLACE_ME''',
+]

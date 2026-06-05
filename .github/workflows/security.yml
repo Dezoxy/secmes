@@ -1,0 +1,94 @@
+name: security
+# Layer-1 security gate. Verify third-party action versions + required secrets before first run.
+# Secrets needed: X42C_API_TOKEN (42Crunch). OSS scanners need no token.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 4 * * 1' # weekly deep sweep
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  sast-semgrep:
+    runs-on: ubuntu-latest
+    container: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      - name: Semgrep (custom secmes rules + registry auto)
+        run: semgrep scan --config .semgrep --config auto --error --quiet
+
+  deps-osv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: OSV-Scanner (dependency CVEs)
+        uses: google/osv-scanner-action/osv-scanner-action@v1.9.2
+        with:
+          scan-args: '--lockfile=./pnpm-lock.yaml'
+
+  fs-trivy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy filesystem + IaC config scan
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
+  secrets-gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  iac-checkov:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: .
+          quiet: true
+          framework: terraform,kubernetes,dockerfile,github_actions
+
+  k8s-kubescape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Kubescape (NSA + MITRE posture on charts)
+        uses: kubescape/github-action@main
+        with:
+          files: 'charts/'
+          frameworks: 'nsa,mitre'
+
+  api-42crunch-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Generate OpenAPI spec
+        run: pnpm --filter @secmes/api openapi
+      - name: 42Crunch API Security Audit
+        uses: 42Crunch/api-security-audit-action@v4
+        with:
+          api-token: ${{ secrets.X42C_API_TOKEN }}
+          min-score: 75
+          log-level: info

@@ -1,0 +1,4 @@
+# Python-based security scanners, isolated in .venv (never global pip install).
+# Bootstrap: `make tools`. Run: `make scan-py`.
+semgrep>=1.90
+checkov>=3.2
