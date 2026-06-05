@@ -3,13 +3,23 @@
 -- and never decrypts. RLS (ENABLE+FORCE+WITH CHECK) keyed on app.tenant_id isolates tenants; intra-tenant
 -- conversation-membership authz is the app layer's job (checkpoint 26). See messaging-schema.md.
 
+-- users.id is globally unique (PK), so a single-column FK to it can't tell tenants apart. Add a
+-- tenant-scoped unique key so the messaging FKs below can pin every user reference to the ROW's tenant
+-- — a tenant-B row then cannot reference a tenant-A user (and an A-user delete can't cascade into B).
+do $$ begin
+  alter table users add constraint users_tenant_id_id_key unique (tenant_id, id);
+exception when duplicate_object then null;
+end $$;
+
 -- A conversation / MLS group. Metadata only — deliberately NO name/title (that would be plaintext
 -- metadata; 1:1 needs none, and a future group name must be encrypted client-side).
 create table if not exists conversations (
   id         uuid primary key default gen_random_uuid(),
   tenant_id  uuid not null references tenants(id) on delete cascade,
-  created_by uuid not null references users(id) on delete cascade,
+  created_by uuid not null,
   created_at timestamptz not null default now(),
+  -- created_by must be a user IN THIS tenant (composite FK, not the global users.id).
+  foreign key (tenant_id, created_by) references users (tenant_id, id) on delete cascade,
   -- FK target for child rows so their tenant_id MUST equal this conversation's tenant (see below).
   unique (tenant_id, id)
 );
@@ -26,11 +36,12 @@ create table if not exists conversation_members (
   id              uuid primary key default gen_random_uuid(),
   tenant_id       uuid not null references tenants(id) on delete cascade,
   conversation_id uuid not null,
-  user_id         uuid not null references users(id) on delete cascade,
+  user_id         uuid not null,
   joined_at       timestamptz not null default now(),
-  -- Composite FK pins a membership's tenant to its conversation's tenant — a row can't reference a
-  -- conversation in another tenant (defence-in-depth beneath RLS).
-  foreign key (tenant_id, conversation_id) references conversations (tenant_id, id) on delete cascade
+  -- Composite FKs pin BOTH the conversation and the user to this row's tenant — a membership can't
+  -- reference a conversation or a user in another tenant (defence-in-depth beneath RLS).
+  foreign key (tenant_id, conversation_id) references conversations (tenant_id, id) on delete cascade,
+  foreign key (tenant_id, user_id) references users (tenant_id, id) on delete cascade
 );
 alter table conversation_members enable row level security;
 alter table conversation_members force row level security;
@@ -51,15 +62,17 @@ create table if not exists messages (
   id                    uuid primary key default gen_random_uuid(),
   tenant_id             uuid not null references tenants(id) on delete cascade,
   conversation_id       uuid not null,
-  sender_user_id        uuid not null references users(id) on delete cascade,
+  sender_user_id        uuid not null,
   client_message_id     uuid not null,                 -- client-generated; idempotency + optimistic UI
   ciphertext            text not null,                 -- opaque MLS ciphertext (base64); never decrypted
   alg                   text not null,                 -- AEAD/version tag, e.g. "MLS_1.0"
   epoch                 bigint not null check (epoch >= 0), -- MLS epoch; selects recipient ratchet state
   attachment_object_key text,                          -- optional ref to an uploaded ENCRYPTED blob
   created_at            timestamptz not null default now(),
-  -- Composite FK pins a message's tenant to its conversation's tenant (defence-in-depth beneath RLS).
-  foreign key (tenant_id, conversation_id) references conversations (tenant_id, id) on delete cascade
+  -- Composite FKs pin BOTH the conversation and the sender to this row's tenant (defence-in-depth
+  -- beneath RLS): a message can't reference a conversation or a user in another tenant.
+  foreign key (tenant_id, conversation_id) references conversations (tenant_id, id) on delete cascade,
+  foreign key (tenant_id, sender_user_id) references users (tenant_id, id) on delete cascade
 );
 alter table messages enable row level security;
 alter table messages force row level security;

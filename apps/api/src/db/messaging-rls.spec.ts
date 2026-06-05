@@ -143,6 +143,17 @@ describe.skipIf(!DB_URL)('messaging schema RLS + append-only (checkpoint 25)', (
     ).rejects.toThrow();
   });
 
+  it('composite FK blocks referencing a user from another tenant', async () => {
+    // tenant B (RLS-valid tenant_id) names tenant A's user as created_by — (B, userA) is not in
+    // users(tenant_id, id), so the composite FK rejects the write.
+    await expect(
+      asTenant(
+        tenantB,
+        (tx) => tx`insert into conversations (tenant_id, created_by) values (${tenantB}, ${userA})`,
+      ),
+    ).rejects.toThrow();
+  });
+
   it('rejects a negative epoch (check constraint)', async () => {
     await expect(
       asTenant(
