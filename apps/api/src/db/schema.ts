@@ -21,6 +21,24 @@ export const users = pgTable('users', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Key directory (roadmap 19) — PUBLIC MLS key material only (base64 text, opaque to the server).
+export const devices = pgTable('devices', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  userId: uuid('user_id').notNull(),
+  signaturePublicKey: text('signature_public_key').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const keyPackages = pgTable('key_packages', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  deviceId: uuid('device_id').notNull(),
+  keyPackage: text('key_package').notNull(),
+  claimedAt: timestamp('claimed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Append-only audit log (IDs + metadata only — never content/secrets). RLS + grants in 0002.
 export const auditEvents = pgTable('audit_events', {
   id: uuid('id').primaryKey().defaultRandom(),

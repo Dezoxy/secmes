@@ -25,6 +25,12 @@ The server **stores and serves public KeyPackages**. It never sees private keys 
 
 2. **Stale/forced KeyPackage exhaustion.** Server hands out a single attacker-known last-resort KeyPackage repeatedly. → KeyPackage lifecycle (see attachments/device notes): pool + replenish, never reuse the last-resort KP silently.
 
+3. **Intra-tenant pool drain (DoS, authenticated).** A valid tenant member can claim — and thus consume — another member's one-time-use KeyPackages with no per-resource authorization, iterating user-ids to exhaust pools. → Mitigated for beta by: a **per-device publish cap** (bounds growth), **auditing every claim** (`keydir.key_package_claimed`, actorSub — drains are detectable), and **`POST`, not `GET`** (a consume-once resource must not be cacheable/prefetchable). Full per-(caller, target) **rate-limiting is checkpoint 46**; a **last-resort KeyPackage** + client replenishment close the empty-pool gap later.
+
+## Server-side implementation (checkpoint 19)
+
+`devices` + `key_packages` tables (tenant-scoped, FORCE RLS). The server **binds** every KeyPackage to the authenticated uploader (`publish` resolves the device from the verified `sub`; a user can only publish for their own device) and serves them **one-time-use** (atomic `UPDATE … FOR UPDATE SKIP LOCKED`; empty pool → 404, never silent reuse). It stores only **public** base64 key material (opaque; crypto-blind upheld). This is the binding + lifecycle half only — **identity↔key authenticity still rests on client-side fingerprint verification** (§5 v1), which is the actual MITM defense and is NOT yet implemented.
+
 ## 4. Invariant check
 
 Directly tests invariant #1 (crypto-blind server). Substitution **violates** it. The fix must make substitution **detectable by the client/users**, not merely *policy*.
