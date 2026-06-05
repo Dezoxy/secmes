@@ -6,8 +6,8 @@ Per the Definition of Done in `AGENTS.md`, every **security-relevant feature** g
 
 | Note | Blocks | Status |
 | --- | --- | --- |
-| `key-directory.md` — server key-substitution / MITM on the KeyPackage directory; fingerprint/safety-number verification; key-transparency as the later upgrade | Phase 2 (device keys), Phase 3 (1:1 text) | ☐ TODO |
-| `key-backup.md` — Argon2id parameters, unique CSPRNG salt, recovery semantics, forward-secrecy implications, key rotation | Phase 2 (checkpoint 21) | ☐ TODO |
+| `key-directory.md` — server key-substitution / MITM on the KeyPackage directory; fingerprint/safety-number verification; key-transparency as the later upgrade | Phase 2 (device keys), Phase 3 (1:1 text) | ✍️ DRAFT — ratify |
+| `key-backup.md` — Argon2id parameters, unique CSPRNG salt, recovery semantics, forward-secrecy implications, key rotation | Phase 2 (checkpoint 21) | ✍️ DRAFT — ratify |
 | `device-lifecycle.md` — device pending→active→revoked, KeyPackage invalidate-not-delete, history readability, "new browser"/"lost phone" | Phase 2 | ☐ TODO |
 | `attachments.md` — server-generated tenant-namespaced object keys, presigned-URL membership checks, blob authz outside RLS | Phase 4 | ✍️ DRAFT — ratify |
 | `rls-tenant-isolation.md` — `set_config('app.tenant_id', …, true)` per-transaction, PgBouncer transaction mode, non-bypass runtime role | Phase 1 | ✍️ DRAFT — ratify |
