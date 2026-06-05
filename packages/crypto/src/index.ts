@@ -100,10 +100,24 @@ export class MlsEngine {
 
 /** One device's view of one conversation. State evolves with each op; it is never logged or sent. */
 export class Conversation {
+  // Serializes stateful ops so each observes the previous op's state. Without this, two concurrent
+  // encrypt()/decrypt() calls would read the same ratchet generation → AEAD nonce/key reuse.
+  private opQueue: Promise<unknown> = Promise.resolve();
+
   constructor(
     private readonly cs: CiphersuiteImpl,
     private state: ClientState,
   ) {}
+
+  /** Run `op` after all prior ops on this conversation have settled (per-conversation mutex). */
+  private run<T>(op: () => Promise<T>): Promise<T> {
+    const result = this.opQueue.then(op, op); // proceed whether the previous op resolved or rejected
+    this.opQueue = result.then(
+      () => undefined,
+      () => undefined,
+    ); // a failed op must not poison the chain
+    return result;
+  }
 
   /**
    * Add a member by their published KeyPackage; returns the invite to forward to them.
@@ -115,46 +129,52 @@ export class Conversation {
    * docs/threat-models/mls-integration.md §5–6.
    */
   async addMember(memberPublicPackage: KeyPackage): Promise<ConversationInvite> {
-    const commit = await createCommit(
-      { state: this.state, cipherSuite: this.cs },
-      { extraProposals: [{ proposalType: 'add', add: { keyPackage: memberPublicPackage } }] },
-    );
-    this.state = commit.newState;
-    wipe(commit.consumed);
-    if (!commit.welcome) throw new Error('add did not produce a Welcome');
-    return { welcome: commit.welcome, ratchetTree: this.state.ratchetTree };
+    return this.run(async () => {
+      const commit = await createCommit(
+        { state: this.state, cipherSuite: this.cs },
+        { extraProposals: [{ proposalType: 'add', add: { keyPackage: memberPublicPackage } }] },
+      );
+      this.state = commit.newState;
+      wipe(commit.consumed);
+      if (!commit.welcome) throw new Error('add did not produce a Welcome');
+      return { welcome: commit.welcome, ratchetTree: this.state.ratchetTree };
+    });
   }
 
   /** Encrypt plaintext → opaque wire bytes (the only thing that leaves the device). */
   async encrypt(plaintext: string): Promise<Uint8Array> {
-    const made = await createApplicationMessage(this.state, te.encode(plaintext), this.cs);
-    this.state = made.newState;
-    const wire = encodeMlsMessage({
-      wireformat: 'mls_private_message',
-      version: 'mls10',
-      privateMessage: made.privateMessage,
+    return this.run(async () => {
+      const made = await createApplicationMessage(this.state, te.encode(plaintext), this.cs);
+      this.state = made.newState;
+      const wire = encodeMlsMessage({
+        wireformat: 'mls_private_message',
+        version: 'mls10',
+        privateMessage: made.privateMessage,
+      });
+      wipe(made.consumed);
+      return wire;
     });
-    wipe(made.consumed);
-    return wire;
   }
 
   /** Decrypt wire bytes → plaintext. Throws on anything that isn't an application message. */
   async decrypt(wire: Uint8Array): Promise<string> {
-    const decoded = decodeMlsMessage(wire, 0);
-    if (!decoded) throw new Error('could not decode MLS message');
-    const [msg] = decoded;
-    if (msg.wireformat !== 'mls_private_message') {
-      throw new Error(`expected an application message, got "${msg.wireformat}"`);
-    }
-    const result = await processMessage(msg, this.state, emptyPskIndex, acceptAll, this.cs);
-    wipe(result.consumed); // spent secrets — wipe regardless of message kind
-    if (result.kind !== 'applicationMessage') {
-      // Do NOT advance state for a message this method doesn't handle (e.g. a handshake/commit).
-      // decrypt() handles application messages only; handshake processing is a separate path
-      // required before group chat / PCS self-updates (see threat model §5–6).
-      throw new Error(`expected applicationMessage, got "${result.kind}"`);
-    }
-    this.state = result.newState; // commit state only after we know this was an application message
-    return td.decode(result.message);
+    return this.run(async () => {
+      const decoded = decodeMlsMessage(wire, 0);
+      if (!decoded) throw new Error('could not decode MLS message');
+      const [msg] = decoded;
+      if (msg.wireformat !== 'mls_private_message') {
+        throw new Error(`expected an application message, got "${msg.wireformat}"`);
+      }
+      const result = await processMessage(msg, this.state, emptyPskIndex, acceptAll, this.cs);
+      wipe(result.consumed); // spent secrets — wipe regardless of message kind
+      if (result.kind !== 'applicationMessage') {
+        // Do NOT advance state for a message this method doesn't handle (e.g. a handshake/commit).
+        // decrypt() handles application messages only; handshake processing is a separate path
+        // required before group chat / PCS self-updates (see threat model §5–6).
+        throw new Error(`expected applicationMessage, got "${result.kind}"`);
+      }
+      this.state = result.newState; // commit state only after we confirm an application message
+      return td.decode(result.message);
+    });
   }
 }
