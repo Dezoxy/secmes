@@ -69,24 +69,43 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     const blob = await ks1.exportSealedBackup();
     if (!blob) throw new Error('expected a sealed backup');
 
-    // Fresh browser (new IndexedDB): download the blob, unlock with the passphrase.
+    // Fresh browser (new IndexedDB): download the blob, unlock with the passphrase on import.
     globalThis.indexedDB = new IDBFactory();
     const ks2 = await DeviceKeystore.open(engine, FAST);
-    await ks2.importSealedBackup('alice', blob);
-    const recovered = await ks2.loadDevice('alice', 'my passphrase');
-    if (!recovered) throw new Error('recovery failed');
-    expect(await worksForMls(engine, recovered)).toBe('msg'); // recovered identity keys work
+    const recovered = await ks2.importSealedBackup('alice', blob, 'my passphrase');
+    expect(await worksForMls(engine, recovered)).toBe('msg'); // returned recovered keys work
+    const reloaded = await ks2.loadDevice('alice', 'my passphrase');
+    if (!reloaded) throw new Error('recovery failed');
+    expect(await worksForMls(engine, reloaded)).toBe('msg'); // and they persist
   });
 
   it('import rejects a malformed blob and refuses to clobber an existing device', async () => {
     const engine = await MlsEngine.create();
     const ks = await DeviceKeystore.open(engine, FAST);
-    await expect(ks.importSealedBackup('alice', '{"not":"a backup"}')).rejects.toThrow();
+    await expect(ks.importSealedBackup('alice', '{"not":"a backup"}', 'pw')).rejects.toThrow();
 
     await ks.getOrCreateDevice('alice', 'pw');
     const blob = await ks.exportSealedBackup();
     if (!blob) throw new Error('expected a backup');
-    await expect(ks.importSealedBackup('alice', blob)).rejects.toThrow(); // won't overwrite
+    await expect(ks.importSealedBackup('alice', blob, 'pw')).rejects.toThrow(); // won't overwrite
+  });
+
+  it('a failed import leaves the profile importable (no stranded bad record)', async () => {
+    const engine = await MlsEngine.create();
+    const ks1 = await DeviceKeystore.open(engine, FAST);
+    await ks1.getOrCreateDevice('alice', 'right pw');
+    const blob = await ks1.exportSealedBackup();
+    if (!blob) throw new Error('expected a backup');
+
+    // Fresh device: a wrong passphrase must NOT persist the (unverified) blob...
+    globalThis.indexedDB = new IDBFactory();
+    const ks2 = await DeviceKeystore.open(engine, FAST);
+    await expect(ks2.importSealedBackup('alice', blob, 'wrong pw')).rejects.toThrow();
+    expect(await ks2.loadDevice('alice', 'right pw')).toBeUndefined(); // nothing was written
+
+    // ...so the correct import still succeeds (profile not stranded behind the no-clobber guard).
+    const recovered = await ks2.importSealedBackup('alice', blob, 'right pw');
+    expect(await worksForMls(engine, recovered)).toBe('msg');
   });
 
   it('import is race-safe: concurrent imports on a fresh profile pick one winner, no clobber', async () => {
@@ -106,8 +125,8 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     globalThis.indexedDB = new IDBFactory();
     const ks = await DeviceKeystore.open(engine, FAST);
     const results = await Promise.allSettled([
-      ks.importSealedBackup('alice', aliceBlob),
-      ks.importSealedBackup('bob', bobBlob),
+      ks.importSealedBackup('alice', aliceBlob, 'pw'),
+      ks.importSealedBackup('bob', bobBlob, 'pw'),
     ]);
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
@@ -147,8 +166,22 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     // Fresh device: the server returns alice's blob but the caller asks for bob (shared passphrase).
     globalThis.indexedDB = new IDBFactory();
     const ks2 = await DeviceKeystore.open(engine, FAST);
-    await ks2.importSealedBackup('bob', blob); // metadata says bob; the sealed KeyPackage embeds alice
-    // Unseal succeeds (same passphrase) but the signed identity is alice ≠ bob → reject, don't return keys.
-    await expect(ks2.loadDevice('bob', 'shared pw')).rejects.toThrow();
+    // Unseal succeeds (same passphrase) but the embedded identity is alice ≠ bob → import rejects
+    // before persisting, and nothing is stored under bob.
+    await expect(ks2.importSealedBackup('bob', blob, 'shared pw')).rejects.toThrow();
+    expect(await ks2.loadDevice('bob', 'shared pw')).toBeUndefined();
+  });
+
+  it('clearDevice lets a profile recover from a stored device and re-import', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    await ks.getOrCreateDevice('alice', 'pw');
+    const blob = await ks.exportSealedBackup();
+    if (!blob) throw new Error('expected a backup');
+
+    await expect(ks.importSealedBackup('alice', blob, 'pw')).rejects.toThrow(); // guarded
+    await ks.clearDevice();
+    const recovered = await ks.importSealedBackup('alice', blob, 'pw'); // now allowed
+    expect(await worksForMls(engine, recovered)).toBe('msg');
   });
 });

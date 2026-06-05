@@ -109,23 +109,40 @@ export class DeviceKeystore {
   }
 
   /**
-   * Store a sealed blob fetched from the server (restore on a fresh device); unlock later via
-   * loadDevice. Validates the blob shape and refuses to overwrite an existing device (clear first).
+   * Restore a device on a fresh profile from a sealed blob fetched from the server. Verifies the blob
+   * BEFORE persisting — it must shape-check, unseal with `passphrase`, and embed the expected identity —
+   * so a wrong, tampered, or wrong-identity blob is rejected without ever writing to the store (a bad
+   * restore response can't strand the profile behind the no-clobber guard). Refuses to overwrite an
+   * existing device (use `clearDevice` first). Returns the recovered working keys.
    */
-  async importSealedBackup(identity: string, sealedJson: string): Promise<void> {
+  async importSealedBackup(
+    identity: string,
+    sealedJson: string,
+    passphrase: string,
+  ): Promise<DeviceKeys> {
     const parsed: unknown = JSON.parse(sealedJson);
     if (!isSealedBackup(parsed)) throw new Error('invalid sealed backup');
+    const stored: StoredDevice = { identity, sealed: parsed };
 
-    // Atomic put-if-absent in a single readwrite tx: a racing second import — or an import overlapping
-    // first-run device generation — can't observe an empty store at an earlier read and then clobber an
-    // already-stored device. Mirrors getOrCreateDevice. Throw only after the tx commits.
+    // Authenticate first: unseal + identity-check. Throws on a wrong passphrase / tampered ciphertext
+    // (GCM) or a mismatched embedded identity — all before the store is touched.
+    const keys = await this.unseal(stored, identity, passphrase);
+
+    // Then atomic put-if-absent in one readwrite tx: a racing import — or an overlap with first-run
+    // device generation — can't observe an empty store and clobber an existing device. Throw post-commit.
     const tx = this.db.transaction(STORE, 'readwrite');
     const existing = await tx.store.get(SELF);
-    if (!existing) await tx.store.put({ identity, sealed: parsed } satisfies StoredDevice, SELF);
+    if (!existing) await tx.store.put(stored, SELF);
     await tx.done;
     if (existing) {
       throw new Error('keystore already holds a device; clear it before importing a backup');
     }
+    return keys;
+  }
+
+  /** Remove the stored device — to recover from a bad import or reset this profile before re-importing. */
+  async clearDevice(): Promise<void> {
+    await this.db.delete(STORE, SELF);
   }
 
   private async unseal(
