@@ -18,8 +18,11 @@ create table if not exists conversations (
   tenant_id  uuid not null references tenants(id) on delete cascade,
   created_by uuid not null,
   created_at timestamptz not null default now(),
-  -- created_by must be a user IN THIS tenant (composite FK, not the global users.id).
-  foreign key (tenant_id, created_by) references users (tenant_id, id) on delete cascade,
+  -- created_by must be a user IN THIS tenant (composite FK, not the global users.id). NO ACTION (not
+  -- cascade): deleting a user must NOT destroy conversations they created (and everyone's messages in
+  -- them). It blocks a direct user delete that would orphan a conversation, but a TENANT teardown still
+  -- cascades (the end-of-statement check passes when the users + conversations go together).
+  foreign key (tenant_id, created_by) references users (tenant_id, id) on delete no action,
   -- FK target for child rows so their tenant_id MUST equal this conversation's tenant (see below).
   unique (tenant_id, id)
 );
@@ -71,8 +74,11 @@ create table if not exists messages (
   created_at            timestamptz not null default now(),
   -- Composite FKs pin BOTH the conversation and the sender to this row's tenant (defence-in-depth
   -- beneath RLS): a message can't reference a conversation or a user in another tenant.
+  -- conversation: CASCADE — deleting a conversation removes its messages (the conversation is gone).
+  -- sender: NO ACTION — deleting a USER must NOT erase their message history through a parent delete
+  -- (append-only). Blocks a direct user delete; a TENANT teardown still cascades both together.
   foreign key (tenant_id, conversation_id) references conversations (tenant_id, id) on delete cascade,
-  foreign key (tenant_id, sender_user_id) references users (tenant_id, id) on delete cascade
+  foreign key (tenant_id, sender_user_id) references users (tenant_id, id) on delete no action
 );
 alter table messages enable row level security;
 alter table messages force row level security;

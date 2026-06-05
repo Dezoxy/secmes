@@ -165,6 +165,28 @@ describe.skipIf(!DB_URL)('messaging schema RLS + append-only (checkpoint 25)', (
     ).rejects.toThrow();
   });
 
+  it('preserves history: deleting a user with messages is blocked (NO ACTION, not cascade)', async () => {
+    // userA created convA and sent a message. A direct user delete must NOT cascade-erase that history;
+    // the NO ACTION FKs (created_by / sender_user_id) block the delete.
+    await expect(
+      asTenant(tenantA, (tx) => tx`delete from users where id = ${userA}`),
+    ).rejects.toThrow();
+  });
+
+  it('a tenant teardown still cascades its conversations + messages (NO ACTION does not block it)', async () => {
+    // A throwaway tenant, fully populated, then deleted as owner — proves NO ACTION on the user refs
+    // does not block tenant teardown (users + messages are co-deleted in the one statement).
+    const [t] = await sql`insert into tenants (name) values ('Teardown Tenant') returning id`;
+    const tid = (t as { id: string }).id;
+    const [u] = await sql`insert into users (tenant_id, external_identity_id, email)
+                          values (${tid}, 'td-ext', 'td@t.test') returning id`;
+    await makeConversation(tid, (u as { id: string }).id);
+
+    await sql`delete from tenants where id = ${tid}`; // must not throw — cascades everything
+    const [row] = await sql`select count(*)::int as n from messages where tenant_id = ${tid}`;
+    expect((row as { n: number }).n).toBe(0);
+  });
+
   it('no tenant context => fail closed on messages', async () => {
     await expect(
       sql.begin(async (tx) => {
