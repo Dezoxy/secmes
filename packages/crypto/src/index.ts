@@ -31,6 +31,7 @@ export {
   type SealedBackup,
   type Argon2Params,
 } from './key-backup.js';
+export { serializeDeviceKeys, deserializeDeviceKeys } from './device-codec.js';
 
 // Classic suite for v1 (single-device). Post-quantum (X-Wing) is available in ts-mls and a later option.
 export const CIPHERSUITE = 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519' as const;

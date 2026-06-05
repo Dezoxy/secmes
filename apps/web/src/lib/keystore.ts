@@ -1,10 +1,20 @@
+import {
+  DEFAULT_ARGON2,
+  MlsEngine,
+  deserializeDeviceKeys,
+  openBackup,
+  sealBackup,
+  serializeDeviceKeys,
+  type Argon2Params,
+  type DeviceKeys,
+  type SealedBackup,
+} from '@secmes/crypto';
 import { openDB, type IDBPDatabase } from 'idb';
 
-import { MlsEngine, type DeviceKeys } from '@secmes/crypto';
-
-// ⚠️ UNSEALED AT REST. Device private key material is persisted to IndexedDB (origin-isolated) but
-// NOT yet encrypted. Checkpoints 21–22 MUST wrap it with the passphrase-derived (Argon2id) seal
-// before any real message history persists. See docs/threat-models/device-keystore.md.
+// SEALED at rest: the device's private key material is stored in IndexedDB only as a passphrase-sealed
+// blob (Argon2id + AES-256-GCM, checkpoint 21). Unlocking requires the passphrase. The same sealed
+// blob is what gets backed up to the server (checkpoints 22–23) — at-rest sealing and backup are one
+// artifact. See docs/threat-models/device-keystore.md + key-backup.md.
 
 const DB_NAME = 'secmes-keystore';
 const STORE = 'device';
@@ -12,67 +22,101 @@ const SELF = 'self'; // single device per user in v1 (multi-device is deferred, 
 
 interface StoredDevice {
   identity: string;
-  keys: DeviceKeys;
+  sealed: SealedBackup;
 }
 
-/** Guard against returning a device that belongs to a different identity than requested. */
-function assertIdentity(record: StoredDevice, identity: string): DeviceKeys {
-  if (record.identity !== identity) {
-    throw new Error('keystore holds a device for a different identity');
-  }
-  return record.keys;
+/** Shape-check a server-provided sealed blob before storing it (it's still GCM-authenticated on unseal). */
+function isSealedBackup(v: unknown): v is SealedBackup {
+  if (!v || typeof v !== 'object') return false;
+  const b = v as Record<string, unknown>;
+  const p = b.params as Record<string, unknown> | undefined;
+  return (
+    b.v === 1 &&
+    b.kdf === 'argon2id' &&
+    typeof b.salt === 'string' &&
+    typeof b.iv === 'string' &&
+    typeof b.ciphertext === 'string' &&
+    !!p &&
+    typeof p.m === 'number' &&
+    typeof p.t === 'number' &&
+    typeof p.p === 'number'
+  );
 }
 
-/** Client-side store for this device's MLS key material, persisted in IndexedDB. */
+/** Client-side store for this device's MLS key material — sealed at rest under the user's passphrase. */
 export class DeviceKeystore {
   private constructor(
     private readonly db: IDBPDatabase,
     private readonly engine: MlsEngine,
+    private readonly argon: Argon2Params,
   ) {}
 
-  static async open(engine?: MlsEngine): Promise<DeviceKeystore> {
-    // Code-enforced gate: this store is unsealed at rest (sealing lands in checkpoints 21–22), so it
-    // must not run in a production build unless explicitly opted in for a dev/beta build.
-    // Vite exposes VITE_* as strings, so only the literal 'true' opts in — "false"/"0"/"" all
-    // fail closed (a truthy "false" string must NOT accidentally enable the unsealed store).
-    if (import.meta.env.PROD && import.meta.env.VITE_ALLOW_UNSEALED_KEYSTORE !== 'true') {
-      throw new Error(
-        'DeviceKeystore is unsealed at rest (encryption lands in checkpoints 21–22); refusing to ' +
-          "run in a production build. Set VITE_ALLOW_UNSEALED_KEYSTORE='true' only for dev/beta.",
-      );
-    }
+  static async open(
+    engine?: MlsEngine,
+    argon: Argon2Params = DEFAULT_ARGON2,
+  ): Promise<DeviceKeystore> {
     const db = await openDB(DB_NAME, 1, {
       upgrade(database) {
         if (!database.objectStoreNames.contains(STORE)) database.createObjectStore(STORE);
       },
     });
-    return new DeviceKeystore(db, engine ?? (await MlsEngine.create()));
-  }
-
-  /** The persisted device, or a freshly generated + stored one (single device per user, v1). */
-  async getOrCreateDevice(identity: string): Promise<DeviceKeys> {
-    const existing = (await this.db.get(STORE, SELF)) as StoredDevice | undefined;
-    if (existing) return assertIdentity(existing, identity);
-
-    // Not present: generate, then atomically put-if-still-absent in one readwrite transaction so two
-    // racing first-runs (multiple tabs / a double-invoked effect) can't overwrite each other's keys.
-    const fresh = await this.engine.generateDeviceKeys(identity);
-    const tx = this.db.transaction(STORE, 'readwrite');
-    const reread = (await tx.store.get(SELF)) as StoredDevice | undefined;
-    const record: StoredDevice = reread ?? { identity, keys: fresh };
-    if (!reread) await tx.store.put(record, SELF);
-    await tx.done;
-    return assertIdentity(record, identity);
+    return new DeviceKeystore(db, engine ?? (await MlsEngine.create()), argon);
   }
 
   /**
-   * The persisted device keys for `identity`, or undefined if none yet. Throws if the profile holds
-   * a device for a DIFFERENT identity (e.g. the browser profile is reused by another logged-in user)
-   * — never hand one identity another's private keys. (Logout should clear the keystore; tracked.)
+   * The persisted device (unsealed with `passphrase`), or a freshly generated one — sealed + stored.
+   * Single device per user; throws if the profile holds a device for a different identity, or if the
+   * passphrase is wrong (unseal fails).
    */
-  async loadDevice(identity: string): Promise<DeviceKeys | undefined> {
+  async getOrCreateDevice(identity: string, passphrase: string): Promise<DeviceKeys> {
+    const existing = (await this.db.get(STORE, SELF)) as StoredDevice | undefined;
+    if (existing) return this.unseal(existing, identity, passphrase);
+
+    const keys = await this.engine.generateDeviceKeys(identity);
+    const sealed = await sealBackup(serializeDeviceKeys(keys), passphrase, this.argon);
+
+    // Atomic put-if-absent: a racing first-run can't overwrite an already-sealed device.
+    const tx = this.db.transaction(STORE, 'readwrite');
+    const reread = (await tx.store.get(SELF)) as StoredDevice | undefined;
+    if (!reread) await tx.store.put({ identity, sealed } satisfies StoredDevice, SELF);
+    await tx.done;
+    return reread ? this.unseal(reread, identity, passphrase) : keys;
+  }
+
+  /** The persisted device keys for `identity`, unsealed with `passphrase`; undefined if none yet. */
+  async loadDevice(identity: string, passphrase: string): Promise<DeviceKeys | undefined> {
     const stored = (await this.db.get(STORE, SELF)) as StoredDevice | undefined;
     if (!stored) return undefined;
-    return assertIdentity(stored, identity);
+    return this.unseal(stored, identity, passphrase);
+  }
+
+  /** The sealed blob (opaque) to upload to the server for cross-device recovery, or undefined. */
+  async exportSealedBackup(): Promise<string | undefined> {
+    const stored = (await this.db.get(STORE, SELF)) as StoredDevice | undefined;
+    return stored ? JSON.stringify(stored.sealed) : undefined;
+  }
+
+  /**
+   * Store a sealed blob fetched from the server (restore on a fresh device); unlock later via
+   * loadDevice. Validates the blob shape and refuses to overwrite an existing device (clear first).
+   */
+  async importSealedBackup(identity: string, sealedJson: string): Promise<void> {
+    if (await this.db.get(STORE, SELF)) {
+      throw new Error('keystore already holds a device; clear it before importing a backup');
+    }
+    const parsed: unknown = JSON.parse(sealedJson);
+    if (!isSealedBackup(parsed)) throw new Error('invalid sealed backup');
+    await this.db.put(STORE, { identity, sealed: parsed } satisfies StoredDevice, SELF);
+  }
+
+  private async unseal(
+    stored: StoredDevice,
+    identity: string,
+    passphrase: string,
+  ): Promise<DeviceKeys> {
+    if (stored.identity !== identity) {
+      throw new Error('keystore holds a device for a different identity');
+    }
+    return deserializeDeviceKeys(await openBackup(stored.sealed, passphrase));
   }
 }
