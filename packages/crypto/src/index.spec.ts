@@ -69,4 +69,19 @@ describe('MLS wrapper (checkpoint 17)', () => {
     const conv = await engine.createConversation('conv-4', keys);
     await expect(conv.decrypt(new Uint8Array([1, 2, 3, 4]))).rejects.toThrow();
   });
+
+  it('rejects a valid message with trailing bytes appended', async () => {
+    const engine = await MlsEngine.create();
+    const aliceKeys = await engine.generateDeviceKeys('alice');
+    const bobKeys = await engine.generateDeviceKeys('bob');
+    const alice = await engine.createConversation('conv-6', aliceKeys);
+    const bob = await engine.joinConversation(
+      bobKeys,
+      await alice.addMember(bobKeys.publicPackage),
+    );
+
+    const wire = await alice.encrypt('hi');
+    const tampered = new Uint8Array([...wire, 0, 0, 0]); // valid message + garbage suffix
+    await expect(bob.decrypt(tampered)).rejects.toThrow();
+  });
 });

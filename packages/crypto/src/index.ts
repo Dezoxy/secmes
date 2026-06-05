@@ -122,6 +122,12 @@ export class Conversation {
   /**
    * Add a member by their published KeyPackage; returns the invite to forward to them.
    *
+   * ⚠️ IDENTITY BINDING: this wrapper does NOT verify that `memberPublicPackage` belongs to the
+   * intended peer — ts-mls' default `validateCredential` accepts any Basic credential. A malicious
+   * server that mediates KeyPackage exchange could substitute keys (MITM). The caller MUST verify the
+   * KeyPackage out-of-band (fingerprint) per docs/threat-models/key-directory.md. Not reachable at
+   * checkpoint 17 (no key directory yet); MUST-WIRE before checkpoint 19 mediates KeyPackage exchange.
+   *
    * 2-PARTY SCOPE: the adder is the only existing member, so it applies the commit locally (the
    * returned `newState`) while the new member joins via the Welcome. Group chat (3+ members) and PCS
    * self-updates additionally require fanning out `commit.commit` to existing members + a
@@ -161,7 +167,10 @@ export class Conversation {
     return this.run(async () => {
       const decoded = decodeMlsMessage(wire, 0);
       if (!decoded) throw new Error('could not decode MLS message');
-      const [msg] = decoded;
+      const [msg, bytesRead] = decoded;
+      // Strict: reject anything appended after the MLS message (transport-framing bug or a malicious
+      // client smuggling non-MLS — including accidental plaintext — alongside the ciphertext).
+      if (bytesRead !== wire.length) throw new Error('trailing bytes after MLS message');
       if (msg.wireformat !== 'mls_private_message') {
         throw new Error(`expected an application message, got "${msg.wireformat}"`);
       }
