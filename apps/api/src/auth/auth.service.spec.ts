@@ -32,8 +32,9 @@ describe('AuthService.verify', () => {
     omitTenant?: boolean;
     expiresInSec?: number;
     notBeforeInSec?: number;
+    claims?: Record<string, unknown>;
   }): Promise<string> {
-    const payload: Record<string, unknown> = {};
+    const payload: Record<string, unknown> = { ...opts.claims };
     if (!opts.omitTenant) payload.tenant_id = opts.tenant ?? TENANT;
     const now = Math.floor(Date.now() / 1000);
     const jwt = new SignJWT(payload)
@@ -67,6 +68,16 @@ describe('AuthService.verify', () => {
   it('accepts a valid token and returns verified identity', async () => {
     const res = await svc.verify(await mint({}));
     expect(res).toEqual({ sub: SUB, tenantId: TENANT });
+  });
+
+  it('surfaces verified email/name claims for JIT provisioning', async () => {
+    const res = await svc.verify(await mint({ claims: { email: 'a@a.test', name: 'Alice' } }));
+    expect(res).toMatchObject({ sub: SUB, tenantId: TENANT, email: 'a@a.test', name: 'Alice' });
+  });
+
+  it('falls back to preferred_username when name is absent', async () => {
+    const res = await svc.verify(await mint({ claims: { preferred_username: 'alice' } }));
+    expect(res.name).toBe('alice');
   });
 
   it('rejects a wrong audience', async () => {

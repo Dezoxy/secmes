@@ -47,3 +47,7 @@ The server still only ever sees ciphertext + metadata — JWT validation touches
 
 - **In-window token replay / no pre-expiry revocation** — accepted for beta; mitigated by short access-token TTL. Revisit with sender-constrained tokens (DPoP/mTLS) and a revocation/introspection path later.
 - **Live end-to-end OIDC login** (Zitadel deployed, real Authorization-Code flow) is not provable until checkpoint 9; this note + tests cover the **API validation half** (13) and the **tenant derivation** (14), proven with locally-minted tokens.
+
+## 7. JIT provisioning (checkpoint 15)
+
+On `POST /auth/session` (login) the user row is created on first sight via an **idempotent upsert** keyed on `(tenant_id, external_identity_id)`, run inside `withTenant(verifiedTenantId)`. All inputs — `tenant_id`, `external_identity_id` (`sub`), `email`, `display_name` — come **only from the verified token**, so a token can create/refresh a user **only in its own tenant** (RLS `WITH CHECK` is the backstop). A verified `email` claim is **required** (Zitadel must grant the `email` scope); absent it, login is `400`, not a partial user. No client-supplied profile field is trusted. Residual: a renamed user's `display_name`/`email` refresh on each login (last-write-wins) — acceptable; the IdP is the source of truth.
