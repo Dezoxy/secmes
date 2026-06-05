@@ -13,7 +13,7 @@ Living checklist. Check items off as they land. Each checkpoint states its **don
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (route through the matching reviewer).
 
-**Status (2026-06-05):** building. **Phase 1 app layer DONE** — **Done:** 11–12 (Drizzle + RLS, PR #34), 14 + `GET /me` (JWT auth + tenant guard, PR #36), 16 (append-only audit log, PR #37), 15 (`/me` + JIT provisioning + `GET /users` directory, PR #38/#39). **In progress:** 13 (API JWT validation done; live Zitadel login pending deploy), S1 (`ts-mls` verified in Node; iOS-PWA proof pending — USER), 6 (CI green; ACR-via-OIDC awaits the cluster). The infra-gated Phase-1 items (9 Zitadel, 10 managed Postgres) + Phase-0 Terraform→Azure are **deferred by choice** — building app logic locally first (Docker stack: `make up`). **Next:** Phase 2 crypto — **16a** headless 2-device test harness → **17** MLS in `packages/crypto`. This is the high-risk core; front-load it.
+**Status (2026-06-05):** building. **Phase 1 app layer DONE** — **Done:** 11–12 (Drizzle + RLS, PR #34), 14 + `GET /me` (JWT auth + tenant guard, PR #36), 16 (append-only audit log, PR #37), 15 (`/me` + JIT provisioning + `GET /users` directory, PR #38/#39). **In progress:** 13 (API JWT validation done; live Zitadel login pending deploy), S1 (`ts-mls` verified in Node; iOS-PWA proof pending — USER), 6 (CI green; ACR-via-OIDC awaits the cluster). The infra-gated Phase-1 items (9 Zitadel, 10 managed Postgres) + Phase-0 Terraform→Azure are **deferred by choice** — building app logic locally first (Docker stack: `make up`). **Phase 2 crypto STARTED:** 16a (2-device harness) + 17 (MLS wrapper in `packages/crypto`) done (PR #40) — 2-party local encrypt/decrypt verified, crypto-reviewer PASS. **Next:** 18 (device keys in IndexedDB) → 19 (key directory: `devices`/`key_packages` tables + publish/fetch) → 20 (crypto review #1). Group chat / PCS self-update handshake fan-out is deferred (B1).
 
 ---
 
@@ -53,8 +53,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (ro
 
 > Goal: the hard part. E2EE keys generated, published, and recoverable.
 
-- [ ] 16a. **Headless 2-device test harness** — a CLI/Node oracle doing encrypt→send→fetch→decrypt across two simulated devices, so checkpoints 17–38 (all _client_ behavior, but no client exists until #39) have a repeatable pass/fail instead of hand-verification. 🔒
-- [ ] 17. **MLS integrated** in `packages/crypto` — local encrypt/decrypt smoke test passes 🔒
+- [x] 16a. **Headless 2-device test harness** — a CLI/Node oracle doing encrypt→send→fetch→decrypt across two simulated devices, so checkpoints 17–38 (all _client_ behavior, but no client exists until #39) have a repeatable pass/fail instead of hand-verification. 🔒 — _PR #40; mock-server harness + a **server-blind assertion** (plaintext never appears in the wire bytes)._
+- [x] 17. **MLS integrated** in `packages/crypto` — local encrypt/decrypt smoke test passes 🔒 — _PR #40; thin typed wrapper over `ts-mls` 1.6.2 (`MlsEngine`/`Conversation`); pinned suite, downgrade-resistant KeyPackage; crypto-reviewer PASS. **2-party scope** — group/PCS handshake fan-out deferred (B1); see `mls-integration.md`._
 - [ ] 18. **Device keys** generated client-side, stored in IndexedDB
 - [ ] 19. **Key directory** — `devices` + `key_packages` tables (RLS); publish/fetch public KeyPackages 🔒
 - [ ] 20. **Crypto review #1** — crypto-reviewer pass + threat-model note for the key model 🔒

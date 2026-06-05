@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    // Client crypto: target Web APIs (TextEncoder, WebCrypto). No @types/node — keep Node APIs
+    // out of code that ships to the browser. Tests run in Node, which provides the same globals.
+    "lib": ["ES2022", "DOM"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}
