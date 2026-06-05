@@ -2,6 +2,7 @@ import {
   DEFAULT_ARGON2,
   MlsEngine,
   deserializeDeviceKeys,
+  deviceIdentity,
   openBackup,
   sealBackup,
   serializeDeviceKeys,
@@ -17,6 +18,10 @@ import { openDB, type IDBPDatabase } from 'idb';
 // artifact. See docs/threat-models/device-keystore.md + key-backup.md.
 
 const DB_NAME = 'secmes-keystore';
+// v1 stored an UNSEALED `{ identity, keys }` record at the same DB/store/key. v2 stores only the sealed
+// blob. The shapes are incompatible: a stale v1 record would be misread as a sealed device and fail to
+// unlock. The upgrade drops the legacy store so those unsealed secrets are also cleared from disk.
+const DB_VERSION = 2;
 const STORE = 'device';
 const SELF = 'self'; // single device per user in v1 (multi-device is deferred, B2)
 
@@ -55,8 +60,15 @@ export class DeviceKeystore {
     engine?: MlsEngine,
     argon: Argon2Params = DEFAULT_ARGON2,
   ): Promise<DeviceKeystore> {
-    const db = await openDB(DB_NAME, 1, {
-      upgrade(database) {
+    const db = await openDB(DB_NAME, DB_VERSION, {
+      upgrade(database, oldVersion) {
+        // Coming from the unsealed v1 schema → drop the legacy store and its unsealed records. This is
+        // best-effort at-rest clearing (the browser decides when backing pages are reclaimed), so a
+        // recovered/fresh device should rotate its key regardless (key-backup.md §4). A fresh sealed
+        // device is generated on next getOrCreateDevice; nothing in the dropped store can be unsealed.
+        if (oldVersion > 0 && oldVersion < 2 && database.objectStoreNames.contains(STORE)) {
+          database.deleteObjectStore(STORE);
+        }
         if (!database.objectStoreNames.contains(STORE)) database.createObjectStore(STORE);
       },
     });
@@ -117,6 +129,15 @@ export class DeviceKeystore {
     if (stored.identity !== identity) {
       throw new Error('keystore holds a device for a different identity');
     }
-    return deserializeDeviceKeys(await openBackup(stored.sealed, passphrase));
+    const keys = deserializeDeviceKeys(await openBackup(stored.sealed, passphrase));
+    // Check the identity embedded in the decrypted KeyPackage, not just the caller-supplied metadata, so
+    // a recovery service that returns the wrong (genuine) sealed blob under this name — shared/reused
+    // passphrase, account switch — can't silently hand back another identity's keys. This is a
+    // confusion check, not full authenticity: proving a restored device is really `identity`'s is the
+    // key-directory + fingerprint job (checkpoint 20, docs/threat-models/key-directory.md).
+    if (deviceIdentity(keys) !== identity) {
+      throw new Error('recovered device identity does not match the requested identity');
+    }
+    return keys;
   }
 }

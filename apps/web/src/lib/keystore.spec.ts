@@ -1,5 +1,6 @@
 import { MlsEngine, type Argon2Params, type DeviceKeys } from '@secmes/crypto';
 import { IDBFactory } from 'fake-indexeddb';
+import { openDB } from 'idb';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { DeviceKeystore } from './keystore';
@@ -86,5 +87,39 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     const blob = await ks.exportSealedBackup();
     if (!blob) throw new Error('expected a backup');
     await expect(ks.importSealedBackup('alice', blob)).rejects.toThrow(); // won't overwrite
+  });
+
+  it('drops a legacy unsealed v1 record on upgrade (no stale unseal)', async () => {
+    const engine = await MlsEngine.create();
+    // Simulate the pre-seal v1 schema: same DB/store/key, an UNSEALED { identity, keys } record.
+    const legacyKeys = await engine.generateDeviceKeys('alice');
+    const v1 = await openDB('secmes-keystore', 1, {
+      upgrade(db) {
+        if (!db.objectStoreNames.contains('device')) db.createObjectStore('device');
+      },
+    });
+    await v1.put('device', { identity: 'alice', keys: legacyKeys }, 'self');
+    v1.close();
+
+    // Opening at the sealed schema must clear the legacy record, not misread it as a sealed blob.
+    const ks = await DeviceKeystore.open(engine, FAST);
+    expect(await ks.loadDevice('alice', 'pw')).toBeUndefined(); // legacy gone, nothing to unseal
+    const fresh = await ks.getOrCreateDevice('alice', 'pw'); // a fresh sealed device works
+    expect(await worksForMls(engine, fresh)).toBe('msg');
+  });
+
+  it('rejects a recovered blob whose embedded identity differs from the requested one', async () => {
+    const engine = await MlsEngine.create();
+    const ks1 = await DeviceKeystore.open(engine, FAST);
+    await ks1.getOrCreateDevice('alice', 'shared pw');
+    const blob = await ks1.exportSealedBackup();
+    if (!blob) throw new Error('expected a backup');
+
+    // Fresh device: the server returns alice's blob but the caller asks for bob (shared passphrase).
+    globalThis.indexedDB = new IDBFactory();
+    const ks2 = await DeviceKeystore.open(engine, FAST);
+    await ks2.importSealedBackup('bob', blob); // metadata says bob; the sealed KeyPackage embeds alice
+    // Unseal succeeds (same passphrase) but the signed identity is alice ≠ bob → reject, don't return keys.
+    await expect(ks2.loadDevice('bob', 'shared pw')).rejects.toThrow();
   });
 });

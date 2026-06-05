@@ -53,6 +53,27 @@ export interface DeviceKeys {
   privatePackage: PrivateKeyPackage;
 }
 
+// Strict decode for the identity field: reject malformed UTF-8 rather than coerce it to U+FFFD, so two
+// distinct identity byte strings can't collide after a lossy decode in an equality check.
+const tdStrict = new TextDecoder('utf-8', { fatal: true });
+
+/**
+ * The device identity carried in a DeviceKeys' KeyPackage Basic credential. Callers restoring a sealed
+ * backup compare this to the expected identity to catch a recovery service handing back the wrong
+ * (genuine) blob under another name. NOTE: this reads the field; it does not by itself prove
+ * authenticity against an adversary who can mint a self-signed KeyPackage for an arbitrary name —
+ * cross-device identity authenticity is the key-directory + out-of-band fingerprint job (checkpoint 20,
+ * see docs/threat-models/key-directory.md). Throws on a non-Basic credential (v1 issues Basic only) or
+ * malformed identity bytes.
+ */
+export function deviceIdentity(keys: DeviceKeys): string {
+  const cred = keys.publicPackage.leafNode.credential;
+  if (cred.credentialType !== 'basic') {
+    throw new Error(`unsupported credential type: ${cred.credentialType}`);
+  }
+  return tdStrict.decode(cred.identity);
+}
+
 /** What a new member needs to join. The server forwards these; both are opaque to it. */
 export interface ConversationInvite {
   welcome: Welcome;
