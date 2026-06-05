@@ -19,6 +19,7 @@ describe.skipIf(!DB_URL)('KeyDirectoryService', () => {
   let bobAuth: VerifiedAuth;
   let carolAuth: VerifiedAuth;
   let daveAuth: VerifiedAuth;
+  let eveAuth: VerifiedAuth;
 
   beforeAll(async () => {
     sql = getDb().sql;
@@ -29,11 +30,13 @@ describe.skipIf(!DB_URL)('KeyDirectoryService', () => {
       await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantA}, 'kd-bob', 'bob@a.test') returning id`;
     await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantB}, 'kd-carol', 'c@b.test')`;
     await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantA}, 'kd-dave', 'dave@a.test')`;
+    await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantA}, 'kd-eve', 'eve@a.test')`;
 
     aliceAuth = { sub: 'kd-alice', tenantId: tenantA };
     bobAuth = { sub: 'kd-bob', tenantId: tenantA };
     carolAuth = { sub: 'kd-carol', tenantId: tenantB };
     daveAuth = { sub: 'kd-dave', tenantId: tenantA };
+    eveAuth = { sub: 'kd-eve', tenantId: tenantA };
   });
 
   afterAll(async () => {
@@ -73,10 +76,18 @@ describe.skipIf(!DB_URL)('KeyDirectoryService', () => {
     expect(row?.n).toBeGreaterThanOrEqual(2); // the two successful claims above
   });
 
+  it('dedupes KeyPackages within a batch and across retries', async () => {
+    const r1 = await dir.publish(eveAuth, 'RVZF', ['e1', 'e1', 'e2']); // 'e1' duplicated in-batch
+    expect(r1.published).toBe(2); // e1, e2
+    const r2 = await dir.publish(eveAuth, 'RVZF', ['e2', 'e3']); // 'e2' already published
+    expect(r2.published).toBe(1); // only e3 is new
+  });
+
   it('caps the unclaimed pool per device', async () => {
-    const batch = Array.from({ length: 100 }, (_, i) => `ZGF2ZS0${i}`);
-    await dir.publish(daveAuth, 'REFWRQ==', batch); // 100 available
-    await dir.publish(daveAuth, 'REFWRQ==', batch); // 200 — at the cap
-    await expect(dir.publish(daveAuth, 'REFWRQ==', ['one-more'])).rejects.toThrow(); // 201 > 200
+    const batchA = Array.from({ length: 100 }, (_, i) => `dave-a-${i}`);
+    const batchB = Array.from({ length: 100 }, (_, i) => `dave-b-${i}`); // distinct from A
+    await dir.publish(daveAuth, 'REFWRQ==', batchA); // 100 available
+    await dir.publish(daveAuth, 'REFWRQ==', batchB); // 200 — at the cap
+    await expect(dir.publish(daveAuth, 'REFWRQ==', ['dave-extra'])).rejects.toThrow(); // 201 > 200
   });
 });

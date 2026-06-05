@@ -61,6 +61,12 @@ export class KeyDirectoryService {
         .returning({ id: schema.devices.id });
       if (!device) throw new Error('device upsert returned no row');
 
+      // Lock the device row so the cap count-then-insert is atomic per device (no concurrent-publish
+      // TOCTOU). The onConflictDoUpdate above already took this lock; this makes it explicit.
+      await tx.execute(sql`select 1 from devices where id = ${device.id} for update`);
+
+      const unique = [...new Set(keyPackages)]; // drop intra-batch duplicates
+
       // Bound pool growth: cap un-claimed packages per device (no GC yet).
       const available = await tx
         .select({ n: sql<number>`count(*)::int` })
@@ -68,20 +74,22 @@ export class KeyDirectoryService {
         .where(
           and(eq(schema.keyPackages.deviceId, device.id), isNull(schema.keyPackages.claimedAt)),
         );
-      if ((available[0]?.n ?? 0) + keyPackages.length > MAX_AVAILABLE_PER_DEVICE) {
+      if ((available[0]?.n ?? 0) + unique.length > MAX_AVAILABLE_PER_DEVICE) {
         throw new BadRequestException(
           `too many unclaimed key packages (max ${MAX_AVAILABLE_PER_DEVICE} per device)`,
         );
       }
 
-      await tx.insert(schema.keyPackages).values(
-        keyPackages.map((kp) => ({
-          tenantId: auth.tenantId,
-          deviceId: device.id,
-          keyPackage: kp,
-        })),
-      );
-      return { deviceId: device.id, published: keyPackages.length };
+      // onConflictDoNothing + the (tenant, device, md5(key_package)) unique index skips any
+      // already-published package (retried batch); `published` reports rows actually inserted.
+      const inserted = await tx
+        .insert(schema.keyPackages)
+        .values(
+          unique.map((kp) => ({ tenantId: auth.tenantId, deviceId: device.id, keyPackage: kp })),
+        )
+        .onConflictDoNothing()
+        .returning({ id: schema.keyPackages.id });
+      return { deviceId: device.id, published: inserted.length };
     });
   }
 
