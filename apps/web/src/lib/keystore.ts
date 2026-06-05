@@ -113,12 +113,19 @@ export class DeviceKeystore {
    * loadDevice. Validates the blob shape and refuses to overwrite an existing device (clear first).
    */
   async importSealedBackup(identity: string, sealedJson: string): Promise<void> {
-    if (await this.db.get(STORE, SELF)) {
-      throw new Error('keystore already holds a device; clear it before importing a backup');
-    }
     const parsed: unknown = JSON.parse(sealedJson);
     if (!isSealedBackup(parsed)) throw new Error('invalid sealed backup');
-    await this.db.put(STORE, { identity, sealed: parsed } satisfies StoredDevice, SELF);
+
+    // Atomic put-if-absent in a single readwrite tx: a racing second import — or an import overlapping
+    // first-run device generation — can't observe an empty store at an earlier read and then clobber an
+    // already-stored device. Mirrors getOrCreateDevice. Throw only after the tx commits.
+    const tx = this.db.transaction(STORE, 'readwrite');
+    const existing = await tx.store.get(SELF);
+    if (!existing) await tx.store.put({ identity, sealed: parsed } satisfies StoredDevice, SELF);
+    await tx.done;
+    if (existing) {
+      throw new Error('keystore already holds a device; clear it before importing a backup');
+    }
   }
 
   private async unseal(

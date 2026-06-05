@@ -89,6 +89,35 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     await expect(ks.importSealedBackup('alice', blob)).rejects.toThrow(); // won't overwrite
   });
 
+  it('import is race-safe: concurrent imports on a fresh profile pick one winner, no clobber', async () => {
+    const engine = await MlsEngine.create();
+    // Two distinct sealed blobs (alice, bob), each minted on its own fresh profile.
+    const mintBlob = async (id: string): Promise<string> => {
+      globalThis.indexedDB = new IDBFactory();
+      const k = await DeviceKeystore.open(engine, FAST);
+      await k.getOrCreateDevice(id, 'pw');
+      const b = await k.exportSealedBackup();
+      if (!b) throw new Error('expected a backup');
+      return b;
+    };
+    const aliceBlob = await mintBlob('alice');
+    const bobBlob = await mintBlob('bob');
+
+    globalThis.indexedDB = new IDBFactory();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const results = await Promise.allSettled([
+      ks.importSealedBackup('alice', aliceBlob),
+      ks.importSealedBackup('bob', bobBlob),
+    ]);
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
+    // Whichever import won, exactly that identity is stored and unseals to working keys.
+    const winner = results[0].status === 'fulfilled' ? 'alice' : 'bob';
+    const recovered = await ks.loadDevice(winner, 'pw');
+    if (!recovered) throw new Error('expected the winning device');
+    expect(await worksForMls(engine, recovered)).toBe('msg');
+  });
+
   it('drops a legacy unsealed v1 record on upgrade (no stale unseal)', async () => {
     const engine = await MlsEngine.create();
     // Simulate the pre-seal v1 schema: same DB/store/key, an UNSEALED { identity, keys } record.
