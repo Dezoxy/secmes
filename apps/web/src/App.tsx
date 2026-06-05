@@ -64,10 +64,13 @@ export default function App() {
               mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
             }`}
           >
-            <img
-              src="https://images.unsplash.com/photo-1509316785289-025f5b846b35?w=800&q=80"
-              alt="Desert landscape with purple sky"
-              className="absolute inset-0 h-full w-full object-cover"
+            {/* Self-hosted gradient hero — no third-party request, fully offline (privacy fix). */}
+            <div
+              className="absolute inset-0"
+              style={{
+                background:
+                  'radial-gradient(120% 120% at 30% 15%, #3b1d6e 0%, #241043 45%, #0f0f16 100%)',
+              }}
             />
             <div className="absolute inset-0 bg-gradient-to-t from-[#0f0f16] via-[#0f0f16]/20 to-transparent" />
 
