@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Eye, EyeOff, ArrowRight } from 'lucide-react';
+import { startLogin } from './lib/auth';
 
 /**
  * Landing / auth screen — ported from the downloaded "split-screen" design and adapted to Vite.
@@ -129,7 +130,13 @@ export default function App() {
             </p>
           </div>
 
-          <form className="space-y-3" onSubmit={(e) => e.preventDefault()}>
+          <form
+            className="space-y-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void startLogin();
+            }}
+          >
             {/* Name Fields - Animated Height */}
             <div
               className={`grid transition-all duration-400 ease-out overflow-hidden ${
@@ -282,7 +289,10 @@ export default function App() {
               mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
             }`}
           >
-            <button className="flex items-center justify-center gap-2 bg-[#1a1a26] border border-white/5 hover:border-white/20 hover:bg-[#1f1f2a] text-white text-sm py-2.5 rounded-xl transition-all duration-300 group hover:scale-[1.02] active:scale-100">
+            <button
+              onClick={() => void startLogin()}
+              className="flex items-center justify-center gap-2 bg-[#1a1a26] border border-white/5 hover:border-white/20 hover:bg-[#1f1f2a] text-white text-sm py-2.5 rounded-xl transition-all duration-300 group hover:scale-[1.02] active:scale-100"
+            >
               <svg
                 className="w-4 h-4 transition-transform duration-300 group-hover:scale-110"
                 viewBox="0 0 24 24"
@@ -308,7 +318,10 @@ export default function App() {
                 Google
               </span>
             </button>
-            <button className="flex items-center justify-center gap-2 bg-[#1a1a26] border border-white/5 hover:border-white/20 hover:bg-[#1f1f2a] text-white text-sm py-2.5 rounded-xl transition-all duration-300 group hover:scale-[1.02] active:scale-100">
+            <button
+              onClick={() => void startLogin()}
+              className="flex items-center justify-center gap-2 bg-[#1a1a26] border border-white/5 hover:border-white/20 hover:bg-[#1f1f2a] text-white text-sm py-2.5 rounded-xl transition-all duration-300 group hover:scale-[1.02] active:scale-100"
+            >
               <svg
                 className="w-4 h-4 text-white/80 group-hover:text-white transition-all duration-300 group-hover:scale-110"
                 fill="currentColor"
