@@ -19,7 +19,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (ro
 
 ## Front-load — start now, parallel to Phase 0
 
-- [~] S1. **MLS spike** (laptop, no cluster) — `ts-mls` two-party encrypt/decrypt + add-member, run RFC 9420 interop vectors, measure gzipped bundle size, **prove it on a real iOS-Safari installed PWA**, sketch an IndexedDB keystore. Ratifies `docs/mls-library-selection.md`. _Highest-leverage de-risking action — do it this week._ 🔒 — _Node portion DONE (`ts-mls` 1.6.2 full 2-party flow in `spike/mls-poc`); iOS-Safari installed-PWA proof still pending (USER)._
+- [~] S1. **MLS spike** (laptop, no cluster) — `ts-mls` two-party encrypt/decrypt + add-member, run RFC 9420 interop vectors, measure gzipped bundle size, **prove it on a real iOS-Safari installed PWA**, sketch an IndexedDB keystore. Ratifies `docs/mls-library-selection.md`. _Highest-leverage de-risking action — do it this week._ 🔒 — _Node portion VERIFIED (`ts-mls` 1.6.2 full 2-party flow) — recorded with reproduction steps in `docs/mls-library-selection.md` § "Spike result" (the spike code is a gitignored throwaway, not committed). Steps 2–5 (interop vectors, bundle size, **iOS-Safari installed-PWA proof**, IndexedDB keystore) still pending — stays `[~]` until the iOS proof passes (USER)._
 - [ ] S2. **Book the paid GA gates** — quotes + provisional calendar holds for G4 (crypto review) and G5 (pen test), ~2 months out. Lead time is the schedule risk, not the audits.
 
 ## Phase 0 — Platform foundation (cluster + pipeline)
