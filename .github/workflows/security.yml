@@ -17,25 +17,25 @@ jobs:
     runs-on: ubuntu-latest
     container: semgrep/semgrep
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Semgrep (custom secmes rules + registry auto)
         run: semgrep scan --config .semgrep --config auto --error --quiet
 
   deps-osv:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: OSV-Scanner (dependency CVEs)
-        uses: google/osv-scanner-action/osv-scanner-action@v1.9.2
+        uses: google/osv-scanner-action/osv-scanner-action@v2.3.8
         with:
           scan-args: '--lockfile=./pnpm-lock.yaml'
 
   fs-trivy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Trivy filesystem + IaC config scan
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -45,17 +45,17 @@ jobs:
   secrets-gitleaks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   iac-checkov:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: bridgecrewio/checkov-action@v12
         with:
           directory: .
@@ -65,7 +65,7 @@ jobs:
   k8s-kubescape:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Kubescape (NSA + MITRE posture on charts)
         uses: kubescape/github-action@main
         with:
@@ -75,9 +75,9 @@ jobs:
   api-42crunch-audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: pnpm
