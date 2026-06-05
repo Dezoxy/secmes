@@ -1,7 +1,16 @@
-import { Body, Controller, NotFoundException, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  HttpCode,
+  NotFoundException,
+  Param,
+  ParseUUIDPipe,
+  Post,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiBody,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -16,6 +25,15 @@ import { CurrentAuth } from '../auth/current-auth.decorator.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { KeyDirectoryService } from './key-directory.service.js';
 import { PublishKeyPackagesSchema, type PublishKeyPackages } from './key-directory.schemas.js';
+
+// Documents the request body in OpenAPI (the Zod type is erased at runtime). Zod still validates.
+class PublishKeyPackagesBody {
+  @ApiProperty({ description: 'base64 MLS signature public key' })
+  signaturePublicKey!: string;
+
+  @ApiProperty({ type: [String], description: 'base64 one-time-use MLS KeyPackages (1–100)' })
+  keyPackages!: string[];
+}
 
 class PublishResultDto {
   @ApiProperty()
@@ -45,10 +63,12 @@ export class KeyDirectoryController {
   constructor(private readonly dir: KeyDirectoryService) {}
 
   @Post('devices/me/key-packages')
+  @HttpCode(200) // Nest defaults POST to 201; this returns 200 to match @ApiOkResponse
   @ApiOperation({
     summary: "Register the caller's device + publish one-time-use KeyPackages",
     operationId: 'publishKeyPackages',
   })
+  @ApiBody({ type: PublishKeyPackagesBody })
   @ApiOkResponse({ type: PublishResultDto })
   @ApiBadRequestResponse({ description: 'invalid body, or user not provisioned' })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
@@ -61,6 +81,7 @@ export class KeyDirectoryController {
 
   // POST, not GET: claiming consumes a one-time-use package (a mutation) — must not be cacheable/prefetchable.
   @Post('users/:userId/key-package/claim')
+  @HttpCode(200) // 200 (data returned), not Nest's default 201
   @ApiOperation({
     summary: 'Claim a fresh one-time-use KeyPackage for a user',
     operationId: 'claimKeyPackage',

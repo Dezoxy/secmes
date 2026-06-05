@@ -67,18 +67,13 @@ export class KeyDirectoryService {
 
       const unique = [...new Set(keyPackages)]; // drop intra-batch duplicates
 
-      // Bound pool growth: cap un-claimed packages per device (no GC yet).
-      const available = await tx
+      const before = await tx
         .select({ n: sql<number>`count(*)::int` })
         .from(schema.keyPackages)
         .where(
           and(eq(schema.keyPackages.deviceId, device.id), isNull(schema.keyPackages.claimedAt)),
         );
-      if ((available[0]?.n ?? 0) + unique.length > MAX_AVAILABLE_PER_DEVICE) {
-        throw new BadRequestException(
-          `too many unclaimed key packages (max ${MAX_AVAILABLE_PER_DEVICE} per device)`,
-        );
-      }
+      const available = before[0]?.n ?? 0;
 
       // onConflictDoNothing + the (tenant, device, md5(key_package)) unique index skips any
       // already-published package (retried batch); `published` reports rows actually inserted.
@@ -89,6 +84,14 @@ export class KeyDirectoryService {
         )
         .onConflictDoNothing()
         .returning({ id: schema.keyPackages.id });
+
+      // Cap on ACTUAL net-new rows (not batch size) so an idempotent retry near the cap isn't
+      // wrongly rejected. Throwing rolls back the insert above (device row is locked for the tx).
+      if (available + inserted.length > MAX_AVAILABLE_PER_DEVICE) {
+        throw new BadRequestException(
+          `too many unclaimed key packages (max ${MAX_AVAILABLE_PER_DEVICE} per device)`,
+        );
+      }
       return { deviceId: device.id, published: inserted.length };
     });
   }

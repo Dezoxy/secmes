@@ -89,5 +89,9 @@ describe.skipIf(!DB_URL)('KeyDirectoryService', () => {
     await dir.publish(daveAuth, 'REFWRQ==', batchA); // 100 available
     await dir.publish(daveAuth, 'REFWRQ==', batchB); // 200 — at the cap
     await expect(dir.publish(daveAuth, 'REFWRQ==', ['dave-extra'])).rejects.toThrow(); // 201 > 200
+
+    // At the cap, re-publishing an EXISTING batch inserts 0 → must NOT be rejected (idempotent).
+    const retry = await dir.publish(daveAuth, 'REFWRQ==', batchA);
+    expect(retry.published).toBe(0);
   });
 });
