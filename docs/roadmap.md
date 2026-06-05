@@ -13,11 +13,13 @@ Living checklist. Check items off as they land. Each checkpoint states its **don
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (route through the matching reviewer).
 
+**Status (2026-06-05):** building has started. **Done:** 11–12 (Drizzle + `tenants`/`users` with enforced RLS, PR #34). **In progress:** S1 (`ts-mls` verified in Node; iOS-Safari installed-PWA proof pending — USER), 6 (CI green; ACR-via-OIDC half awaits the cluster). Phase-0 infra (Terraform→Azure) is **deferred by choice** — building Phase 1 app logic locally first (Docker stack: `make up`). **Next:** 13–14 (server-side OIDC token exchange + tenant guard that feeds `withTenant`).
+
 ---
 
 ## Front-load — start now, parallel to Phase 0
 
-- [ ] S1. **MLS spike** (laptop, no cluster) — `ts-mls` two-party encrypt/decrypt + add-member, run RFC 9420 interop vectors, measure gzipped bundle size, **prove it on a real iOS-Safari installed PWA**, sketch an IndexedDB keystore. Ratifies `docs/mls-library-selection.md`. _Highest-leverage de-risking action — do it this week._ 🔒
+- [~] S1. **MLS spike** (laptop, no cluster) — `ts-mls` two-party encrypt/decrypt + add-member, run RFC 9420 interop vectors, measure gzipped bundle size, **prove it on a real iOS-Safari installed PWA**, sketch an IndexedDB keystore. Ratifies `docs/mls-library-selection.md`. _Highest-leverage de-risking action — do it this week._ 🔒 — _Node portion VERIFIED (`ts-mls` 1.6.2 full 2-party flow) — recorded with reproduction steps in `docs/mls-library-selection.md` § "Spike result" (the spike code is a gitignored throwaway, not committed). Steps 2–5 (interop vectors, bundle size, **iOS-Safari installed-PWA proof**, IndexedDB keystore) still pending — stays `[~]` until the iOS proof passes (USER)._
 - [ ] S2. **Book the paid GA gates** — quotes + provisional calendar holds for G4 (crypto review) and G5 (pen test), ~2 months out. Lead time is the schedule risk, not the audits.
 
 ## Phase 0 — Platform foundation (cluster + pipeline)
@@ -29,7 +31,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (ro
 - [ ] 3. **Cilium NetworkPolicy** proven — default-deny blocks pod-to-pod, allow-rule permits it 🔒
 - [ ] 4. **Ingress + TLS** — ingress-nginx + cert-manager issue a valid Let's Encrypt cert on a test host
 - [ ] 5. **Argo CD** installed — app-of-apps syncs `charts/secmes`
-- [ ] 6. **CI green on a PR** — lint/format/typecheck/test/build pass; GitHub→ACR via OIDC
+- [~] 6. **CI green on a PR** — lint/format/typecheck/test/build pass; GitHub→ACR via OIDC — _CI green (ci · security · codeql); ACR push via OIDC awaits the cluster (Phase-0/Azure)._
 - [ ] 7. **Hello-world `api` live** end-to-end over HTTPS via GitOps
 - [ ] 8. **Secrets via Key Vault** + Secrets Store CSI mounted in the `api` pod 🔒
 - [ ] 8a. **Staging + prod environments** stood up (namespaces, per-env Helm values, first GitOps sync, `vars.STAGING_URL` registered) — the GitOps prod gate and nightly DAST both require this, and no other checkpoint creates it.
@@ -40,8 +42,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (ro
 
 - [ ] 9. **Zitadel deployed** (Helm) with its DB — admin console reachable
 - [ ] 10. **Managed Postgres** (Flexible Server) + private endpoint — reachable only in-VNet 🔒
-- [ ] 11. **Drizzle wired** with a per-transaction `app.tenant_id` session var
-- [ ] 12. **`tenants` + `users` with RLS** — cross-tenant read provably blocked by a test 🔒
+- [x] 11. **Drizzle wired** with a per-transaction `app.tenant_id` session var — _`withTenant()` (PR #34); pool `prepare:false` for PgBouncer txn mode._
+- [x] 12. **`tenants` + `users` with RLS** — cross-tenant read provably blocked by a test 🔒 — _PR #34; non-bypass `secmes_app` role, FORCE RLS + WITH CHECK, 8-test spec incl. pooled-reuse + privilege-escalation negatives._
 - [ ] 13. **OIDC login** via Zitadel works; API validates JWTs
 - [ ] 14. **Tenant guard** sets `app.tenant_id` from the verified token only (never client input) 🔒
 - [ ] 15. **`/me` + user directory** (per tenant) — Zod-validated, documented in the spec
