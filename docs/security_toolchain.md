@@ -8,10 +8,10 @@ Principle: **OSS self-hosted by default** (nothing leaves our tenancy); external
 | Workflow | Tools | Blocks on |
 |---|---|---|
 | `ci.yml` | ESLint, Prettier, typecheck, tests, build, OpenAPI emit | lint/type/test failure |
-| `security.yml` | Semgrep (custom + auto), OSV-Scanner, Trivy (fs+IaC), gitleaks, Checkov, Kubescape, **42Crunch Audit** | HIGH/CRITICAL findings, secrets, API score < 75 |
+| `security.yml` | Semgrep (custom + auto), OSV-Scanner, gitleaks, Checkov, Kubescape, **42Crunch Audit** | HIGH/CRITICAL findings, secrets, API score < 75 |
 | `codeql.yml` | CodeQL (security-extended) | new code-scanning alerts |
 | `dast.yml` (nightly) | OWASP ZAP baseline, **42Crunch Conformance Scan** | against staging |
-| `cd.yml` | Trivy image (TODO), **syft SBOM**, **cosign** keyless sign + attest | — |
+| `cd.yml` | **Trivy image scan**, **syft SBOM**, **cosign** keyless sign + attest | HIGH/CRITICAL in the image |
 
 **Secrets/vars to set before first run:** `X42C_API_TOKEN` (42Crunch), `vars.STAGING_URL` (DAST), `vars.ACR_LOGIN_SERVER` + `AZURE_*` (CD OIDC). Third-party action versions are pinned but **verify them before the first run**.
 

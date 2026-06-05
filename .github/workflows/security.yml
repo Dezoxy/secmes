@@ -60,7 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Kubescape (NSA + MITRE posture on charts)
-        uses: kubescape/github-action@main
+        uses: kubescape/github-action@c9749b84d138c0cbbb702b258774954f5463b82e # v3.0.21
         with:
           files: 'charts/'
           frameworks: 'nsa,mitre'

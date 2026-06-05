@@ -6,7 +6,8 @@ import { z } from 'zod';
  * INVARIANT: the server treats `ciphertext` as opaque. It MUST NOT contain,
  * and the server MUST NOT log or attempt to interpret, any plaintext.
  * Only the fields below ever reach the backend in the clear — none of them
- * reveal message content.
+ * reveal message content. Never add a field that could carry plaintext or key
+ * material here without a threat-model review under docs/threat-models/.
  */
 
 export const CipherEnvelopeSchema = z.object({

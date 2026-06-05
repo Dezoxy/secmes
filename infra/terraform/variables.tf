@@ -43,6 +43,12 @@ variable "node_vm_size" {
   description = "Burstable VMs keep beta cost down; move to D-series for steady load."
 }
 
+variable "enable_prod" {
+  type        = bool
+  default     = false
+  description = "When true, AKS uses the SLA-backed Standard control-plane tier (required before customer beta). Default Free keeps dev cost down."
+}
+
 variable "tags" {
   type = map(string)
   default = {
