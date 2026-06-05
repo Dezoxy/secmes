@@ -11,7 +11,7 @@
     "openapi": "nest build && node dist/generate-openapi.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "db:migrate": "node src/db/migrate.ts"
+    "db:migrate": "tsx src/db/migrate.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.24",
@@ -28,6 +28,7 @@
     "@nestjs/testing": "^11.1.24",
     "@swc/core": "^1.15.40",
     "@types/node": "^25.9.1",
+    "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "unplugin-swc": "^1.5.9",
     "vitest": "^4.1.8"
