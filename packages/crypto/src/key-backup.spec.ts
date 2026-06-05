@@ -49,6 +49,14 @@ describe('key backup (checkpoint 21)', () => {
     await expect(openBackup(downgraded, 'pw')).rejects.toThrow();
   });
 
+  it('binds the header (v/kdf) into GCM auth — header tampering is rejected', async () => {
+    const blob = await sealBackup(te.encode('x'), 'pw', FAST);
+    await expect(openBackup({ ...blob, v: 2 } as unknown as typeof blob, 'pw')).rejects.toThrow();
+    await expect(
+      openBackup({ ...blob, kdf: 'scrypt' } as unknown as typeof blob, 'pw'),
+    ).rejects.toThrow();
+  });
+
   it('refuses absurd Argon2id params (anti-DoS ceiling) without deriving', async () => {
     await expect(sealBackup(te.encode('x'), 'pw', { m: 2 ** 31, t: 1, p: 1 })).rejects.toThrow();
     const ok = await sealBackup(te.encode('x'), 'pw', FAST);
