@@ -3,7 +3,7 @@
 # via pnpm workspace `--filter ... deploy`.
 
 # ---- build ----
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 COPY package.json ./
 RUN corepack enable && npm install --no-audit --no-fund
@@ -12,7 +12,7 @@ COPY src ./src
 RUN npm run build && npm prune --omit=dev
 
 # ---- runtime ----
-FROM node:20-alpine AS runtime
+FROM node:24-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 # non-root, read-only-friendly

@@ -20,6 +20,8 @@ concurrency:
 
 jobs:
   build-push:
+    # Enable by setting repo variable ENABLE_DEPLOY=true once Azure OIDC + ACR vars/secrets exist.
+    if: ${{ vars.ENABLE_DEPLOY == 'true' }}
     runs-on: ubuntu-latest
     env:
       # github.sha is trusted (not attacker-controllable). Use via env per hardening guidance.
