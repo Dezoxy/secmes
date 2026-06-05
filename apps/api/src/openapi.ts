@@ -12,5 +12,17 @@ export function createOpenApiDocument(app: INestApplication): OpenAPIObject {
     .setVersion(process.env.APP_VERSION ?? 'dev')
     .addBearerAuth()
     .build();
-  return SwaggerModule.createDocument(app, config);
+  const doc = SwaggerModule.createDocument(app, config);
+
+  // Invariant 5 / 42Crunch: request bodies must reject unknown properties. @nestjs/swagger has no class
+  // decorator for `additionalProperties:false`, so pin it on the input DTO schemas here — keeping the
+  // documented contract in lockstep with the Zod `.strict()` the server actually enforces.
+  const STRICT_INPUT_SCHEMAS = ['PublishKeyPackagesBody', 'BackupBody'];
+  for (const name of STRICT_INPUT_SCHEMAS) {
+    const schema = doc.components?.schemas?.[name];
+    if (schema && typeof schema === 'object' && !('$ref' in schema)) {
+      (schema as { additionalProperties?: boolean }).additionalProperties = false;
+    }
+  }
+  return doc;
 }

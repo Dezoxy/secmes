@@ -27,11 +27,25 @@ import { KeyDirectoryService } from './key-directory.service.js';
 import { PublishKeyPackagesSchema, type PublishKeyPackages } from './key-directory.schemas.js';
 
 // Documents the request body in OpenAPI (the Zod type is erased at runtime). Zod still validates.
+// Bounds mirror PublishKeyPackagesSchema (the enforced Zod) so the documented contract 42Crunch audits
+// matches what the server actually accepts — base64 pattern, length caps, additionalProperties:false.
+const BASE64_PATTERN = '^[A-Za-z0-9+/]+={0,2}$';
+
 class PublishKeyPackagesBody {
-  @ApiProperty({ description: 'base64 MLS signature public key' })
+  @ApiProperty({
+    description: 'base64 MLS signature public key',
+    maxLength: 512,
+    pattern: BASE64_PATTERN,
+  })
   signaturePublicKey!: string;
 
-  @ApiProperty({ type: [String], description: 'base64 one-time-use MLS KeyPackages (1–100)' })
+  @ApiProperty({
+    type: [String],
+    description: 'base64 one-time-use MLS KeyPackages (1–100)',
+    minItems: 1,
+    maxItems: 100,
+    items: { type: 'string', maxLength: 8192, pattern: BASE64_PATTERN },
+  })
   keyPackages!: string[];
 }
 
