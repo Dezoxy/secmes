@@ -63,6 +63,11 @@ services:
       S3_BUCKET: secmes-attachments
       S3_ACCESS_KEY: secmes
       S3_SECRET_KEY: secmes_local_dev
+      # OIDC (non-secret). Empty until Zitadel is deployed (checkpoint 9); while empty the API
+      # boots and health works, but protected routes (e.g. /me) fail closed with 401.
+      OIDC_ISSUER: '' # e.g. https://<zitadel-host>
+      OIDC_AUDIENCE: '' # the API's OIDC audience/clientID
+      OIDC_TENANT_CLAIM: tenant_id # verified claim carrying our tenant UUID
     ports: ['3000:3000']
     depends_on:
       postgres:
