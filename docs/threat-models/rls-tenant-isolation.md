@@ -49,4 +49,4 @@ Upholds invariant #3 (RLS on every tenant table, no cross-tenant reads). No tens
 
 ## 6. Residual risk
 
-A developer using a raw connection outside the transaction helper bypasses the per-tx var. Mitigated by: the helper being the only sanctioned DB entry point, the non-bypass role (so even a raw query is RLS-filtered as long as the var defaults to empty/None → policy denies), and a Semgrep rule flagging direct `pool.query` outside the helper. Accept for beta.
+A developer using a raw connection outside the transaction helper bypasses the per-tx var. Mitigated by: the helper being the only sanctioned DB entry point, the non-bypass role (so even a raw query is RLS-filtered, and with no tenant var set `current_setting('app.tenant_id')` raises rather than returning rows — fail-closed loudly, not silently empty), and a Semgrep rule flagging direct `pool.query` outside the helper. Accept for beta.
