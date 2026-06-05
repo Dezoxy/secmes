@@ -37,6 +37,12 @@ Hard rules. A change that violates one is wrong even if it "works".
 - Security-relevant change: a short threat-model note under `docs/threat-models/`.
 - No secrets; no banned log patterns.
 
+## Pull request flow
+
+- Every change lands via a PR; `main` is protected.
+- **Wait for the `chatgpt-codex-connector` (Codex) review before merging — never merge on green CI alone.** Resolve every Codex finding, or reply on the PR with an explicit, recorded justification. Treat its P1/P2 findings like CI failures.
+- Merge only when **both** hold: CI green (ci · security · codeql) **and** the Codex review is addressed.
+
 ## Never do
 
 - Weaken or bypass crypto, RLS, or auth "to make it work".
