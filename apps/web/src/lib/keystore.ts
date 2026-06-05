@@ -33,10 +33,12 @@ export class DeviceKeystore {
   static async open(engine?: MlsEngine): Promise<DeviceKeystore> {
     // Code-enforced gate: this store is unsealed at rest (sealing lands in checkpoints 21–22), so it
     // must not run in a production build unless explicitly opted in for a dev/beta build.
-    if (import.meta.env.PROD && !import.meta.env.VITE_ALLOW_UNSEALED_KEYSTORE) {
+    // Vite exposes VITE_* as strings, so only the literal 'true' opts in — "false"/"0"/"" all
+    // fail closed (a truthy "false" string must NOT accidentally enable the unsealed store).
+    if (import.meta.env.PROD && import.meta.env.VITE_ALLOW_UNSEALED_KEYSTORE !== 'true') {
       throw new Error(
         'DeviceKeystore is unsealed at rest (encryption lands in checkpoints 21–22); refusing to ' +
-          'run in a production build. Set VITE_ALLOW_UNSEALED_KEYSTORE only for dev/beta.',
+          "run in a production build. Set VITE_ALLOW_UNSEALED_KEYSTORE='true' only for dev/beta.",
       );
     }
     const db = await openDB(DB_NAME, 1, {
