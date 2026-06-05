@@ -37,15 +37,22 @@ describe('key backup (checkpoint 21)', () => {
   });
 
   it('uses the production Argon2id params by default and round-trips', async () => {
-    const blob = await sealBackup(te.encode('secret'), 'pw'); // DEFAULT_ARGON2 — 64 MiB
+    const blob = await sealBackup(te.encode('secret'), 'pw'); // DEFAULT_ARGON2 — 64 MiB (slow)
     expect(blob.params).toEqual(DEFAULT_ARGON2);
     expect(await openBackup(blob, 'pw')).toEqual(te.encode('secret'));
-  });
+  }, 30_000); // 64 MiB Argon2id in pure JS can exceed vitest's 5s default on a slow CI runner
 
   it('refuses weak Argon2id params on seal and on open (anti-downgrade floor)', async () => {
     await expect(sealBackup(te.encode('x'), 'pw', { m: 8, t: 1, p: 1 })).rejects.toThrow();
     const ok = await sealBackup(te.encode('x'), 'pw', FAST);
     const downgraded = { ...ok, params: { m: 8, t: 1, p: 1 } as Argon2Params };
     await expect(openBackup(downgraded, 'pw')).rejects.toThrow();
+  });
+
+  it('refuses absurd Argon2id params (anti-DoS ceiling) without deriving', async () => {
+    await expect(sealBackup(te.encode('x'), 'pw', { m: 2 ** 31, t: 1, p: 1 })).rejects.toThrow();
+    const ok = await sealBackup(te.encode('x'), 'pw', FAST);
+    const huge = { ...ok, params: { m: 2 ** 31, t: 1, p: 1 } as Argon2Params };
+    await expect(openBackup(huge, 'pw')).rejects.toThrow();
   });
 });

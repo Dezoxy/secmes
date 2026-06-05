@@ -17,14 +17,21 @@ export interface Argon2Params {
 /** Production parameters (key-backup.md): 64 MiB, 3 passes, 1 lane. */
 export const DEFAULT_ARGON2: Argon2Params = { m: 65536, t: 3, p: 1 };
 
-// Hard floor: refuse to seal OR open below this, so a misconfigured caller can't create a weak
-// backup and a tampered/downgraded server-stored blob is rejected before we even derive.
-// (Tampering params also changes the derived key → GCM would fail anyway; this fails fast + loud.)
+// Bound Argon2id params on both ends. Floor: a misconfigured caller can't make a weak backup and a
+// downgraded server blob is rejected before we derive. Ceiling: a tampered blob can't carry an absurd
+// cost (e.g. m = 2 GiB) that would OOM/hang the client before AES-GCM auth could fail — a DoS vector.
 const MIN_ARGON2: Argon2Params = { m: 8192, t: 2, p: 1 };
+const MAX_ARGON2: Argon2Params = { m: 1048576, t: 10, p: 4 }; // 1 GiB / 10 passes / 4 lanes
 
-function assertStrong(p: Argon2Params): void {
+function assertParams(p: Argon2Params): void {
+  if (!Number.isInteger(p.m) || !Number.isInteger(p.t) || !Number.isInteger(p.p)) {
+    throw new Error('Argon2id parameters must be integers');
+  }
   if (p.m < MIN_ARGON2.m || p.t < MIN_ARGON2.t || p.p < MIN_ARGON2.p) {
     throw new Error('Argon2id parameters are below the minimum security floor');
+  }
+  if (p.m > MAX_ARGON2.m || p.t > MAX_ARGON2.t || p.p > MAX_ARGON2.p) {
+    throw new Error('Argon2id parameters exceed the allowed maximum');
   }
 }
 
@@ -81,7 +88,7 @@ export async function sealBackup(
   passphrase: string,
   params: Argon2Params = DEFAULT_ARGON2,
 ): Promise<SealedBackup> {
-  assertStrong(params);
+  assertParams(params);
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await deriveKey(passphrase, salt, params, ['encrypt']);
@@ -93,7 +100,7 @@ export async function sealBackup(
 
 /** Decrypt a SealedBackup. Throws on a wrong passphrase or any tampering (AES-GCM auth failure). */
 export async function openBackup(backup: SealedBackup, passphrase: string): Promise<Uint8Array> {
-  assertStrong(backup.params); // reject a downgraded/weak blob before spending the KDF
+  assertParams(backup.params); // reject a downgraded/weak blob before spending the KDF
   const salt = fromB64(backup.salt);
   const iv = fromB64(backup.iv);
   if (salt.length !== 16 || iv.length !== 12) throw new Error('malformed backup blob');
