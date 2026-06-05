@@ -18,8 +18,14 @@ import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { KeyBackupService } from './key-backup.service.js';
 import { StoreBackupSchema, type StoreBackup } from './key-backup.schemas.js';
 
+// Bounds mirror StoreBackupSchema (the enforced Zod) so the documented contract matches enforcement:
+// the blob is opaque (never parsed server-side) but size-capped at 64 KiB to prevent abuse.
 class BackupBody {
-  @ApiProperty({ description: 'opaque passphrase-sealed backup blob (the server never opens it)' })
+  @ApiProperty({
+    description: 'opaque passphrase-sealed backup blob (the server never opens it)',
+    minLength: 1,
+    maxLength: 65536,
+  })
   backup!: string;
 }
 
