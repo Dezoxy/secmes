@@ -1,4 +1,4 @@
-import { argon2id } from '@noble/hashes/argon2.js';
+import { argon2idAsync } from '@noble/hashes/argon2.js';
 
 // Passphrase-sealed backup of private key material: Argon2id (memory-hard KDF) → AES-256-GCM.
 // Used to back up a device's IDENTITY keys for recovery, and to seal the keystore at rest. Argon2id
@@ -18,10 +18,11 @@ export interface Argon2Params {
 export const DEFAULT_ARGON2: Argon2Params = { m: 65536, t: 3, p: 1 };
 
 // Bound Argon2id params on both ends. Floor: a misconfigured caller can't make a weak backup and a
-// downgraded server blob is rejected before we derive. Ceiling: a tampered blob can't carry an absurd
-// cost (e.g. m = 2 GiB) that would OOM/hang the client before AES-GCM auth could fail — a DoS vector.
+// downgraded server blob is rejected before we derive. Ceiling: kept budget-phone-safe so a tampered
+// server blob can't force a huge allocation before AES-GCM auth fails (DoS). Headroom above DEFAULT
+// for a future cost bump; raising DEFAULT past this needs a deliberate ceiling raise + migration.
 const MIN_ARGON2: Argon2Params = { m: 8192, t: 2, p: 1 };
-const MAX_ARGON2: Argon2Params = { m: 1048576, t: 10, p: 4 }; // 1 GiB / 10 passes / 4 lanes
+const MAX_ARGON2: Argon2Params = { m: 131072, t: 4, p: 2 }; // 128 MiB / 4 passes / 2 lanes (2× DEFAULT mem)
 
 function assertParams(p: Argon2Params): void {
   if (!Number.isInteger(p.m) || !Number.isInteger(p.t) || !Number.isInteger(p.p)) {
@@ -84,7 +85,8 @@ async function deriveKey(
   params: Argon2Params,
   usage: KeyUsage[],
 ): Promise<CryptoKey> {
-  const raw = argon2id(te.encode(passphrase), salt, {
+  // Async variant yields to the event loop so the 64 MiB KDF doesn't freeze the PWA main thread.
+  const raw = await argon2idAsync(te.encode(passphrase), salt, {
     t: params.t,
     m: params.m,
     p: params.p,
