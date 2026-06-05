@@ -1,4 +1,4 @@
-import type { DeviceKeys } from './index.js';
+import type { DeviceIdentity, DeviceKeys } from './index.js';
 
 // Fidelity-preserving codec for DeviceKeys → bytes (sealBackup needs a Uint8Array; IndexedDB's native
 // structured clone can't produce bytes). ts-mls key objects contain Uint8Array AND bigint, so JSON
@@ -44,4 +44,32 @@ export function deserializeDeviceKeys(bytes: Uint8Array): DeviceKeys {
     }
     return v;
   }) as DeviceKeys;
+}
+
+/**
+ * Serialize identity-only recovery material to bytes (for sealing as a backup; key-backup.md §4).
+ * Carries the signing identity only — NO one-time KeyPackage HPKE private keys. Inverse of
+ * `deserializeDeviceIdentity`. ⚠️ Output contains the secret signing key — seal it immediately.
+ */
+export function serializeDeviceIdentity(id: DeviceIdentity): Uint8Array {
+  return te.encode(
+    JSON.stringify({
+      identity: id.identity,
+      spk: toB64(id.signaturePublicKey),
+      ssk: toB64(id.signaturePrivateKey),
+    }),
+  );
+}
+
+/** Reconstruct DeviceIdentity from `serializeDeviceIdentity` output. Throws on a malformed blob. */
+export function deserializeDeviceIdentity(bytes: Uint8Array): DeviceIdentity {
+  const o = JSON.parse(td.decode(bytes)) as Record<string, unknown>;
+  if (typeof o.identity !== 'string' || typeof o.spk !== 'string' || typeof o.ssk !== 'string') {
+    throw new Error('malformed device identity');
+  }
+  return {
+    identity: o.identity,
+    signaturePublicKey: fromB64(o.spk),
+    signaturePrivateKey: fromB64(o.ssk),
+  };
 }

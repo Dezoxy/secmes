@@ -1,10 +1,12 @@
 import {
   DEFAULT_ARGON2,
   MlsEngine,
+  deserializeDeviceIdentity,
   deserializeDeviceKeys,
   deviceIdentity,
   openBackup,
   sealBackup,
+  serializeDeviceIdentity,
   serializeDeviceKeys,
   type Argon2Params,
   type DeviceKeys,
@@ -12,10 +14,11 @@ import {
 } from '@secmes/crypto';
 import { openDB, type IDBPDatabase } from 'idb';
 
-// SEALED at rest: the device's private key material is stored in IndexedDB only as a passphrase-sealed
-// blob (Argon2id + AES-256-GCM, checkpoint 21). Unlocking requires the passphrase. The same sealed
-// blob is what gets backed up to the server (checkpoints 22–23) — at-rest sealing and backup are one
-// artifact. See docs/threat-models/device-keystore.md + key-backup.md.
+// SEALED at rest: the full device key material is stored in IndexedDB only as a passphrase-sealed blob
+// (Argon2id + AES-256-GCM, checkpoint 21); unlocking requires the passphrase. The server RECOVERY
+// artifact is a SEPARATE, narrower blob — identity-only (no one-time KeyPackage HPKE private keys) — so
+// a leaked backup can't decrypt a retained Welcome (forward secrecy, key-backup.md §4). The full at-rest
+// blob is never uploaded. See docs/threat-models/device-keystore.md + key-backup.md §4.
 
 const DB_NAME = 'secmes-keystore';
 // v1 stored an UNSEALED `{ identity, keys }` record at the same DB/store/key. v2 stores only the sealed
@@ -102,37 +105,53 @@ export class DeviceKeystore {
     return this.unseal(stored, identity, passphrase);
   }
 
-  /** The sealed blob (opaque) to upload to the server for cross-device recovery, or undefined. */
-  async exportSealedBackup(): Promise<string | undefined> {
+  /**
+   * The identity-only sealed artifact to upload for cross-device recovery (key-backup.md §4). Unseals the
+   * local device with `passphrase`, strips it to identity material (no one-time KeyPackage HPKE private
+   * keys), and re-seals that under the same passphrase. Forward-secret: a leak of this artifact can't
+   * decrypt a retained Welcome. undefined if no device is stored yet.
+   */
+  async exportRecoveryArtifact(identity: string, passphrase: string): Promise<string | undefined> {
     const stored = (await this.db.get(STORE, SELF)) as StoredDevice | undefined;
-    return stored ? JSON.stringify(stored.sealed) : undefined;
+    if (!stored) return undefined;
+    const keys = await this.unseal(stored, identity, passphrase);
+    const plaintext = serializeDeviceIdentity(this.engine.exportIdentity(keys));
+    const sealed = await sealBackup(plaintext, passphrase, this.argon);
+    plaintext.fill(0); // best-effort wipe of the transient identity plaintext after sealing
+    return JSON.stringify(sealed);
   }
 
   /**
-   * Restore a device on a fresh profile from a sealed blob fetched from the server. Verifies the blob
-   * BEFORE persisting — it must shape-check, unseal with `passphrase`, and embed the expected identity —
-   * so a wrong, tampered, or wrong-identity blob is rejected without ever writing to the store (a bad
-   * restore response can't strand the profile behind the no-clobber guard). Refuses to overwrite an
-   * existing device (use `clearDevice` first). Returns the recovered working keys.
+   * Restore on a fresh profile from an identity-only recovery artifact. Unseals with `passphrase`,
+   * checks the embedded identity, then mints a FRESH device under the recovered signing identity and
+   * stores it sealed at rest. Verification happens BEFORE the store is touched, so a wrong, tampered, or
+   * wrong-identity artifact is rejected without stranding the profile. Refuses to clobber an existing
+   * device (use `clearDevice` first). Returns the recovered working device; it must re-publish + re-join.
    */
-  async importSealedBackup(
+  async importRecoveryArtifact(
     identity: string,
     sealedJson: string,
     passphrase: string,
   ): Promise<DeviceKeys> {
     const parsed: unknown = JSON.parse(sealedJson);
-    if (!isSealedBackup(parsed)) throw new Error('invalid sealed backup');
-    const stored: StoredDevice = { identity, sealed: parsed };
+    if (!isSealedBackup(parsed)) throw new Error('invalid recovery artifact');
 
-    // Authenticate first: unseal + identity-check. Throws on a wrong passphrase / tampered ciphertext
-    // (GCM) or a mismatched embedded identity — all before the store is touched.
-    const keys = await this.unseal(stored, identity, passphrase);
+    // Authenticate + bind BEFORE persisting: unseal (GCM rejects wrong passphrase / tampering), confirm
+    // the recovered identity, then mint a fresh device under that signing identity.
+    const recovered = deserializeDeviceIdentity(await openBackup(parsed, passphrase));
+    if (recovered.identity !== identity) {
+      throw new Error('recovered identity does not match the requested identity');
+    }
+    const keys = await this.engine.deviceFromIdentity(recovered);
+    const plaintext = serializeDeviceKeys(keys);
+    const sealed = await sealBackup(plaintext, passphrase, this.argon);
+    plaintext.fill(0); // best-effort wipe of the transient device plaintext after sealing
 
-    // Then atomic put-if-absent in one readwrite tx: a racing import — or an overlap with first-run
-    // device generation — can't observe an empty store and clobber an existing device. Throw post-commit.
+    // Atomic put-if-absent: a racing import — or an overlap with first-run generation — can't clobber an
+    // existing device. Throw post-commit.
     const tx = this.db.transaction(STORE, 'readwrite');
     const existing = await tx.store.get(SELF);
-    if (!existing) await tx.store.put(stored, SELF);
+    if (!existing) await tx.store.put({ identity, sealed } satisfies StoredDevice, SELF);
     await tx.done;
     if (existing) {
       throw new Error('keystore already holds a device; clear it before importing a backup');

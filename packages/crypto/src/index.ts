@@ -12,6 +12,7 @@ import {
   emptyPskIndex,
   encodeMlsMessage,
   generateKeyPackage,
+  generateKeyPackageWithKey,
   getCiphersuiteFromName,
   getCiphersuiteImpl,
   joinGroup,
@@ -31,7 +32,12 @@ export {
   type SealedBackup,
   type Argon2Params,
 } from './key-backup.js';
-export { serializeDeviceKeys, deserializeDeviceKeys } from './device-codec.js';
+export {
+  serializeDeviceKeys,
+  deserializeDeviceKeys,
+  serializeDeviceIdentity,
+  deserializeDeviceIdentity,
+} from './device-codec.js';
 
 // Classic suite for v1 (single-device). Post-quantum (X-Wing) is available in ts-mls and a later option.
 export const CIPHERSUITE = 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519' as const;
@@ -74,6 +80,19 @@ export function deviceIdentity(keys: DeviceKeys): string {
   return tdStrict.decode(cred.identity);
 }
 
+/**
+ * Identity-only recovery material: the device's stable signing identity, WITHOUT the one-time KeyPackage
+ * HPKE private keys (`initPrivateKey`/`hpkePrivateKey`). This is all a cross-device backup may carry
+ * (key-backup.md §4): restoring it re-establishes the identity (mint fresh KeyPackages, re-join groups),
+ * but it cannot decrypt a previously-published Welcome, so a leaked backup can't recover history —
+ * forward secrecy is preserved. The full DeviceKeys are never uploaded.
+ */
+export interface DeviceIdentity {
+  identity: string;
+  signaturePublicKey: Uint8Array;
+  signaturePrivateKey: Uint8Array;
+}
+
 /** What a new member needs to join. The server forwards these; both are opaque to it. */
 export interface ConversationInvite {
   welcome: Welcome;
@@ -100,6 +119,42 @@ export class MlsEngine {
       [],
       this.cs,
     );
+  }
+
+  /**
+   * Strip a device to its identity-only recovery material (key-backup.md §4): the signing identity,
+   * minus the one-time KeyPackage HPKE private keys. Seal THIS — not the full DeviceKeys — for backup so
+   * a leaked backup can't decrypt a retained Welcome (forward secrecy).
+   */
+  exportIdentity(keys: DeviceKeys): DeviceIdentity {
+    return {
+      identity: deviceIdentity(keys),
+      signaturePublicKey: keys.publicPackage.leafNode.signaturePublicKey,
+      signaturePrivateKey: keys.privatePackage.signaturePrivateKey,
+    };
+  }
+
+  /**
+   * Re-establish a full device from identity-only recovery material by minting a FRESH KeyPackage under
+   * the same signature identity. The new device gets new one-time HPKE keys — so it cannot read a
+   * pre-existing Welcome — and must re-publish + re-join groups. The forward-secret recovery path of
+   * key-backup.md §4.
+   */
+  async deviceFromIdentity(id: DeviceIdentity): Promise<DeviceKeys> {
+    const capabilities = { ...defaultCapabilities(), ciphersuites: [CIPHERSUITE] };
+    const keys = await generateKeyPackageWithKey(
+      { credentialType: 'basic', identity: te.encode(id.identity) },
+      capabilities,
+      defaultLifetime,
+      [],
+      { signKey: id.signaturePrivateKey, publicKey: id.signaturePublicKey },
+      this.cs,
+    );
+    // Defense-in-depth: the freshly-minted credential must carry the identity we restored.
+    if (deviceIdentity(keys) !== id.identity) {
+      throw new Error('minted device identity does not match the recovery material');
+    }
+    return keys;
   }
 
   /** Start a new conversation (MLS group) owned by `keys`. */
