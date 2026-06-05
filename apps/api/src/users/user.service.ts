@@ -55,6 +55,18 @@ export class UserService {
     return user;
   }
 
+  /** List ACTIVE users in a tenant (the directory), capped by `limit`. RLS scopes it to the tenant. */
+  async list(tenantId: string, limit: number): Promise<UserRecord[]> {
+    return withTenant(tenantId, async (tx) =>
+      tx
+        .select(SELECTION)
+        .from(schema.users)
+        .where(eq(schema.users.status, 'active')) // don't surface deactivated/suspended members
+        .orderBy(schema.users.email)
+        .limit(limit),
+    );
+  }
+
   /** Read the user for a verified identity within their tenant. Undefined if not yet provisioned. */
   async getByAuth(auth: VerifiedAuth): Promise<UserRecord | undefined> {
     const [user] = await withTenant(auth.tenantId, async (tx) =>
