@@ -12,6 +12,7 @@ import {
   emptyPskIndex,
   encodeMlsMessage,
   generateKeyPackage,
+  generateKeyPackageWithKey,
   getCiphersuiteFromName,
   getCiphersuiteImpl,
   joinGroup,
@@ -31,6 +32,12 @@ export {
   type SealedBackup,
   type Argon2Params,
 } from './key-backup.js';
+export {
+  serializeDeviceKeys,
+  deserializeDeviceKeys,
+  serializeDeviceIdentity,
+  deserializeDeviceIdentity,
+} from './device-codec.js';
 
 // Classic suite for v1 (single-device). Post-quantum (X-Wing) is available in ts-mls and a later option.
 export const CIPHERSUITE = 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519' as const;
@@ -50,6 +57,40 @@ function wipe(buffers: Uint8Array[]): void {
 export interface DeviceKeys {
   publicPackage: KeyPackage;
   privatePackage: PrivateKeyPackage;
+}
+
+// Strict decode for the identity field: reject malformed UTF-8 rather than coerce it to U+FFFD, so two
+// distinct identity byte strings can't collide after a lossy decode in an equality check.
+const tdStrict = new TextDecoder('utf-8', { fatal: true });
+
+/**
+ * The device identity carried in a DeviceKeys' KeyPackage Basic credential. Callers restoring a sealed
+ * backup compare this to the expected identity to catch a recovery service handing back the wrong
+ * (genuine) blob under another name. NOTE: this reads the field; it does not by itself prove
+ * authenticity against an adversary who can mint a self-signed KeyPackage for an arbitrary name —
+ * cross-device identity authenticity is the key-directory + out-of-band fingerprint job (checkpoint 20,
+ * see docs/threat-models/key-directory.md). Throws on a non-Basic credential (v1 issues Basic only) or
+ * malformed identity bytes.
+ */
+export function deviceIdentity(keys: DeviceKeys): string {
+  const cred = keys.publicPackage.leafNode.credential;
+  if (cred.credentialType !== 'basic') {
+    throw new Error(`unsupported credential type: ${cred.credentialType}`);
+  }
+  return tdStrict.decode(cred.identity);
+}
+
+/**
+ * Identity-only recovery material: the device's stable signing identity, WITHOUT the one-time KeyPackage
+ * HPKE private keys (`initPrivateKey`/`hpkePrivateKey`). This is all a cross-device backup may carry
+ * (key-backup.md §4): restoring it re-establishes the identity (mint fresh KeyPackages, re-join groups),
+ * but it cannot decrypt a previously-published Welcome, so a leaked backup can't recover history —
+ * forward secrecy is preserved. The full DeviceKeys are never uploaded.
+ */
+export interface DeviceIdentity {
+  identity: string;
+  signaturePublicKey: Uint8Array;
+  signaturePrivateKey: Uint8Array;
 }
 
 /** What a new member needs to join. The server forwards these; both are opaque to it. */
@@ -78,6 +119,42 @@ export class MlsEngine {
       [],
       this.cs,
     );
+  }
+
+  /**
+   * Strip a device to its identity-only recovery material (key-backup.md §4): the signing identity,
+   * minus the one-time KeyPackage HPKE private keys. Seal THIS — not the full DeviceKeys — for backup so
+   * a leaked backup can't decrypt a retained Welcome (forward secrecy).
+   */
+  exportIdentity(keys: DeviceKeys): DeviceIdentity {
+    return {
+      identity: deviceIdentity(keys),
+      signaturePublicKey: keys.publicPackage.leafNode.signaturePublicKey,
+      signaturePrivateKey: keys.privatePackage.signaturePrivateKey,
+    };
+  }
+
+  /**
+   * Re-establish a full device from identity-only recovery material by minting a FRESH KeyPackage under
+   * the same signature identity. The new device gets new one-time HPKE keys — so it cannot read a
+   * pre-existing Welcome — and must re-publish + re-join groups. The forward-secret recovery path of
+   * key-backup.md §4.
+   */
+  async deviceFromIdentity(id: DeviceIdentity): Promise<DeviceKeys> {
+    const capabilities = { ...defaultCapabilities(), ciphersuites: [CIPHERSUITE] };
+    const keys = await generateKeyPackageWithKey(
+      { credentialType: 'basic', identity: te.encode(id.identity) },
+      capabilities,
+      defaultLifetime,
+      [],
+      { signKey: id.signaturePrivateKey, publicKey: id.signaturePublicKey },
+      this.cs,
+    );
+    // Defense-in-depth: the freshly-minted credential must carry the identity we restored.
+    if (deviceIdentity(keys) !== id.identity) {
+      throw new Error('minted device identity does not match the recovery material');
+    }
+    return keys;
   }
 
   /** Start a new conversation (MLS group) owned by `keys`. */
