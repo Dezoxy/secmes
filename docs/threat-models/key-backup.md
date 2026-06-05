@@ -46,3 +46,4 @@ Upholds #1 (server stores ciphertext only, never the passphrase or plaintext key
 - **Lost passphrase = unrecoverable** (by design — no server-side reset, or the server could decrypt). Communicate at backup time.
 - **Weak passphrase** remains the weakest link; mitigated by Argon2id cost + fetch rate-limiting + a strength meter, not eliminated.
 - Identity-only recovery means a device loss loses pre-existing history (FS); acceptable and honest for beta.
+- **Backup fetch is not yet rate-limited** (server storage = checkpoint 22; rate-limiting = checkpoint 46). For beta this is mitigated by **auditing every fetch (`keybackup.fetched`) and store (`keybackup.stored`)** so repeated-restore brute-force is detectable; per-(IP, user) rate limiting lands at 46. Accepted residual.
