@@ -2,11 +2,10 @@ version: 2
 
 updates:
   # JavaScript / TypeScript — pnpm workspace (root lockfile + each package.json)
+  # Single root entry — the pnpm workspace has ONE lockfile, so this covers all
+  # packages and avoids duplicate per-directory PRs.
   - package-ecosystem: 'npm'
-    directories:
-      - '/'
-      - '/apps/api'
-      - '/packages/contracts'
+    directory: '/'
     schedule:
       interval: 'weekly'
       day: 'monday'
