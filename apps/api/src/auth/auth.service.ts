@@ -9,6 +9,9 @@ export interface VerifiedAuth {
   sub: string;
   /** Tenant the request acts as, from a VERIFIED claim only. */
   tenantId: string;
+  /** Verified profile claims (present when the IdP grants email/profile scope). Used for JIT provisioning. */
+  email?: string;
+  name?: string;
 }
 
 // Asymmetric only. Excludes `none` and HS* (an HS256 token signed with the public key would
@@ -44,8 +47,18 @@ export class AuthService {
     // fall through to 401 by design — do NOT add array handling and silently accept the first element.
     const claim = payload[this.cfg.tenantClaim];
     if (typeof claim !== 'string') throw new UnauthorizedException('token missing tenant claim');
+
+    // Optional verified profile claims (used for JIT provisioning). Trustworthy — they're inside
+    // the signed token. `name` falls back to preferred_username.
+    const email = typeof payload.email === 'string' ? payload.email : undefined;
+    const name =
+      typeof payload.name === 'string'
+        ? payload.name
+        : typeof payload.preferred_username === 'string'
+          ? payload.preferred_username
+          : undefined;
     try {
-      return { sub, tenantId: asTenantId(claim) };
+      return { sub, tenantId: asTenantId(claim), email, name };
     } catch {
       throw new UnauthorizedException('invalid tenant claim');
     }

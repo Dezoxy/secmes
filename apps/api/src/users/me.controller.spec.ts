@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { getDb } from '../db/index.js';
 import { MeController } from './me.controller.js';
+import { UserService } from './user.service.js';
 
 // Integration — proves /me resolves the user inside the verified tenant's RLS context (13–14 → 15).
 // Needs a live Postgres with migrations applied; auto-skips without DATABASE_URL.
@@ -13,7 +14,7 @@ describe.skipIf(!DB_URL)('MeController.me', () => {
   let sql: ReturnType<typeof getDb>['sql'];
   let tenantA: string;
   let tenantB: string;
-  const controller = new MeController();
+  const controller = new MeController(new UserService());
 
   beforeAll(async () => {
     sql = getDb().sql;
