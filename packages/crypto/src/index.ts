@@ -30,6 +30,14 @@ export const CIPHERSUITE = 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519' as con
 const te = new TextEncoder();
 const td = new TextDecoder();
 
+/**
+ * Best-effort overwrite of spent ratchet secrets (the `consumed` arrays ts-mls returns) for forward
+ * secrecy. JS can't guarantee the engine kept no internal copies, but this zeroes the buffers we hold.
+ */
+function wipe(buffers: Uint8Array[]): void {
+  for (const b of buffers) b.fill(0);
+}
+
 /** A device's MLS key material: `publicPackage` is published to the key directory; `privatePackage` stays local. */
 export interface DeviceKeys {
   publicPackage: KeyPackage;
@@ -112,6 +120,7 @@ export class Conversation {
       { extraProposals: [{ proposalType: 'add', add: { keyPackage: memberPublicPackage } }] },
     );
     this.state = commit.newState;
+    wipe(commit.consumed);
     if (!commit.welcome) throw new Error('add did not produce a Welcome');
     return { welcome: commit.welcome, ratchetTree: this.state.ratchetTree };
   }
@@ -120,11 +129,13 @@ export class Conversation {
   async encrypt(plaintext: string): Promise<Uint8Array> {
     const made = await createApplicationMessage(this.state, te.encode(plaintext), this.cs);
     this.state = made.newState;
-    return encodeMlsMessage({
+    const wire = encodeMlsMessage({
       wireformat: 'mls_private_message',
       version: 'mls10',
       privateMessage: made.privateMessage,
     });
+    wipe(made.consumed);
+    return wire;
   }
 
   /** Decrypt wire bytes → plaintext. Throws on anything that isn't an application message. */
@@ -136,6 +147,7 @@ export class Conversation {
       throw new Error(`expected an application message, got "${msg.wireformat}"`);
     }
     const result = await processMessage(msg, this.state, emptyPskIndex, acceptAll, this.cs);
+    wipe(result.consumed); // spent secrets — wipe regardless of message kind
     if (result.kind !== 'applicationMessage') {
       // Do NOT advance state for a message this method doesn't handle (e.g. a handshake/commit).
       // decrypt() handles application messages only; handshake processing is a separate path
