@@ -9,13 +9,15 @@
   },
   "scripts": {
     "build": "pnpm -r build",
+    "build:packages": "pnpm --filter \"./packages/*\" run build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "prepare": "lefthook install || true"
+    "comment:prepare": "build:packages emits packages/*/dist so consumers (apps/web) can typecheck against the libs' .d.ts — CI typechecks before building and dist is gitignored.",
+    "prepare": "lefthook install || true && pnpm run build:packages"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
