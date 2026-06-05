@@ -17,18 +17,18 @@ jobs:
     runs-on: ubuntu-latest
     container: semgrep/semgrep
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Semgrep (custom secmes rules + registry auto)
         run: semgrep scan --config .semgrep --config auto --error --quiet
 
   deps-osv:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: OSV-Scanner (dependency CVEs)
         # Known transitive CVEs are allow-listed with reasons + expiry in osv-scanner.toml.
         # NEW or unlisted vulnerabilities still fail this job.
-        uses: google/osv-scanner-action/osv-scanner-action@v1.9.2
+        uses: google/osv-scanner-action/osv-scanner-action@v2.3.8
         with:
           scan-args: |-
             --config=osv-scanner.toml
@@ -40,17 +40,17 @@ jobs:
   secrets-gitleaks:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   iac-checkov:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: bridgecrewio/checkov-action@v12
         with:
           config_file: .checkov.yaml
@@ -58,7 +58,7 @@ jobs:
   k8s-kubescape:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Kubescape (NSA + MITRE posture on charts)
         uses: kubescape/github-action@main
         with:
@@ -70,9 +70,9 @@ jobs:
     if: ${{ vars.ENABLE_42CRUNCH == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: pnpm
