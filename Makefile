@@ -1,4 +1,4 @@
-# secmes local tooling.
+# argus local tooling.
 # Isolation model:
 #   - Node deps + tests  -> pnpm, in ./node_modules (already isolated; run `pnpm install`)
 #   - Python scanners    -> ./.venv (this Makefile; never global pip)

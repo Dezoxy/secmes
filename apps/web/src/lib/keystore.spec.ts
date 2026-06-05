@@ -1,4 +1,4 @@
-import { MlsEngine, type Argon2Params, type DeviceKeys } from '@secmes/crypto';
+import { MlsEngine, type Argon2Params, type DeviceKeys } from '@argus/crypto';
 import { IDBFactory } from 'fake-indexeddb';
 import { openDB } from 'idb';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -141,7 +141,7 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     const engine = await MlsEngine.create();
     // Simulate the pre-seal v1 schema: same DB/store/key, an UNSEALED { identity, keys } record.
     const legacyKeys = await engine.generateDeviceKeys('alice');
-    const v1 = await openDB('secmes-keystore', 1, {
+    const v1 = await openDB('argus-keystore', 1, {
       upgrade(db) {
         if (!db.objectStoreNames.contains('device')) db.createObjectStore('device');
       },

@@ -22,13 +22,13 @@ Every randomness source in `apps/` + `packages/` (excluding `node_modules`, buil
 
 ## 3. Enforcement (the Semgrep rule)
 
-`.semgrep/secmes.yml` → **`secmes-no-insecure-random`** (severity ERROR), run in CI by `sast-semgrep` (`semgrep scan --config .semgrep --config auto --error --quiet`):
+`.semgrep/argus.yml` → **`argus-no-insecure-random`** (severity ERROR), run in CI by `sast-semgrep` (`semgrep scan --config .semgrep --config auto --error --quiet`):
 
 - Bans `Math.random` — matched as a **bare member access**, not `Math.random()`, so aliasing (`const r = Math.random; r()`) is caught too, not just direct calls.
 - Bans Node's `crypto.pseudoRandomBytes(...)` / destructured `pseudoRandomBytes(...)` (an insecure PRNG that looks crypto-ish).
 - **Total ban — no test/spec exclusion.** Tests must use crypto-grade randomness as well; there are zero current uses to grandfather.
 
-A complementary rule, `secmes-crypto-only-in-crypto-package`, keeps cryptographic primitives confined to `packages/crypto`, so new randomness in a security path is steered to the vetted wrapper.
+A complementary rule, `argus-crypto-only-in-crypto-package`, keeps cryptographic primitives confined to `packages/crypto`, so new randomness in a security path is steered to the vetted wrapper.
 
 ## 4. Invariant check
 
@@ -36,7 +36,7 @@ Upholds invariant **#4 (no hand-rolled crypto / CSPRNG only)**. No tension with 
 
 ## 5. Decision & mitigations
 
-- Hardened `secmes-no-insecure-random` (aliasing + `pseudoRandomBytes`, total ban) and recorded the inventory above. Gate: `sast-semgrep` in CI (`--error` fails the build on any match). Reviewer: `crypto-reviewer` informally confirmed "no `Math.random`" during crypto review #1 (`key-model.md`).
+- Hardened `argus-no-insecure-random` (aliasing + `pseudoRandomBytes`, total ban) and recorded the inventory above. Gate: `sast-semgrep` in CI (`--error` fails the build on any match). Reviewer: `crypto-reviewer` informally confirmed "no `Math.random`" during crypto review #1 (`key-model.md`).
 
 ## 6. Residual risk
 

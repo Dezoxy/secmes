@@ -11,7 +11,7 @@ The OpenAPI spec is the contract 42Crunch audits and the security-boundary-audit
 1. **Annotate** new/changed endpoints in `apps/api` with `@nestjs/swagger` decorators: `@ApiTags`, `@ApiOperation`, typed request/response DTOs, and the security scheme (`@ApiBearerAuth`). Every endpoint must declare auth unless it is deliberately public (health only).
 2. **Generate** the spec:
    ```bash
-   pnpm --filter @secmes/api openapi   # builds, then writes apps/api/openapi.json
+   pnpm --filter @argus/api openapi   # builds, then writes apps/api/openapi.json
    ```
 3. **Audit** with 42Crunch — invoke the `42crunch-audit` skill on `apps/api/openapi.json`. Treat the Security Quality Gate as a hard gate; fix findings (missing auth, weak/unbounded schemas, missing rate-limit hints) until the score clears the threshold.
 4. **Scan** (when a staging deployment exists) — invoke `42crunch-scan` for a dynamic conformance scan against the running API.

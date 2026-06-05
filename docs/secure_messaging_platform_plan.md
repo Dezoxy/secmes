@@ -158,7 +158,7 @@ The IdP authenticates **who you are**. It **never** sees or holds **message keys
 
 ### 6.2 Namespaces
 ```text
-secmes          # app workloads
+argus          # app workloads
 data            # redis backplane (Postgres & Blob are managed Azure services)
 identity        # zitadel
 platform        # ingress, cert-manager, external-secrets, reloader
@@ -325,7 +325,7 @@ infra/
                         #   Key Vault, Storage Account, Private Endpoints, DNS, Workload ID
   bootstrap/            # cluster add-ons (ingress-nginx, cert-manager, CSI, Argo CD)
 charts/
-  secmes/               # umbrella Helm chart (web, api, realtime, worker)
+  argus/               # umbrella Helm chart (web, api, realtime, worker)
   platform/             # cert-manager, ingress, external-secrets values
 gitops/                 # Argo CD app-of-apps, per-env values
 apps/

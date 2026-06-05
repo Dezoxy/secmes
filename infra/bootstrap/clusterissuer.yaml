@@ -5,7 +5,7 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: ops@secmes.example # set to a real shared ops/security alias before deploy
+    email: ops@argus.example # set to a real shared ops/security alias before deploy
     privateKeySecretRef:
       name: letsencrypt-prod-account-key
     solvers:

@@ -23,8 +23,8 @@ make reset   # stop + wipe data volumes
 |---|---|
 | http://localhost:3000/healthz | api health probe |
 | http://localhost:3000/docs | Swagger UI (dev only) |
-| http://localhost:9001 | MinIO web console (user/pass: `secmes` / `secmes_local_dev`) |
-| localhost:5432 | Postgres (`secmes` / `secmes_local_dev`, db `secmes`) |
+| http://localhost:9001 | MinIO web console (user/pass: `argus` / `argus_local_dev`) |
+| localhost:5432 | Postgres (`argus` / `argus_local_dev`, db `argus`) |
 | localhost:6379 | Redis |
 
 ## Service mapping (local → Azure)
@@ -36,7 +36,7 @@ make reset   # stop + wipe data volumes
 | `minio` | Azure Blob Storage (S3-compatible API) |
 | `api` (built image) | api Deployment on AKS |
 
-The Compose file is the **local** equivalent of `charts/secmes` — keep them in sync conceptually, but Compose is never deployed to prod.
+The Compose file is the **local** equivalent of `charts/argus` — keep them in sync conceptually, but Compose is never deployed to prod.
 
 ## Develop against it from the host (hot reload)
 
@@ -44,7 +44,7 @@ Prefer editing with live reload? Run the backing services in Docker and the app 
 
 ```bash
 make up                       # postgres/redis/minio (api also starts; ignore or `docker compose stop api`)
-pnpm --filter @secmes/api dev # nest watch on the host, pointing at localhost services
+pnpm --filter @argus/api dev # nest watch on the host, pointing at localhost services
 ```
 
 ## Notes

@@ -10,7 +10,7 @@ describe('AppController', () => {
 
   it('root reports service identity', () => {
     const body = controller.root();
-    expect(body.service).toBe('secmes-api');
+    expect(body.service).toBe('argus-api');
     expect(body.status).toBe('ok');
   });
 });

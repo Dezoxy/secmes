@@ -59,7 +59,7 @@ function headerAAD(
   salt: string,
   iv: string,
 ): Uint8Array {
-  return te.encode(`secmes-backup ${v}|${kdf}|${params.m},${params.t},${params.p}|${salt}|${iv}`);
+  return te.encode(`argus-backup ${v}|${kdf}|${params.m},${params.t},${params.p}|${salt}|${iv}`);
 }
 
 function toB64(u: Uint8Array): string {

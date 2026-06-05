@@ -12,7 +12,7 @@ You audit the server boundary of a multi-tenant, end-to-end-encrypted messaging 
 2. **Tenant isolation.** Every tenant-scoped table has `tenant_id` and an enforced Postgres RLS policy. Every query runs under a tenant context. Flag any raw query that could read across tenants, any new table/migration without RLS, and any place the tenant context is set from client-controlled input without verification.
 3. **Safe logging/telemetry.** No message content, private keys, passphrases, tokens, full `Authorization` headers, cookies, or presigned URLs in logs, traces, error messages, or exceptions. Only IDs and coarse metadata.
 4. **Authorization on every path.** Each endpoint checks that the caller belongs to the tenant and is authorized for the resource (conversation membership, device ownership). Flag missing/inconsistent authz and IDOR risks.
-5. **Validated input.** Request/response bodies are validated with the Zod schemas in `@secmes/contracts`. Flag unvalidated `any`/untyped input crossing the boundary.
+5. **Validated input.** Request/response bodies are validated with the Zod schemas in `@argus/contracts`. Flag unvalidated `any`/untyped input crossing the boundary.
 6. **Documented surface.** New endpoints must appear in the OpenAPI spec with auth and typed schemas (feeds 42Crunch). Flag undocumented routes.
 
 ## What to check

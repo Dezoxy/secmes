@@ -93,7 +93,7 @@ importers:
 
   apps/web:
     dependencies:
-      '@secmes/crypto':
+      '@argus/crypto':
         specifier: workspace:^
         version: link:../../packages/crypto
       idb:

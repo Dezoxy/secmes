@@ -12,7 +12,7 @@
 
 ## The two decisive filters
 
-1. **License (hard gate).** secmes ships **proprietary / all-rights-reserved**. **CoreCrypto is GPL-3.0** — linking our client against it would trigger copyleft (and the JS/WASM linking question is legally murky enough that we don't want to bet the company on it). Ruled out unless you (a) open-source the client, or (b) buy a Wire commercial license. → **CoreCrypto is out.** That leaves the two permissive options (MIT, Apache-2.0).
+1. **License (hard gate).** argus ships **proprietary / all-rights-reserved**. **CoreCrypto is GPL-3.0** — linking our client against it would trigger copyleft (and the JS/WASM linking question is legally murky enough that we don't want to bet the company on it). Ruled out unless you (a) open-source the client, or (b) buy a Wire commercial license. → **CoreCrypto is out.** That leaves the two permissive options (MIT, Apache-2.0).
 2. **The iOS/PWA constraint we already committed to.** The plan flagged "wasm/iOS-PWA binding maturity" as a risk (§3.2). **ts-mls is pure TypeScript — no WASM at all**, so that entire risk class disappears (iOS Safari runs JS natively; WASM has historically been the fragile part on iOS PWAs). For a *PWA-on-every-platform* product, a pure-TS MLS is a better structural fit than any wasm option.
 
 ## Recommendation

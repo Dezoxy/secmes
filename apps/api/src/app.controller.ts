@@ -2,7 +2,7 @@ import { Controller, Get } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { Public } from './auth/public.decorator.js';
 
-const SERVICE = 'secmes-api';
+const SERVICE = 'argus-api';
 const VERSION = process.env.APP_VERSION ?? 'dev';
 
 class HealthResponse {

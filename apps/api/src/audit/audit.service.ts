@@ -12,7 +12,7 @@ export interface AuditEventInput {
 
 // NOTE: the `metadata` jsonb column exists for future structured context, but the service does
 // NOT accept arbitrary metadata — that would put the "no secrets/content in the log" invariant on
-// a caller's discipline. When a concrete need arises, add it behind a STRICT @secmes/contracts Zod
+// a caller's discipline. When a concrete need arises, add it behind a STRICT @argus/contracts Zod
 // schema (closed object of known non-sensitive keys), validated here before insert.
 
 @Injectable()

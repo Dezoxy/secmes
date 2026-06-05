@@ -1,4 +1,4 @@
-# secmes — Security Toolchain & Agent Guardrails
+# argus — Security Toolchain & Agent Guardrails
 
 How we keep a privacy-first E2EE platform honest. Three enforcement layers + the AI-agent config.
 Principle: **OSS self-hosted by default** (nothing leaves our tenancy); external SaaS only where it clearly wins. Scanners see code/specs/deps — never customer message content (E2EE ciphertext regardless).
@@ -32,13 +32,13 @@ Principle: **OSS self-hosted by default** (nothing leaves our tenancy); external
 
 > Hooks added mid-session need `/hooks` (open once) or a restart to activate, because the settings watcher only tracks `.claude/` if a settings file existed at startup.
 
-## Custom Semgrep rules (`.semgrep/secmes.yml`)
+## Custom Semgrep rules (`.semgrep/argus.yml`)
 
 Enforce the invariants generic scanners miss: no `Math.random()` for security, no crypto primitives outside `packages/crypto`, no logging of secrets/keys/tokens, no SQL string interpolation, no hardcoded secrets.
 
 ## 42Crunch flow
 
-1. NestJS `@nestjs/swagger` → `pnpm --filter @secmes/api openapi` emits `apps/api/openapi.json`.
+1. NestJS `@nestjs/swagger` → `pnpm --filter @argus/api openapi` emits `apps/api/openapi.json`.
 2. CI runs **42Crunch Audit** (static, Security Quality Gate ≥ 75).
 3. Nightly **42Crunch Scan** (dynamic conformance) against staging.
 4. One-time token/binary setup via the `42crunch-setup` skill.

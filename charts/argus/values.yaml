@@ -1,7 +1,7 @@
 api:
   image:
-    # Set by CD: <acr-login-server>/secmes-api
-    repository: REPLACE_ME.azurecr.io/secmes-api
+    # Set by CD: <acr-login-server>/argus-api
+    repository: REPLACE_ME.azurecr.io/argus-api
     tag: "dev"
     pullPolicy: IfNotPresent
   replicas: 2
@@ -17,7 +17,7 @@ api:
 ingress:
   enabled: true
   className: nginx
-  host: api.secmes.example   # TODO: real DNS
+  host: api.argus.example   # TODO: real DNS
   tls:
     enabled: true
     clusterIssuer: letsencrypt-prod   # provided by cert-manager (see infra/bootstrap)

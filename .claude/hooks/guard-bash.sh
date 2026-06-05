@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PreToolUse(Bash) guard for secmes. Emits a permission decision for dangerous commands.
+# PreToolUse(Bash) guard for argus. Emits a permission decision for dangerous commands.
 # deny  = hard block (destructive / secret exposure)
 # ask   = require explicit user confirmation (mutating infra/deploy/push)
 set -euo pipefail

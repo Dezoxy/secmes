@@ -15,7 +15,7 @@ describe.skipIf(!DB_URL)('AuditService + audit_events', () => {
 
   function asTenant(tenantId: string, fn: (tx: typeof sql) => unknown): Promise<unknown> {
     return sql.begin(async (tx) => {
-      await tx`set local role secmes_app`;
+      await tx`set local role argus_app`;
       await tx`select set_config('app.tenant_id', ${tenantId}, true)`;
       return fn(tx as unknown as typeof sql);
     }) as Promise<unknown>;

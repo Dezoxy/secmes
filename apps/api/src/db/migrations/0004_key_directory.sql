@@ -40,5 +40,5 @@ create index if not exists key_packages_available_idx
 
 -- Runtime role: insert + select + update (update needed to claim / idempotent re-register). No delete —
 -- pool GC of long-claimed packages is a later maintenance/worker job (cf. audit retention).
-grant select, insert, update on devices to secmes_app;
-grant select, insert, update on key_packages to secmes_app;
+grant select, insert, update on devices to argus_app;
+grant select, insert, update on key_packages to argus_app;

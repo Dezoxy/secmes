@@ -11,7 +11,7 @@ import {
   type Argon2Params,
   type DeviceKeys,
   type SealedBackup,
-} from '@secmes/crypto';
+} from '@argus/crypto';
 import { openDB, type IDBPDatabase } from 'idb';
 
 // SEALED at rest: the full device key material is stored in IndexedDB only as a passphrase-sealed blob
@@ -20,7 +20,7 @@ import { openDB, type IDBPDatabase } from 'idb';
 // a leaked backup can't decrypt a retained Welcome (forward secrecy, key-backup.md §4). The full at-rest
 // blob is never uploaded. See docs/threat-models/device-keystore.md + key-backup.md §4.
 
-const DB_NAME = 'secmes-keystore';
+const DB_NAME = 'argus-keystore';
 // v1 stored an UNSEALED `{ identity, keys }` record at the same DB/store/key. v2 stores only the sealed
 // blob. The shapes are incompatible: a stale v1 record would be misread as a sealed device and fail to
 // unlock. The upgrade drops the legacy store so those unsealed secrets are also cleared from disk.

@@ -17,7 +17,7 @@ You are the cryptography reviewer for an end-to-end-encrypted messaging platform
 ## What to check
 - Diff every file the change touches; grep the repo for new uses of crypto primitives outside `packages/crypto`.
 - Trace where keys are generated, stored, transmitted, and destroyed.
-- Confirm the envelope (`@secmes/contracts`) still treats `ciphertext` as opaque and adds no plaintext-bearing field.
+- Confirm the envelope (`@argus/contracts`) still treats `ciphertext` as opaque and adds no plaintext-bearing field.
 - Check error/log statements near crypto code for accidental secret leakage.
 
 ## Output

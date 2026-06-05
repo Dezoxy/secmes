@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-// Local for now (no client consumer yet). Mirrors the @secmes/contracts envelope; migrate to the shared
+// Local for now (no client consumer yet). Mirrors the @argus/contracts envelope; migrate to the shared
 // package when the web client sends messages. `.strict()` rejects unknown keys (fail-closed).
 
 const base64 = z.string().regex(/^[A-Za-z0-9+/]+={0,2}$/, 'must be base64');

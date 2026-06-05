@@ -3,7 +3,7 @@
 Installs the platform add-ons that the app depends on. Run after fetching kubeconfig:
 
 ```bash
-az aks get-credentials --resource-group secmes-rg --name secmes-aks
+az aks get-credentials --resource-group argus-rg --name argus-aks
 ```
 
 Then either run `./install.sh` or the steps below.
@@ -29,7 +29,7 @@ kubectl apply -f clusterissuer.yaml
 helm repo add argo https://argoproj.github.io/argo-helm
 helm upgrade --install argocd argo/argo-cd \
   --namespace argocd --create-namespace
-kubectl apply -f ../../gitops/apps/secmes.yaml
+kubectl apply -f ../../gitops/apps/argus.yaml
 ```
 
 > Phase 1+: replace manual helm installs with the **AKS GitOps (Flux) extension**

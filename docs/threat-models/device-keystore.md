@@ -4,7 +4,7 @@
 
 ## 1. Feature & data flow
 
-On first use a device generates its MLS key material via `@secmes/crypto` (`MlsEngine.generateDeviceKeys`, CSPRNG through WebCrypto — no hand-rolled crypto), and `DeviceKeystore` persists it in **IndexedDB SEALED** under the user's passphrase (`sealBackup`: Argon2id + AES-256-GCM). Unlocking requires the passphrase. The **public** package is later published to the key directory (checkpoint 19); the **private** package never leaves the device unencrypted and is never sent to the server. The server stays crypto-blind.
+On first use a device generates its MLS key material via `@argus/crypto` (`MlsEngine.generateDeviceKeys`, CSPRNG through WebCrypto — no hand-rolled crypto), and `DeviceKeystore` persists it in **IndexedDB SEALED** under the user's passphrase (`sealBackup`: Argon2id + AES-256-GCM). Unlocking requires the passphrase. The **public** package is later published to the key directory (checkpoint 19); the **private** package never leaves the device unencrypted and is never sent to the server. The server stays crypto-blind.
 
 ## 2. Assets & trust boundaries
 
@@ -19,7 +19,7 @@ On first use a device generates its MLS key material via `@secmes/crypto` (`MlsE
 
 ## 4. Invariant check
 
-- **#1 crypto-blind / #4 no hand-rolled crypto:** keys come from `@secmes/crypto` (ts-mls/WebCrypto); the server never sees private material.
+- **#1 crypto-blind / #4 no hand-rolled crypto:** keys come from `@argus/crypto` (ts-mls/WebCrypto); the server never sees private material.
 - **#2 no secret logging:** the keystore logs nothing.
 - No tension. **At-rest encryption (#3.1) is now implemented** — IndexedDB holds only the passphrase-sealed blob.
 

@@ -21,7 +21,7 @@ export default tseslint.config(
   security.configs.recommended,
   {
     rules: {
-      // secmes hygiene — the hard invariants are enforced by Semgrep; these are guardrails.
+      // argus hygiene — the hard invariants are enforced by Semgrep; these are guardrails.
       'no-console': 'warn',
       '@typescript-eslint/no-explicit-any': 'warn',
       'security/detect-object-injection': 'off',

@@ -10,8 +10,8 @@ terraform {
 
   # Phase 0 uses local state. Before sharing/CI, migrate to a remote backend:
   # backend "azurerm" {
-  #   resource_group_name  = "secmes-tfstate"
-  #   storage_account_name = "secmestfstate"
+  #   resource_group_name  = "argus-tfstate"
+  #   storage_account_name = "argustfstate"
   #   container_name       = "tfstate"
   #   key                  = "phase0.tfstate"
   # }

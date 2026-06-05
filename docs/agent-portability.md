@@ -1,6 +1,6 @@
 # Agent Portability — Codex, Claude Code, and others
 
-secmes is agent-neutral. The **rules** live in one file (`AGENTS.md`); the **hard guarantees** live in git hooks + CI, which run no matter which agent (or human) writes the code.
+argus is agent-neutral. The **rules** live in one file (`AGENTS.md`); the **hard guarantees** live in git hooks + CI, which run no matter which agent (or human) writes the code.
 
 ## One source of truth
 

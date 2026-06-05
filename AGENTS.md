@@ -1,4 +1,4 @@
-# AGENTS.md — secmes engineering contract
+# AGENTS.md — argus engineering contract
 
 Canonical instructions for **any** AI coding agent working in this repo (Codex, Claude Code, Cursor, Gemini CLI, …). Tool-specific wiring is at the bottom; the rules here apply to all.
 
@@ -7,7 +7,7 @@ Architecture: `docs/secure_messaging_platform_plan.md`. Security toolchain: `doc
 
 ## Languages
 
-- **All application code is TypeScript** (strict, ESM): React + Vite PWA, NestJS API, WebSocket gateway, workers, and the shared `@secmes/contracts` (Zod) package.
+- **All application code is TypeScript** (strict, ESM): React + Vite PWA, NestJS API, WebSocket gateway, workers, and the shared `@argus/contracts` (Zod) package.
 - **Crypto**: a TypeScript wrapper over an MLS (WASM) library in `packages/crypto`. You do not write raw crypto.
 - **Data**: SQL (PostgreSQL). **Infra/glue**: Terraform (HCL), Helm/K8s/CI (YAML), Bash, Dockerfile, Make.
 
@@ -26,7 +26,7 @@ Hard rules. A change that violates one is wrong even if it "works".
 
 - TypeScript strict, ESM. Monorepo via pnpm workspaces (`apps/*`, `packages/*`).
 - Backend **NestJS** (`apps/api`); realtime WebSocket gateway; **PostgreSQL** + RLS; DB layer SQL-first (Drizzle/Kysely, not Prisma) so the tenant session var is set per transaction.
-- Shared client↔server types + **Zod** schemas live in `@secmes/contracts`. Validate at every boundary.
+- Shared client↔server types + **Zod** schemas live in `@argus/contracts`. Validate at every boundary.
 - Frontend **React + Vite** PWA. Cloud: **Azure AKS** (EU), Key Vault, Blob, ACR, Entra Workload ID. IaC Terraform; deploy Helm + Argo CD.
 
 ## Definition of done
