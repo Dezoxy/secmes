@@ -13,7 +13,7 @@ Living checklist. Check items off as they land. Each checkpoint states its **don
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (route through the matching reviewer).
 
-**Status (2026-06-05):** building. **Done:** 11–12 (Drizzle + RLS, PR #34), 14 + `GET /me` (JWT auth + tenant guard, PR #36), 16 (append-only audit log + login/logout, PR #37). **In progress:** 13 (API JWT validation done; live Zitadel login pending deploy), 15 (`/me` + JIT provisioning done; user directory to come), S1 (`ts-mls` verified in Node; iOS-PWA proof pending — USER), 6 (CI green; ACR-via-OIDC awaits the cluster). The infra-gated Phase-1 items (9 Zitadel, 10 managed Postgres) + Phase-0 Terraform→Azure are **deferred by choice** — building app logic locally first (Docker stack: `make up`). **Next:** 15's user directory + JIT provisioning, then Phase 2 crypto (16a test harness → MLS in `packages/crypto`).
+**Status (2026-06-05):** building. **Phase 1 app layer DONE** — **Done:** 11–12 (Drizzle + RLS, PR #34), 14 + `GET /me` (JWT auth + tenant guard, PR #36), 16 (append-only audit log, PR #37), 15 (`/me` + JIT provisioning + `GET /users` directory, PR #38/#39). **In progress:** 13 (API JWT validation done; live Zitadel login pending deploy), S1 (`ts-mls` verified in Node; iOS-PWA proof pending — USER), 6 (CI green; ACR-via-OIDC awaits the cluster). The infra-gated Phase-1 items (9 Zitadel, 10 managed Postgres) + Phase-0 Terraform→Azure are **deferred by choice** — building app logic locally first (Docker stack: `make up`). **Next:** Phase 2 crypto — **16a** headless 2-device test harness → **17** MLS in `packages/crypto`. This is the high-risk core; front-load it.
 
 ---
 
@@ -46,7 +46,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (ro
 - [x] 12. **`tenants` + `users` with RLS** — cross-tenant read provably blocked by a test 🔒 — _PR #34; non-bypass `secmes_app` role, FORCE RLS + WITH CHECK, 8-test spec incl. pooled-reuse + privilege-escalation negatives._
 - [~] 13. **OIDC login** via Zitadel works; API validates JWTs — _API JWT validation DONE (jose/JWKS: iss + aud + asymmetric-alg allowlist + exp/nbf; PR #36); live Zitadel login pending deploy (checkpoint 9)._
 - [x] 14. **Tenant guard** sets `app.tenant_id` from the verified token only (never client input) 🔒 — _PR #36; global deny-by-default guard → `withTenant(verifiedTenantId)`; threat model `auth-tenant-context.md`._
-- [~] 15. **`/me` + user directory** (per tenant) — Zod-validated, documented in the spec — _`GET /me` + **JIT provisioning** DONE (login upserts the user from verified token claims, idempotent, RLS-scoped; PR #36, #38); the user **directory** endpoint still to come._
+- [x] 15. **`/me` + user directory** (per tenant) — Zod-validated, documented in the spec — _`GET /me` + JIT provisioning + `GET /users` directory DONE (Zod-validated via a reusable `ZodValidationPipe`, RLS-scoped, active-only, bounded `limit`; PR #36, #38, #39). Threat models `auth-tenant-context.md` §7 + `user-directory.md`._
 - [x] 16. **Audit events** table + login/logout auditing (IDs/metadata only, no secrets) 🔒 — _PR #37; append-only `audit_events` (RLS; `secmes_app` INSERT+SELECT only → tamper-resistant), `auth.login`/`auth.logout` via `POST`/`DELETE /auth/session`; 90-day retention policy (per-tenant worker prune later); threat model `audit-logging.md`._
 
 ## Phase 2 — Device keys & recovery (crypto foundation)
