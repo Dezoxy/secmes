@@ -41,8 +41,8 @@ export function asTenantId(value: string): TenantId {
  * Run `fn` inside a transaction scoped to a single tenant.
  *
  * Sets `app.tenant_id` transaction-locally (`set_config(..., true)`) and drops to the non-bypass
- * `secmes_app` role, so PostgreSQL RLS enforces tenant isolation. `SET LOCAL ROLE` works in BOTH
- * deployment shapes: prod connects directly as `secmes_app` (a role may SET ROLE to itself —
+ * `argus_app` role, so PostgreSQL RLS enforces tenant isolation. `SET LOCAL ROLE` works in BOTH
+ * deployment shapes: prod connects directly as `argus_app` (a role may SET ROLE to itself —
  * pg_has_role self-member), dev connects as the superuser and this drops it to the non-bypass
  * role. Both the var and the role reset at COMMIT/ROLLBACK, so nothing leaks across the pool.
  *
@@ -52,7 +52,7 @@ export function asTenantId(value: string): TenantId {
 export async function withTenant<T>(tenantId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
   const tid = asTenantId(tenantId); // fail fast before opening a transaction
   return getDb().db.transaction(async (tx) => {
-    await tx.execute(dsql`set local role secmes_app`);
+    await tx.execute(dsql`set local role argus_app`);
     await tx.execute(dsql`select set_config('app.tenant_id', ${tid}, true)`);
     return fn(tx);
   });

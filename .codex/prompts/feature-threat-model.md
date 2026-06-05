@@ -1,4 +1,4 @@
-Write a one-page threat-model note BEFORE coding a security-relevant secmes feature. Save it to `docs/threat-models/<feature>.md`.
+Write a one-page threat-model note BEFORE coding a security-relevant argus feature. Save it to `docs/threat-models/<feature>.md`.
 
 Sections:
 1. Feature & data flow — trace any sensitive data; confirm the server only ever sees ciphertext + metadata.

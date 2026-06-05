@@ -49,7 +49,7 @@ export default function App() {
           >
             <div className="text-white text-xl font-bold tracking-wider">
               <span className="bg-gradient-to-r from-purple-400 to-purple-600 bg-clip-text text-transparent">
-                secmes
+                argus
               </span>
             </div>
             <button className="flex items-center gap-1.5 bg-[#1f1f2a]/80 backdrop-blur-sm hover:bg-[#2a2a38] text-white/90 text-xs px-3 py-1.5 rounded-full transition-all duration-300 border border-white/5 hover:border-white/10">

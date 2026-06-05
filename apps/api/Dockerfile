@@ -1,5 +1,5 @@
 # Phase 0: self-contained build (context = apps/api).
-# TODO (Phase 1+): switch to a repo-root build that wires in @secmes/contracts
+# TODO (Phase 1+): switch to a repo-root build that wires in @argus/contracts
 # via pnpm workspace `--filter ... deploy`.
 
 # ---- build ----

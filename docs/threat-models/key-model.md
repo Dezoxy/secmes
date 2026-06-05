@@ -35,7 +35,7 @@ The server stores/forwards **public KeyPackages** and **opaque sealed ciphertext
 
 - **#1 crypto-blind server** — upheld: only public KeyPackages + opaque ciphertext cross the boundary; no server-side parse/decrypt of key material. Substitution (§3.1) is the one place the invariant must be made *client-detectable*, not merely policy — tracked, not yet shipped.
 - **#2 no secret logging** — upheld: zero `console`/logger in the crypto package and keystore; audit rows carry `eventType` + `actorSub` + bounded UA only; no key/ciphertext/token/Authorization/presigned-URL in any log.
-- **#3 RLS on every tenant table** — upheld: `devices`, `key_packages`, `key_backups` each have `tenant_id` + ENABLE+FORCE RLS + WITH CHECK + leading-`tenant_id` index; runtime role `secmes_app` is non-bypass; tenant context comes only from the verified token claim.
+- **#3 RLS on every tenant table** — upheld: `devices`, `key_packages`, `key_backups` each have `tenant_id` + ENABLE+FORCE RLS + WITH CHECK + leading-`tenant_id` index; runtime role `argus_app` is non-bypass; tenant context comes only from the verified token claim.
 - **#4 no hand-rolled crypto** — upheld: all primitives via `ts-mls` + `@noble/hashes` Argon2id + WebCrypto AES-GCM; no `Math.random` in any security path (the one `crypto.subtle` outside the package is PKCE S256 OAuth plumbing, not E2EE).
 - **#5 secrets via Key Vault** — N/A to this surface (no new cloud secrets).
 - **#6 no admin path to content** — upheld: key/backup surfaces expose IDs/metadata only.
@@ -55,4 +55,4 @@ The server stores/forwards **public KeyPackages** and **opaque sealed ciphertext
 5. **Passphrase is the weakest link**; a lost passphrase is unrecoverable by design (no server reset, or the server could decrypt).
 6. **Backup overwrite bricks recovery.** `store` is an upsert keyed on `(tenant_id, user_id)` with no versioning; a compromised own-session can silently replace the only backup. Consider keeping N prior sealed blobs (deferred).
 7. **Drain / no-GC / unbounded device count.** Intra-tenant pool drain and accumulation of claimed rows depend on checkpoint-46 rate-limiting + a future GC worker; no global per-user/tenant device cap yet. Audited, bounded, accepted for beta.
-8. **Contract-vs-enforcement drift is structural.** Bounds live in local Zod, not `@secmes/contracts`; track migrating these schemas into the shared package as more key endpoints land.
+8. **Contract-vs-enforcement drift is structural.** Bounds live in local Zod, not `@argus/contracts`; track migrating these schemas into the shared package as more key endpoints land.

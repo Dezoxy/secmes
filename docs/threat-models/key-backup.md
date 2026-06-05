@@ -35,7 +35,7 @@ The server stores **only ciphertext it cannot open** (no passphrase). This exist
 
 ## Implementation — sealing primitive (checkpoint 21)
 
-`@secmes/crypto` `sealBackup(plaintext, passphrase, params?)` / `openBackup(blob, passphrase)`: **Argon2id** (`@noble/hashes`, audited) → 32-byte key → **AES-256-GCM** (WebCrypto). `DEFAULT_ARGON2 = { m: 65536 KiB (64 MiB), t: 3, p: 1 }`; **fresh 16-byte salt + 12-byte IV per seal** (CSPRNG); params/salt/iv recorded in the versioned `SealedBackup` blob so cost can be raised later. `openBackup` throws on a wrong passphrase or any tampering (GCM auth). The primitive is **generic over bytes** — the caller serializes the identity material to back up (scope = identity-only per §4). Server storage + backup/restore API is checkpoint 22; running Argon2id in a Web Worker (so 64 MiB doesn't block the UI) is a Phase-5 UX follow-up.
+`@argus/crypto` `sealBackup(plaintext, passphrase, params?)` / `openBackup(blob, passphrase)`: **Argon2id** (`@noble/hashes`, audited) → 32-byte key → **AES-256-GCM** (WebCrypto). `DEFAULT_ARGON2 = { m: 65536 KiB (64 MiB), t: 3, p: 1 }`; **fresh 16-byte salt + 12-byte IV per seal** (CSPRNG); params/salt/iv recorded in the versioned `SealedBackup` blob so cost can be raised later. `openBackup` throws on a wrong passphrase or any tampering (GCM auth). The primitive is **generic over bytes** — the caller serializes the identity material to back up (scope = identity-only per §4). Server storage + backup/restore API is checkpoint 22; running Argon2id in a Web Worker (so 64 MiB doesn't block the UI) is a Phase-5 UX follow-up.
 
 ## 5. Invariant check
 

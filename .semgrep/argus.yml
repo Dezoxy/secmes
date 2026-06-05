@@ -1,5 +1,5 @@
 rules:
-  - id: secmes-no-insecure-random
+  - id: argus-no-insecure-random
     languages: [typescript, javascript]
     severity: ERROR
     message: >
@@ -15,7 +15,7 @@ rules:
           - pattern: crypto.pseudoRandomBytes(...)
           - pattern: pseudoRandomBytes(...)
 
-  - id: secmes-crypto-only-in-crypto-package
+  - id: argus-crypto-only-in-crypto-package
     languages: [typescript, javascript]
     severity: ERROR
     message: >
@@ -26,7 +26,7 @@ rules:
     patterns:
       - pattern-regex: \b(crypto\.subtle|createCipheriv|createDecipheriv|createHmac|pbkdf2Sync?|scryptSync?|tweetnacl|libsodium)\b
 
-  - id: secmes-no-secret-logging
+  - id: argus-no-secret-logging
     languages: [typescript, javascript]
     severity: ERROR
     message: >
@@ -36,7 +36,7 @@ rules:
     patterns:
       - pattern-regex: (console\.(log|info|warn|error|debug)|logger\.(log|info|warn|error|debug|verbose))\s*\([^)]*\b(password|passphrase|private[_]?[Kk]ey|secret|bearer|authorization|ciphertext|plaintext|sessionKey|messageKey)\b
 
-  - id: secmes-no-sql-string-interpolation
+  - id: argus-no-sql-string-interpolation
     languages: [typescript, javascript]
     severity: WARNING
     message: >
@@ -44,7 +44,7 @@ rules:
       into SQL. Also confirm the query runs under the tenant RLS context.
     pattern-regex: (SELECT|INSERT\s+INTO|UPDATE|DELETE\s+FROM)\b[^;`]*\$\{
 
-  - id: secmes-no-hardcoded-secret
+  - id: argus-no-hardcoded-secret
     languages: [typescript, javascript]
     severity: ERROR
     message: >

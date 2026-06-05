@@ -1,4 +1,4 @@
-Create a PostgreSQL migration for secmes that is correct-by-construction for multi-tenant isolation.
+Create a PostgreSQL migration for argus that is correct-by-construction for multi-tenant isolation.
 
 Rules (refuse to violate):
 - Every tenant-scoped table has `tenant_id uuid NOT NULL`.

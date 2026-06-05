@@ -1,6 +1,6 @@
 ---
 name: db-migration
-description: Scaffold a PostgreSQL migration for secmes that always enforces multi-tenant isolation (tenant_id + Row-Level Security). Use whenever adding or altering a database table, so no tenant-scoped table ever ships without RLS.
+description: Scaffold a PostgreSQL migration for argus that always enforces multi-tenant isolation (tenant_id + Row-Level Security). Use whenever adding or altering a database table, so no tenant-scoped table ever ships without RLS.
 ---
 
 # db-migration

@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - 'apps/api/**'
-      - 'charts/secmes/**'
+      - 'charts/argus/**'
       - '.github/workflows/cd.yml'
 
 # Least privilege. id-token for Azure OIDC (no stored cloud creds);
@@ -26,7 +26,7 @@ jobs:
     env:
       # github.sha is trusted (not attacker-controllable). Use via env per hardening guidance.
       IMAGE_TAG: ${{ github.sha }}
-      ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }} # e.g. secmesacr.azurecr.io
+      ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }} # e.g. argusacr.azurecr.io
     steps:
       - uses: actions/checkout@v6
 
@@ -42,20 +42,20 @@ jobs:
 
       - name: Build and push api image
         run: |
-          docker build -t "$ACR_LOGIN_SERVER/secmes-api:$IMAGE_TAG" apps/api
-          docker push "$ACR_LOGIN_SERVER/secmes-api:$IMAGE_TAG"
+          docker build -t "$ACR_LOGIN_SERVER/argus-api:$IMAGE_TAG" apps/api
+          docker push "$ACR_LOGIN_SERVER/argus-api:$IMAGE_TAG"
 
       - name: Trivy image scan (fail on HIGH/CRITICAL)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
-          image-ref: ${{ env.ACR_LOGIN_SERVER }}/secmes-api:${{ env.IMAGE_TAG }}
+          image-ref: ${{ env.ACR_LOGIN_SERVER }}/argus-api:${{ env.IMAGE_TAG }}
           severity: HIGH,CRITICAL
           exit-code: '1'
 
       - name: Generate SBOM (syft)
         uses: anchore/sbom-action@v0
         with:
-          image: ${{ env.ACR_LOGIN_SERVER }}/secmes-api:${{ env.IMAGE_TAG }}
+          image: ${{ env.ACR_LOGIN_SERVER }}/argus-api:${{ env.IMAGE_TAG }}
           format: spdx-json
           output-file: sbom.spdx.json
 
@@ -64,14 +64,20 @@ jobs:
 
       - name: Sign image + attest SBOM (keyless via OIDC)
         run: |
-          cosign sign --yes "$ACR_LOGIN_SERVER/secmes-api:$IMAGE_TAG"
-          cosign attest --yes --predicate sbom.spdx.json --type spdxjson "$ACR_LOGIN_SERVER/secmes-api:$IMAGE_TAG"
+          cosign sign --yes "$ACR_LOGIN_SERVER/argus-api:$IMAGE_TAG"
+          cosign attest --yes --predicate sbom.spdx.json --type spdxjson "$ACR_LOGIN_SERVER/argus-api:$IMAGE_TAG"
 
+      # ⚠️ DEPLOY ORDERING: DB migrations are NOT yet run by this pipeline (Phase-0, no live cluster).
+      # Bumping the tag is what makes Argo roll out the new image. A migration that the new image REQUIRES
+      # (e.g. 0009 renaming the runtime role secmes_app → argus_app) MUST be applied to the database
+      # BEFORE the rollout, or tenant-scoped requests fail at SET LOCAL ROLE. Until the pre-upgrade
+      # migration Job lands (roadmap Phase-0, checkpoint 7a), run `pnpm --filter @argus/api db:migrate`
+      # (owner connection) before promoting an image that needs a new migration.
       - name: Bump image tag in GitOps values
         run: |
           set -euo pipefail
           # yq v4 is preinstalled on GitHub-hosted ubuntu runners — no untrusted download.
-          yq -i ".api.image.repository = \"$ACR_LOGIN_SERVER/secmes-api\" | .api.image.tag = \"$IMAGE_TAG\"" charts/secmes/values.yaml
+          yq -i ".api.image.repository = \"$ACR_LOGIN_SERVER/argus-api\" | .api.image.tag = \"$IMAGE_TAG\"" charts/argus/values.yaml
 
       - name: Commit tag bump
         run: |
@@ -81,5 +87,5 @@ jobs:
           if git diff --quiet; then
             echo "no change"; exit 0
           fi
-          git commit -am "ci: deploy secmes-api $IMAGE_TAG [skip ci]"
+          git commit -am "ci: deploy argus-api $IMAGE_TAG [skip ci]"
           git push

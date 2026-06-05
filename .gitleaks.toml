@@ -1,4 +1,4 @@
-title = "secmes gitleaks config"
+title = "argus gitleaks config"
 
 [extend]
 useDefault = true

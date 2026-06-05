@@ -30,7 +30,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Generate OpenAPI spec
-        run: pnpm --filter @secmes/api openapi
+        run: pnpm --filter @argus/api openapi
       - name: 42Crunch Conformance Scan
         uses: 42Crunch/api-security-scan-action@v1
         with:

@@ -1,6 +1,0 @@
-apiVersion: v2
-name: secmes
-description: "secmes application workloads (Phase 0: api only)"
-type: application
-version: 0.1.0
-appVersion: "0.0.0"

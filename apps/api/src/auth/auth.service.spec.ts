@@ -12,8 +12,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import type { OidcConfig } from './auth.config.js';
 import { AuthService } from './auth.service.js';
 
-const ISSUER = 'https://idp.test/secmes';
-const AUDIENCE = 'secmes-api';
+const ISSUER = 'https://idp.test/argus';
+const AUDIENCE = 'argus-api';
 const TENANT = '11111111-1111-1111-1111-111111111111';
 const SUB = 'user-sub-1';
 

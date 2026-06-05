@@ -21,7 +21,7 @@ async function createPkcePair(): Promise<{ verifier: string; challenge: string }
   const verifier = base64UrlEncode(random.buffer);
   // PKCE S256 challenge: OIDC auth plumbing (a standard WebCrypto SHA-256), NOT message E2EE.
   // Message/E2EE crypto must go through packages/crypto (the MLS wrapper); this is OAuth only.
-  const subtle = crypto.subtle; // nosemgrep: secmes-crypto-only-in-crypto-package
+  const subtle = crypto.subtle; // nosemgrep: argus-crypto-only-in-crypto-package
   const digest = await subtle.digest('SHA-256', new TextEncoder().encode(verifier));
   return { verifier, challenge: base64UrlEncode(digest) };
 }

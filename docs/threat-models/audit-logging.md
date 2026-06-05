@@ -13,7 +13,7 @@ A protected request (already through the JWT guard, so tenant + `sub` are **veri
 
 ## 3. Threats (STRIDE-lite)
 
-1. **Tampering — log forgery / cover-up (primary).** A bug or a compromised `secmes_app` role edits or deletes audit rows to hide activity. → **Append-only by grant:** `secmes_app` gets `SELECT`+`INSERT` only — **no `UPDATE`/`DELETE`**. Mutation/retention runs out-of-band (owner/maintenance role). Tested with a negative case (app role update/delete must fail).
+1. **Tampering — log forgery / cover-up (primary).** A bug or a compromised `argus_app` role edits or deletes audit rows to hide activity. → **Append-only by grant:** `argus_app` gets `SELECT`+`INSERT` only — **no `UPDATE`/`DELETE`**. Mutation/retention runs out-of-band (owner/maintenance role). Tested with a negative case (app role update/delete must fail).
 2. **Information disclosure — cross-tenant audit read.** Tenant A reads B's audit trail. → `tenant_id` + `ENABLE`/`FORCE` RLS + `WITH CHECK`, same as every tenant table; writes only via `withTenant`.
 3. **Information disclosure — sensitive data in the log.** Someone logs a token/content/PII into `metadata` or a free field. → Hard rule + review: `metadata` is **non-sensitive context only**; no token/header/content/key fields exist on the table; the service never receives the raw token.
 4. **Spoofing — forged actor.** An attacker records events as another user/tenant. → `actor_sub` and `tenant_id` come **only** from the verified token (never request body), via the same guard as `/me`.
@@ -29,7 +29,7 @@ A protected request (already through the JWT guard, so tenant + `sub` are **veri
 ## 5. Decision & mitigations
 
 - Table: `audit_events(id, tenant_id, event_type, actor_sub, ip, user_agent, metadata, created_at)`; `ENABLE`+`FORCE` RLS; `WITH CHECK` on `current_setting('app.tenant_id')`; index `(tenant_id, created_at desc)`.
-- **Grants: `SELECT, INSERT` only to `secmes_app`** (append-only). Retention `DELETE` is a maintenance-role job.
+- **Grants: `SELECT, INSERT` only to `argus_app`** (append-only). Retention `DELETE` is a maintenance-role job.
 - `actor_sub`/`tenant_id` from the verified token; writes only via `withTenant`.
 - **GDPR (EU):** auth-event metadata (incl. IP) is processed under legitimate interest for security; **90-day retention** bounds it; goes into the `privacy-model.md` processing record (USER decision pending — 90d is the working default).
 - **Reviewer:** `security-boundary-auditor`. **Tests:** insert+readback under tenant; cross-tenant audit read returns zero; **append-only negative** (app role `UPDATE`/`DELETE` fails); login/logout endpoints record the right event with no sensitive fields.

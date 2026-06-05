@@ -18,7 +18,7 @@ jobs:
     container: semgrep/semgrep
     steps:
       - uses: actions/checkout@v6
-      - name: Semgrep (custom secmes rules + registry auto)
+      - name: Semgrep (custom argus rules + registry auto)
         run: semgrep scan --config .semgrep --config auto --error --quiet
 
   deps-osv:
@@ -78,7 +78,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Generate OpenAPI spec
-        run: pnpm --filter @secmes/api openapi
+        run: pnpm --filter @argus/api openapi
       - name: 42Crunch API Security Audit
         uses: 42Crunch/api-security-audit-action@v4
         with:

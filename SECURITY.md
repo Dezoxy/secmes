@@ -1,6 +1,6 @@
 # Security Policy
 
-secmes is a privacy-first, end-to-end-encrypted messaging platform — security and
+argus is a privacy-first, end-to-end-encrypted messaging platform — security and
 user privacy are the entire point of the project. We take vulnerability reports
 seriously and welcome responsible disclosure.
 
@@ -22,7 +22,7 @@ Preferred channel — **GitHub private vulnerability reporting**:
 Repository **Security** tab → **Report a vulnerability** (GitHub Security
 Advisories). This opens a private thread visible only to the maintainers.
 
-If you cannot use GitHub, email **security@secmes.example** _(replace with your real
+If you cannot use GitHub, email **security@argus.example** _(replace with your real
 ops/security alias before relying on this)_.
 
 Please include:
@@ -71,4 +71,4 @@ We will not pursue or support legal action against researchers who:
 - Only interact with accounts they own or have explicit permission to test;
 - Report promptly and allow reasonable time to remediate before disclosure.
 
-Thank you for helping keep secmes and its users safe.
+Thank you for helping keep argus and its users safe.

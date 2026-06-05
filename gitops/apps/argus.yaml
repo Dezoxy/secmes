@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: secmes
+  name: argus
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
@@ -11,13 +11,13 @@ spec:
     # TODO: set to your git origin after `git init` + push.
     repoURL: https://github.com/REPLACE_ME/secmes.git
     targetRevision: main
-    path: charts/secmes
+    path: charts/argus
     helm:
       valueFiles:
         - values.yaml
   destination:
     server: https://kubernetes.default.svc
-    namespace: secmes
+    namespace: argus
   syncPolicy:
     automated:
       prune: true

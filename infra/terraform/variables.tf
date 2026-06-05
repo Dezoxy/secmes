@@ -5,7 +5,7 @@ variable "subscription_id" {
 
 variable "prefix" {
   type        = string
-  default     = "secmes"
+  default     = "argus"
   description = "Name prefix for all resources."
 }
 
@@ -52,7 +52,7 @@ variable "enable_prod" {
 variable "tags" {
   type = map(string)
   default = {
-    project = "secmes"
+    project = "argus"
     env     = "dev"
     owner   = "platform"
   }

@@ -27,13 +27,13 @@ The server only ever sees ciphertext + routing metadata. It never decrypts; only
 
 - **Spoofing — forge sender.** `sender_user_id` is set from the **verified token** (sub→user), never from client input; a client can't post as someone else. (Wired in 26.)
 - **Tampering — mutate/replay messages.** Messages are **append-only** for the app role (`select, insert` grants; no `update`/`delete`). `client_message_id` is unique per sender for **idempotent** retries (no duplicate on resend). Ciphertext integrity is the MLS AEAD's job, not the DB's.
-- **Information disclosure — cross-tenant read.** Every table has `tenant_id` + **ENABLE + FORCE RLS + WITH CHECK** keyed on `current_setting('app.tenant_id')`; the non-bypass `secmes_app` role can't see another tenant's rows or disable RLS. Content disclosure is additionally barred by E2EE (a same-tenant non-member who somehow read a `messages` row gets ciphertext it can't decrypt).
+- **Information disclosure — cross-tenant read.** Every table has `tenant_id` + **ENABLE + FORCE RLS + WITH CHECK** keyed on `current_setting('app.tenant_id')`; the non-bypass `argus_app` role can't see another tenant's rows or disable RLS. Content disclosure is additionally barred by E2EE (a same-tenant non-member who somehow read a `messages` row gets ciphertext it can't decrypt).
 - **Elevation — read a conversation you're not in (intra-tenant).** RLS stops *cross-tenant*, not *intra-tenant non-member* reads. That authz (is the caller a `conversation_members` row?) is enforced in the **app layer at 26**; E2EE is the backstop. Optionally hardenable later to DB-enforced membership RLS via an `app.user_id` session var (see §6).
 
 ## 4. Invariant check
 
 - **#1 crypto-blind server** — upheld: `ciphertext` is opaque; `alg`/`epoch`/`client_message_id`/`attachment_object_key` are routing/version metadata, not content. No column can hold plaintext.
-- **#2 no secret logging** — services log IDs/metadata only (enforced by `secmes-no-secret-logging`); `ciphertext` is never logged.
+- **#2 no secret logging** — services log IDs/metadata only (enforced by `argus-no-secret-logging`); `ciphertext` is never logged.
 - **#3 RLS on every tenant table** — all three tables: `tenant_id` + ENABLE+FORCE RLS + WITH CHECK + leading-`tenant_id` index.
 - **#4 no hand-rolled crypto / #5 Key Vault / #6 no admin content access** — N/A to the schema, upheld elsewhere; admin/ops see metadata only (no decryptable content exists server-side).
 

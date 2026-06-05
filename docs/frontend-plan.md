@@ -5,14 +5,14 @@ The client is the security boundary in an E2EE app — it does the crypto; the s
 ## Stack
 
 - **React 19 + Vite + TypeScript**, **Tailwind v4**, **shadcn/ui** (add components as needed), **vite-plugin-pwa**.
-- Shared types/validation from **`@secmes/contracts`** (Zod) — same package the API uses.
+- Shared types/validation from **`@argus/contracts`** (Zod) — same package the API uses.
 - Crypto from **`packages/crypto`** (the `ts-mls` wrapper) — runs client-side; private keys live in **IndexedDB**.
 - Realtime over a **WebSocket** to the gateway; offline via the service worker + a local outbox.
 - **Why not Next.js:** SSR/RSC renders on the server, which is the wrong model when the server must be crypto-blind and the app must be an installable static PWA. (The downloaded design shipped as Next.js; we ported the *design*, not the framework.)
 
 ## Design language
 
-The dark `#1a1a24` / `#12121a` surfaces + purple (`purple-400→600`) accents + rounded-2xl + the mount/transition animations from the ported landing screen become the secmes system. Consolidate into Tailwind theme tokens as the component set grows.
+The dark `#1a1a24` / `#12121a` surfaces + purple (`purple-400→600`) accents + rounded-2xl + the mount/transition animations from the ported landing screen become the argus system. Consolidate into Tailwind theme tokens as the component set grows.
 
 ## Screens (mapped to the roadmap)
 

@@ -25,12 +25,12 @@ Every tenant-scoped query runs inside a transaction that first sets `app.tenant_
    Forbid plain `SET app.tenant_id` (session scope) anywhere. With Drizzle/Kysely, wrap every tenant-scoped unit of work in a transaction that calls `set_config(..., true)` first. Run the pooler in **transaction mode** and document it.
 
 2. **App connects as an RLS-exempt role (Elevation).**
-   `FORCE RLS` (already in the skill) is bypassed by any role that is the table **owner**, a **superuser**, or has **`BYPASSRLS`**. Local dev currently connects as the all-powerful `secmes` superuser → RLS is silently inert.
-   → **Mitigation (mandatory):** runtime connects as a dedicated **`secmes_app` role: `NOSUPERUSER NOBYPASSRLS`, owns no tables**, granted only `SELECT/INSERT/UPDATE/DELETE` on app tables. **Migrations** run as the owner role; **the app never does.** Add this role to `compose.yaml` (local) and to the Phase-1 Postgres provisioning.
+   `FORCE RLS` (already in the skill) is bypassed by any role that is the table **owner**, a **superuser**, or has **`BYPASSRLS`**. Local dev currently connects as the all-powerful `argus` superuser → RLS is silently inert.
+   → **Mitigation (mandatory):** runtime connects as a dedicated **`argus_app` role: `NOSUPERUSER NOBYPASSRLS`, owns no tables**, granted only `SELECT/INSERT/UPDATE/DELETE` on app tables. **Migrations** run as the owner role; **the app never does.** Add this role to `compose.yaml` (local) and to the Phase-1 Postgres provisioning.
 
 3. **`worker` / `realtime` touch data with no per-request token (Spoofing/EoP).**
    The API tenant guard is request-scoped; background GC / KeyPackage jobs and the WS gateway have no JWT.
-   → **Rule:** `realtime` sets `app.tenant_id` from the authenticated **WS session** per query; `worker` iterates **tenant-by-tenant**, setting the var for each, always under the non-bypass `secmes_app` role. A GC job that connects as owner would read/delete across every tenant.
+   → **Rule:** `realtime` sets `app.tenant_id` from the authenticated **WS session** per query; `worker` iterates **tenant-by-tenant**, setting the var for each, always under the non-bypass `argus_app` role. A GC job that connects as owner would read/delete across every tenant.
 
 4. **Tenant context set from client input (Spoofing).**
    → `app.tenant_id` is derived **only** from claims in the verified token; never from a header, body, or query param.
@@ -42,7 +42,7 @@ Upholds invariant #3 (RLS on every tenant table, no cross-tenant reads). No tens
 ## 5. Decision & mitigations
 
 - Transaction-local `set_config(..., true)`; pooler in transaction mode; ban session `SET`.
-- `secmes_app` (`NOSUPERUSER NOBYPASSRLS`) for runtime; owner role only for migrations.
+- `argus_app` (`NOSUPERUSER NOBYPASSRLS`) for runtime; owner role only for migrations.
 - worker/realtime context rules above.
 - **Tests (gate Phase 1):** (a) an **interleaved two-tenant bleed test** — two transactions on pooled connections, assert tenant A never sees tenant B; (b) a test that the app role cannot `SET ROLE` to owner or disable RLS; (c) a cross-tenant `JOIN` returns zero rows.
 - Add an AGENTS.md procedure: "all tenant DB access goes through the transaction helper that sets `app.tenant_id` locally."

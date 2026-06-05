@@ -1,4 +1,4 @@
-# secmes — Secure Messaging Platform
+# argus — Secure Messaging Platform
 
 Privacy-first, end-to-end-encrypted messaging platform delivered as an installable PWA.
 The server is **crypto-blind**: it stores ciphertext + metadata only.
@@ -16,7 +16,7 @@ infra/
   terraform/           # azurerm: RG, VNet, AKS, ACR, Log Analytics
   bootstrap/           # cluster add-ons (ingress-nginx, cert-manager, Argo CD)
 charts/
-  secmes/              # Helm chart for the app workloads
+  argus/              # Helm chart for the app workloads
 gitops/
   apps/                # Argo CD Application manifests
 .github/workflows/     # CI (build/test) + CD (build image -> ACR -> bump tag)
@@ -31,7 +31,7 @@ Goal: a "hello world" service deployed end-to-end (Terraform → AKS → Argo CD
 ```bash
 corepack enable
 pnpm install
-pnpm --filter @secmes/api dev        # http://localhost:3000/healthz
+pnpm --filter @argus/api dev        # http://localhost:3000/healthz
 pnpm test
 ```
 
@@ -47,7 +47,7 @@ terraform plan
 
 Then bootstrap cluster add-ons and Argo CD: see [`infra/bootstrap/README.md`](infra/bootstrap/README.md).
 
-After cloning: set the Argo CD `repoURL` in `gitops/apps/secmes.yaml` and the CD secrets in GitHub before deploying.
+After cloning: set the Argo CD `repoURL` in `gitops/apps/argus.yaml` and the CD secrets in GitHub before deploying.
 
 ## License
 

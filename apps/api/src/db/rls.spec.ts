@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getDb } from './index.js';
 
 // Integration test — proves PostgreSQL itself blocks cross-tenant access (roadmap checkpoint 12).
-// Requires a live Postgres with migrations applied:  make up && pnpm --filter @secmes/api db:migrate
+// Requires a live Postgres with migrations applied:  make up && pnpm --filter @argus/api db:migrate
 // Auto-skips where no DATABASE_URL is set (e.g. the unit-only CI job without a DB service).
 const DB_URL = process.env.DATABASE_URL;
 
@@ -16,7 +16,7 @@ describe.skipIf(!DB_URL)('RLS tenant isolation', () => {
   // Run `fn` exactly as the app's withTenant() does: non-bypass role + tx-local tenant context.
   function asTenant(tenantId: string, fn: (tx: typeof sql) => unknown): Promise<unknown> {
     return sql.begin(async (tx) => {
-      await tx`set local role secmes_app`;
+      await tx`set local role argus_app`;
       await tx`select set_config('app.tenant_id', ${tenantId}, true)`;
       return fn(tx as unknown as typeof sql);
     }) as Promise<unknown>;
@@ -69,7 +69,7 @@ describe.skipIf(!DB_URL)('RLS tenant isolation', () => {
   it('no tenant context => fail closed (never reads all rows)', async () => {
     await expect(
       sql.begin(async (tx) => {
-        await tx`set local role secmes_app`;
+        await tx`set local role argus_app`;
         return tx`select count(*) from users`;
       }),
     ).rejects.toThrow();
@@ -85,12 +85,12 @@ describe.skipIf(!DB_URL)('RLS tenant isolation', () => {
       const owner = ownerRows[0]?.who;
 
       const a = (await pinned.begin(async (tx) => {
-        await tx`set local role secmes_app`;
+        await tx`set local role argus_app`;
         await tx`select set_config('app.tenant_id', ${tenantA}, true)`;
         return tx`select email from users`;
       })) as unknown as { email: string }[];
       const b = (await pinned.begin(async (tx) => {
-        await tx`set local role secmes_app`;
+        await tx`set local role argus_app`;
         await tx`select set_config('app.tenant_id', ${tenantB}, true)`;
         return tx`select email from users`;
       })) as unknown as { email: string }[];
@@ -104,7 +104,7 @@ describe.skipIf(!DB_URL)('RLS tenant isolation', () => {
         tid: string | null;
       }[];
       const after = afterRows[0];
-      expect(after?.who).toBe(owner); // role reset off secmes_app
+      expect(after?.who).toBe(owner); // role reset off argus_app
       expect(after?.tid).toBeFalsy(); // tenant var gone — not tenantA/tenantB
     } finally {
       await pinned.end({ timeout: 5 });
@@ -114,13 +114,13 @@ describe.skipIf(!DB_URL)('RLS tenant isolation', () => {
   it('the app role cannot disable RLS (no privilege escalation)', async () => {
     await expect(
       sql.begin(async (tx) => {
-        await tx`set local role secmes_app`;
+        await tx`set local role argus_app`;
         return tx`alter table users disable row level security`;
       }),
     ).rejects.toThrow();
     await expect(
       sql.begin(async (tx) => {
-        await tx`set local role secmes_app`;
+        await tx`set local role argus_app`;
         return tx`alter table users no force row level security`;
       }),
     ).rejects.toThrow();

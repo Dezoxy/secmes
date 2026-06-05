@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PostToolUse(Edit|Write) — static check on TypeScript for secmes security invariants.
+# PostToolUse(Edit|Write) — static check on TypeScript for argus security invariants.
 # Advisory: injects findings back to the model; does not block.
 set -euo pipefail
 input="$(cat)"
@@ -25,7 +25,7 @@ case "$f" in
 esac
 
 [ -z "$findings" ] && exit 0
-msg="secmes invariant check on ${f}:\n${findings}Route this through the crypto-reviewer / security-boundary-auditor before committing."
+msg="argus invariant check on ${f}:\n${findings}Route this through the crypto-reviewer / security-boundary-auditor before committing."
 jq -nc --arg c "$(printf '%b' "$msg")" \
   '{hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:$c}}'
 exit 0

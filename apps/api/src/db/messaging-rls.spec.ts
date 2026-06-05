@@ -4,7 +4,7 @@ import { getDb } from './index.js';
 
 // Integration test — proves PostgreSQL itself isolates the messaging tables by tenant and keeps
 // messages append-only (roadmap checkpoint 25). Requires a live Postgres with migrations applied:
-//   make up && pnpm --filter @secmes/api db:migrate
+//   make up && pnpm --filter @argus/api db:migrate
 // Auto-skips where no DATABASE_URL is set (the unit-only CI job).
 const DB_URL = process.env.DATABASE_URL;
 
@@ -20,7 +20,7 @@ describe.skipIf(!DB_URL)('messaging schema RLS + append-only (checkpoint 25)', (
   // Same shape as the app's withTenant(): non-bypass role + tx-local tenant context.
   function asTenant(tenantId: string, fn: (tx: typeof sql) => unknown): Promise<unknown> {
     return sql.begin(async (tx) => {
-      await tx`set local role secmes_app`;
+      await tx`set local role argus_app`;
       await tx`select set_config('app.tenant_id', ${tenantId}, true)`;
       return fn(tx as unknown as typeof sql);
     }) as Promise<unknown>;
@@ -190,7 +190,7 @@ describe.skipIf(!DB_URL)('messaging schema RLS + append-only (checkpoint 25)', (
   it('no tenant context => fail closed on messages', async () => {
     await expect(
       sql.begin(async (tx) => {
-        await tx`set local role secmes_app`;
+        await tx`set local role argus_app`;
         return tx`select count(*) from messages`;
       }),
     ).rejects.toThrow();
