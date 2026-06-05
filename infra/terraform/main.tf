@@ -43,7 +43,7 @@ resource "azurerm_kubernetes_cluster" "this" {
   resource_group_name = azurerm_resource_group.this.name
   dns_prefix          = "${var.prefix}-aks"
   kubernetes_version  = var.kubernetes_version
-  sku_tier            = "Free" # move to "Standard" for an uptime SLA later
+  sku_tier            = var.enable_prod ? "Standard" : "Free" # Standard (SLA) is required before customer beta
 
   # --- the IRSA equivalent: federated pod identity, no secrets in pods ---
   oidc_issuer_enabled       = true

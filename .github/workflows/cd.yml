@@ -45,6 +45,13 @@ jobs:
           docker build -t "$ACR_LOGIN_SERVER/secmes-api:$IMAGE_TAG" apps/api
           docker push "$ACR_LOGIN_SERVER/secmes-api:$IMAGE_TAG"
 
+      - name: Trivy image scan (fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.ACR_LOGIN_SERVER }}/secmes-api:${{ env.IMAGE_TAG }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
       - name: Generate SBOM (syft)
         uses: anchore/sbom-action@v0
         with:
@@ -63,8 +70,7 @@ jobs:
       - name: Bump image tag in GitOps values
         run: |
           set -euo pipefail
-          curl -sSLo /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          chmod +x /usr/local/bin/yq
+          # yq v4 is preinstalled on GitHub-hosted ubuntu runners — no untrusted download.
           yq -i ".api.image.repository = \"$ACR_LOGIN_SERVER/secmes-api\" | .api.image.tag = \"$IMAGE_TAG\"" charts/secmes/values.yaml
 
       - name: Commit tag bump
