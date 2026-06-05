@@ -3,11 +3,17 @@ rules:
     languages: [typescript, javascript]
     severity: ERROR
     message: >
-      Math.random() is not a CSPRNG. Use crypto-grade randomness from packages/crypto
-      for anything security-relevant (keys, nonces, IDs, tokens).
-    paths:
-      exclude: ['**/*.spec.ts', '**/*.test.ts']
-    pattern: Math.random()
+      Insecure randomness. Math.random() and Node's pseudoRandomBytes are NOT CSPRNGs and must never
+      seed keys, nonces, salts, IVs, IDs, or tokens. Use crypto.getRandomValues / crypto.randomUUID
+      (WebCrypto), gen_random_uuid() in SQL, or the primitives in packages/crypto. Banned in tests too —
+      use crypto-grade randomness there as well.
+    # No path excludes: a total ban. The bare `Math.random` pattern (not `Math.random()`) also catches
+    # aliasing like `const r = Math.random; r()`, which a call-only pattern would miss.
+    patterns:
+      - pattern-either:
+          - pattern: Math.random
+          - pattern: crypto.pseudoRandomBytes(...)
+          - pattern: pseudoRandomBytes(...)
 
   - id: secmes-crypto-only-in-crypto-package
     languages: [typescript, javascript]
