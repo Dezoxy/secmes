@@ -17,9 +17,11 @@ create table if not exists attachments (
   tenant_id       uuid not null references tenants(id) on delete cascade,
   -- The owning conversation (server-verified at upload). Drives member-only download authz.
   conversation_id uuid not null,
-  -- Server-chosen, tenant-prefixed handle to the ciphertext blob (e.g. "<tenant_id>/<uuid>"). NOT a URL
-  -- (presigned URLs are capabilities — never persisted/logged, invariant #2); just the object key.
-  object_key      text not null,
+  -- Server-chosen handle to the ciphertext blob (e.g. "<tenant_id>/<uuid>"). NOT a URL (presigned URLs
+  -- are capabilities — never persisted/logged, invariant #2); just the object key. The CHECK forces the
+  -- key to be prefixed with THIS row's tenant_id so it is structurally tenant-bound — the blob store is
+  -- OUTSIDE Postgres RLS, so the app's prefixing must fail closed at the schema (see the global unique).
+  object_key      text not null check (object_key like tenant_id::text || '/%'),
   -- Size of the OPAQUE ciphertext blob (bytes). Intrinsic object-storage metadata; not content.
   byte_size       bigint not null check (byte_size > 0),
   -- The VERIFIED caller who created the upload grant (sub -> user), never client input.
@@ -27,8 +29,11 @@ create table if not exists attachments (
   created_at      timestamptz not null default now(),
   -- Lifecycle: when the blob may be pruned (set by the app/cleanup worker, checkpoint 37). Nullable.
   expires_at      timestamptz,
-  -- One row per blob; also the leading-tenant_id lookup path (object_key resolved within the tenant).
-  unique (tenant_id, object_key),
+  -- GLOBALLY unique: the blob container is outside Postgres RLS, so a per-tenant-unique key would let
+  -- two tenants' rows point at the same blob (tenant B minting a SAS URL for tenant A's object via its
+  -- own RLS-visible row). Global unique + the tenant-prefix CHECK make cross-tenant blob aliasing
+  -- impossible. Tenant-scoped access paths are served by the (tenant_id, ...) indexes below.
+  unique (object_key),
   -- Composite FK: the attachment's conversation MUST be in this row's tenant. CASCADE — deleting a
   -- conversation removes its attachment rows (like messages); the blobs are reaped by the cleanup worker.
   foreign key (tenant_id, conversation_id) references conversations (tenant_id, id) on delete cascade,

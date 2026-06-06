@@ -131,10 +131,23 @@ describe.skipIf(!DB_URL)('attachments schema RLS + lifecycle (checkpoint 35)', (
     ).rejects.toThrow();
   });
 
-  it('rejects a duplicate (tenant_id, object_key)', async () => {
+  it('rejects a duplicate object_key (GLOBAL unique — the blob store is outside RLS)', async () => {
     const key = `${tenantA}/dup`;
     await makeAttachment(tenantA, convA, userA, key);
     await expect(makeAttachment(tenantA, convA, userA, key)).rejects.toThrow();
+  });
+
+  it('object_key must be prefixed with the row tenant (CHECK — structural blob isolation)', async () => {
+    // tenant A (RLS-valid) tries to claim a key in tenant B's namespace — the prefix CHECK rejects it,
+    // so the app's tenant-prefixing fails closed even if the presign path had a bug.
+    await expect(
+      asTenant(
+        tenantA,
+        (tx) =>
+          tx`insert into attachments (tenant_id, conversation_id, object_key, byte_size, uploaded_by)
+             values (${tenantA}, ${convA}, ${`${tenantB}/x`}, 1, ${userA})`,
+      ),
+    ).rejects.toThrow();
   });
 
   it('is PRUNABLE: the app role can delete its own attachment (unlike append-only messages)', async () => {
