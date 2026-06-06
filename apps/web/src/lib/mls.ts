@@ -60,11 +60,18 @@ export async function createE2eeSession(conversationId: string): Promise<E2eeSes
   };
 }
 
-let sessionPromise: Promise<E2eeSession> | null = null;
-/** A lazily-created, cached session for the app (one MLS group backs the in-browser demo). */
-export function getMlsSession(): Promise<E2eeSession> {
-  sessionPromise ??= createE2eeSession('argus-local-demo');
-  return sessionPromise;
+const sessionsByConversation = new Map<string, Promise<E2eeSession>>();
+/**
+ * A lazily-created, cached MLS session PER conversation — so each peer is its own group with its own
+ * keys, and therefore its own distinct safety number (#20). Stable per page load.
+ */
+export function getMlsSession(conversationId: string): Promise<E2eeSession> {
+  let session = sessionsByConversation.get(conversationId);
+  if (!session) {
+    session = createE2eeSession(conversationId);
+    sessionsByConversation.set(conversationId, session);
+  }
+  return session;
 }
 
 /** Self-test for a UI badge: a real round-trip succeeds AND the plaintext never appears in the wire bytes. */

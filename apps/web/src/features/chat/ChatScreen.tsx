@@ -53,7 +53,8 @@ export default function ChatScreen() {
   const [showSidebar, setShowSidebar] = useState(true);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [verifyOpen, setVerifyOpen] = useState(false);
-  const [sessionNumber, setSessionNumber] = useState<string | null>(null);
+  // Each direct conversation has its own MLS session, so its own safety number (#20).
+  const [numbersByConv, setNumbersByConv] = useState<Record<string, string>>({});
   // Per-conversation verification: conversationId → the safety number marked verified for it.
   const [verifiedByConv, setVerifiedByConv] = useState<Record<string, string>>({});
 
@@ -61,23 +62,30 @@ export default function ChatScreen() {
     setMounted(true);
   }, []);
 
-  // The 2-party session's out-of-band safety number (#20) — computed once; stable per page load.
-  useEffect(() => {
-    void getMlsSession()
-      .then((s) => setSessionNumber(s.safetyNumber))
-      .catch(() => setSessionNumber(null));
-  }, []);
-
   const selectedConversation = conversations.find((c) => c.id === selectedId);
   // Safety-number verification is 2-party only (group safety numbers are deferred —
-  // fingerprint-verification.md §6) and per-conversation. Verified only while the number marked for
-  // THIS conversation still matches the current key (resets if the key changes).
+  // fingerprint-verification.md §6) and per-conversation.
   const isDirect = selectedConversation?.type === 'direct';
+
+  // Compute the selected DIRECT conversation's own safety number (from its own session), once.
+  useEffect(() => {
+    if (!selectedId || !isDirect) return;
+    void getMlsSession(selectedId)
+      .then((s) =>
+        setNumbersByConv((prev) =>
+          prev[selectedId] ? prev : { ...prev, [selectedId]: s.safetyNumber },
+        ),
+      )
+      .catch(() => {});
+  }, [selectedId, isDirect]);
+
+  const currentNumber = selectedId ? (numbersByConv[selectedId] ?? null) : null;
+  // Verified only while the number marked for THIS conversation still matches the current key.
   const verified =
     !!isDirect &&
     selectedId !== null &&
-    sessionNumber !== null &&
-    verifiedByConv[selectedId] === sessionNumber;
+    currentNumber !== null &&
+    verifiedByConv[selectedId] === currentNumber;
 
   const handleSelect = (id: string) => {
     setSelectedId(id);
@@ -115,7 +123,7 @@ export default function ChatScreen() {
       // plaintext confirms the E2EE path and a lock shows. A failure marks the bubble failed, never
       // sent (no false delivery signal); `encrypted` stays false so no lock shows.
       try {
-        const session = await getMlsSession();
+        const session = await getMlsSession(convId);
         await session.send(content || '(attachment)');
         patchMessage(convId, id, { status: 'sent', encrypted: true });
         setTimeout(() => patchMessage(convId, id, { status: 'delivered' }), 1000);
@@ -204,12 +212,12 @@ export default function ChatScreen() {
               ? getConversationDisplayName(selectedConversation, currentUser.id)
               : 'this contact'
           }
-          safetyNumber={sessionNumber}
+          safetyNumber={currentNumber}
           verified={verified}
           onVerifiedChange={(v) =>
             setVerifiedByConv((prev) => {
               const next = { ...prev };
-              if (v && selectedId && sessionNumber) next[selectedId] = sessionNumber;
+              if (v && selectedId && currentNumber) next[selectedId] = currentNumber;
               else if (selectedId) delete next[selectedId];
               return next;
             })
