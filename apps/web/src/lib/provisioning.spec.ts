@@ -73,4 +73,20 @@ describe('provisionDevice', () => {
     const firstBatch = new Set(publish.mock.calls[0]![1]);
     expect(publish.mock.calls[1]![1].every((kp) => !firstBatch.has(kp))).toBe(true);
   });
+
+  it('chunks publishing when the retained pool exceeds the server per-request limit', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('u1', 'pw');
+    await ks.ensurePool(device, 'pw', 105); // a grown pool (> the 100-per-request server limit)
+    publish.mockReset().mockResolvedValue({ deviceId: 'd', published: 0, available: 105 });
+
+    await provisionDevice(ks, device, 'pw');
+
+    // 105 members → two requests within the limit (100 + 5); no batch exceeds the contract.
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect(publish.mock.calls.every((c) => c[1].length <= 100)).toBe(true);
+    expect(publish.mock.calls[0]![1]).toHaveLength(100);
+    expect(publish.mock.calls[1]![1]).toHaveLength(5);
+  });
 });

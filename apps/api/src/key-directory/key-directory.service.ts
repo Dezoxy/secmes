@@ -71,14 +71,6 @@ export class KeyDirectoryService {
 
       const unique = [...new Set(keyPackages)]; // drop intra-batch duplicates
 
-      const before = await tx
-        .select({ n: sql<number>`count(*)::int` })
-        .from(schema.keyPackages)
-        .where(
-          and(eq(schema.keyPackages.deviceId, device.id), isNull(schema.keyPackages.claimedAt)),
-        );
-      const available = before[0]?.n ?? 0;
-
       // onConflictDoNothing + the (tenant, device, md5(key_package)) unique index skips any
       // already-published package (retried batch); `published` reports rows actually inserted.
       const inserted = await tx
@@ -89,18 +81,26 @@ export class KeyDirectoryService {
         .onConflictDoNothing()
         .returning({ id: schema.keyPackages.id });
 
-      // Unclaimed pool size AFTER this insert = pre-insert unclaimed + net-new rows (both unclaimed).
-      // One value drives both the cap and the reported `available`, so they can never drift apart.
-      const afterPublish = available + inserted.length;
+      // Recount unclaimed AFTER the insert rather than trusting a pre-insert count + inserted.length:
+      // claim() doesn't take this device-row lock, so a concurrent claim could have reduced the pool in
+      // between. This statement sees our own just-inserted rows + any committed claims, so `available` is
+      // accurate — the client trusts it to decide replenishment (an over-count would leave it short).
+      const counted = await tx
+        .select({ n: sql<number>`count(*)::int` })
+        .from(schema.keyPackages)
+        .where(
+          and(eq(schema.keyPackages.deviceId, device.id), isNull(schema.keyPackages.claimedAt)),
+        );
+      const available = counted[0]?.n ?? 0;
 
-      // Cap on ACTUAL net-new rows (not batch size) so an idempotent retry near the cap isn't
-      // wrongly rejected. Throwing rolls back the insert above (device row is locked for the tx).
-      if (afterPublish > MAX_AVAILABLE_PER_DEVICE) {
+      // Cap on the true post-insert unclaimed count (so an idempotent retry near the cap isn't wrongly
+      // rejected). Throwing rolls back the insert above (device row is locked for the tx).
+      if (available > MAX_AVAILABLE_PER_DEVICE) {
         throw new BadRequestException(
           `too many unclaimed key packages (max ${MAX_AVAILABLE_PER_DEVICE} per device)`,
         );
       }
-      return { deviceId: device.id, published: inserted.length, available: afterPublish };
+      return { deviceId: device.id, published: inserted.length, available };
     });
   }
 
