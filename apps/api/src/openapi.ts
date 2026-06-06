@@ -29,7 +29,9 @@ const EMAIL_RE = '^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$';
 const BASE64_RE = '^[A-Za-z0-9+/]+={0,2}$'; // opaque MLS/crypto blobs (ciphertext, key packages, backups)
 const BASE64URL_RE = '^[A-Za-z0-9_-]+$'; // opaque keyset cursors
 const TAG_RE = '^[A-Za-z0-9._-]{1,64}$'; // short version/algorithm tags, e.g. "MLS_1.0"
-const TEXT_RE = '^[^\\u0000-\\u001f\\u007f]{0,2048}$'; // free-form unicode text, control chars excluded
+// Opaque / free-form text: control chars excluded, length bounded by `maxLength` (NOT a `{0,N}`
+// quantifier — a large bounded quantifier trips 42Crunch's ReDoS check and invalidates the contract).
+const TEXT_RE = '^[^\\u0000-\\u001f\\u007f]+$';
 const STRING_MAX = 65_536; // safe upper bound for opaque blobs (ciphertext is capped here on input too)
 const ARRAY_MAX = 1_000;
 
@@ -38,7 +40,9 @@ type MutableSchema = Record<string, unknown>;
 /** A real (non-loose) pattern for an opaque/structured string, inferred from its property name. */
 function patternForName(name: string): string | undefined {
   const n = name.toLowerCase();
-  if (/cipher|keypackage|publickey|signature|backup|blob/.test(n)) return BASE64_RE;
+  // Only fields that are ALWAYS base64 — NOT `backup` (the sealed recovery artifact is `JSON.stringify`d
+  // and starts with `{`) or other opaque blobs, which fall through to the bounded-text fallback.
+  if (/cipher|keypackage|publickey|signature/.test(n)) return BASE64_RE;
   if (/cursor|after/.test(n)) return BASE64URL_RE;
   if (n === 'alg') return TAG_RE;
   if (/email/.test(n)) return EMAIL_RE;
@@ -141,7 +145,19 @@ export function createOpenApiDocument(app: INestApplication): OpenAPIObject {
     required: ['statusCode', 'message'],
     properties: {
       statusCode: { type: 'integer', format: 'int64', minimum: 100, maximum: 599 },
-      message: { type: 'string', maxLength: 2048, pattern: TEXT_RE },
+      // ZodValidationPipe throws BadRequestException(issues[]) → Nest serializes `message` as a string[]
+      // for 400s, while other HttpExceptions use a single string. Document both so generated clients and
+      // conformance checks accept real validation failures.
+      message: {
+        oneOf: [
+          { type: 'string', maxLength: 2048, pattern: TEXT_RE },
+          {
+            type: 'array',
+            maxItems: 100,
+            items: { type: 'string', maxLength: 2048, pattern: TEXT_RE },
+          },
+        ],
+      },
       error: { type: 'string', maxLength: 256, pattern: TEXT_RE },
     },
   };
