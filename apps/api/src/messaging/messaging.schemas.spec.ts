@@ -56,15 +56,25 @@ describe('SendMessageSchema', () => {
 });
 
 describe('DeliverWelcomeSchema', () => {
-  const ok = { recipientUserId: uuid, welcome: 'AAAA', ratchetTree: 'BBBB' };
+  const ok = {
+    recipientUserId: uuid,
+    recipientDeviceId: uuid,
+    welcome: 'AAAA',
+    ratchetTree: 'BBBB',
+  };
 
   it('accepts a well-formed welcome delivery', () => {
     expect(DeliverWelcomeSchema.safeParse(ok).success).toBe(true);
   });
-  it('rejects a non-uuid recipient, non-base64 blobs, empty blobs, and unknown keys', () => {
+  it('rejects a non-uuid recipient/device, non-base64 blobs, empty blobs, missing device, unknown keys', () => {
     expect(DeliverWelcomeSchema.safeParse({ ...ok, recipientUserId: 'nope' }).success).toBe(false);
+    expect(DeliverWelcomeSchema.safeParse({ ...ok, recipientDeviceId: 'nope' }).success).toBe(
+      false,
+    );
     expect(DeliverWelcomeSchema.safeParse({ ...ok, welcome: 'not base64!' }).success).toBe(false);
     expect(DeliverWelcomeSchema.safeParse({ ...ok, ratchetTree: '' }).success).toBe(false);
+    const noDevice = { recipientUserId: uuid, welcome: 'AAAA', ratchetTree: 'BBBB' };
+    expect(DeliverWelcomeSchema.safeParse(noDevice).success).toBe(false); // device is required
     expect(DeliverWelcomeSchema.safeParse({ ...ok, surprise: true }).success).toBe(false);
   });
   it('rejects a welcome blob over the 32 KiB bound (DoS guard)', () => {

@@ -14,6 +14,7 @@ describe.skipIf(!DB_URL)('messaging schema RLS + append-only (checkpoint 25)', (
   let tenantB: string;
   let userA: string;
   let userB: string;
+  let deviceA: string; // a device of userA (welcomes are sealed to a specific device)
   let convA: string; // a conversation owned by tenant A
   let convB: string; // a conversation owned by tenant B (proves disjoint isolation)
 
@@ -35,6 +36,8 @@ describe.skipIf(!DB_URL)('messaging schema RLS + append-only (checkpoint 25)', (
                                 values (${tenantA}, 'msg-ext-a', 'msg-a@a.test') returning id`;
     [{ id: userB }] = await sql`insert into users (tenant_id, external_identity_id, email)
                                 values (${tenantB}, 'msg-ext-b', 'msg-b@b.test') returning id`;
+    [{ id: deviceA }] = await sql`insert into devices (tenant_id, user_id, signature_public_key)
+                                  values (${tenantA}, ${userA}, 'msg-rls-sig-a') returning id`;
   });
 
   afterAll(async () => {
@@ -238,12 +241,12 @@ describe.skipIf(!DB_URL)('messaging schema RLS + append-only (checkpoint 25)', (
 
   // ── MLS Welcome delivery (welcome-delivery.md) ───────────────────────────────────────────────────
   it('conversation_welcomes isolates by tenant (RLS) and WITH CHECK blocks cross-tenant writes', async () => {
-    // A welcome in tenant A (recipient + sender = userA, in convA — both base64-opaque blobs).
+    // A welcome in tenant A (recipient + sender = userA, device = deviceA, in convA — opaque blobs).
     await asTenant(
       tenantA,
       (tx) => tx`insert into conversation_welcomes
-                   (tenant_id, conversation_id, recipient_user_id, sender_user_id, welcome, ratchet_tree)
-                 values (${tenantA}, ${convA}, ${userA}, ${userA}, 'b64-welcome', 'b64-tree')`,
+                   (tenant_id, conversation_id, recipient_user_id, recipient_device_id, sender_user_id, welcome, ratchet_tree)
+                 values (${tenantA}, ${convA}, ${userA}, ${deviceA}, ${userA}, 'b64-welcome', 'b64-tree')`,
     );
     // Tenant B sees NONE of A's welcomes.
     const [bSees] = (await asTenant(
@@ -263,8 +266,8 @@ describe.skipIf(!DB_URL)('messaging schema RLS + append-only (checkpoint 25)', (
       asTenant(
         tenantA,
         (tx) => tx`insert into conversation_welcomes
-                     (tenant_id, conversation_id, recipient_user_id, sender_user_id, welcome, ratchet_tree)
-                   values (${tenantB}, ${convA}, ${userA}, ${userA}, 'x', 'y')`,
+                     (tenant_id, conversation_id, recipient_user_id, recipient_device_id, sender_user_id, welcome, ratchet_tree)
+                   values (${tenantB}, ${convA}, ${userA}, ${deviceA}, ${userA}, 'x', 'y')`,
       ),
     ).rejects.toThrow();
   });
@@ -289,8 +292,8 @@ describe.skipIf(!DB_URL)('messaging schema RLS + append-only (checkpoint 25)', (
                            values (${tenantA}, ${userA}) returning id`;
       const id = (c as { id: string }).id;
       await tx`insert into conversation_welcomes
-                 (tenant_id, conversation_id, recipient_user_id, sender_user_id, welcome, ratchet_tree)
-               values (${tenantA}, ${id}, ${userA}, ${userA}, 'w', 't')`;
+                 (tenant_id, conversation_id, recipient_user_id, recipient_device_id, sender_user_id, welcome, ratchet_tree)
+               values (${tenantA}, ${id}, ${userA}, ${deviceA}, ${userA}, 'w', 't')`;
       return id;
     })) as string;
     await sql`delete from conversations where id = ${cid}`; // composite FK ON DELETE CASCADE removes the welcome

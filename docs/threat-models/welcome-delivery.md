@@ -5,17 +5,21 @@
 
 ## 1. Feature & data flow
 
-To add a member, the inviter (an existing member) runs MLS `addMember(peerKeyPackage)` locally, which
-yields an opaque **Welcome** + **RatchetTree**. The inviter `POST`s them to the server **for the
-recipient**; the server stores them ciphertext-only. The recipient, on connect, `GET`s their pending
-welcomes, runs `joinConversation(welcome, ratchetTree)` to enter the group, then `DELETE`s the consumed
-row. The server **never decrypts** the Welcome (it carries the group's key material, sealed to the
-recipient's KeyPackage HPKE key). Server stores + forwards opaque base64 only — crypto-blind.
+To add a member, the inviter (an existing member) **claims one of the recipient's one-time KeyPackages**
+from the key directory (#19) — which names a **specific device** — and runs MLS `addMember(keyPackage)`
+locally, yielding an opaque **Welcome** + **RatchetTree**. The inviter `POST`s them to the server **for
+that recipient device**; the server stores them ciphertext-only. The recipient device, on connect, `GET`s
+its pending welcomes, runs `joinConversation(welcome, ratchetTree)` to enter the group, then `DELETE`s the
+consumed row. The server **never decrypts** the Welcome (it carries the group's key material, HPKE-sealed
+to that device's KeyPackage key). Server stores + forwards opaque base64 only — crypto-blind.
 
 - **Deliver = invite** (one op): in a transaction the server verifies the caller is a member, adds the
-  recipient to `conversation_members`, and stores the welcome for them.
-- **Fetch is caller-scoped** (like `/sync` #30): a recipient gets only welcomes addressed to them, across
-  all conversations they were added to.
+  recipient to `conversation_members`, and stores the welcome for the recipient's **specific device** (the
+  one whose KeyPackage the inviter claimed — the Welcome is HPKE-sealed to it).
+- **Fetch/consume are device-scoped** (caller-scoped like `/sync` #30, plus the device): a device gets —
+  and may consume — only the welcomes sealed to **its own** KeyPackage, across all conversations it was
+  added to. This stops a second device of the same user from fetching (and worse, consuming/**destroying**)
+  a welcome it cannot decrypt, which would permanently strand the intended device.
 
 ## 2. Assets & trust boundaries
 
@@ -28,9 +32,10 @@ recipient's KeyPackage HPKE key). Server stores + forwards opaque base64 only �
 ## 3. Threats (STRIDE-lite)
 
 - **Information disclosure (group key material):** the Welcome is **opaque** — the server stores base64 it
-  never parses, so it learns no group secret. RLS blocks cross-tenant reads; the fetch is filtered to
-  `recipient_user_id = caller`, so one member can't read **another** member's welcome (which is sealed to
-  that member's HPKE key anyway, but we don't even hand it over).
+  never parses, so it learns no group secret. RLS blocks cross-tenant reads; fetch/consume are filtered to
+  `recipient_user_id = caller` **and** `recipient_device_id = the calling device`, so one member can't read
+  **another** member's welcome, and one device can't read/consume a **sibling** device's welcome (each is
+  sealed to a single device's HPKE key anyway, but we don't even hand it over).
 - **Spoofing / elevation (who can add a member):** delivery is **membership-gated** — `requireMembership`
   on the verified caller; a non-member adding members / planting welcomes → 404 (no existence leak, same
   as send #26). The recipient must be a user **in the caller's tenant** (composite FK). `sender_user_id`
@@ -59,14 +64,19 @@ recipient's KeyPackage HPKE key). Server stores + forwards opaque base64 only �
 ## 5. Decision & mitigations
 
 - **Table** `conversation_welcomes` (0012): `tenant_id` + `conversation_id` + `recipient_user_id` +
-  `sender_user_id` + `welcome` + `ratchet_tree` (both base64, ciphertext-only) + `created_at`. RLS
-  ENABLE+FORCE+WITH CHECK; composite FK `(tenant_id, conversation_id) → conversations` CASCADE; user FKs
-  NO ACTION (preserve like `messages.sender_user_id`; tenant teardown still cascades). Leading-`tenant_id`
-  indexes: `(tenant_id, recipient_user_id)` (fetch-mine) and `(tenant_id, conversation_id)` (FK cascade).
-  Grants `select, insert, delete` to `argus_app` (transient, prunable — not append-only).
+  `recipient_device_id` + `sender_user_id` + `welcome` + `ratchet_tree` (both base64, ciphertext-only) +
+  `created_at`. RLS ENABLE+FORCE+WITH CHECK; composite FK `(tenant_id, conversation_id) → conversations`
+  CASCADE; **`(tenant_id, recipient_user_id, recipient_device_id) → devices` NO ACTION** (the welcome must
+  be sealed to a real device **of the recipient** — rejects an unknown device or one of another user); user
+  FKs NO ACTION (preserve like `messages.sender_user_id`; tenant teardown still cascades). Leading-`tenant_id`
+  indexes: `(tenant_id, recipient_user_id, recipient_device_id)` (device fetch-mine) and
+  `(tenant_id, conversation_id)` (FK cascade). Grants `select, insert, delete` to `argus_app` (transient).
 - **Endpoints** (Zod `.strict()` + OpenAPI bounds, base64 patterns): `POST /conversations/:id/welcomes`
-  (deliver = invite; membership-gated; adds the member + stores the welcome atomically),
-  `GET /welcomes` (caller-scoped pending list), `DELETE /welcomes/:id` (recipient-only consume).
+  (deliver = invite; membership-gated; body carries `recipientUserId` + `recipientDeviceId`; adds the
+  member + stores the welcome atomically), `GET /welcomes?deviceId=` (the calling device's pending list),
+  `DELETE /welcomes/:id?deviceId=` (recipient-device-only consume). `deviceId` is **client-asserted** — the
+  token proves the user, not the device — so it only narrows within the caller's own welcomes (routing, not
+  authz; confidentiality is HPKE-sealed regardless).
 - **Reviewer:** `security-boundary-auditor`. **Tests (live-DB):** cross-tenant isolation, non-member
   deliver → 404, recipient-scoped fetch (a member can't see another's welcome), recipient-only consume,
   opaque round-trip, conversation-delete cascade, WITH CHECK.
@@ -86,6 +96,12 @@ recipient's KeyPackage HPKE key). Server stores + forwards opaque base64 only �
   the v1 1:1 add and kept under the platform's ~100 KB JSON body cap so the documented contract is also
   the enforced one. N-party group RatchetTrees (B1) can exceed this and will need the body cap raised
   alongside the bound.
+- **`deviceId` is client-asserted, not from the token.** The access token carries the user (`sub`), not
+  the device, so list/consume take the device id from the client. Safe: it can only select among the
+  **caller's own** welcomes (cross-user/tenant stay blocked by the token-derived user + RLS), and a
+  welcome's confidentiality is HPKE-sealed to the device regardless — so a wrong/forged `deviceId` is at
+  most a self-inflicted routing miss, never a disclosure. Binding the device into the access token (so the
+  server *verifies* it) is later hardening, tracked with multi-device session management.
 - **No server-pushed real-time welcome** yet — the recipient polls `GET /welcomes` on connect; a WS push
   is a later refinement (the receipts/realtime gateway #28 can carry it).
 - **Group / PCS** semantics (N-party adds, post-compromise security) are deferred (B1); v1 is the 1:1 add.

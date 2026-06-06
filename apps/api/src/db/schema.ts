@@ -120,6 +120,8 @@ export const conversationWelcomes = pgTable('conversation_welcomes', {
   tenantId: uuid('tenant_id').notNull(),
   conversationId: uuid('conversation_id').notNull(),
   recipientUserId: uuid('recipient_user_id').notNull(),
+  // The specific device whose claimed KeyPackage the Welcome is sealed to (multi-device routing).
+  recipientDeviceId: uuid('recipient_device_id').notNull(),
   senderUserId: uuid('sender_user_id').notNull(),
   welcome: text('welcome').notNull(),
   ratchetTree: text('ratchet_tree').notNull(),

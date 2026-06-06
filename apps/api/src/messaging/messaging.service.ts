@@ -206,9 +206,10 @@ export class MessagingService {
    * and a live group. In ONE transaction the verified caller (an existing member) adds `recipientUserId`
    * to the conversation and stores the opaque Welcome + RatchetTree FOR them. AUTHZ: the caller must
    * already be a member (same membership 404 as send — a non-member / cross-tenant / non-existent
-   * conversation leaks nothing). The recipient must be a user IN THE CALLER'S TENANT (composite FK → 400).
-   * `welcome`/`ratchetTree` are CIPHERTEXT ONLY — the server never decrypts them; `senderUserId` is the
-   * VERIFIED caller, never client input.
+   * conversation leaks nothing). The recipient must be a user IN THE CALLER'S TENANT, and
+   * `recipientDeviceId` one of THAT user's devices — the Welcome is HPKE-sealed to that device's claimed
+   * KeyPackage (composite FKs → 400). `welcome`/`ratchetTree` are CIPHERTEXT ONLY — the server never
+   * decrypts them; `senderUserId` is the VERIFIED caller, never client input.
    */
   async deliverWelcome(
     auth: VerifiedAuth,
@@ -232,29 +233,43 @@ export class MessagingService {
         throw new BadRequestException('recipient user id is invalid for this tenant');
       }
 
-      const [welcome] = await tx
-        .insert(schema.conversationWelcomes)
-        .values({
-          tenantId: auth.tenantId,
-          conversationId,
-          recipientUserId: body.recipientUserId,
-          senderUserId: sender,
-          welcome: body.welcome,
-          ratchetTree: body.ratchetTree,
-        })
-        .returning({ id: schema.conversationWelcomes.id });
+      // Store the opaque Welcome + RatchetTree for the recipient DEVICE. The composite FK
+      // (tenant_id, recipient_user_id, recipient_device_id) → devices rejects a device that isn't the
+      // recipient's (or an unknown one) → 400 (no id echoed). A caught FK error aborts the tx, rolling
+      // back the member add too (atomic).
+      let rows: { id: string }[];
+      try {
+        rows = await tx
+          .insert(schema.conversationWelcomes)
+          .values({
+            tenantId: auth.tenantId,
+            conversationId,
+            recipientUserId: body.recipientUserId,
+            recipientDeviceId: body.recipientDeviceId,
+            senderUserId: sender,
+            welcome: body.welcome,
+            ratchetTree: body.ratchetTree,
+          })
+          .returning({ id: schema.conversationWelcomes.id });
+      } catch {
+        throw new BadRequestException('recipient device id is invalid for this tenant');
+      }
+      const welcome = rows[0];
       if (!welcome) throw new Error('welcome insert returned no row');
       return { welcomeId: welcome.id };
     });
   }
 
   /**
-   * The caller's PENDING welcomes across every conversation they were added to (fetched on connect to
-   * run `joinConversation()` locally). CALLER-SCOPED: `recipient_user_id = the verified caller`, so a
-   * member never sees another member's welcome (which is sealed to that member's HPKE key anyway — we
-   * don't even hand it over). RLS scopes to the tenant. CIPHERTEXT ONLY; the server never decrypts.
+   * The calling DEVICE's PENDING welcomes across every conversation it was added to (fetched on connect
+   * to run `joinConversation()` locally). Scoped to `recipient_user_id = the verified caller` (the authz
+   * boundary — a member never sees another member's welcome, which is sealed to that member's HPKE key
+   * anyway) AND `recipient_device_id = deviceId` (intra-account routing — each device gets only the
+   * welcomes sealed to ITS KeyPackage, so a phone never picks up the laptop's). RLS scopes to the tenant.
+   * `deviceId` is client-asserted (the access token carries the user, not the device); it can only narrow
+   * within the caller's own welcomes, so it routes, it does not authorize. CIPHERTEXT ONLY.
    */
-  async listMyWelcomes(auth: VerifiedAuth): Promise<PendingWelcome[]> {
+  async listMyWelcomes(auth: VerifiedAuth, deviceId: string): Promise<PendingWelcome[]> {
     return withTenant(auth.tenantId, async (tx) => {
       const me = await this.requireUser(tx, auth.sub);
       const rows = await tx
@@ -266,7 +281,12 @@ export class MessagingService {
           createdAt: schema.conversationWelcomes.createdAt,
         })
         .from(schema.conversationWelcomes)
-        .where(eq(schema.conversationWelcomes.recipientUserId, me))
+        .where(
+          and(
+            eq(schema.conversationWelcomes.recipientUserId, me),
+            eq(schema.conversationWelcomes.recipientDeviceId, deviceId),
+          ),
+        )
         .orderBy(asc(schema.conversationWelcomes.createdAt));
       return rows.map((r) => ({
         id: r.id,
@@ -279,12 +299,14 @@ export class MessagingService {
   }
 
   /**
-   * Consume (delete) a welcome after the caller has joined the group. RECIPIENT-ONLY: the delete is
-   * filtered to `recipient_user_id = the verified caller`, so a member can only consume their OWN
-   * welcome. 0 rows deleted → 404 — the SAME 404 whether the id is foreign, wrong-tenant (RLS-hidden),
-   * or already consumed, so nothing about another member's welcomes is revealed.
+   * Consume (delete) a welcome after the calling DEVICE has joined the group. Scoped to
+   * `recipient_user_id = the verified caller` (authz boundary) AND `recipient_device_id = deviceId`
+   * (routing), so a device can only consume the welcome sealed to ITS OWN KeyPackage — a second device
+   * of the same user can NOT delete (and thereby lose) another device's pending welcome. 0 rows deleted
+   * → 404 — the SAME 404 whether the id is foreign, wrong-tenant (RLS-hidden), for another device, or
+   * already consumed, so nothing about other welcomes is revealed.
    */
-  async consumeWelcome(auth: VerifiedAuth, welcomeId: string): Promise<void> {
+  async consumeWelcome(auth: VerifiedAuth, welcomeId: string, deviceId: string): Promise<void> {
     await withTenant(auth.tenantId, async (tx) => {
       const me = await this.requireUser(tx, auth.sub);
       const deleted = await tx
@@ -293,6 +315,7 @@ export class MessagingService {
           and(
             eq(schema.conversationWelcomes.id, welcomeId),
             eq(schema.conversationWelcomes.recipientUserId, me),
+            eq(schema.conversationWelcomes.recipientDeviceId, deviceId),
           ),
         )
         .returning({ id: schema.conversationWelcomes.id });

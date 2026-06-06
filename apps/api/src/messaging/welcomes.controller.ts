@@ -7,6 +7,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -19,6 +20,7 @@ import {
   ApiOperation,
   ApiParam,
   ApiProperty,
+  ApiQuery,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -39,6 +41,12 @@ class DeliverWelcomeBody {
     description: 'the user being added; must be a user in this tenant',
   })
   recipientUserId!: string;
+
+  @ApiProperty({
+    format: 'uuid',
+    description: "the recipient's device whose claimed KeyPackage this Welcome is sealed to",
+  })
+  recipientDeviceId!: string;
 
   @ApiProperty({
     description: 'opaque base64 MLS Welcome — the server never decrypts it',
@@ -107,29 +115,50 @@ export class WelcomesController {
 
   @Get('welcomes')
   @ApiOperation({
-    summary: "Fetch the caller's pending welcomes to join (caller-scoped)",
+    summary: "Fetch the calling device's pending welcomes to join (caller + device scoped)",
     operationId: 'listWelcomes',
   })
+  @ApiQuery({
+    name: 'deviceId',
+    required: true,
+    schema: { type: 'string', format: 'uuid' },
+    description: "the calling device's id — returns only welcomes sealed to its KeyPackage",
+  })
   @ApiOkResponse({ type: [PendingWelcomeDto] })
+  @ApiBadRequestResponse({ description: 'missing or invalid deviceId' })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
-  async list(@CurrentAuth() auth: VerifiedAuth): Promise<PendingWelcomeDto[]> {
-    return this.messaging.listMyWelcomes(auth);
+  async list(
+    @CurrentAuth() auth: VerifiedAuth,
+    @Query('deviceId', ParseUUIDPipe) deviceId: string,
+  ): Promise<PendingWelcomeDto[]> {
+    return this.messaging.listMyWelcomes(auth, deviceId);
   }
 
   @Delete('welcomes/:welcomeId')
   @HttpCode(204)
   @ApiOperation({
-    summary: 'Consume (delete) a welcome after joining (recipient-only)',
+    summary: 'Consume (delete) a welcome after joining (recipient device only)',
     operationId: 'consumeWelcome',
   })
   @ApiParam({ name: 'welcomeId', format: 'uuid' })
+  @ApiQuery({
+    name: 'deviceId',
+    required: true,
+    schema: { type: 'string', format: 'uuid' },
+    description:
+      "the calling device's id — only the device the welcome is sealed to may consume it",
+  })
   @ApiNoContentResponse({ description: 'welcome consumed' })
-  @ApiNotFoundResponse({ description: 'welcome not found or not addressed to the caller' })
+  @ApiBadRequestResponse({ description: 'missing or invalid deviceId' })
+  @ApiNotFoundResponse({
+    description: 'welcome not found, or not addressed to this caller + device',
+  })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async consume(
     @CurrentAuth() auth: VerifiedAuth,
     @Param('welcomeId', ParseUUIDPipe) welcomeId: string,
+    @Query('deviceId', ParseUUIDPipe) deviceId: string,
   ): Promise<void> {
-    await this.messaging.consumeWelcome(auth, welcomeId);
+    await this.messaging.consumeWelcome(auth, welcomeId, deviceId);
   }
 }

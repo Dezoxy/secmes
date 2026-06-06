@@ -45,6 +45,9 @@ export const DeliverWelcomeSchema = z
   .object({
     // The user being ADDED — must be a user in the caller's tenant (composite FK → 400). Becomes a member.
     recipientUserId: z.string().uuid(),
+    // The recipient's DEVICE whose claimed KeyPackage this Welcome is sealed to — must be a device of
+    // recipientUserId in this tenant (composite FK → 400). Routes the welcome to the right device.
+    recipientDeviceId: z.string().uuid(),
     // Opaque MLS Welcome + RatchetTree (base64). The server stores + forwards; it NEVER decrypts them —
     // they carry the group's key material sealed to the recipient's KeyPackage HPKE key. 32 KiB each:
     // ample for a v1 1:1 add (a Welcome/RatchetTree is a few hundred bytes to a few KB) and it keeps the
