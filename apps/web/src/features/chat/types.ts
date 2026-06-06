@@ -34,6 +34,8 @@ export interface ChatMessage {
   sentAt: number;
   /** Delivery state shown on the user's own messages. */
   status: DeliveryStatus;
+  /** True once the message has been through a real MLS encrypt→decrypt round-trip (shows a lock). */
+  encrypted?: boolean;
   images?: ImageAttachment[];
 }
 

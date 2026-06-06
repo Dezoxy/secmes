@@ -1,4 +1,4 @@
-import { Check, CheckCheck, Image as ImageIcon } from 'lucide-react';
+import { Check, CheckCheck, Image as ImageIcon, Lock } from 'lucide-react';
 import type { ChatMessage, Contact, DeliveryStatus } from './types';
 import { ME } from './types';
 import { formatClockTime } from './format';
@@ -77,6 +77,11 @@ export function MessageBubble({
           }`}
         >
           <span className="text-xs text-white/30">{formatClockTime(message.sentAt)}</span>
+          {isOwn && message.encrypted && (
+            <span title="Ran a real MLS encrypt→decrypt in this browser (demo — not yet to a remote recipient)">
+              <Lock className="h-3 w-3 text-purple-400/70" aria-label="Encrypted via MLS (demo)" />
+            </span>
+          )}
           {isOwn && <StatusTicks status={message.status} />}
         </div>
       </div>
