@@ -7,8 +7,13 @@ import { ChatHeader } from './ChatHeader';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { ImagePreviewModal } from './ImagePreviewModal';
+import { VerifySecurity } from './VerifySecurity';
 import type { Attachment, Conversation, Message } from './seed';
-import { conversations as initialConversations, currentUser } from './seed';
+import {
+  conversations as initialConversations,
+  currentUser,
+  getConversationDisplayName,
+} from './seed';
 
 /**
  * Chat experience, ported from the reworked design (`~/Downloads`) into the Vite PWA.
@@ -47,12 +52,40 @@ export default function ChatScreen() {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [verifyOpen, setVerifyOpen] = useState(false);
+  // Each direct conversation has its own MLS session, so its own safety number (#20).
+  const [numbersByConv, setNumbersByConv] = useState<Record<string, string>>({});
+  // Per-conversation verification: conversationId → the safety number marked verified for it.
+  const [verifiedByConv, setVerifiedByConv] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
   const selectedConversation = conversations.find((c) => c.id === selectedId);
+  // Safety-number verification is 2-party only (group safety numbers are deferred —
+  // fingerprint-verification.md §6) and per-conversation.
+  const isDirect = selectedConversation?.type === 'direct';
+
+  // Compute the selected DIRECT conversation's own safety number (from its own session), once.
+  useEffect(() => {
+    if (!selectedId || !isDirect) return;
+    void getMlsSession(selectedId)
+      .then((s) =>
+        setNumbersByConv((prev) =>
+          prev[selectedId] ? prev : { ...prev, [selectedId]: s.safetyNumber },
+        ),
+      )
+      .catch(() => {});
+  }, [selectedId, isDirect]);
+
+  const currentNumber = selectedId ? (numbersByConv[selectedId] ?? null) : null;
+  // Verified only while the number marked for THIS conversation still matches the current key.
+  const verified =
+    !!isDirect &&
+    selectedId !== null &&
+    currentNumber !== null &&
+    verifiedByConv[selectedId] === currentNumber;
 
   const handleSelect = (id: string) => {
     setSelectedId(id);
@@ -90,7 +123,7 @@ export default function ChatScreen() {
       // plaintext confirms the E2EE path and a lock shows. A failure marks the bubble failed, never
       // sent (no false delivery signal); `encrypted` stays false so no lock shows.
       try {
-        const session = await getMlsSession();
+        const session = await getMlsSession(convId);
         await session.send(content || '(attachment)');
         patchMessage(convId, id, { status: 'sent', encrypted: true });
         setTimeout(() => patchMessage(convId, id, { status: 'delivered' }), 1000);
@@ -147,7 +180,12 @@ export default function ChatScreen() {
         >
           {selectedConversation ? (
             <>
-              <ChatHeader conversation={selectedConversation} onBack={() => setShowSidebar(true)} />
+              <ChatHeader
+                conversation={selectedConversation}
+                onBack={() => setShowSidebar(true)}
+                verified={verified}
+                onVerify={isDirect ? () => setVerifyOpen(true) : undefined}
+              />
               <MessageList conversation={selectedConversation} onImageClick={setPreviewImage} />
               <ChatInput onSend={handleSend} />
             </>
@@ -167,6 +205,26 @@ export default function ChatScreen() {
 
       <ImagePreviewModal imageUrl={previewImage} onClose={() => setPreviewImage(null)} />
       {recoveryOpen && <RecoveryPanel onClose={() => setRecoveryOpen(false)} />}
+      {verifyOpen && isDirect && (
+        <VerifySecurity
+          peerName={
+            selectedConversation
+              ? getConversationDisplayName(selectedConversation, currentUser.id)
+              : 'this contact'
+          }
+          safetyNumber={currentNumber}
+          verified={verified}
+          onVerifiedChange={(v) =>
+            setVerifiedByConv((prev) => {
+              const next = { ...prev };
+              if (v && selectedId && currentNumber) next[selectedId] = currentNumber;
+              else if (selectedId) delete next[selectedId];
+              return next;
+            })
+          }
+          onClose={() => setVerifyOpen(false)}
+        />
+      )}
     </div>
   );
 }

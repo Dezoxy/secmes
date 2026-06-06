@@ -1,4 +1,4 @@
-import { Phone, Video, MoreVertical, ArrowLeft, Users } from 'lucide-react';
+import { Phone, Video, MoreVertical, ArrowLeft, Users, Shield, ShieldCheck } from 'lucide-react';
 import type { Conversation } from './seed';
 import {
   currentUser,
@@ -10,9 +10,12 @@ import {
 interface ChatHeaderProps {
   conversation: Conversation;
   onBack?: () => void;
+  /** Out-of-band safety-number verification state + opener (checkpoint 20). */
+  verified?: boolean;
+  onVerify?: () => void;
 }
 
-export function ChatHeader({ conversation, onBack }: ChatHeaderProps) {
+export function ChatHeader({ conversation, onBack, verified, onVerify }: ChatHeaderProps) {
   const displayName = getConversationDisplayName(conversation, currentUser.id);
   const avatar = getConversationAvatar(conversation, currentUser.id);
   const otherUser = getOtherParticipant(conversation, currentUser.id);
@@ -53,7 +56,26 @@ export function ChatHeader({ conversation, onBack }: ChatHeaderProps) {
         </div>
 
         <div>
-          <h2 className="font-semibold text-white">{displayName}</h2>
+          <div className="flex items-center gap-1.5">
+            <h2 className="font-semibold text-white">{displayName}</h2>
+            {onVerify && (
+              <button
+                type="button"
+                onClick={onVerify}
+                title={verified ? 'Verified — review security' : 'Verify security'}
+                className="rounded-md p-0.5 transition-colors"
+              >
+                {verified ? (
+                  <ShieldCheck className="h-4 w-4 text-green-400" aria-label="Verified" />
+                ) : (
+                  <Shield
+                    className="h-3.5 w-3.5 text-white/30 hover:text-white/60"
+                    aria-label="Verify security"
+                  />
+                )}
+              </button>
+            )}
+          </div>
           <p className={`text-xs ${isOnline ? 'text-green-400' : 'text-white/40'}`}>{statusText}</p>
         </div>
       </div>

@@ -5,7 +5,7 @@
 // via the key directory + a server-delivered Welcome, and additionally needs auth (Zitadel) +
 // out-of-band fingerprint verification (#20, MITM defense) — none of which exist yet.
 
-import { MlsEngine, type Conversation } from '@argus/crypto';
+import { MlsEngine, safetyNumber, type Conversation } from '@argus/crypto';
 
 let enginePromise: Promise<MlsEngine> | null = null;
 function getEngine(): Promise<MlsEngine> {
@@ -30,6 +30,12 @@ export interface EncryptResult {
 export interface E2eeSession {
   /** MLS-encrypt as you, MLS-decrypt as the peer. Returns the recovered plaintext + the wire ciphertext. */
   send(text: string): Promise<EncryptResult>;
+  /**
+   * The out-of-band SAFETY NUMBER for this 2-party session (you ↔ peer), derived from both devices'
+   * identity keys (@argus/crypto). Users compare it out-of-band to detect a MITM key-swap (#20). In the
+   * loopback demo it's computed for the local peer; the live flow uses the remote peer's published key.
+   */
+  safetyNumber: string;
 }
 
 /** Create a fresh two-party MLS session (you + a local peer) in one group. */
@@ -41,7 +47,11 @@ export async function createE2eeSession(conversationId: string): Promise<E2eeSes
   // 2-party: addMember applies the commit locally AND yields the Welcome the peer joins with.
   const invite = await yourConversation.addMember(peer.publicPackage);
   const peerConversation: Conversation = await engine.joinConversation(peer, invite);
+  // The number both sides would compare out-of-band to confirm no key was swapped (MITM, #20).
+  // Derived from PUBLIC KeyPackages — in the live flow the peer's comes from the key directory.
+  const sn = await safetyNumber(you.publicPackage, peer.publicPackage);
   return {
+    safetyNumber: sn,
     async send(text: string): Promise<EncryptResult> {
       const wire = await yourConversation.encrypt(text); // opaque bytes — all that leaves the device
       const plaintext = await peerConversation.decrypt(wire); // the peer recovers it
@@ -50,11 +60,18 @@ export async function createE2eeSession(conversationId: string): Promise<E2eeSes
   };
 }
 
-let sessionPromise: Promise<E2eeSession> | null = null;
-/** A lazily-created, cached session for the app (one MLS group backs the in-browser demo). */
-export function getMlsSession(): Promise<E2eeSession> {
-  sessionPromise ??= createE2eeSession('argus-local-demo');
-  return sessionPromise;
+const sessionsByConversation = new Map<string, Promise<E2eeSession>>();
+/**
+ * A lazily-created, cached MLS session PER conversation — so each peer is its own group with its own
+ * keys, and therefore its own distinct safety number (#20). Stable per page load.
+ */
+export function getMlsSession(conversationId: string): Promise<E2eeSession> {
+  let session = sessionsByConversation.get(conversationId);
+  if (!session) {
+    session = createE2eeSession(conversationId);
+    sessionsByConversation.set(conversationId, session);
+  }
+  return session;
 }
 
 /** Self-test for a UI badge: a real round-trip succeeds AND the plaintext never appears in the wire bytes. */
