@@ -55,6 +55,18 @@ function isSealedBackup(v: unknown): v is SealedBackup {
   );
 }
 
+/**
+ * Thrown by importRecoveryArtifact when a device already exists for this profile — raised ONLY after the
+ * artifact has been authenticated + identity-bound, so callers can safely clear + re-import on this error
+ * (a typed sentinel, so the recovery layer doesn't match on brittle message text).
+ */
+export class DeviceExistsError extends Error {
+  constructor() {
+    super('keystore already holds a device; clear it before importing a backup');
+    this.name = 'DeviceExistsError';
+  }
+}
+
 /** Client-side store for this device's MLS key material — sealed at rest under the user's passphrase. */
 export class DeviceKeystore {
   private constructor(
@@ -158,7 +170,7 @@ export class DeviceKeystore {
     if (!existing) await tx.store.put({ identity, sealed } satisfies StoredDevice, SELF);
     await tx.done;
     if (existing) {
-      throw new Error('keystore already holds a device; clear it before importing a backup');
+      throw new DeviceExistsError();
     }
     return keys;
   }
@@ -166,6 +178,11 @@ export class DeviceKeystore {
   /** Remove the stored device — to recover from a bad import or reset this profile before re-importing. */
   async clearDevice(): Promise<void> {
     await this.db.delete(STORE, SELF);
+  }
+
+  /** Whether a sealed device is stored for this profile. Metadata only — no passphrase, no unseal. */
+  async hasDevice(): Promise<boolean> {
+    return (await this.db.get(STORE, SELF)) !== undefined;
   }
 
   private async unseal(

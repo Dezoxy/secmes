@@ -8,15 +8,22 @@ interface ConversationListProps {
   conversations: Conversation[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onSettings?: () => void;
 }
 
-export function ConversationList({ conversations, selectedId, onSelect }: ConversationListProps) {
+export function ConversationList({
+  conversations,
+  selectedId,
+  onSelect,
+  onSettings,
+}: ConversationListProps) {
   return (
     <div className="flex h-full flex-col">
       {/* Profile */}
       <div className="border-b border-white/5 p-4">
         <button
           type="button"
+          onClick={onSettings}
           className="flex w-full items-center gap-3 rounded-xl p-2 transition-colors hover:bg-[#1a1a26]"
         >
           <Avatar name="You" size={40} online />

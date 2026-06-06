@@ -3,7 +3,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { openDB } from 'idb';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { DeviceKeystore } from './keystore';
+import { DeviceExistsError, DeviceKeystore } from './keystore';
 
 // Clears the key-backup Argon2 floor while keeping the seal/unseal fast in tests.
 const FAST: Argon2Params = { m: 8192, t: 2, p: 1 };
@@ -32,6 +32,16 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     const loaded = await reopened.loadDevice('alice', 'correct horse');
     if (!loaded) throw new Error('expected a persisted device');
     expect(await worksForMls(engine, loaded)).toBe('msg');
+  });
+
+  it('hasDevice reflects whether a sealed device is stored (no passphrase)', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    expect(await ks.hasDevice()).toBe(false);
+    await ks.getOrCreateDevice('alice', 'pw');
+    expect(await ks.hasDevice()).toBe(true);
+    await ks.clearDevice();
+    expect(await ks.hasDevice()).toBe(false);
   });
 
   it('rejects a wrong passphrase (sealed at rest)', async () => {
@@ -87,7 +97,10 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     await ks.getOrCreateDevice('alice', 'pw');
     const blob = await ks.exportRecoveryArtifact('alice', 'pw');
     if (!blob) throw new Error('expected a backup');
-    await expect(ks.importRecoveryArtifact('alice', blob, 'pw')).rejects.toThrow(); // won't overwrite
+    // Typed sentinel (raised only AFTER the artifact is verified) so the recovery layer can match on it.
+    await expect(ks.importRecoveryArtifact('alice', blob, 'pw')).rejects.toBeInstanceOf(
+      DeviceExistsError,
+    );
   });
 
   it('a failed import leaves the profile importable (no stranded bad record)', async () => {
