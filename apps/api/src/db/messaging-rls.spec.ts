@@ -187,6 +187,46 @@ describe.skipIf(!DB_URL)('messaging schema RLS + append-only (checkpoint 25)', (
     expect((row as { n: number }).n).toBe(0);
   });
 
+  it('removing a membership cascade-deletes that member’s receipt (re-add starts clean)', async () => {
+    // A receipt is OWNED BY its membership. When a member is removed and later re-added, the old
+    // delivery/read watermark must NOT resurface (PR #55 finding). The conversation_receipts ->
+    // conversation_members composite FK (ON DELETE CASCADE) enforces this at the schema level — and
+    // the cascade fires for the non-superuser app role under FORCE RLS (the real removal path).
+    const cid = await makeConversation(tenantA, userA); // conversation + membership(userA) + a message
+    await asTenant(
+      tenantA,
+      (tx) => tx`insert into conversation_receipts
+                   (tenant_id, conversation_id, user_id, delivered_through_created_at, delivered_at)
+                 values (${tenantA}, ${cid}, ${userA}, now(), now())`,
+    );
+    const [receiptsBefore] = (await asTenant(
+      tenantA,
+      (tx) =>
+        tx`select count(*)::int as n from conversation_receipts where conversation_id = ${cid}`,
+    )) as Array<{ n: number }>;
+    expect((receiptsBefore as { n: number }).n).toBe(1);
+
+    // Remove the membership as the app role (argus_app holds DELETE on conversation_members).
+    await asTenant(
+      tenantA,
+      (tx) =>
+        tx`delete from conversation_members where conversation_id = ${cid} and user_id = ${userA}`,
+    );
+
+    const [receiptsAfter] = (await asTenant(
+      tenantA,
+      (tx) =>
+        tx`select count(*)::int as n from conversation_receipts where conversation_id = ${cid}`,
+    )) as Array<{ n: number }>;
+    expect((receiptsAfter as { n: number }).n).toBe(0); // cascade fired — no stale watermark survives re-add
+    // The message stays: deleting a membership is not deleting history (messages FK is not to members).
+    const [msgRow] = (await asTenant(
+      tenantA,
+      (tx) => tx`select count(*)::int as n from messages where conversation_id = ${cid}`,
+    )) as Array<{ n: number }>;
+    expect((msgRow as { n: number }).n).toBeGreaterThan(0);
+  });
+
   it('no tenant context => fail closed on messages', async () => {
     await expect(
       sql.begin(async (tx) => {

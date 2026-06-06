@@ -21,6 +21,7 @@ The server records only **watermarks** (a message id + its timestamp the user ha
 
 - **Spoofing — post a receipt as someone else.** The receipt's `user_id` is the **verified caller** (sub→user), never client input; you can only advance your own watermark.
 - **Tampering / rollback.** Watermarks **only advance** (monotonic on `(created_at, id)` of the referenced message); a replayed/older `throughMessageId` can't move a watermark backward.
+- **Tampering — stale watermark across membership churn.** A receipt is **owned by its membership**: removing a member `ON DELETE CASCADE`-deletes their receipt (the composite FK targets `conversation_members`), so a removed-then-re-added member starts with a **clean** watermark instead of resurfacing a stale read/delivery position from a prior membership. Verified to fire for the non-superuser app role under FORCE RLS.
 - **Information disclosure — read-receipt privacy.** A read receipt reveals reading behavior. The **server mechanism is neutral**: it stores a receipt only if the client sends one. Whether to send read receipts is a **client-controlled user setting** (privacy), mirroring Signal/WhatsApp — out of scope for the server, but the server must never *infer* a read receipt the client didn't send. Cross-tenant/cross-conversation leakage is barred by RLS + membership.
 - **Elevation — receipt for a foreign conversation/message.** Member-gated (same 404 as messaging); `throughMessageId` must be a message **in that conversation** (composite check), so a receipt can't reference another conversation's message.
 
@@ -28,12 +29,12 @@ The server records only **watermarks** (a message id + its timestamp the user ha
 
 - **#1 crypto-blind** — upheld: receipts are delivery metadata (ids + timestamps), never content; nothing decrypted.
 - **#2 no secret logging** — receipts carry no secrets; IDs/metadata only.
-- **#3 RLS** — `conversation_receipts` is tenant-scoped with ENABLE+FORCE RLS + composite-FK tenant pinning (conversation + user), like the messaging tables.
+- **#3 RLS** — `conversation_receipts` is tenant-scoped with ENABLE+FORCE RLS + a composite FK to `conversation_members` pinning tenant + conversation + user to a **real membership**, like the messaging tables.
 - **#4/#5/#6** — N/A / upheld.
 
 ## 5. Decision & mitigations
 
-- Migration `0010_conversation_receipts.sql`: `(tenant_id, conversation_id, user_id)` unique; denormalized `delivered_through_*` / `read_through_*` watermark columns (message id + its created_at + the receipt time) so monotonic advance is a single conditional upsert; composite FKs `(tenant_id, conversation_id)→conversations` and `(tenant_id, user_id)→users`. Grants: `select, insert, update` (advance in place; no delete).
+- Migration `0010_conversation_receipts.sql`: `(tenant_id, conversation_id, user_id)` unique; denormalized `delivered_through_*` / `read_through_*` watermark columns (message id + its created_at + the receipt time) so monotonic advance is a single conditional upsert; a single composite FK `(tenant_id, conversation_id, user_id)→conversation_members` **ON DELETE CASCADE** ties each receipt to a live membership — stronger tenant-pinning than separate conversation/user FKs (it forces a real membership pair) and it cleans up watermarks on member removal (see §3 churn). Grants: `select, insert, update` (advance in place; no delete — cleanup cascades from the membership).
 - `POST /conversations/:id/receipts` (member-gated, own watermark only, monotonic) + `GET /conversations/:id/receipts` (member-gated, per-member watermarks).
 - Gate: **`security-boundary-auditor`** review; live-DB tests (advance, monotonic no-rollback, member-only authz, cross-tenant, foreign-message rejection).
 
