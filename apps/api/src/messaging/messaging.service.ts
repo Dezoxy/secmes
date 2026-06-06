@@ -5,7 +5,12 @@ import { z } from 'zod';
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant, type Tx } from '../db/index.js';
 import { RealtimeBus, type MessageCreatedEvent } from '../realtime/realtime-bus.js';
-import type { ListMessagesQuery, SendMessage, SyncQuery } from './messaging.schemas.js';
+import type {
+  ListMessagesQuery,
+  RecordReceipt,
+  SendMessage,
+  SyncQuery,
+} from './messaging.schemas.js';
 
 export interface CreatedConversation {
   conversationId: string;
@@ -45,6 +50,15 @@ export interface SyncedMessage extends FetchedMessage {
 export interface SyncPage {
   messages: SyncedMessage[];
   nextCursor: string | null;
+}
+
+/** A member's delivery/read high-water-marks in a conversation (metadata; checkpoint 31). */
+export interface ConversationReceipt {
+  userId: string;
+  deliveredThroughMessageId: string | null;
+  deliveredAt: string | null;
+  readThroughMessageId: string | null;
+  readAt: string | null;
 }
 
 // Validates each raw fetched row so a schema drift on this read path fails loudly. `epoch` (int8) and
@@ -379,6 +393,96 @@ export class MessagingService {
       const lastRow = parsedRows.at(-1);
       const nextCursor = lastRow ? encodeSyncCursor(lastRow.created_at_iso, lastRow.id) : null;
       return { messages, nextCursor };
+    });
+  }
+
+  /**
+   * Record the caller's delivery/read HIGH-WATER-MARK in a conversation (checkpoint 31). Metadata only.
+   * AUTHZ: member-only (same 404 as messaging); the watermark is the VERIFIED caller's own (never client-
+   * supplied), and `throughMessageId` must be a message IN this conversation. Monotonic: the watermark
+   * advances forward only — a replayed/older message can't move it backward.
+   */
+  async recordReceipt(
+    auth: VerifiedAuth,
+    conversationId: string,
+    body: RecordReceipt,
+  ): Promise<void> {
+    await withTenant(auth.tenantId, async (tx) => {
+      const user = await this.requireUser(tx, auth.sub);
+      await this.requireMembership(tx, conversationId, user);
+
+      // Fetch the watermark message's created_at as FULL microsecond text (the driver's JS Date is only
+      // ms — too lossy: two same-ms messages would then order by random uuid, mis-advancing the watermark).
+      const [m] = await tx
+        .select({
+          id: schema.messages.id,
+          createdAtIso: sql<string>`to_char(${schema.messages.createdAt} at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+        })
+        .from(schema.messages)
+        .where(
+          and(
+            eq(schema.messages.id, body.throughMessageId),
+            eq(schema.messages.conversationId, conversationId),
+          ),
+        )
+        .limit(1);
+      if (!m) throw new NotFoundException('message not found in conversation');
+
+      // `col` is a VALIDATED enum ('delivered'|'read') — safe to splice as an identifier via sql.raw
+      // (never user free-text). Advance only if the new (created_at, id) is later than the stored one.
+      const c = sql.raw(body.status); // 'delivered' | 'read'
+      await tx.execute(sql`
+        insert into conversation_receipts
+          (tenant_id, conversation_id, user_id, ${c}_through_message_id, ${c}_through_created_at, ${c}_at)
+        values (${auth.tenantId}, ${conversationId}, ${user}, ${m.id}, ${m.createdAtIso}::timestamptz, now())
+        on conflict (tenant_id, conversation_id, user_id) do update set
+          ${c}_through_message_id = excluded.${c}_through_message_id,
+          ${c}_through_created_at = excluded.${c}_through_created_at,
+          ${c}_at = excluded.${c}_at,
+          updated_at = now()
+        where conversation_receipts.${c}_through_created_at is null
+           or (excluded.${c}_through_created_at, excluded.${c}_through_message_id)
+            > (conversation_receipts.${c}_through_created_at, conversation_receipts.${c}_through_message_id)
+      `);
+    });
+  }
+
+  /** Per-member delivery/read watermarks in a conversation (metadata). AUTHZ: member-only. */
+  async getReceipts(auth: VerifiedAuth, conversationId: string): Promise<ConversationReceipt[]> {
+    return withTenant(auth.tenantId, async (tx) => {
+      const user = await this.requireUser(tx, auth.sub);
+      await this.requireMembership(tx, conversationId, user);
+
+      // Drive from MEMBERS (left join receipts) so EVERY member is returned — a member who hasn't acked
+      // yet appears with null watermarks (i.e. "not delivered/read"), not omitted. RLS scopes both tables.
+      const rows = await tx
+        .select({
+          userId: schema.conversationMembers.userId,
+          deliveredThroughMessageId: schema.conversationReceipts.deliveredThroughMessageId,
+          deliveredAt: schema.conversationReceipts.deliveredAt,
+          readThroughMessageId: schema.conversationReceipts.readThroughMessageId,
+          readAt: schema.conversationReceipts.readAt,
+        })
+        .from(schema.conversationMembers)
+        .leftJoin(
+          schema.conversationReceipts,
+          and(
+            eq(
+              schema.conversationReceipts.conversationId,
+              schema.conversationMembers.conversationId,
+            ),
+            eq(schema.conversationReceipts.userId, schema.conversationMembers.userId),
+          ),
+        )
+        .where(eq(schema.conversationMembers.conversationId, conversationId));
+
+      return rows.map((r) => ({
+        userId: r.userId,
+        deliveredThroughMessageId: r.deliveredThroughMessageId,
+        deliveredAt: r.deliveredAt ? r.deliveredAt.toISOString() : null,
+        readThroughMessageId: r.readThroughMessageId,
+        readAt: r.readAt ? r.readAt.toISOString() : null,
+      }));
     });
   }
 }

@@ -32,6 +32,15 @@ export const SyncQuerySchema = z
   .strict();
 export type SyncQuery = z.infer<typeof SyncQuerySchema>;
 
+export const RecordReceiptSchema = z
+  .object({
+    status: z.enum(['delivered', 'read']),
+    // The message the caller has received/read THROUGH (all earlier messages implied).
+    throughMessageId: z.string().uuid(),
+  })
+  .strict();
+export type RecordReceipt = z.infer<typeof RecordReceiptSchema>;
+
 export const SendMessageSchema = z
   .object({
     clientMessageId: z.string().uuid(), // client-generated; idempotency key (per sender)
