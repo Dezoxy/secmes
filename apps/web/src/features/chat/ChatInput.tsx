@@ -1,114 +1,149 @@
-import { type ChangeEvent, type KeyboardEvent, useRef, useState } from 'react';
-import { Image as ImageIcon, Paperclip, Send, Smile, X } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Send, Paperclip, Image as ImageIcon, Smile, X } from 'lucide-react';
 
 interface ChatInputProps {
-  onSend: (body: string, images: File[]) => void;
+  onSend: (content: string, attachments?: File[]) => void;
 }
 
 export function ChatInput({ onSend }: ChatInputProps) {
-  const [body, setBody] = useState('');
-  const [images, setImages] = useState<File[]>([]);
+  const [message, setMessage] = useState('');
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
 
-  const send = () => {
-    if (!body.trim() && images.length === 0) return;
-    onSend(body.trim(), images);
-    setBody('');
-    setImages([]);
-  };
-
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      send();
+  const handleSend = () => {
+    if (message.trim() || attachments.length > 0) {
+      onSend(message.trim(), attachments);
+      setMessage('');
+      setAttachments([]);
+      setPreviews([]);
     }
   };
 
-  const onPick = (e: ChangeEvent<HTMLInputElement>) => {
-    const picked = Array.from(e.target.files ?? []).filter((f) => f.type.startsWith('image/'));
-    setImages((prev) => [...prev, ...picked]);
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) {
+      setAttachments((prev) => [...prev, ...files]);
+      // Composer previews are local data URIs (FileReader) — never object URLs / server URLs.
+      files.forEach((file) => {
+        if (file.type.startsWith('image/')) {
+          const reader = new FileReader();
+          reader.onloadend = () => setPreviews((prev) => [...prev, reader.result as string]);
+          reader.readAsDataURL(file);
+        } else {
+          setPreviews((prev) => [...prev, '']);
+        }
+      });
+    }
     e.target.value = '';
   };
 
-  const remove = (i: number) => setImages((prev) => prev.filter((_, idx) => idx !== i));
-
-  const canSend = body.trim().length > 0 || images.length > 0;
+  const removeAttachment = (index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+    setPreviews((prev) => prev.filter((_, i) => i !== index));
+  };
 
   return (
     <div className="border-t border-white/5 bg-[#0f0f16] p-4">
-      {/* Pending-attachment chips. We deliberately do NOT render a thumbnail from the raw file here —
-          rich, decrypted thumbnails belong to the encrypted-image pipeline (attachments table + content
-          key), not a local object-URL preview. Chips keep the composer simple and the bundle XSS-clean. */}
-      {images.length > 0 && (
-        <div className="mb-3 flex flex-wrap gap-2">
-          {images.map((file, i) => (
-            <div
-              key={`${file.name}-${file.size}-${i}`}
-              className="flex items-center gap-2 rounded-lg border border-white/5 bg-[#1a1a26] py-1.5 pl-2.5 pr-1.5 text-sm text-white/80"
-            >
-              <ImageIcon className="h-4 w-4 shrink-0 text-purple-400" />
-              <span className="max-w-[160px] truncate">{file.name}</span>
+      {/* Attachment previews */}
+      {attachments.length > 0 && (
+        <div className="flex gap-2 mb-3 overflow-x-auto pb-2">
+          {attachments.map((file, index) => (
+            <div key={index} className="relative shrink-0 group">
+              {file.type.startsWith('image/') && previews[index] ? (
+                <div className="w-20 h-20 rounded-lg overflow-hidden bg-[#1a1a26]">
+                  <img
+                    src={previews[index]}
+                    alt={file.name}
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+              ) : (
+                <div className="w-20 h-20 rounded-lg bg-[#1a1a26] flex flex-col items-center justify-center p-2">
+                  <Paperclip className="w-5 h-5 text-white/40 mb-1" />
+                  <span className="text-xs text-white/40 truncate w-full text-center">
+                    {file.name.split('.').pop()?.toUpperCase()}
+                  </span>
+                </div>
+              )}
               <button
                 type="button"
-                onClick={() => remove(i)}
-                className="rounded-md p-1 text-white/40 transition-colors hover:bg-white/5 hover:text-white/70"
-                aria-label={`Remove ${file.name}`}
+                onClick={() => removeAttachment(index)}
+                className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200"
               >
-                <X className="h-3.5 w-3.5" />
+                <X className="w-3 h-3 text-white" />
               </button>
             </div>
           ))}
         </div>
       )}
+
       <div className="flex items-end gap-3">
-        <div className="flex shrink-0 gap-1">
+        <div className="flex gap-1 shrink-0">
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            onChange={handleFileSelect}
+            multiple
+          />
           <input
             ref={imageInputRef}
             type="file"
             accept="image/*"
-            multiple
             className="hidden"
-            onChange={onPick}
+            onChange={handleFileSelect}
+            multiple
           />
           <button
             type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="p-2.5 rounded-xl text-white/40 hover:text-white/70 hover:bg-[#1a1a26] transition-all duration-300"
+          >
+            <Paperclip className="w-5 h-5" />
+          </button>
+          <button
+            type="button"
             onClick={() => imageInputRef.current?.click()}
-            className="rounded-xl p-2.5 text-white/40 transition-colors hover:bg-[#1a1a26] hover:text-white/70"
-            aria-label="Attach image"
+            className="p-2.5 rounded-xl text-white/40 hover:text-white/70 hover:bg-[#1a1a26] transition-all duration-300"
           >
-            <ImageIcon className="h-5 w-5" />
+            <ImageIcon className="w-5 h-5" />
           </button>
           <button
             type="button"
-            className="rounded-xl p-2.5 text-white/40 transition-colors hover:bg-[#1a1a26] hover:text-white/70"
-            aria-label="Attach file"
+            className="p-2.5 rounded-xl text-white/40 hover:text-white/70 hover:bg-[#1a1a26] transition-all duration-300"
           >
-            <Paperclip className="h-5 w-5" />
-          </button>
-          <button
-            type="button"
-            className="rounded-xl p-2.5 text-white/40 transition-colors hover:bg-[#1a1a26] hover:text-white/70"
-            aria-label="Emoji"
-          >
-            <Smile className="h-5 w-5" />
+            <Smile className="w-5 h-5" />
           </button>
         </div>
-        <textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="Type a message..."
-          rows={1}
-          className="max-h-32 min-h-[46px] flex-1 resize-none rounded-xl border border-white/5 bg-[#1a1a26] px-4 py-3 text-sm text-white placeholder-white/30 transition-all focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20"
-        />
+
+        <div className="flex-1 relative">
+          <textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Type a message..."
+            rows={1}
+            className="w-full bg-[#1a1a26] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder-white/30 focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/20 transition-all duration-300 resize-none max-h-32"
+            style={{ minHeight: '46px' }}
+          />
+        </div>
+
         <button
           type="button"
-          onClick={send}
-          disabled={!canSend}
-          className="rounded-xl bg-purple-500 p-3 text-white shadow-lg shadow-purple-500/25 transition-all hover:-translate-y-0.5 hover:bg-purple-400 hover:shadow-purple-500/40 active:translate-y-0 disabled:translate-y-0 disabled:cursor-not-allowed disabled:bg-purple-500/50 disabled:shadow-none"
-          aria-label="Send message"
+          onClick={handleSend}
+          disabled={!message.trim() && attachments.length === 0}
+          className="p-3 bg-purple-500 hover:bg-purple-400 disabled:bg-purple-500/50 disabled:cursor-not-allowed rounded-xl transition-all duration-300 shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 hover:-translate-y-0.5 active:translate-y-0 disabled:shadow-none disabled:translate-y-0"
         >
-          <Send className="h-5 w-5" />
+          <Send className="w-5 h-5 text-white" />
         </button>
       </div>
     </div>
