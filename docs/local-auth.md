@@ -19,8 +19,7 @@ echo '127.0.0.1 zitadel' | sudo tee -a /etc/hosts
 
 ```sh
 make up                                        # postgres, redis, minio, zitadel + provision OIDC
-pnpm --filter @argus/api db:migrate            # apply the argus schema
-pnpm --filter @argus/api db:seed:dev           # seed the local tenant (DEV_TENANT_ID)
+make migrate && make seed                      # apply the argus schema + seed the dev tenant
 make api-dev                                   # API on :3000 (host; reads the generated OIDC env)
 pnpm --filter @argus/web dev                   # http://localhost:5173  (separate terminal)
 ```
