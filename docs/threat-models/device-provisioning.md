@@ -89,5 +89,17 @@ opaque base64 to the crypto-blind server). Private keys never leave; the passphr
   in-flight Welcome) and appends fresh ones, so the local pool grows over time; consumed members are
   removed on join (Slice 4); expired-KeyPackage pruning (MLS lifetime) is a follow-up. Bounded by the
   server's 200/device cap.
+- **Stranded server-side packages after reset/recovery**: clearing the device (`clearDevice`, used by the
+  account-switch reset and the pre-restore wipe) discards the retained HPKE privates locally, but the
+  matching PUBLIC KeyPackages already in the directory stay unclaimed — so a peer can claim one and seal a
+  Welcome this browser can never open until the stale set is exhausted. This is an **availability
+  degradation only**: the discarded private is unrecoverable, so no Welcome sealed to it ever leaks (FS
+  preserved); it is **bounded** (≤ the published pool / 200-per-device cap) and **self-healing** (each dead
+  package is consumed on the claim that poisons one initiation attempt, after which fresh packages are
+  served). The proper fix is a **server-side, device-scoped revoke** of unclaimed packages, landing with
+  the claim/Welcome lifecycle in **Slice 3** (a user revokes their own device's unclaimed packages before
+  re-provisioning). The **account-switch** case is intentionally *not* client-revocable: the abandoned
+  device belongs to a different user and the current session has no authority over it (correct authz);
+  those packages are cleaned when that user next re-provisions. (Codex P2, PR #66 — accepted residual.)
 - **Single device per user** (v1, B2) — multi-device key management is deferred; ties into the
   device-bound-session hardening noted in `welcome-delivery.md` §6.

@@ -255,6 +255,15 @@ export class DeviceKeystore {
   /**
    * Remove the stored device AND its KeyPackage pool — to recover from a bad import or reset this profile
    * before re-importing. The pool privates are tied to the cleared device's identity, so they go too.
+   *
+   * Local-only by design: this cannot revoke the matching PUBLIC KeyPackages already published to the
+   * directory, so until they are claimed a peer could seal a Welcome to one this browser can no longer
+   * open. The effect is an availability degradation only — the discarded private is unrecoverable, so no
+   * Welcome sealed to it leaks (forward secrecy preserved) — and it is bounded (≤ the published pool /
+   * 200-per-device cap) and self-healing (each dead package is consumed on claim). On account-switch the
+   * abandoned device belongs to a DIFFERENT user, so the signed-in session has no authority to revoke it.
+   * The server-side, device-scoped revoke lands with the claim/Welcome lifecycle in Slice 3 — see
+   * docs/threat-models/device-provisioning.md §6.
    */
   async clearDevice(): Promise<void> {
     await this.db.delete(STORE, SELF);
