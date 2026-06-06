@@ -7,8 +7,13 @@ import { ChatHeader } from './ChatHeader';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { ImagePreviewModal } from './ImagePreviewModal';
+import { VerifySecurity } from './VerifySecurity';
 import type { Attachment, Conversation, Message } from './seed';
-import { conversations as initialConversations, currentUser } from './seed';
+import {
+  conversations as initialConversations,
+  currentUser,
+  getConversationDisplayName,
+} from './seed';
 
 /**
  * Chat experience, ported from the reworked design (`~/Downloads`) into the Vite PWA.
@@ -47,10 +52,23 @@ export default function ChatScreen() {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [verifyOpen, setVerifyOpen] = useState(false);
+  const [sessionNumber, setSessionNumber] = useState<string | null>(null);
+  const [verifiedNumber, setVerifiedNumber] = useState<string | null>(null);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // The 2-party session's out-of-band safety number (#20) — computed once; stable per page load.
+  useEffect(() => {
+    void getMlsSession()
+      .then((s) => setSessionNumber(s.safetyNumber))
+      .catch(() => setSessionNumber(null));
+  }, []);
+
+  // Verified only while the marked number still matches the current key (resets if the key changes).
+  const verified = sessionNumber !== null && verifiedNumber === sessionNumber;
 
   const selectedConversation = conversations.find((c) => c.id === selectedId);
 
@@ -147,7 +165,12 @@ export default function ChatScreen() {
         >
           {selectedConversation ? (
             <>
-              <ChatHeader conversation={selectedConversation} onBack={() => setShowSidebar(true)} />
+              <ChatHeader
+                conversation={selectedConversation}
+                onBack={() => setShowSidebar(true)}
+                verified={verified}
+                onVerify={() => setVerifyOpen(true)}
+              />
               <MessageList conversation={selectedConversation} onImageClick={setPreviewImage} />
               <ChatInput onSend={handleSend} />
             </>
@@ -167,6 +190,19 @@ export default function ChatScreen() {
 
       <ImagePreviewModal imageUrl={previewImage} onClose={() => setPreviewImage(null)} />
       {recoveryOpen && <RecoveryPanel onClose={() => setRecoveryOpen(false)} />}
+      {verifyOpen && (
+        <VerifySecurity
+          peerName={
+            selectedConversation
+              ? getConversationDisplayName(selectedConversation, currentUser.id)
+              : 'this contact'
+          }
+          safetyNumber={sessionNumber}
+          verified={verified}
+          onVerifiedChange={(v) => setVerifiedNumber(v ? sessionNumber : null)}
+          onClose={() => setVerifyOpen(false)}
+        />
+      )}
     </div>
   );
 }

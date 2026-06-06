@@ -5,7 +5,7 @@
 // via the key directory + a server-delivered Welcome, and additionally needs auth (Zitadel) +
 // out-of-band fingerprint verification (#20, MITM defense) — none of which exist yet.
 
-import { MlsEngine, type Conversation } from '@argus/crypto';
+import { MlsEngine, safetyNumber, type Conversation } from '@argus/crypto';
 
 let enginePromise: Promise<MlsEngine> | null = null;
 function getEngine(): Promise<MlsEngine> {
@@ -30,6 +30,12 @@ export interface EncryptResult {
 export interface E2eeSession {
   /** MLS-encrypt as you, MLS-decrypt as the peer. Returns the recovered plaintext + the wire ciphertext. */
   send(text: string): Promise<EncryptResult>;
+  /**
+   * The out-of-band SAFETY NUMBER for this 2-party session (you ↔ peer), derived from both devices'
+   * identity keys (@argus/crypto). Users compare it out-of-band to detect a MITM key-swap (#20). In the
+   * loopback demo it's computed for the local peer; the live flow uses the remote peer's published key.
+   */
+  safetyNumber: string;
 }
 
 /** Create a fresh two-party MLS session (you + a local peer) in one group. */
@@ -41,7 +47,10 @@ export async function createE2eeSession(conversationId: string): Promise<E2eeSes
   // 2-party: addMember applies the commit locally AND yields the Welcome the peer joins with.
   const invite = await yourConversation.addMember(peer.publicPackage);
   const peerConversation: Conversation = await engine.joinConversation(peer, invite);
+  // The number both sides would compare out-of-band to confirm no key was swapped (MITM, #20).
+  const sn = await safetyNumber(you, peer);
   return {
+    safetyNumber: sn,
     async send(text: string): Promise<EncryptResult> {
       const wire = await yourConversation.encrypt(text); // opaque bytes — all that leaves the device
       const plaintext = await peerConversation.decrypt(wire); // the peer recovers it
