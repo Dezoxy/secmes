@@ -97,8 +97,9 @@ const taylor = user('user-6', 'Taylor Smith', false);
 
 export const users: User[] = [sarah, marcus, emily, alexR, jordan, taylor];
 
-// Fixed base time (no Date.now()) so the seed renders deterministically.
-const BASE_TIME = new Date('2026-06-05T14:00:00Z').getTime();
+// Anchor the seed to app-load time so it always reads fresh ("45m ago"); relative formatting below
+// uses the current clock, so both seeded and real sent messages age correctly as the app runs.
+const BASE_TIME = Date.now();
 const ago = (mins: number): Date => new Date(BASE_TIME - mins * 60_000);
 
 export const conversations: Conversation[] = [
@@ -359,7 +360,7 @@ export function getOtherParticipant(
 }
 
 export function formatMessageTime(date: Date): string {
-  const diff = BASE_TIME - date.getTime();
+  const diff = Date.now() - date.getTime();
   const minutes = Math.floor(diff / 60_000);
   const hours = Math.floor(diff / 3_600_000);
   const days = Math.floor(diff / 86_400_000);
