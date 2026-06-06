@@ -133,7 +133,29 @@ describe('RealtimeGateway', () => {
     s.send.mockClear();
     const e = event();
     bus.emitMessageCreated(e);
-    expect(lastSend(s)).toEqual({ event: 'message', data: e.message });
+    expect(lastSend(s)).toEqual({
+      event: 'message',
+      data: { conversationId: CONV, message: e.message },
+    });
+  });
+
+  it('does not join a socket that disconnects during the membership lookup (no leak)', async () => {
+    const s = mkSocket();
+    await authed(s);
+    let resolveMember!: (v: boolean) => void;
+    messaging.isMember.mockReturnValue(
+      new Promise<boolean>((r) => {
+        resolveMember = r;
+      }),
+    );
+    const pending = gw.onSubscribe(sock(s), { conversationId: CONV });
+    gw.handleDisconnect(sock(s)); // disconnect before isMember resolves
+    resolveMember(true);
+    await pending;
+
+    s.send.mockClear();
+    bus.emitMessageCreated(event());
+    expect(s.send).not.toHaveBeenCalled(); // never joined the room → no delivery, no leaked dead socket
   });
 
   it('fan-out is scoped: never crosses tenant or conversation', async () => {
@@ -152,7 +174,10 @@ describe('RealtimeGateway', () => {
     c.send.mockClear();
 
     bus.emitMessageCreated(event({ tenantId: 'T1', conversationId: CONV })); // → only alice
-    expect(lastSend(a)).toEqual({ event: 'message', data: event().message });
+    expect(lastSend(a)).toEqual({
+      event: 'message',
+      data: { conversationId: CONV, message: event().message },
+    });
     expect(c.send).not.toHaveBeenCalled();
 
     a.send.mockClear();
@@ -174,7 +199,10 @@ describe('RealtimeGateway', () => {
     });
     live.send.mockClear();
     expect(() => bus.emitMessageCreated(event())).not.toThrow();
-    expect(lastSend(live)).toEqual({ event: 'message', data: event().message }); // live still delivered
+    expect(lastSend(live)).toEqual({
+      event: 'message',
+      data: { conversationId: CONV, message: event().message },
+    }); // live still delivered
   });
 
   it('disconnect removes the socket from its rooms', async () => {

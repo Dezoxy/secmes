@@ -8,9 +8,10 @@
 connect:   client opens a WebSocket → sends {event:'auth', data:{token}} as the FIRST frame
            gateway verifies the JWT (same AuthService as HTTP) → binds {sub, tenantId} to the socket
 subscribe: client sends {event:'subscribe', data:{conversationId}} → gateway checks MEMBERSHIP → joins
-deliver:   POST /…/messages stores ciphertext → emits 'message.created' on an in-process bus →
-           gateway pushes {event:'message', data:{…ciphertext envelope…}} to that conversation's
-           subscribed sockets IN THE SAME TENANT
+deliver:   POST /…/messages stores ciphertext (COMMITS) → emits 'message.created' on an in-process bus →
+           gateway pushes {event:'message', data:{conversationId, message:{…ciphertext envelope…}}} to
+           that conversation's subscribed sockets IN THE SAME TENANT (conversationId so a multiplexed
+           socket knows which conversation each frame belongs to)
 ```
 
 The gateway only ever forwards the **opaque ciphertext envelope** (the same fields the REST fetch returns: `ciphertext`, `alg`, `epoch`, ids, `createdAt`). It never sees plaintext or keys. The token is sent in the **first application frame**, not the handshake URL/headers, so it can't land in a proxy/access log.

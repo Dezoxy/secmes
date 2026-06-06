@@ -111,6 +111,10 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
     // Same authz as REST: must be a member. Don't distinguish non-member from non-existent.
     const isMember = await this.messaging.isMember(state.auth, conversationId);
+    // The socket may have disconnected DURING the async lookup — handleDisconnect then already ran and
+    // removed it from `conns`. Don't resurrect a dead connection into `rooms` (it would leak, since no
+    // future disconnect would clean it up). Re-check the live state before joining.
+    if (this.conns.get(client) !== state) return;
     if (!isMember) {
       this.send(client, 'error', { message: 'conversation not found' });
       return;
@@ -130,8 +134,11 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   private deliver(event: MessageCreatedEvent): void {
     const sockets = this.rooms.get(roomKey(event.tenantId, event.conversationId));
     if (!sockets) return;
+    // Include conversationId in the frame: one socket multiplexes many conversations, so the client
+    // needs to know which conversation each delivered message belongs to.
+    const data = { conversationId: event.conversationId, message: event.message };
     for (const client of sockets) {
-      if (client.readyState === WebSocket.OPEN) this.send(client, 'message', event.message);
+      if (client.readyState === WebSocket.OPEN) this.send(client, 'message', data);
     }
   }
 
