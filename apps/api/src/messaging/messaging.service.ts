@@ -371,11 +371,13 @@ export class MessagingService {
         attachmentObjectKey: r.attachment_object_key,
         createdAt: r.created_at.toISOString(),
       }));
+      // `nextCursor` is the durable RESUME token positioned at this page's last message — returned
+      // whenever the page has any messages (NOT only on a full page), so a client that catches up on a
+      // partial final page can still persist its progress and resume later from exactly there. It's null
+      // only for an empty page (nothing after the cursor → the client keeps its prior cursor). The client
+      // decides whether to keep paging by whether it received a full page (`messages.length === limit`).
       const lastRow = parsedRows.at(-1);
-      const nextCursor =
-        lastRow && messages.length === query.limit
-          ? encodeSyncCursor(lastRow.created_at_iso, lastRow.id)
-          : null;
+      const nextCursor = lastRow ? encodeSyncCursor(lastRow.created_at_iso, lastRow.id) : null;
       return { messages, nextCursor };
     });
   }

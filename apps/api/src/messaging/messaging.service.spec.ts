@@ -269,6 +269,22 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     ).rejects.toThrow();
   });
 
+  it('returns a resume cursor even on a partial final page (progress is persistable)', async () => {
+    const c = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
+    await svc.sendMessage(aliceAuth, c, msg());
+    const page = await svc.syncMessages(bobAuth, { limit: 100 }); // partial page (< 100)
+    expect(page.messages.length).toBeLessThan(100);
+    expect(page.nextCursor).not.toBeNull(); // resume token returned despite the page not being full
+
+    // Resuming from it is caught up (empty); a message sent AFTER it is then returned by that cursor.
+    expect(
+      (await svc.syncMessages(bobAuth, { limit: 100, after: page.nextCursor! })).messages,
+    ).toEqual([]);
+    const next = (await svc.sendMessage(aliceAuth, c, msg())).messageId;
+    const resumed = await svc.syncMessages(bobAuth, { limit: 100, after: page.nextCursor! });
+    expect(resumed.messages.map((m) => m.id)).toEqual([next]);
+  });
+
   it('preserves sync progress after the caller is removed from a conversation', async () => {
     // Bob has a cursor from conversation X, then is removed from X. He must still sync his OTHER
     // conversations — the opaque cursor carries (created_at, id), so it doesn't depend on X-membership.

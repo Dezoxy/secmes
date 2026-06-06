@@ -56,7 +56,9 @@ class SyncPageDto {
   @ApiProperty({
     required: false,
     nullable: true,
-    description: 'opaque cursor — pass as `after` to fetch the next page; null when caught up',
+    description:
+      'opaque resume cursor at the last message of this page — persist it; pass as `after` to ' +
+      'continue or resume later. Keep paging while you receive a full page. Null only on an empty page.',
   })
   nextCursor!: string | null;
 }
