@@ -153,35 +153,47 @@ export class DeviceKeystore {
   ): Promise<DeviceKeys[]> {
     const identity = deviceIdentity(device);
     const signaturePublicKey = deviceSignaturePublicKeyB64(device);
-    const stored = (await this.db.get(POOL_STORE, SELF)) as StoredPool | undefined;
-    let pool: DeviceKeys[] = [];
-    // Reuse the sealed pool ONLY if it's for THIS device's identity AND signature key. A stale pool from
-    // a re-created/recovered device (same identity string, different key) is discarded — its retained
-    // privates are orphaned, so republishing them would advertise KeyPackages the live device can't back.
-    if (
-      stored &&
-      stored.identity === identity &&
-      stored.signaturePublicKey === signaturePublicKey
-    ) {
-      const opened = await openBackup(stored.sealed, passphrase);
-      try {
-        pool = deserializeDeviceKeysArray(opened);
-      } finally {
-        opened.fill(0); // wipe the transient unsealed plaintext (it holds retained HPKE privates)
+
+    // Read + unseal THIS device's pool record (a stale pool from a re-created/recovered device — same
+    // identity string, different key — is discarded; its retained privates are orphaned). Returns the
+    // record (to detect a concurrent write) + the unsealed pool.
+    const read = async (): Promise<{ rec: StoredPool | undefined; pool: DeviceKeys[] }> => {
+      const rec = (await this.db.get(POOL_STORE, SELF)) as StoredPool | undefined;
+      if (rec && rec.identity === identity && rec.signaturePublicKey === signaturePublicKey) {
+        const opened = await openBackup(rec.sealed, passphrase);
+        try {
+          return { rec, pool: deserializeDeviceKeysArray(opened) };
+        } finally {
+          opened.fill(0); // wipe the transient unsealed plaintext (it holds retained HPKE privates)
+        }
       }
-    }
+      return { rec, pool: [] };
+    };
+
+    const { rec, pool } = await read();
     if (pool.length >= target) return pool;
 
     while (pool.length < target) pool.push(await this.engine.mintKeyPackage(device));
     const plaintext = serializeDeviceKeysArray(pool);
     const sealed = await sealBackup(plaintext, passphrase, this.argon);
     plaintext.fill(0); // best-effort wipe of the transient pool plaintext after sealing
-    await this.db.put(
-      POOL_STORE,
-      { identity, signaturePublicKey, sealed } satisfies StoredPool,
-      SELF,
-    );
-    return pool;
+
+    // Compare-and-swap: commit only if the store still holds exactly what we read (no racing tab wrote in
+    // between). The idb tx stays atomic across get→put (no awaits between). If a racer won, ADOPT its
+    // persisted pool — both tabs converge on one sealed pool whose privates are retained, so we never
+    // publish KeyPackages whose private was dropped (the two-tab data-loss race).
+    let won = false;
+    const tx = this.db.transaction(POOL_STORE, 'readwrite');
+    const current = (await tx.store.get(SELF)) as StoredPool | undefined;
+    if (current?.sealed.ciphertext === rec?.sealed.ciphertext) {
+      await tx.store.put({ identity, signaturePublicKey, sealed } satisfies StoredPool, SELF);
+      won = true;
+    }
+    await tx.done;
+    if (won) return pool;
+
+    const winner = await read(); // a concurrent unlock persisted first — publish ITS retained pool
+    return winner.pool.length > 0 ? winner.pool : pool;
   }
 
   /**

@@ -4,6 +4,7 @@ import type { DeviceKeys } from '@argus/crypto';
 
 import { DeviceKeystore } from '../../lib/keystore';
 import { provisionDevice } from '../../lib/provisioning';
+import { restoreFromArtifact } from '../../lib/recovery';
 import { useAuth } from '../auth/AuthContext';
 
 // Holds the SESSION's unlocked MLS device + its one-time KeyPackage pool. The device is sealed at rest
@@ -28,6 +29,12 @@ interface DeviceState {
   error: string | null;
   /** Unlock (or create on first run) the device, then provision + publish its KeyPackage pool. */
   unlock: (passphrase: string) => Promise<void>;
+  /**
+   * Restore this account's device from a recovery artifact (fresh browser / lost device), then provision.
+   * Reachable from the gate BEFORE a device exists — so a lost-device user never has to create a throwaway
+   * one first. Updates provider state in place (no reload).
+   */
+  restore: (artifactJson: string, passphrase: string) => Promise<void>;
 }
 
 const DeviceCtx = createContext<DeviceState | null>(null);
@@ -92,7 +99,37 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
     [keystore, profile],
   );
 
-  const value: DeviceState = { device, pool, keystore, status, error, unlock };
+  const restore = useCallback(
+    async (artifactJson: string, passphrase: string): Promise<void> => {
+      if (!keystore) return;
+      if (!profile) {
+        setError('still loading your profile — try again in a moment');
+        return;
+      }
+      const identity = profile.userId;
+      setStatus('unlocking');
+      setError(null);
+      try {
+        await restoreFromArtifact(identity, artifactJson, passphrase);
+        const dev = await keystore.loadDevice(identity, passphrase);
+        if (!dev) throw new Error('restore did not produce a device');
+        const { pool: provisioned } = await provisionDevice(keystore, dev, passphrase);
+        setDevice(dev);
+        setPool(provisioned);
+        setStatus('ready');
+      } catch (err) {
+        // restore fails closed on a wrong passphrase / file / identity mismatch — keep the existing device.
+        const bad =
+          err instanceof Error &&
+          /passphrase|decrypt|identity|artifact|recovery/i.test(err.message);
+        setError(bad ? 'wrong passphrase or recovery file' : 'could not restore the device');
+        setStatus((await keystore.hasDevice()) ? 'needs-unlock' : 'needs-create');
+      }
+    },
+    [keystore, profile],
+  );
+
+  const value: DeviceState = { device, pool, keystore, status, error, unlock, restore };
   return <DeviceCtx.Provider value={value}>{children}</DeviceCtx.Provider>;
 }
 

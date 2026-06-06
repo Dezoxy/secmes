@@ -230,6 +230,31 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     expect([...persisted].sort()).toEqual([...first].sort()); // pool survived reopen
   });
 
+  it('ensurePool is race-safe: concurrent provisions converge on one persisted pool', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('alice', 'pw');
+
+    // Two tabs unlocking at once must NOT each publish a distinct pool (the losing one's privates would
+    // be dropped while its packages stay claimable). The CAS makes both converge on the persisted pool.
+    const [a, b] = await Promise.all([
+      ks.ensurePool(device, 'pw', 3),
+      ks.ensurePool(device, 'pw', 3),
+    ]);
+    const sa = a.map((m) => serializeKeyPackage(m.publicPackage)).sort();
+    const sb = b.map((m) => serializeKeyPackage(m.publicPackage)).sort();
+    expect(sa).toEqual(sb); // same pool returned to both callers
+
+    // ...and it is exactly the pool actually persisted (a fresh reopen reads the same set).
+    const reopened = await DeviceKeystore.open(engine, FAST);
+    const dev2 = await reopened.loadDevice('alice', 'pw');
+    if (!dev2) throw new Error('expected a persisted device');
+    const stored = (await reopened.ensurePool(dev2, 'pw', 3))
+      .map((m) => serializeKeyPackage(m.publicPackage))
+      .sort();
+    expect(stored).toEqual(sa);
+  });
+
   it('clearDevice also clears the KeyPackage pool (fresh mints afterwards)', async () => {
     const engine = await MlsEngine.create();
     const ks = await DeviceKeystore.open(engine, FAST);
