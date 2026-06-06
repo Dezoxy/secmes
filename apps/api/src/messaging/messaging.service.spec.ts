@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { getDb } from '../db/index.js';
+import { RealtimeBus } from '../realtime/realtime-bus.js';
 import { MessagingService } from './messaging.service.js';
 import type { SendMessage } from './messaging.schemas.js';
 
@@ -16,7 +17,7 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
   let aliceId: string;
   let bobId: string;
   let carolId: string;
-  const svc = new MessagingService();
+  const svc = new MessagingService(new RealtimeBus());
 
   let aliceAuth: VerifiedAuth; // tenant A, conversation creator + member
   let bobAuth: VerifiedAuth; // tenant A, member

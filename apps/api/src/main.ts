@@ -2,12 +2,17 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { WsAdapter } from '@nestjs/platform-ws';
 import { SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module.js';
 import { createOpenApiDocument } from './openapi.js';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: false });
+
+  // Native WebSocket gateway (no socket.io) for real-time ciphertext delivery (checkpoint 28). The
+  // gateway authenticates each socket with a first-frame token; the global HTTP guard skips WS.
+  app.useWebSocketAdapter(new WsAdapter(app));
 
   // Trust exactly the deployment's proxy hop count (ingress/LB) so req.ip reflects the real client
   // in audit metadata. Driven by env so a topology change (added CDN/WAF) can't silently corrupt

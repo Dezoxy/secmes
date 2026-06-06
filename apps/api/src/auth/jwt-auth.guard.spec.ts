@@ -8,12 +8,16 @@ import { JwtAuthGuard } from './jwt-auth.guard.js';
 
 const AUTH: VerifiedAuth = { sub: 'u1', tenantId: '11111111-1111-1111-1111-111111111111' };
 
-function ctx(headers: Record<string, string | undefined>): {
+function ctx(
+  headers: Record<string, string | undefined>,
+  type: 'http' | 'ws' = 'http',
+): {
   req: { headers: Record<string, string | undefined>; auth?: VerifiedAuth };
   ec: ExecutionContext;
 } {
   const req = { headers };
   const ec = {
+    getType: () => type,
     getHandler: () => undefined,
     getClass: () => undefined,
     switchToHttp: () => ({ getRequest: () => req }),
@@ -60,5 +64,13 @@ describe('JwtAuthGuard', () => {
     });
     await expect(guard.canActivate(ec)).resolves.toBe(true);
     expect(req.auth?.tenantId).toBe(AUTH.tenantId); // the token's claim, not the header
+  });
+
+  it('skips non-HTTP (WebSocket) contexts — the gateway authenticates those itself', async () => {
+    const verify = vi.fn();
+    const guard = makeGuard(false, verify);
+    const { ec } = ctx({}, 'ws'); // no token, ws context
+    await expect(guard.canActivate(ec)).resolves.toBe(true); // not rejected — HTTP guard doesn't run
+    expect(verify).not.toHaveBeenCalled();
   });
 });
