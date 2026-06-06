@@ -1,6 +1,6 @@
 # Threat model: OIDC JWT validation + tenant guard (API edge)
 
-> Status: **DRAFT for ratification.** Covers roadmap checkpoints 13–14 — how the API authenticates a request and establishes the **verified** tenant context that `rls-tenant-isolation.md` then enforces at the database. This note owns the *edge*; that note owns the *database*. Together they implement invariant #3.
+> Status: **DRAFT for ratification.** Covers roadmap checkpoints 13–15 (API auth + tenant derivation + JIT) and now the **SPA login flow + token handling** (§8) and **local Zitadel bootstrap** (§9, checkpoint 9) — how the API authenticates a request and establishes the **verified** tenant context that `rls-tenant-isolation.md` then enforces at the database. This note owns the *edge*; that note owns the *database*. Together they implement invariant #3.
 
 ## 1. Feature & data flow
 
@@ -46,8 +46,31 @@ The server still only ever sees ciphertext + metadata — JWT validation touches
 ## 6. Residual risk
 
 - **In-window token replay / no pre-expiry revocation** — accepted for beta; mitigated by short access-token TTL. Revisit with sender-constrained tokens (DPoP/mTLS) and a revocation/introspection path later.
-- **Live end-to-end OIDC login** (Zitadel deployed, real Authorization-Code flow) is not provable until checkpoint 9; this note + tests cover the **API validation half** (13) and the **tenant derivation** (14), proven with locally-minted tokens.
+- **Live end-to-end OIDC login** (real Authorization-Code+PKCE against a running Zitadel) is now wired **locally** — see §8 (SPA flow) and §9 (local Zitadel bootstrap). Production Zitadel-on-AKS + Key Vault remains checkpoint 9 proper; the local stack uses throwaway creds and is not a prod posture.
 
 ## 7. JIT provisioning (checkpoint 15)
 
 On `POST /auth/session` (login) the user row is created on first sight via an **idempotent upsert** keyed on `(tenant_id, external_identity_id)`, run inside `withTenant(verifiedTenantId)`. All inputs — `tenant_id`, `external_identity_id` (`sub`), `email`, `display_name` — come **only from the verified token**, so a token can create/refresh a user **only in its own tenant** (RLS `WITH CHECK` is the backstop). A verified `email` claim is **required** (Zitadel must grant the `email` scope); absent it, login is `400`, not a partial user. No client-supplied profile field is trusted. Residual: a renamed user's `display_name`/`email` refresh on each login (last-write-wins) — acceptable; the IdP is the source of truth.
+
+## 8. Client login flow & token handling (SPA — checkpoints 9, 13)
+
+The PWA runs **Authorization Code + PKCE (S256)** against Zitadel via **`oidc-client-ts`** (`UserManager`). It is a **public client — no client secret**. The access token is a **JWT** kept in **JS memory only** (never `localStorage`/`sessionStorage`) and attached as `Authorization: Bearer` to API and WS calls — the exact contract the API edge (§1) already validates. Silent renewal uses a refresh token (`offline_access`) held in memory; logout clears local session state and calls Zitadel's end-session endpoint.
+
+**Decision — in-browser PKCE, not a server-side BFF/cookie exchange.** Rationale: (a) it matches the API's existing bearer contract with **zero new server surface** — no token-exchange endpoint, no cookie session, no CSRF layer, no second auth scheme on the WS gateway (which does first-frame bearer auth); (b) the usual reason to prefer an httpOnly cookie — XSS exfiltrating the token — is **weak for an E2EE app**: any script running in our origin already sees decrypted message plaintext and the in-use MLS keys, so moving only the OIDC token behind a cookie does not reduce the dominant risk. The effective XSS control is **CSP + SRI + SW pinning (checkpoint 43)**, which protects *everything*, not just the token. BFF/cookies remains available as later defense-in-depth. (This supersedes the earlier "exchange server-side" comment in `apps/web/src/lib/auth.ts`.)
+
+**Front-channel threats**
+
+- **Authorization-code interception (Spoofing/Tampering):** PKCE S256 binds the code to a one-time verifier held in `sessionStorage` for the round-trip only; `state` (and `nonce` where used) are generated with the CSPRNG and verified in the callback. An intercepted code is useless without the verifier.
+- **Open redirect / redirect-URI swap (Spoofing):** Zitadel is configured with an **exact-match** `redirect_uri` allowlist (`http://localhost:5173/auth/callback` locally); the callback rejects a `state` mismatch.
+- **Token theft via XSS (Information disclosure):** token in memory + short TTL; real mitigation is CSP/SRI (#43). Accepted residual below.
+- **CSRF:** not applicable — auth is a bearer header set explicitly by JS, never an ambient cookie; the OAuth `state` covers the login round-trip itself.
+- **Secret/token in logs (Info disclosure):** the SPA never logs the token or the `code`; invariant #2 holds client-side too.
+
+## 9. Local Zitadel bootstrap (dev only — checkpoint 9 stand-in)
+
+Zitadel + its own PostgreSQL run in `compose.yaml` with **local-only throwaway credentials** (never real secrets; invariant #5 is about cloud creds via Key Vault, which this does not touch). Production Zitadel-on-AKS behind Key Vault + Workload ID is checkpoint 9 proper. Bootstrap is **scripted** (a one-shot init container, like `createbuckets`) so `make up` yields a ready IdP and surfaces the issuer + SPA client id for `.env`.
+
+- **JWT access tokens:** the OIDC app is configured to mint **JWT** (not opaque) access tokens so the API validates via JWKS with no introspection round-trip.
+- **Tenant claim is IdP-asserted, not user-editable (closes §3 threat #4):** the API requires the tenant claim to be a **UUID** (it casts to `tenants.id`). Zitadel org ids are numeric snowflakes, so a **fixed dev tenant UUID** is seeded into `tenants`, and an **org-scoped Action** asserts `tenant_id=<that UUID>` into the access token. The end user cannot edit it. The exact Action/claim mechanism is pinned in the bootstrap script and **verified against current Zitadel (v4) docs** at implementation time, not assumed. Multi-org→tenant onboarding is Phase 7 (G1).
+  - **Carry-forward requirement for the Phase-7 production Action** (the local one uses a hardcoded constant, so this doesn't bite yet): when `tenant_id` is derived from real per-org data it MUST (a) read the org→tenant mapping from **IdP-asserted org metadata only** (never a user-writable attribute), and (b) **overwrite** the claim (set-then, not Zitadel's set-if-absent `setClaim`), so a `tenant_id` a user managed to get emitted *earlier* in the token pipeline can never survive and win with a validly-signed token (§3 threat #4).
+- **Reviewers:** `infra-reviewer` (compose + bootstrap) and `security-boundary-auditor` (the auth wiring). **Gate tests** extend §5's: a real login yields a token that the API accepts, provisions the user JIT in the seeded tenant, and a request with no/!expired token fails closed.

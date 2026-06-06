@@ -50,7 +50,83 @@ services:
       echo 'bucket ready'
       "
 
+  # Dedicated Postgres for Zitadel — own volume so `make up` always inits cleanly and `make reset`
+  # wipes it, isolated from the argus app DB. LOCAL creds only.
+  zitadel-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: zitadel
+      POSTGRES_PASSWORD: zitadel_local_dev # local-only, not a secret
+      POSTGRES_DB: zitadel
+    volumes: ['zitadel-pgdata:/var/lib/postgresql/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U zitadel -d zitadel']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # One-shot: named volumes are created root-owned, but Zitadel runs as the non-root `zitadel` user
+  # and must write its bootstrap PAT into /bootstrap. Make it writable before Zitadel starts.
+  zitadel-bootstrap-perms:
+    image: alpine:3.20
+    command: ['sh', '-c', 'chmod 0777 /bootstrap']
+    volumes: ['zitadel-bootstrap:/bootstrap']
+
+  # Local OIDC provider — stands in for managed Zitadel-on-AKS (checkpoint 9). `iss` host is `zitadel`
+  # so it's identical for the in-compose API (compose DNS) and the browser — add `127.0.0.1 zitadel`
+  # to /etc/hosts (docs/local-auth.md). All creds here are LOCAL throwaways, never real secrets.
+  zitadel:
+    image: ghcr.io/zitadel/zitadel:v4.15.0
+    restart: unless-stopped
+    command: 'start-from-init --masterkeyFromEnv --tlsMode disabled --steps /init-steps.yaml'
+    environment:
+      ZITADEL_MASTERKEY: 'argusLocalDevMasterKey0123456789' # local-only; must be exactly 32 chars
+      ZITADEL_PORT: '8080'
+      ZITADEL_EXTERNALDOMAIN: zitadel
+      ZITADEL_EXTERNALPORT: '8080'
+      ZITADEL_EXTERNALSECURE: 'false'
+      ZITADEL_TLS_ENABLED: 'false'
+      ZITADEL_DATABASE_POSTGRES_HOST: zitadel-db
+      ZITADEL_DATABASE_POSTGRES_PORT: '5432'
+      ZITADEL_DATABASE_POSTGRES_DATABASE: zitadel
+      ZITADEL_DATABASE_POSTGRES_USER_USERNAME: zitadel_user
+      ZITADEL_DATABASE_POSTGRES_USER_PASSWORD: zitadel_local_dev # local-only
+      ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
+      ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: zitadel
+      ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: zitadel_local_dev # local-only (superuser of zitadel-db)
+      ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
+    volumes:
+      - './infra/local/zitadel/init-steps.yaml:/init-steps.yaml:ro'
+      - 'zitadel-bootstrap:/bootstrap'
+    ports: ['8080:8080']
+    depends_on:
+      zitadel-db:
+        condition: service_healthy
+      zitadel-bootstrap-perms:
+        condition: service_completed_successfully
+
+  # One-shot provisioner — run by `make up`, profiled out of a bare `docker compose up`. Creates the
+  # project, the SPA OIDC app, and the tenant-claim Action via the bootstrap PAT, then writes the
+  # generated ids to the shared volume for the Makefile to place in .env.local. Idempotent.
+  zitadel-provision:
+    image: alpine:3.20
+    profiles: ['tools']
+    depends_on:
+      zitadel:
+        condition: service_started
+    volumes:
+      - './infra/local/zitadel:/scripts:ro'
+      - 'zitadel-bootstrap:/bootstrap'
+    entrypoint: ['sh', '-c', 'apk add --no-cache curl jq >/dev/null && sh /scripts/provision.sh']
+
+  # NOTE: this image build is currently broken (the self-contained Dockerfile does `npm install`
+  # without a lockfile → drizzle-orm drifts to a version with non-compiling .d.ts; see the Dockerfile
+  # TODO). `make up` therefore does NOT build the API — run it on the host with `make api-dev`. The
+  # service + env_file stay defined for when the build is reworked to the pnpm workspace.
+  # `profiles: [app]` keeps the broken build out of a bare `docker compose up` — start it explicitly
+  # (`docker compose --profile app up api`) once the Dockerfile is fixed.
   api:
+    profiles: ['app']
     build:
       context: ./apps/api
     environment:
@@ -63,11 +139,12 @@ services:
       S3_BUCKET: argus-attachments
       S3_ACCESS_KEY: argus
       S3_SECRET_KEY: argus_local_dev
-      # OIDC (non-secret). Empty until Zitadel is deployed (checkpoint 9); while empty the API
-      # boots and health works, but protected routes (e.g. /me) fail closed with 401.
-      OIDC_ISSUER: '' # e.g. https://<zitadel-host>
-      OIDC_AUDIENCE: '' # the API's OIDC audience/clientID
-      OIDC_TENANT_CLAIM: tenant_id # verified claim carrying our tenant UUID
+    # OIDC config (non-secret issuer/audience/tenant-claim) is generated per-instance by
+    # `zitadel-provision` and materialised to .env.local by `make up`. Absent it, the API boots and
+    # health works but protected routes fail closed with 401 — never silently unauthenticated.
+    env_file:
+      - path: .env.local
+        required: false
     ports: ['3000:3000']
     depends_on:
       postgres:
@@ -83,3 +160,5 @@ services:
 volumes:
   pgdata:
   miniodata:
+  zitadel-pgdata:
+  zitadel-bootstrap:

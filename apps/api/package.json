@@ -11,7 +11,8 @@
     "openapi": "nest build && node dist/generate-openapi.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "db:migrate": "tsx src/db/migrate.ts"
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:seed:dev": "tsx src/db/seed.dev.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.24",
