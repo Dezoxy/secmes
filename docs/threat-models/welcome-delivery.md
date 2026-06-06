@@ -41,6 +41,12 @@ to that device's KeyPackage key). Server stores + forwards opaque base64 only �
   as send #26). The recipient must be a user **in the caller's tenant** (composite FK). `sender_user_id`
   is the verified caller, never client input. Tenant context comes from the verified token only; RLS
   `WITH CHECK` is the backstop.
+- **Stale invite after revocation (elevation):** a pending welcome is **owned by the recipient's
+  `conversation_members` row** — a composite FK `(tenant_id, conversation_id, recipient_user_id) →
+  conversation_members` with **ON DELETE CASCADE**. Revoking app-level membership (the granted member
+  DELETE) drops the pending join material atomically, so a removed member can't still fetch a Welcome and
+  re-enter the group (mirrors `conversation_receipts`). The deliver tx adds the membership before storing
+  the welcome, so it is always bound to a member.
 - **Tampering (forged/altered Welcome):** the server can't forge a valid Welcome — it's produced inside
   the inviter's MLS group and integrity-protected; `joinConversation` rejects a tampered blob (MLS
   verification) and the recipient simply fails to join. A malicious server can at most **withhold** a
@@ -67,8 +73,10 @@ to that device's KeyPackage key). Server stores + forwards opaque base64 only �
   `recipient_device_id` + `sender_user_id` + `welcome` + `ratchet_tree` (both base64, ciphertext-only) +
   `created_at`. RLS ENABLE+FORCE+WITH CHECK; composite FK `(tenant_id, conversation_id) → conversations`
   CASCADE; **`(tenant_id, recipient_user_id, recipient_device_id) → devices` NO ACTION** (the welcome must
-  be sealed to a real device **of the recipient** — rejects an unknown device or one of another user); user
-  FKs NO ACTION (preserve like `messages.sender_user_id`; tenant teardown still cascades). Leading-`tenant_id`
+  be sealed to a real device **of the recipient** — rejects an unknown device or one of another user);
+  **`(tenant_id, conversation_id, recipient_user_id) → conversation_members` CASCADE** (the welcome is owned
+  by the membership — revoking it drops the pending welcome); user FKs NO ACTION (preserve like
+  `messages.sender_user_id`; tenant teardown still cascades). Leading-`tenant_id`
   indexes: `(tenant_id, recipient_user_id, recipient_device_id)` (device fetch-mine) and
   `(tenant_id, conversation_id)` (FK cascade). Grants `select, insert, delete` to `argus_app` (transient).
 - **Endpoints** (Zod `.strict()` + OpenAPI bounds, base64 patterns): `POST /conversations/:id/welcomes`

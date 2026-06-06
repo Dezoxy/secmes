@@ -36,6 +36,12 @@ create table if not exists conversation_welcomes (
   -- device, or one belonging to another user — no inconsistent/orphan welcome). NO ACTION like the user FKs.
   foreign key (tenant_id, recipient_user_id, recipient_device_id)
     references devices (tenant_id, user_id, id) on delete no action,
+  -- A pending welcome is OWNED BY the recipient's membership: revoking app-level membership (deleting the
+  -- conversation_members row) CASCADE-drops the pending join material, so the server never hands a Welcome
+  -- to a REMOVED member (mirrors conversation_receipts -> conversation_members). The deliver tx adds the
+  -- member before inserting the welcome, so this FK is always satisfiable.
+  foreign key (tenant_id, conversation_id, recipient_user_id)
+    references conversation_members (tenant_id, conversation_id, user_id) on delete cascade,
   foreign key (tenant_id, sender_user_id) references users (tenant_id, id) on delete no action
 );
 alter table conversation_welcomes enable row level security;

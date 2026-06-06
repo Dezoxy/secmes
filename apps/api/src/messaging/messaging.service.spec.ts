@@ -532,6 +532,20 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     await svc.consumeWelcome(daveAuth, welcomeId, daveDeviceId); // succeeds
   });
 
+  it('a revoked member no longer receives the pending welcome (membership cascade)', async () => {
+    const conv = await newConversation(); // alice + bob
+    await svc.deliverWelcome(aliceAuth, conv, wel({ welcome: 'cmV2b2tl' })); // dave added + welcome
+    expect(
+      (await svc.listMyWelcomes(daveAuth, daveDeviceId)).some((w) => w.conversationId === conv),
+    ).toBe(true);
+
+    // Revoke dave's app-level membership — the pending welcome must not survive it (no join after remove).
+    await sql`delete from conversation_members where conversation_id = ${conv} and user_id = ${daveId}`;
+    expect(
+      (await svc.listMyWelcomes(daveAuth, daveDeviceId)).some((w) => w.conversationId === conv),
+    ).toBe(false); // cascaded away — no stale join material
+  });
+
   it('delivering to an existing member is idempotent on membership (no duplicate member row)', async () => {
     const conv = await newConversation(); // bob is already a member
     await svc.deliverWelcome(

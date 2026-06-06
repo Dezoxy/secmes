@@ -286,11 +286,13 @@ describe.skipIf(!DB_URL)('messaging schema RLS + append-only (checkpoint 25)', (
   });
 
   it('deleting a conversation cascades its pending welcomes', async () => {
-    // A bare conversation (no message/member) carrying just a welcome, to isolate the welcome FK cascade.
+    // A conversation with a member + a welcome (the welcome's membership FK requires the member to exist).
     const cid = (await asTenant(tenantA, async (tx) => {
       const [c] = await tx`insert into conversations (tenant_id, created_by)
                            values (${tenantA}, ${userA}) returning id`;
       const id = (c as { id: string }).id;
+      await tx`insert into conversation_members (tenant_id, conversation_id, user_id)
+               values (${tenantA}, ${id}, ${userA})`;
       await tx`insert into conversation_welcomes
                  (tenant_id, conversation_id, recipient_user_id, recipient_device_id, sender_user_id, welcome, ratchet_tree)
                values (${tenantA}, ${id}, ${userA}, ${deviceA}, ${userA}, 'w', 't')`;
@@ -300,6 +302,29 @@ describe.skipIf(!DB_URL)('messaging schema RLS + append-only (checkpoint 25)', (
     const [row] =
       await sql`select count(*)::int as n from conversation_welcomes where conversation_id = ${cid}`;
     expect((row as { n: number }).n).toBe(0);
+  });
+
+  it('revoking a membership cascade-deletes that member’s pending welcome', async () => {
+    // A pending welcome is OWNED BY the recipient's membership — an app-level remove must NOT leave stale
+    // join material the removed member could still fetch and use to join. (Mirrors the receipts cascade.)
+    const cid = await makeConversation(tenantA, userA); // conversation + membership(userA) + a message
+    await asTenant(
+      tenantA,
+      (tx) => tx`insert into conversation_welcomes
+                   (tenant_id, conversation_id, recipient_user_id, recipient_device_id, sender_user_id, welcome, ratchet_tree)
+                 values (${tenantA}, ${cid}, ${userA}, ${deviceA}, ${userA}, 'w', 't')`,
+    );
+    await asTenant(
+      tenantA,
+      (tx) =>
+        tx`delete from conversation_members where conversation_id = ${cid} and user_id = ${userA}`,
+    );
+    const [row] =
+      await sql`select count(*)::int as n from conversation_welcomes where conversation_id = ${cid}`;
+    expect((row as { n: number }).n).toBe(0); // cascaded — no stale join material survives the remove
+    // The message stays (its FK is to the conversation, not the membership) — removal ≠ deleting history.
+    const [msg] = await sql`select count(*)::int as n from messages where conversation_id = ${cid}`;
+    expect((msg as { n: number }).n).toBeGreaterThan(0);
   });
 
   it('no tenant context => fail closed on conversation_welcomes', async () => {
