@@ -39,8 +39,10 @@ class SyncedMessageDto {
   epoch!: number;
 
   @ApiProperty({
+    type: String,
     required: false,
     nullable: true,
+    maxLength: 512,
     description: 'object key of an encrypted attachment',
   })
   attachmentObjectKey!: string | null;
@@ -54,8 +56,10 @@ class SyncPageDto {
   messages!: SyncedMessageDto[];
 
   @ApiProperty({
+    type: String,
     required: false,
     nullable: true,
+    maxLength: 256,
     description:
       'opaque resume cursor at the last message of this page — persist it; pass as `after` to ' +
       'continue or resume later. Keep paging while you receive a full page. Null only on an empty page.',

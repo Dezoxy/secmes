@@ -102,8 +102,10 @@ class FetchedMessageDto {
   epoch!: number;
 
   @ApiProperty({
+    type: String,
     required: false,
     nullable: true,
+    maxLength: 512,
     description: 'object key of an encrypted attachment',
   })
   attachmentObjectKey!: string | null;
@@ -117,6 +119,7 @@ class MessagePageDto {
   messages!: FetchedMessageDto[];
 
   @ApiProperty({
+    type: String,
     required: false,
     nullable: true,
     format: 'uuid',
