@@ -16,6 +16,7 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
   let tenantB: string;
   let aliceId: string;
   let bobId: string;
+  let daveId: string;
   let carolId: string;
   const svc = new MessagingService(new InProcessRealtimeBus());
 
@@ -41,7 +42,8 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
       await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantA}, 'm-alice', 'al@a.test') returning id`;
     [{ id: bobId }] =
       await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantA}, 'm-bob', 'bob@a.test') returning id`;
-    await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantA}, 'm-dave', 'dave@a.test')`;
+    [{ id: daveId }] =
+      await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantA}, 'm-dave', 'dave@a.test') returning id`;
     [{ id: carolId }] =
       await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantB}, 'm-carol', 'c@b.test') returning id`;
     await sql`insert into users (tenant_id, external_identity_id, email, status)
@@ -206,5 +208,98 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     const page = await svc.listMessages(aliceAuth, conv, { limit: 50 });
     expect(page.messages).toEqual([]);
     expect(page.nextCursor).toBeNull();
+  });
+
+  // ── catch-up sync across conversations (checkpoint 30) ───────────────────────────────────────────
+  it('syncs messages across the caller’s conversations (tagged with conversationId), excluding others', async () => {
+    const c1 = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
+    const c2 = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
+    const cOther = (await svc.createConversation(aliceAuth, [daveId])).conversationId; // bob NOT a member
+    const m1 = (await svc.sendMessage(aliceAuth, c1, msg())).messageId;
+    const m2 = (await svc.sendMessage(aliceAuth, c2, msg())).messageId;
+    await svc.sendMessage(aliceAuth, cOther, msg());
+
+    const page = await svc.syncMessages(bobAuth, { limit: 100 });
+    const seen = page.messages.filter((m) => [m1, m2].includes(m.id));
+    expect(seen.map((m) => m.id)).toEqual([m1, m2]); // chronological
+    expect(seen.find((m) => m.id === m1)?.conversationId).toBe(c1); // tagged
+    expect(seen.find((m) => m.id === m2)?.conversationId).toBe(c2);
+    expect(page.messages.some((m) => m.conversationId === cOther)).toBe(false); // excluded (non-member)
+  });
+
+  it('sync paginates with the opaque nextCursor across conversations', async () => {
+    const a = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
+    const b = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
+    const ids = [
+      (await svc.sendMessage(aliceAuth, a, msg())).messageId,
+      (await svc.sendMessage(aliceAuth, b, msg())).messageId,
+      (await svc.sendMessage(aliceAuth, a, msg())).messageId,
+    ];
+    // Find this batch's start cursor by syncing the full stream and locating ids[0], then page from it.
+    const all = await svc.syncMessages(bobAuth, { limit: 1000 });
+    const startIdx = all.messages.findIndex((m) => m.id === ids[0]);
+    const cursorAfterId0 = all.nextCursor; // not used directly; we walk from ids[0] below
+    expect(startIdx).toBeGreaterThanOrEqual(0);
+    expect(cursorAfterId0 === null || typeof cursorAfterId0 === 'string').toBe(true);
+
+    // Page through everything with limit 2 and assert ids[0..2] appear contiguously, in order.
+    const collected: string[] = [];
+    let cursor: string | undefined;
+    for (let i = 0; i < 50; i++) {
+      const page: { messages: { id: string }[]; nextCursor: string | null } =
+        await svc.syncMessages(bobAuth, { limit: 2, after: cursor });
+      collected.push(...page.messages.map((m) => m.id));
+      if (!page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+    const sub = collected.slice(collected.indexOf(ids[0]!), collected.indexOf(ids[0]!) + 3);
+    expect(sub).toEqual(ids); // ids[0], ids[1], ids[2] contiguous & ordered across the paged stream
+  });
+
+  it('another tenant’s user syncs nothing from this tenant', async () => {
+    const conv = await newConversation();
+    await svc.sendMessage(aliceAuth, conv, msg());
+    const page = await svc.syncMessages(carolAuth, { limit: 100 });
+    expect(page.messages.some((m) => m.conversationId === conv)).toBe(false); // RLS: no cross-tenant
+  });
+
+  it('rejects a malformed cursor (opaque token, not a free id → no oracle)', async () => {
+    await expect(
+      svc.syncMessages(bobAuth, { limit: 100, after: 'not-a-cursor!' }),
+    ).rejects.toThrow();
+  });
+
+  it('returns a resume cursor even on a partial final page (progress is persistable)', async () => {
+    const c = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
+    await svc.sendMessage(aliceAuth, c, msg());
+    const page = await svc.syncMessages(bobAuth, { limit: 100 }); // partial page (< 100)
+    expect(page.messages.length).toBeLessThan(100);
+    expect(page.nextCursor).not.toBeNull(); // resume token returned despite the page not being full
+
+    // Resuming from it is caught up (empty); a message sent AFTER it is then returned by that cursor.
+    expect(
+      (await svc.syncMessages(bobAuth, { limit: 100, after: page.nextCursor! })).messages,
+    ).toEqual([]);
+    const next = (await svc.sendMessage(aliceAuth, c, msg())).messageId;
+    const resumed = await svc.syncMessages(bobAuth, { limit: 100, after: page.nextCursor! });
+    expect(resumed.messages.map((m) => m.id)).toEqual([next]);
+  });
+
+  it('preserves sync progress after the caller is removed from a conversation', async () => {
+    // Bob has a cursor from conversation X, then is removed from X. He must still sync his OTHER
+    // conversations — the opaque cursor carries (created_at, id), so it doesn't depend on X-membership.
+    const x = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
+    await svc.sendMessage(aliceAuth, x, msg()); // bob's last-seen is in X
+    const afterX = (await svc.syncMessages(bobAuth, { limit: 1 })).nextCursor;
+    if (!afterX) throw new Error('expected a cursor');
+
+    // Remove bob from X, then send into a DIFFERENT conversation bob is in.
+    await sql`delete from conversation_members where conversation_id = ${x} and user_id = ${bobId}`;
+    const y = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
+    const my = (await svc.sendMessage(aliceAuth, y, msg())).messageId;
+
+    const page = await svc.syncMessages(bobAuth, { limit: 100, after: afterX });
+    expect(page.messages.some((m) => m.id === my)).toBe(true); // sync still works for Y
+    expect(page.messages.some((m) => m.conversationId === x)).toBe(false); // X (left) excluded
   });
 });

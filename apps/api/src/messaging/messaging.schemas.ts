@@ -22,6 +22,16 @@ export const ListMessagesQuerySchema = z
   .strict();
 export type ListMessagesQuery = z.infer<typeof ListMessagesQuerySchema>;
 
+export const SyncQuerySchema = z
+  .object({
+    // `after` is the previous page's OPAQUE `nextCursor` (an encoded (created_at, id) token — NOT a
+    // message id). Treated as opaque by the client; bounded length, structure validated on decode.
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    after: z.string().min(1).max(256).optional(),
+  })
+  .strict();
+export type SyncQuery = z.infer<typeof SyncQuerySchema>;
+
 export const SendMessageSchema = z
   .object({
     clientMessageId: z.string().uuid(), // client-generated; idempotency key (per sender)
