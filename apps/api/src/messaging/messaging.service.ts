@@ -36,6 +36,17 @@ export interface MessagePage {
   nextCursor: string | null;
 }
 
+/** A message from the cross-conversation catch-up sync — carries its `conversationId` (the stream is
+ * interleaved across all the caller's conversations, so each item must say which one it belongs to). */
+export interface SyncedMessage extends FetchedMessage {
+  conversationId: string;
+}
+
+export interface SyncPage {
+  messages: SyncedMessage[];
+  nextCursor: string | null;
+}
+
 // Validates each raw fetched row so a schema drift on this read path fails loudly. `epoch` (int8) and
 // `created_at` (timestamptz) come back from the driver as string/Date — coerce them.
 const MessageRowSchema = z.object({
@@ -48,6 +59,9 @@ const MessageRowSchema = z.object({
   attachment_object_key: z.string().nullable(),
   created_at: z.coerce.date(),
 });
+
+// The sync row adds the conversation id (cross-conversation stream).
+const SyncRowSchema = MessageRowSchema.extend({ conversation_id: z.string().uuid() });
 
 @Injectable()
 export class MessagingService {
@@ -273,6 +287,62 @@ export class MessagingService {
         };
       });
       // A full page implies more may exist → hand back the last id as the next cursor.
+      const last = messages.at(-1);
+      const nextCursor = last && messages.length === query.limit ? last.id : null;
+      return { messages, nextCursor };
+    });
+  }
+
+  /**
+   * Catch-up sync (checkpoint 30): the messages across ALL the caller's conversations after a cursor, in
+   * chronological order, each tagged with its `conversationId`. A reconnecting client passes its last-seen
+   * `nextCursor` to fetch everything it missed in one paginated stream (the durable `messages` table is
+   * the offline queue). AUTHZ: the inner join to `conversation_members` (caller) under RLS means only
+   * conversations the caller is a member of are returned — never another member's or tenant's messages.
+   */
+  async syncMessages(auth: VerifiedAuth, query: ListMessagesQuery): Promise<SyncPage> {
+    return withTenant(auth.tenantId, async (tx) => {
+      const user = await this.requireUser(tx, auth.sub);
+
+      // Exclusive keyset cursor over the whole (caller-visible) stream. The cursor row is looked up
+      // through the caller's OWN memberships — so a message id from a conversation the caller isn't in
+      // (even same-tenant) resolves to NULL → empty page, identical to a non-existent id. This makes the
+      // cursor's visibility match the result set's, closing an intra-tenant existence/timing oracle.
+      // Bound params, no SQL injection.
+      const cursor = query.after
+        ? sql`and (m.created_at, m.id) > (
+            select mm.created_at, mm.id from messages mm
+            join conversation_members cm2
+              on cm2.conversation_id = mm.conversation_id and cm2.user_id = ${user}
+            where mm.id = ${query.after})`
+        : sql``;
+      const rows = (await tx.execute(sql`
+        select m.id, m.conversation_id, m.sender_user_id, m.client_message_id, m.ciphertext, m.alg,
+               m.epoch, m.attachment_object_key, m.created_at
+        from messages m
+        join conversation_members cm
+          on cm.conversation_id = m.conversation_id and cm.user_id = ${user}
+        where true ${cursor}
+        order by m.created_at asc, m.id asc
+        limit ${query.limit}
+      `)) as unknown as unknown[];
+
+      const messages: SyncedMessage[] = rows.map((raw) => {
+        const parsed = SyncRowSchema.safeParse(raw); // content-free error (never echo ciphertext)
+        if (!parsed.success) throw new Error('message row shape drift');
+        const r = parsed.data;
+        return {
+          id: r.id,
+          conversationId: r.conversation_id,
+          senderUserId: r.sender_user_id,
+          clientMessageId: r.client_message_id,
+          ciphertext: r.ciphertext,
+          alg: r.alg,
+          epoch: r.epoch,
+          attachmentObjectKey: r.attachment_object_key,
+          createdAt: r.created_at.toISOString(),
+        };
+      });
       const last = messages.at(-1);
       const nextCursor = last && messages.length === query.limit ? last.id : null;
       return { messages, nextCursor };

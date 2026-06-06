@@ -16,6 +16,7 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
   let tenantB: string;
   let aliceId: string;
   let bobId: string;
+  let daveId: string;
   let carolId: string;
   const svc = new MessagingService(new InProcessRealtimeBus());
 
@@ -41,7 +42,8 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
       await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantA}, 'm-alice', 'al@a.test') returning id`;
     [{ id: bobId }] =
       await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantA}, 'm-bob', 'bob@a.test') returning id`;
-    await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantA}, 'm-dave', 'dave@a.test')`;
+    [{ id: daveId }] =
+      await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantA}, 'm-dave', 'dave@a.test') returning id`;
     [{ id: carolId }] =
       await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantB}, 'm-carol', 'c@b.test') returning id`;
     await sql`insert into users (tenant_id, external_identity_id, email, status)
@@ -206,5 +208,57 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     const page = await svc.listMessages(aliceAuth, conv, { limit: 50 });
     expect(page.messages).toEqual([]);
     expect(page.nextCursor).toBeNull();
+  });
+
+  // ── catch-up sync across conversations (checkpoint 30) ───────────────────────────────────────────
+  it('syncs messages across the caller’s conversations (tagged with conversationId), excluding others', async () => {
+    const c1 = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
+    const c2 = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
+    const cOther = (await svc.createConversation(aliceAuth, [daveId])).conversationId; // bob NOT a member
+    const m1 = (await svc.sendMessage(aliceAuth, c1, msg())).messageId;
+    const m2 = (await svc.sendMessage(aliceAuth, c2, msg())).messageId;
+    await svc.sendMessage(aliceAuth, cOther, msg());
+
+    const page = await svc.syncMessages(bobAuth, { limit: 100 });
+    const seen = page.messages.filter((m) => [m1, m2].includes(m.id));
+    expect(seen.map((m) => m.id)).toEqual([m1, m2]); // chronological
+    expect(seen.find((m) => m.id === m1)?.conversationId).toBe(c1); // tagged
+    expect(seen.find((m) => m.id === m2)?.conversationId).toBe(c2);
+    expect(page.messages.some((m) => m.conversationId === cOther)).toBe(false); // excluded (non-member)
+  });
+
+  it('sync paginates with a cursor across conversations', async () => {
+    const a = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
+    const b = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
+    const ids = [
+      (await svc.sendMessage(aliceAuth, a, msg())).messageId,
+      (await svc.sendMessage(aliceAuth, b, msg())).messageId,
+      (await svc.sendMessage(aliceAuth, a, msg())).messageId,
+    ];
+    const p1 = await svc.syncMessages(bobAuth, { limit: 2, after: ids[0] });
+    // after ids[0]: the next two (ids[1], ids[2]) — across conversations a and b, interleaved by time.
+    expect(p1.messages.map((m) => m.id)).toEqual([ids[1], ids[2]]);
+  });
+
+  it('another tenant’s user syncs nothing from this tenant', async () => {
+    const conv = await newConversation();
+    await svc.sendMessage(aliceAuth, conv, msg());
+    const page = await svc.syncMessages(carolAuth, { limit: 100 });
+    expect(page.messages.some((m) => m.conversationId === conv)).toBe(false); // RLS: no cross-tenant
+  });
+
+  it('a non-member message id as cursor behaves like a non-existent id (no cursor oracle)', async () => {
+    // A conversation bob is NOT in, with a message — bob must not be able to probe its id via `after`.
+    const cOther = (await svc.createConversation(aliceAuth, [daveId])).conversationId;
+    const foreign = (await svc.sendMessage(aliceAuth, cOther, msg())).messageId;
+
+    const withForeignCursor = await svc.syncMessages(bobAuth, { limit: 100, after: foreign });
+    const withRandomCursor = await svc.syncMessages(bobAuth, {
+      limit: 100,
+      after: crypto.randomUUID(),
+    });
+    // Both collapse to empty (the cursor is resolved only through bob's own memberships).
+    expect(withForeignCursor.messages).toEqual([]);
+    expect(withRandomCursor.messages).toEqual([]);
   });
 });
