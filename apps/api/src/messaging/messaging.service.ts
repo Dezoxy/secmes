@@ -453,16 +453,28 @@ export class MessagingService {
       const user = await this.requireUser(tx, auth.sub);
       await this.requireMembership(tx, conversationId, user);
 
+      // Drive from MEMBERS (left join receipts) so EVERY member is returned — a member who hasn't acked
+      // yet appears with null watermarks (i.e. "not delivered/read"), not omitted. RLS scopes both tables.
       const rows = await tx
         .select({
-          userId: schema.conversationReceipts.userId,
+          userId: schema.conversationMembers.userId,
           deliveredThroughMessageId: schema.conversationReceipts.deliveredThroughMessageId,
           deliveredAt: schema.conversationReceipts.deliveredAt,
           readThroughMessageId: schema.conversationReceipts.readThroughMessageId,
           readAt: schema.conversationReceipts.readAt,
         })
-        .from(schema.conversationReceipts)
-        .where(eq(schema.conversationReceipts.conversationId, conversationId));
+        .from(schema.conversationMembers)
+        .leftJoin(
+          schema.conversationReceipts,
+          and(
+            eq(
+              schema.conversationReceipts.conversationId,
+              schema.conversationMembers.conversationId,
+            ),
+            eq(schema.conversationReceipts.userId, schema.conversationMembers.userId),
+          ),
+        )
+        .where(eq(schema.conversationMembers.conversationId, conversationId));
 
       return rows.map((r) => ({
         userId: r.userId,

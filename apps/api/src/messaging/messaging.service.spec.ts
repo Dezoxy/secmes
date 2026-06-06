@@ -316,6 +316,12 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     expect(bob?.readThroughMessageId).toBe(m1);
     expect(bob?.deliveredAt).not.toBeNull();
     expect(bob?.readAt).not.toBeNull();
+
+    // Alice is a member but hasn't posted a receipt → still listed, with null watermarks.
+    const alice = receipts.find((r) => r.userId === aliceId);
+    expect(alice).toBeDefined();
+    expect(alice?.deliveredThroughMessageId).toBeNull();
+    expect(alice?.readAt).toBeNull();
   });
 
   it('advances watermarks forward only (monotonic — no rollback)', async () => {
