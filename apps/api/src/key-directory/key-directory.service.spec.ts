@@ -49,6 +49,7 @@ describe.skipIf(!DB_URL)('KeyDirectoryService', () => {
   it('publishes the caller device + KeyPackages, bound to the caller', async () => {
     const res = await dir.publish(bobAuth, 'Qk9CU0lH', ['a2V5LTE=', 'a2V5LTI=']);
     expect(res.published).toBe(2);
+    expect(res.available).toBe(2); // both unclaimed after publish
     const [d] = await sql`select user_id from devices where id = ${res.deviceId}`;
     expect(d?.user_id).toBe(bobId); // device is bound to Bob's verified identity
   });
@@ -79,8 +80,10 @@ describe.skipIf(!DB_URL)('KeyDirectoryService', () => {
   it('dedupes KeyPackages within a batch and across retries', async () => {
     const r1 = await dir.publish(eveAuth, 'RVZF', ['e1', 'e1', 'e2']); // 'e1' duplicated in-batch
     expect(r1.published).toBe(2); // e1, e2
+    expect(r1.available).toBe(2);
     const r2 = await dir.publish(eveAuth, 'RVZF', ['e2', 'e3']); // 'e2' already published
     expect(r2.published).toBe(1); // only e3 is new
+    expect(r2.available).toBe(3); // e1, e2, e3 unclaimed
   });
 
   it('caps the unclaimed pool per device', async () => {
@@ -93,5 +96,6 @@ describe.skipIf(!DB_URL)('KeyDirectoryService', () => {
     // At the cap, re-publishing an EXISTING batch inserts 0 → must NOT be rejected (idempotent).
     const retry = await dir.publish(daveAuth, 'REFWRQ==', batchA);
     expect(retry.published).toBe(0);
+    expect(retry.available).toBe(200); // still 200 unclaimed (republish inserted nothing)
   });
 });

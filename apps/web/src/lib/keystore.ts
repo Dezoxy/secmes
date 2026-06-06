@@ -36,7 +36,9 @@ const DB_VERSION = 3;
 const STORE = 'device';
 const POOL_STORE = 'key-package-pool'; // sealed one-time KeyPackage pool (privates retained for join)
 const SELF = 'self'; // single device per user in v1 (multi-device is deferred, B2)
-const POOL_TARGET = 10; // one-time KeyPackages kept published so peers can claim one to add this device
+// One-time KeyPackages kept AVAILABLE (unclaimed) in the directory so peers can claim one to add this
+// device. Provisioning replenishes back to this after others claim some (see provisioning.ts).
+export const POOL_TARGET = 10;
 
 interface StoredDevice {
   identity: string;

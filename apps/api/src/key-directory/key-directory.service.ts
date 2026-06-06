@@ -17,7 +17,11 @@ const ClaimRowSchema = z.object({
 
 export interface PublishResult {
   deviceId: string;
+  /** Net-new KeyPackages inserted by THIS call (already-published dups are skipped). */
   published: number;
+  /** Total UNCLAIMED KeyPackages for this device after the call — lets the client replenish to target
+   * after others have claimed some (re-publishing claimed packages inserts nothing, so count drives it). */
+  available: number;
 }
 
 export interface ClaimedKeyPackage {
@@ -85,14 +89,18 @@ export class KeyDirectoryService {
         .onConflictDoNothing()
         .returning({ id: schema.keyPackages.id });
 
+      // Unclaimed pool size AFTER this insert = pre-insert unclaimed + net-new rows (both unclaimed).
+      // One value drives both the cap and the reported `available`, so they can never drift apart.
+      const afterPublish = available + inserted.length;
+
       // Cap on ACTUAL net-new rows (not batch size) so an idempotent retry near the cap isn't
       // wrongly rejected. Throwing rolls back the insert above (device row is locked for the tx).
-      if (available + inserted.length > MAX_AVAILABLE_PER_DEVICE) {
+      if (afterPublish > MAX_AVAILABLE_PER_DEVICE) {
         throw new BadRequestException(
           `too many unclaimed key packages (max ${MAX_AVAILABLE_PER_DEVICE} per device)`,
         );
       }
-      return { deviceId: device.id, published: inserted.length };
+      return { deviceId: device.id, published: inserted.length, available: afterPublish };
     });
   }
 

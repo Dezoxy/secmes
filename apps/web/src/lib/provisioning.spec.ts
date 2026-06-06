@@ -20,7 +20,8 @@ describe('provisionDevice', () => {
   beforeEach(() => {
     globalThis.indexedDB = new IDBFactory();
     publish.mockReset();
-    publish.mockResolvedValue({ deviceId: 'd', published: 10 });
+    // Default: the directory already has a full pool unclaimed → no replenishment needed.
+    publish.mockResolvedValue({ deviceId: 'd', published: 10, available: 10 });
   });
 
   it('ensures the pool and publishes its PUBLIC KeyPackages under the signature key', async () => {
@@ -49,5 +50,27 @@ describe('provisionDevice', () => {
     await provisionDevice(ks, device, 'pw');
     const second = publish.mock.calls[1]![1];
     expect(second).toEqual(first); // same pool — the server dedups, so re-publish is a safe no-op
+  });
+
+  it('replenishes with fresh packages when the server reports availability below target', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('u1', 'pw');
+
+    // First publish: only 2 of the 10 remain unclaimed (8 were claimed while offline). Second publish
+    // (the replenishment) tops the directory back up to 10.
+    publish
+      .mockReset()
+      .mockResolvedValueOnce({ deviceId: 'd', published: 10, available: 2 })
+      .mockResolvedValueOnce({ deviceId: 'd', published: 8, available: 10 });
+
+    await provisionDevice(ks, device, 'pw');
+
+    expect(publish).toHaveBeenCalledTimes(2);
+    // the replenishment publishes 8 FRESH replacements (target 10 − available 2)…
+    expect(publish.mock.calls[1]![1]).toHaveLength(8);
+    // …which are distinct from the originally published 10 (genuinely new one-time KeyPackages)
+    const firstBatch = new Set(publish.mock.calls[0]![1]);
+    expect(publish.mock.calls[1]![1].every((kp) => !firstBatch.has(kp))).toBe(true);
   });
 });

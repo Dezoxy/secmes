@@ -53,8 +53,11 @@ class PublishResultDto {
   @ApiProperty()
   deviceId!: string;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'net-new KeyPackages inserted by this call' })
   published!: number;
+
+  @ApiProperty({ description: 'total unclaimed KeyPackages for this device after the call' })
+  available!: number;
 }
 
 class ClaimedKeyPackageDto {

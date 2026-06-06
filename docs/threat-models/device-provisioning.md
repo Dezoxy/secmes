@@ -80,10 +80,14 @@ opaque base64 to the crypto-blind server). Private keys never leave; the passphr
 
 - **Passphrase UX is v1** — a local passcode gate (the sealed-keystore pattern; like Signal/Element
   desktop). Open to refinement (strength meter, biometric unlock, session timeout). Reversible.
-- **Replenishment after *others'* claims** isn't availability-driven yet (the client can't see the
-  server's remaining count). v1 publishes a generous pool + re-publishes (idempotent) each login; precise
-  top-up wants the publish response to return `available` (a small later server addition).
-- **Local pool growth / pruning**: consumed members are removed on join (Slice 4); expired-KeyPackage
-  pruning (MLS lifetime) is a follow-up. Bounded by the server's 200/device cap.
+- **Replenishment is availability-driven**: the publish response returns `available` (this device's
+  unclaimed count), and provisioning mints + publishes FRESH replacements until the directory is back at
+  target — so a device stays addressable after peers claim its packages while it was offline (re-publishing
+  the claimed ones inserts nothing). The `available` count is the caller's OWN device metadata (no
+  cross-tenant leak). Bounded by `MAX_REPLENISH_ROUNDS` + the server's 200/device cap.
+- **Local pool growth / pruning**: replenishment retains claimed members' privates (needed to join an
+  in-flight Welcome) and appends fresh ones, so the local pool grows over time; consumed members are
+  removed on join (Slice 4); expired-KeyPackage pruning (MLS lifetime) is a follow-up. Bounded by the
+  server's 200/device cap.
 - **Single device per user** (v1, B2) — multi-device key management is deferred; ties into the
   device-bound-session hardening noted in `welcome-delivery.md` §6.

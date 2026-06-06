@@ -5,22 +5,37 @@
 import { deviceSignaturePublicKeyB64, serializeKeyPackage, type DeviceKeys } from '@argus/crypto';
 
 import { publishKeyPackages, type PublishResult } from './api';
-import type { DeviceKeystore } from './keystore';
+import { POOL_TARGET, type DeviceKeystore } from './keystore';
+
+const MAX_REPLENISH_ROUNDS = 5; // bound the top-up loop (normally 0–1 rounds)
+
+const publicKeyPackages = (pool: DeviceKeys[]): string[] =>
+  pool.map((member) => serializeKeyPackage(member.publicPackage));
 
 /**
- * Ensure the device's one-time KeyPackage pool is full (sealed at rest) and published to the directory
- * so peers can claim a package to add this device. Idempotent — safe on every login (the server dedups
- * already-published packages). Returns the pool (DeviceKeys with retained privates) + the publish result.
+ * Ensure the device keeps `POOL_TARGET` one-time KeyPackages AVAILABLE (unclaimed) in the directory so
+ * peers can claim one to add this device. Publishes the sealed pool (idempotent — the server dedups), then
+ * REPLENISHES: if peers claimed some while this device was offline, re-publishing the claimed packages
+ * inserts nothing, so we mint + publish FRESH replacements until the server reports `available` back at
+ * target. Every minted member's private is retained sealed, so any resulting Welcome can still be joined.
+ * Returns the (growing) pool + the latest publish result.
  */
 export async function provisionDevice(
   keystore: DeviceKeystore,
   device: DeviceKeys,
   passphrase: string,
 ): Promise<{ pool: DeviceKeys[]; result: PublishResult }> {
-  const pool = await keystore.ensurePool(device, passphrase);
-  const result = await publishKeyPackages(
-    deviceSignaturePublicKeyB64(device),
-    pool.map((member) => serializeKeyPackage(member.publicPackage)),
-  );
+  const signaturePublicKey = deviceSignaturePublicKeyB64(device);
+  let pool = await keystore.ensurePool(device, passphrase, POOL_TARGET);
+  let result = await publishKeyPackages(signaturePublicKey, publicKeyPackages(pool));
+
+  for (let round = 0; round < MAX_REPLENISH_ROUNDS && result.available < POOL_TARGET; round += 1) {
+    const before = pool.length;
+    pool = await keystore.ensurePool(device, passphrase, before + (POOL_TARGET - result.available));
+    const fresh = pool.slice(before);
+    if (fresh.length === 0) break;
+    result = await publishKeyPackages(signaturePublicKey, publicKeyPackages(fresh));
+    if (result.published === 0) break; // nothing new took (e.g. the server per-device cap) — stop
+  }
   return { pool, result };
 }

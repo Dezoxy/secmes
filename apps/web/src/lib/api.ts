@@ -44,7 +44,10 @@ export async function establishSession(): Promise<Me> {
 /** Result of publishing one-time KeyPackages to the directory. */
 export interface PublishResult {
   deviceId: string;
+  /** Net-new KeyPackages inserted by this call (already-published dups are skipped). */
   published: number;
+  /** Total UNCLAIMED KeyPackages for this device after the call — drives replenishment. */
+  available: number;
 }
 
 /**
