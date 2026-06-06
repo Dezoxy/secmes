@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, Download, KeyRound, Loader2, Upload, X } from 'lucide-react';
 import {
+  RECOVERY_IDENTITY,
   exportRecovery,
   recoveryIsSetUp,
   restoreFromArtifact,
   setUpRecovery,
 } from '../../lib/recovery';
+import { useAuth } from '../auth/AuthContext';
 
 const INPUT =
   'w-full rounded-xl border border-white/5 bg-[#1a1a26] px-4 py-2.5 text-sm text-white placeholder-white/30 transition-all focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20';
@@ -28,6 +30,10 @@ interface RecoveryPanelProps {
 }
 
 export function RecoveryPanel({ onClose }: RecoveryPanelProps) {
+  const { profile } = useAuth();
+  // Back up / restore the SIGNED-IN account's device (the same identity the unlock gate sealed it under),
+  // so recovery and unlock share one device. RECOVERY_IDENTITY is only the demo fallback (no real account).
+  const identity = profile?.userId ?? RECOVERY_IDENTITY;
   const [setUp, setSetUp] = useState<boolean | null>(null);
   const [tab, setTab] = useState<'backup' | 'restore'>('backup');
   const [passphrase, setPassphrase] = useState('');
@@ -63,7 +69,9 @@ export function RecoveryPanel({ onClose }: RecoveryPanelProps) {
     setBusy(true);
     try {
       const artifact =
-        setUp === true ? await exportRecovery(passphrase) : await setUpRecovery(passphrase);
+        setUp === true
+          ? await exportRecovery(identity, passphrase)
+          : await setUpRecovery(identity, passphrase);
       downloadFile('argus-recovery.json', artifact);
       setSetUp(true);
       setDone(
@@ -87,7 +95,7 @@ export function RecoveryPanel({ onClose }: RecoveryPanelProps) {
     }
     setBusy(true);
     try {
-      await restoreFromArtifact(await file.text(), passphrase);
+      await restoreFromArtifact(identity, await file.text(), passphrase);
       setSetUp(true);
       setDone('This device was restored from your recovery file.');
       setFile(null);
