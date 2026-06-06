@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { MessageCircle } from 'lucide-react';
-import type { ChatMessage, Conversation, DeliveryStatus } from './types';
+import type { ChatMessage, Conversation } from './types';
 import { ME } from './types';
+import { getMlsSession } from '../../lib/mls';
 import { seedConversations } from './seed';
 import { ConversationList } from './ConversationList';
 import { ChatHeader } from './ChatHeader';
@@ -11,12 +12,13 @@ import { ImagePreviewModal } from './ImagePreviewModal';
 import { RecoveryPanel } from '../recovery/RecoveryPanel';
 
 /**
- * Chat experience, rebuilt in the Vite PWA from the design (Phase-5 #41 shell).
+ * Chat experience, rebuilt in the Vite PWA from the design (Phase-5 #41).
  *
- * Drives off a LOCAL in-memory seed for now. The live loop — subscribe over the WS gateway, fetch
- * ciphertext, MLS-decrypt via @argus/crypto into this view model, and send by encrypting client-side
- * (the server only ever stores ciphertext) — replaces the seed + the simulated delivery below when the
- * Phase-3 client wiring lands. No message text or image bytes here ever leave the browser as plaintext.
+ * Conversations come from a local seed, but SENDING runs a real in-browser MLS (RFC 9420) encrypt→
+ * decrypt round-trip via @argus/crypto (see lib/mls.ts) — proving the E2EE path end-to-end (a lock
+ * appears once a message has been through it). The live loop swaps the local peer for a remote member
+ * over the WS gateway and back-fills history by decrypting fetched ciphertext; it needs auth (Zitadel) +
+ * the key directory + fingerprint verification, none of which exist yet. No plaintext leaves the browser.
  */
 export default function ChatScreen() {
   const [conversations, setConversations] = useState<Conversation[]>(seedConversations);
@@ -33,8 +35,19 @@ export default function ChatScreen() {
     setConversations((prev) => prev.map((c) => (c.id === id ? { ...c, unread: 0 } : c)));
   };
 
+  const patchMessage = (convId: string, msgId: string, patch: Partial<ChatMessage>): void => {
+    setConversations((prev) =>
+      prev.map((c) =>
+        c.id === convId
+          ? { ...c, messages: c.messages.map((m) => (m.id === msgId ? { ...m, ...patch } : m)) }
+          : c,
+      ),
+    );
+  };
+
   const send = (body: string, images: File[]) => {
     if (!selectedId) return;
+    const convId = selectedId;
     const id = crypto.randomUUID(); // CSPRNG id; the real client_message_id is minted the same way
     const message: ChatMessage = {
       id,
@@ -46,23 +59,22 @@ export default function ChatScreen() {
       images: images.map((f, i) => ({ id: `${id}-${i}`, name: f.name })),
     };
     setConversations((prev) =>
-      prev.map((c) => (c.id === selectedId ? { ...c, messages: [...c.messages, message] } : c)),
+      prev.map((c) => (c.id === convId ? { ...c, messages: [...c.messages, message] } : c)),
     );
-    // Stand-in for the real send → server-ack → recipient-read transitions (replaced by the live loop).
-    const advance = (status: DeliveryStatus, delay: number): void => {
-      setTimeout(() => {
-        setConversations((prev) =>
-          prev.map((c) =>
-            c.id === selectedId
-              ? { ...c, messages: c.messages.map((m) => (m.id === id ? { ...m, status } : m)) }
-              : c,
-          ),
-        );
-      }, delay);
-    };
-    advance('sent', 400);
-    advance('delivered', 1200);
-    advance('read', 2400);
+    // Run a REAL MLS encrypt→decrypt round-trip (in-browser, via @argus/crypto) before marking the
+    // message sent — the recovered plaintext confirms the E2EE path, and a lock shows on the bubble.
+    // The live loop swaps the local peer for a remote member over the WS gateway (needs auth + the key
+    // directory + out-of-band fingerprint verification); the simulated delivery timing stands in for it.
+    void getMlsSession()
+      .then((session) => session.send(body || '(attachment)'))
+      .then(() => {
+        patchMessage(convId, id, { status: 'sent', encrypted: true });
+        setTimeout(() => patchMessage(convId, id, { status: 'delivered' }), 800);
+        setTimeout(() => patchMessage(convId, id, { status: 'read' }), 1800);
+      })
+      // If MLS setup/round-trip fails, the message was NOT encrypted or sent — mark it failed, never
+      // sent (no false delivery signal). `encrypted` stays false, so no lock shows.
+      .catch(() => patchMessage(convId, id, { status: 'failed' }));
   };
 
   return (
