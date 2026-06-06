@@ -235,4 +235,76 @@ describe.skipIf(!DB_URL)('messaging schema RLS + append-only (checkpoint 25)', (
       }),
     ).rejects.toThrow();
   });
+
+  // ── MLS Welcome delivery (welcome-delivery.md) ───────────────────────────────────────────────────
+  it('conversation_welcomes isolates by tenant (RLS) and WITH CHECK blocks cross-tenant writes', async () => {
+    // A welcome in tenant A (recipient + sender = userA, in convA — both base64-opaque blobs).
+    await asTenant(
+      tenantA,
+      (tx) => tx`insert into conversation_welcomes
+                   (tenant_id, conversation_id, recipient_user_id, sender_user_id, welcome, ratchet_tree)
+                 values (${tenantA}, ${convA}, ${userA}, ${userA}, 'b64-welcome', 'b64-tree')`,
+    );
+    // Tenant B sees NONE of A's welcomes.
+    const [bSees] = (await asTenant(
+      tenantB,
+      (tx) => tx`select count(*)::int as n from conversation_welcomes`,
+    )) as Array<{ n: number }>;
+    expect((bSees as { n: number }).n).toBe(0);
+    // Tenant A sees its own.
+    const [aSees] = (await asTenant(
+      tenantA,
+      (tx) =>
+        tx`select count(*)::int as n from conversation_welcomes where conversation_id = ${convA}`,
+    )) as Array<{ n: number }>;
+    expect((aSees as { n: number }).n).toBeGreaterThan(0);
+    // WITH CHECK: tenant A cannot write a welcome stamped tenant B.
+    await expect(
+      asTenant(
+        tenantA,
+        (tx) => tx`insert into conversation_welcomes
+                     (tenant_id, conversation_id, recipient_user_id, sender_user_id, welcome, ratchet_tree)
+                   values (${tenantB}, ${convA}, ${userA}, ${userA}, 'x', 'y')`,
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('welcomes are transient for the app role: delete is granted, update is NOT', async () => {
+    // argus_app holds select/insert/delete (the recipient consumes on join) but NO update — a stored
+    // welcome can't be silently altered server-side.
+    await expect(
+      asTenant(tenantA, (tx) => tx`update conversation_welcomes set welcome = 'tampered'`),
+    ).rejects.toThrow();
+    // delete IS allowed (consume).
+    await asTenant(
+      tenantA,
+      (tx) => tx`delete from conversation_welcomes where conversation_id = ${convA}`,
+    );
+  });
+
+  it('deleting a conversation cascades its pending welcomes', async () => {
+    // A bare conversation (no message/member) carrying just a welcome, to isolate the welcome FK cascade.
+    const cid = (await asTenant(tenantA, async (tx) => {
+      const [c] = await tx`insert into conversations (tenant_id, created_by)
+                           values (${tenantA}, ${userA}) returning id`;
+      const id = (c as { id: string }).id;
+      await tx`insert into conversation_welcomes
+                 (tenant_id, conversation_id, recipient_user_id, sender_user_id, welcome, ratchet_tree)
+               values (${tenantA}, ${id}, ${userA}, ${userA}, 'w', 't')`;
+      return id;
+    })) as string;
+    await sql`delete from conversations where id = ${cid}`; // composite FK ON DELETE CASCADE removes the welcome
+    const [row] =
+      await sql`select count(*)::int as n from conversation_welcomes where conversation_id = ${cid}`;
+    expect((row as { n: number }).n).toBe(0);
+  });
+
+  it('no tenant context => fail closed on conversation_welcomes', async () => {
+    await expect(
+      sql.begin(async (tx) => {
+        await tx`set local role argus_app`;
+        return tx`select count(*) from conversation_welcomes`;
+      }),
+    ).rejects.toThrow();
+  });
 });

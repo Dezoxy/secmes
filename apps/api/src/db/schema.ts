@@ -112,6 +112,20 @@ export const attachments = pgTable('attachments', {
   expiresAt: timestamp('expires_at', { withTimezone: true }),
 });
 
+// MLS Welcome delivery — opaque join material relayed to an added member (0012). `welcome` +
+// `ratchet_tree` are ciphertext-only base64 the server never decrypts; transient (consumed on join).
+// RLS + composite-FK tenant pinning in 0012. See welcome-delivery.md.
+export const conversationWelcomes = pgTable('conversation_welcomes', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  conversationId: uuid('conversation_id').notNull(),
+  recipientUserId: uuid('recipient_user_id').notNull(),
+  senderUserId: uuid('sender_user_id').notNull(),
+  welcome: text('welcome').notNull(),
+  ratchetTree: text('ratchet_tree').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Append-only audit log (IDs + metadata only — never content/secrets). RLS + grants in 0002.
 export const auditEvents = pgTable('audit_events', {
   id: uuid('id').primaryKey().defaultRandom(),

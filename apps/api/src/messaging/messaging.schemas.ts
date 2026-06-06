@@ -41,6 +41,21 @@ export const RecordReceiptSchema = z
   .strict();
 export type RecordReceipt = z.infer<typeof RecordReceiptSchema>;
 
+export const DeliverWelcomeSchema = z
+  .object({
+    // The user being ADDED — must be a user in the caller's tenant (composite FK → 400). Becomes a member.
+    recipientUserId: z.string().uuid(),
+    // Opaque MLS Welcome + RatchetTree (base64). The server stores + forwards; it NEVER decrypts them —
+    // they carry the group's key material sealed to the recipient's KeyPackage HPKE key. 32 KiB each:
+    // ample for a v1 1:1 add (a Welcome/RatchetTree is a few hundred bytes to a few KB) and it keeps the
+    // whole request under the platform's ~100 KB JSON body cap (Express default; main.ts). Larger N-party
+    // RatchetTrees (B1 group chat) will need that body cap raised in tandem — see welcome-delivery.md §6.
+    welcome: base64.min(1).max(32768),
+    ratchetTree: base64.min(1).max(32768),
+  })
+  .strict();
+export type DeliverWelcome = z.infer<typeof DeliverWelcomeSchema>;
+
 export const SendMessageSchema = z
   .object({
     clientMessageId: z.string().uuid(), // client-generated; idempotency key (per sender)

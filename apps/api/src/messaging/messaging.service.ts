@@ -1,11 +1,12 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant, type Tx } from '../db/index.js';
 import { RealtimeBus, type MessageCreatedEvent } from '../realtime/realtime-bus.js';
 import type {
+  DeliverWelcome,
   ListMessagesQuery,
   RecordReceipt,
   SendMessage,
@@ -14,6 +15,15 @@ import type {
 
 export interface CreatedConversation {
   conversationId: string;
+}
+
+/** A pending MLS Welcome the recipient fetches on connect to join the group — opaque blobs only. */
+export interface PendingWelcome {
+  id: string;
+  conversationId: string;
+  welcome: string;
+  ratchetTree: string;
+  createdAt: string;
 }
 
 export interface SentMessage {
@@ -188,6 +198,105 @@ export class MessagingService {
         throw new BadRequestException('one or more member user ids are invalid for this tenant');
       }
       return { conversationId: conv.id };
+    });
+  }
+
+  /**
+   * Deliver an MLS Welcome to a newly-added member — the live-loop relay between the key directory (#19)
+   * and a live group. In ONE transaction the verified caller (an existing member) adds `recipientUserId`
+   * to the conversation and stores the opaque Welcome + RatchetTree FOR them. AUTHZ: the caller must
+   * already be a member (same membership 404 as send — a non-member / cross-tenant / non-existent
+   * conversation leaks nothing). The recipient must be a user IN THE CALLER'S TENANT (composite FK → 400).
+   * `welcome`/`ratchetTree` are CIPHERTEXT ONLY — the server never decrypts them; `senderUserId` is the
+   * VERIFIED caller, never client input.
+   */
+  async deliverWelcome(
+    auth: VerifiedAuth,
+    conversationId: string,
+    body: DeliverWelcome,
+  ): Promise<{ welcomeId: string }> {
+    return withTenant(auth.tenantId, async (tx) => {
+      const sender = await this.requireUser(tx, auth.sub);
+      await this.requireMembership(tx, conversationId, sender);
+
+      // Add the recipient as a member (idempotent — re-delivering to an existing member is a no-op add).
+      // The composite FK (tenant_id, user_id) → users(tenant_id, id) rejects an unknown / cross-tenant
+      // recipient id; surfaced as 400 (no id echoed). A caught FK error aborts the tx, so we never
+      // proceed to the welcome insert on a bad recipient.
+      try {
+        await tx
+          .insert(schema.conversationMembers)
+          .values({ tenantId: auth.tenantId, conversationId, userId: body.recipientUserId })
+          .onConflictDoNothing();
+      } catch {
+        throw new BadRequestException('recipient user id is invalid for this tenant');
+      }
+
+      const [welcome] = await tx
+        .insert(schema.conversationWelcomes)
+        .values({
+          tenantId: auth.tenantId,
+          conversationId,
+          recipientUserId: body.recipientUserId,
+          senderUserId: sender,
+          welcome: body.welcome,
+          ratchetTree: body.ratchetTree,
+        })
+        .returning({ id: schema.conversationWelcomes.id });
+      if (!welcome) throw new Error('welcome insert returned no row');
+      return { welcomeId: welcome.id };
+    });
+  }
+
+  /**
+   * The caller's PENDING welcomes across every conversation they were added to (fetched on connect to
+   * run `joinConversation()` locally). CALLER-SCOPED: `recipient_user_id = the verified caller`, so a
+   * member never sees another member's welcome (which is sealed to that member's HPKE key anyway — we
+   * don't even hand it over). RLS scopes to the tenant. CIPHERTEXT ONLY; the server never decrypts.
+   */
+  async listMyWelcomes(auth: VerifiedAuth): Promise<PendingWelcome[]> {
+    return withTenant(auth.tenantId, async (tx) => {
+      const me = await this.requireUser(tx, auth.sub);
+      const rows = await tx
+        .select({
+          id: schema.conversationWelcomes.id,
+          conversationId: schema.conversationWelcomes.conversationId,
+          welcome: schema.conversationWelcomes.welcome,
+          ratchetTree: schema.conversationWelcomes.ratchetTree,
+          createdAt: schema.conversationWelcomes.createdAt,
+        })
+        .from(schema.conversationWelcomes)
+        .where(eq(schema.conversationWelcomes.recipientUserId, me))
+        .orderBy(asc(schema.conversationWelcomes.createdAt));
+      return rows.map((r) => ({
+        id: r.id,
+        conversationId: r.conversationId,
+        welcome: r.welcome,
+        ratchetTree: r.ratchetTree,
+        createdAt: r.createdAt.toISOString(),
+      }));
+    });
+  }
+
+  /**
+   * Consume (delete) a welcome after the caller has joined the group. RECIPIENT-ONLY: the delete is
+   * filtered to `recipient_user_id = the verified caller`, so a member can only consume their OWN
+   * welcome. 0 rows deleted → 404 — the SAME 404 whether the id is foreign, wrong-tenant (RLS-hidden),
+   * or already consumed, so nothing about another member's welcomes is revealed.
+   */
+  async consumeWelcome(auth: VerifiedAuth, welcomeId: string): Promise<void> {
+    await withTenant(auth.tenantId, async (tx) => {
+      const me = await this.requireUser(tx, auth.sub);
+      const deleted = await tx
+        .delete(schema.conversationWelcomes)
+        .where(
+          and(
+            eq(schema.conversationWelcomes.id, welcomeId),
+            eq(schema.conversationWelcomes.recipientUserId, me),
+          ),
+        )
+        .returning({ id: schema.conversationWelcomes.id });
+      if (deleted.length === 0) throw new NotFoundException('welcome not found');
     });
   }
 

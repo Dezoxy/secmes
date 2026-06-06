@@ -366,4 +366,115 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
       svc.recordReceipt(bobAuth, conv, { status: 'read', throughMessageId: foreign }),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
+
+  // ── MLS Welcome delivery (live message loop, checkpoint via welcome-delivery.md) ──────────────────
+  const wel = (
+    over: Partial<{ recipientUserId: string; welcome: string; ratchetTree: string }> = {},
+  ) => ({
+    recipientUserId: daveId,
+    welcome: 'd2VsY29tZQ==', // "welcome" — opaque base64; the server never decrypts it
+    ratchetTree: 'dHJlZQ==', // "tree"
+    ...over,
+  });
+
+  it('deliver adds the recipient as a member and stores the opaque welcome verbatim', async () => {
+    const conv = await newConversation(); // alice + bob; dave is NOT yet a member
+    const { welcomeId } = await svc.deliverWelcome(aliceAuth, conv, wel());
+    expect(welcomeId).toBeTruthy();
+
+    // dave is now a member of the conversation.
+    const [member] =
+      await sql`select 1 as ok from conversation_members where conversation_id = ${conv} and user_id = ${daveId}`;
+    expect(member?.ok).toBe(1);
+
+    // the blobs are stored verbatim, and the sender is the VERIFIED caller (not client-supplied).
+    const [row] =
+      await sql`select welcome, ratchet_tree, sender_user_id, recipient_user_id from conversation_welcomes where id = ${welcomeId}`;
+    expect(row?.welcome).toBe('d2VsY29tZQ==');
+    expect(row?.ratchet_tree).toBe('dHJlZQ==');
+    expect(row?.sender_user_id).toBe(aliceId);
+    expect(row?.recipient_user_id).toBe(daveId);
+  });
+
+  it('a non-member (same tenant) cannot deliver — 404, no existence leak', async () => {
+    const conv = await newConversation(); // dave is not a member
+    await expect(
+      svc.deliverWelcome(daveAuth, conv, wel({ recipientUserId: bobId })),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("another tenant's user cannot deliver — 404", async () => {
+    const conv = await newConversation();
+    await expect(svc.deliverWelcome(carolAuth, conv, wel())).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it('rejects a recipient from another tenant (composite FK → 400)', async () => {
+    const conv = await newConversation();
+    await expect(
+      svc.deliverWelcome(aliceAuth, conv, wel({ recipientUserId: carolId })),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects a non-existent recipient (composite FK → 400)', async () => {
+    const conv = await newConversation();
+    await expect(
+      svc.deliverWelcome(aliceAuth, conv, wel({ recipientUserId: crypto.randomUUID() })),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('the recipient fetches only their OWN welcome, never another member’s', async () => {
+    const conv = await newConversation();
+    await svc.deliverWelcome(
+      aliceAuth,
+      conv,
+      wel({ recipientUserId: daveId, welcome: 'ZGF2ZQ==' }),
+    );
+    await svc.deliverWelcome(aliceAuth, conv, wel({ recipientUserId: bobId, welcome: 'Ym9i' }));
+
+    const daves = await svc.listMyWelcomes(daveAuth);
+    expect(daves.every((w) => w.welcome !== 'Ym9i')).toBe(true); // never sees bob's
+    expect(daves.some((w) => w.welcome === 'ZGF2ZQ==' && w.conversationId === conv)).toBe(true);
+
+    const bobs = await svc.listMyWelcomes(bobAuth);
+    expect(bobs.some((w) => w.welcome === 'Ym9i' && w.conversationId === conv)).toBe(true);
+    expect(bobs.every((w) => w.welcome !== 'ZGF2ZQ==')).toBe(true); // never sees dave's
+  });
+
+  it("another tenant's user fetches no welcomes from this tenant (RLS)", async () => {
+    const conv = await newConversation();
+    await svc.deliverWelcome(aliceAuth, conv, wel());
+    expect(await svc.listMyWelcomes(carolAuth)).toEqual([]); // cross-tenant: nothing
+  });
+
+  it('the recipient consumes their welcome; it is gone, and re-consume is 404', async () => {
+    const conv = await newConversation();
+    await svc.deliverWelcome(aliceAuth, conv, wel({ welcome: 'b25l' }));
+    const before = await svc.listMyWelcomes(daveAuth);
+    const mine = before.find((w) => w.welcome === 'b25l' && w.conversationId === conv);
+    expect(mine).toBeDefined();
+
+    await svc.consumeWelcome(daveAuth, mine!.id);
+    const after = await svc.listMyWelcomes(daveAuth);
+    expect(after.some((w) => w.id === mine!.id)).toBe(false); // consumed
+    await expect(svc.consumeWelcome(daveAuth, mine!.id)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('a non-recipient cannot consume another member’s welcome — 404, and the row survives', async () => {
+    const conv = await newConversation();
+    const { welcomeId } = await svc.deliverWelcome(aliceAuth, conv, wel({ welcome: 'a2VlcA==' }));
+    // bob (a member, but not the recipient) cannot consume dave's welcome.
+    await expect(svc.consumeWelcome(bobAuth, welcomeId)).rejects.toBeInstanceOf(NotFoundException);
+    // dave (the recipient) still has it.
+    expect((await svc.listMyWelcomes(daveAuth)).some((w) => w.id === welcomeId)).toBe(true);
+  });
+
+  it('delivering to an existing member is idempotent on membership (no duplicate member row)', async () => {
+    const conv = await newConversation(); // bob is already a member
+    await svc.deliverWelcome(aliceAuth, conv, wel({ recipientUserId: bobId }));
+    const [row] =
+      await sql`select count(*)::int as n from conversation_members where conversation_id = ${conv} and user_id = ${bobId}`;
+    expect((row as { n: number }).n).toBe(1); // still exactly one membership
+  });
 });

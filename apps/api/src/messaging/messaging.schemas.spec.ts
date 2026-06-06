@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CreateConversationSchema,
+  DeliverWelcomeSchema,
   ListMessagesQuerySchema,
   SendMessageSchema,
 } from './messaging.schemas.js';
@@ -51,5 +52,24 @@ describe('SendMessageSchema', () => {
     expect(
       SendMessageSchema.safeParse({ ...ok, attachmentObjectKey: 'tenant/abc/blob1' }).success,
     ).toBe(true);
+  });
+});
+
+describe('DeliverWelcomeSchema', () => {
+  const ok = { recipientUserId: uuid, welcome: 'AAAA', ratchetTree: 'BBBB' };
+
+  it('accepts a well-formed welcome delivery', () => {
+    expect(DeliverWelcomeSchema.safeParse(ok).success).toBe(true);
+  });
+  it('rejects a non-uuid recipient, non-base64 blobs, empty blobs, and unknown keys', () => {
+    expect(DeliverWelcomeSchema.safeParse({ ...ok, recipientUserId: 'nope' }).success).toBe(false);
+    expect(DeliverWelcomeSchema.safeParse({ ...ok, welcome: 'not base64!' }).success).toBe(false);
+    expect(DeliverWelcomeSchema.safeParse({ ...ok, ratchetTree: '' }).success).toBe(false);
+    expect(DeliverWelcomeSchema.safeParse({ ...ok, surprise: true }).success).toBe(false);
+  });
+  it('rejects a welcome blob over the 32 KiB bound (DoS guard)', () => {
+    expect(DeliverWelcomeSchema.safeParse({ ...ok, welcome: 'A'.repeat(32769) }).success).toBe(
+      false,
+    );
   });
 });
