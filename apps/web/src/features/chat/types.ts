@@ -5,7 +5,7 @@
 // from the crypto-blind server — the server never sees any of this. The fetch→decrypt→(this shape) wiring
 // lands with the Phase-3 client loop; for now a local seed drives the UI so the UX can be built + reviewed.
 
-export type DeliveryStatus = 'sending' | 'sent' | 'delivered' | 'read';
+export type DeliveryStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
 
 export interface Contact {
   id: string;

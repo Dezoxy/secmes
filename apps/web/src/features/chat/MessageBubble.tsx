@@ -1,4 +1,4 @@
-import { Check, CheckCheck, Image as ImageIcon, Lock } from 'lucide-react';
+import { AlertCircle, Check, CheckCheck, Image as ImageIcon, Lock } from 'lucide-react';
 import type { ChatMessage, Contact, DeliveryStatus } from './types';
 import { ME } from './types';
 import { formatClockTime } from './format';
@@ -7,6 +7,8 @@ function StatusTicks({ status }: { status: DeliveryStatus }) {
   if (status === 'sending') return <Check className="h-3.5 w-3.5 text-white/30" />;
   if (status === 'sent') return <Check className="h-3.5 w-3.5 text-white/40" />;
   if (status === 'delivered') return <CheckCheck className="h-3.5 w-3.5 text-white/40" />;
+  if (status === 'failed')
+    return <AlertCircle className="h-3.5 w-3.5 text-red-400" aria-label="Not sent" />;
   return <CheckCheck className="h-3.5 w-3.5 text-purple-400" />; // read
 }
 

@@ -72,7 +72,9 @@ export default function ChatScreen() {
         setTimeout(() => patchMessage(convId, id, { status: 'delivered' }), 800);
         setTimeout(() => patchMessage(convId, id, { status: 'read' }), 1800);
       })
-      .catch(() => patchMessage(convId, id, { status: 'sent' }));
+      // If MLS setup/round-trip fails, the message was NOT encrypted or sent — mark it failed, never
+      // sent (no false delivery signal). `encrypted` stays false, so no lock shows.
+      .catch(() => patchMessage(convId, id, { status: 'failed' }));
   };
 
   return (
