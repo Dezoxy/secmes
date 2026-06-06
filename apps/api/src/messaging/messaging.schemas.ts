@@ -13,6 +13,15 @@ export const CreateConversationSchema = z
   .strict();
 export type CreateConversation = z.infer<typeof CreateConversationSchema>;
 
+export const ListMessagesQuerySchema = z
+  .object({
+    // Query params arrive as strings → coerce. `after` is an exclusive keyset cursor (a message id).
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    after: z.string().uuid().optional(),
+  })
+  .strict();
+export type ListMessagesQuery = z.infer<typeof ListMessagesQuerySchema>;
+
 export const SendMessageSchema = z
   .object({
     clientMessageId: z.string().uuid(), // client-generated; idempotency key (per sender)

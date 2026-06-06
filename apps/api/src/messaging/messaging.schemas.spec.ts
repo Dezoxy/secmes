@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { CreateConversationSchema, SendMessageSchema } from './messaging.schemas.js';
+import {
+  CreateConversationSchema,
+  ListMessagesQuerySchema,
+  SendMessageSchema,
+} from './messaging.schemas.js';
 
 const uuid = '550e8400-e29b-41d4-a716-446655440000'; // a valid RFC-4122 UUID (correct version + variant)
 
@@ -12,6 +16,20 @@ describe('CreateConversationSchema', () => {
     expect(CreateConversationSchema.safeParse({ memberUserIds: [] }).success).toBe(false);
     expect(CreateConversationSchema.safeParse({ memberUserIds: ['nope'] }).success).toBe(false);
     expect(CreateConversationSchema.safeParse({ memberUserIds: [uuid], x: 1 }).success).toBe(false);
+  });
+});
+
+describe('ListMessagesQuerySchema', () => {
+  it('defaults limit to 50 and accepts a coerced string limit + uuid cursor', () => {
+    expect(ListMessagesQuerySchema.parse({})).toEqual({ limit: 50 });
+    const r = ListMessagesQuerySchema.parse({ limit: '20', after: uuid });
+    expect(r).toEqual({ limit: 20, after: uuid });
+  });
+  it('rejects limit out of range, a non-uuid cursor, and unknown keys', () => {
+    expect(ListMessagesQuerySchema.safeParse({ limit: 0 }).success).toBe(false);
+    expect(ListMessagesQuerySchema.safeParse({ limit: 101 }).success).toBe(false);
+    expect(ListMessagesQuerySchema.safeParse({ after: 'nope' }).success).toBe(false);
+    expect(ListMessagesQuerySchema.safeParse({ limit: 10, x: 1 }).success).toBe(false);
   });
 });
 

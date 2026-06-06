@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -9,6 +9,7 @@ import {
   ApiOperation,
   ApiParam,
   ApiProperty,
+  ApiQuery,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -19,8 +20,10 @@ import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { MessagingService } from './messaging.service.js';
 import {
   CreateConversationSchema,
+  ListMessagesQuerySchema,
   SendMessageSchema,
   type CreateConversation,
+  type ListMessagesQuery,
   type SendMessage,
 } from './messaging.schemas.js';
 
@@ -79,6 +82,49 @@ class SentMessageDto {
   deduplicated!: boolean;
 }
 
+class FetchedMessageDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ format: 'uuid' })
+  senderUserId!: string;
+
+  @ApiProperty({ format: 'uuid' })
+  clientMessageId!: string;
+
+  @ApiProperty({ description: 'opaque base64 MLS ciphertext — the server never decrypts it' })
+  ciphertext!: string;
+
+  @ApiProperty({ description: 'AEAD/version tag' })
+  alg!: string;
+
+  @ApiProperty({ description: 'MLS epoch' })
+  epoch!: number;
+
+  @ApiProperty({
+    required: false,
+    nullable: true,
+    description: 'object key of an encrypted attachment',
+  })
+  attachmentObjectKey!: string | null;
+
+  @ApiProperty({ format: 'date-time' })
+  createdAt!: string;
+}
+
+class MessagePageDto {
+  @ApiProperty({ type: [FetchedMessageDto] })
+  messages!: FetchedMessageDto[];
+
+  @ApiProperty({
+    required: false,
+    nullable: true,
+    format: 'uuid',
+    description: 'pass as `after` to fetch the next page; null when no more',
+  })
+  nextCursor!: string | null;
+}
+
 @ApiTags('messaging')
 @ApiBearerAuth()
 @Controller('conversations')
@@ -121,5 +167,36 @@ export class MessagingController {
     @Body(new ZodValidationPipe(SendMessageSchema)) body: SendMessage,
   ): Promise<SentMessageDto> {
     return this.messaging.sendMessage(auth, conversationId, body);
+  }
+
+  @Get(':conversationId/messages')
+  @ApiOperation({
+    summary: "List a conversation's ciphertext messages (member-only, paginated)",
+    operationId: 'listMessages',
+  })
+  @ApiParam({ name: 'conversationId', format: 'uuid' })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 },
+  })
+  @ApiQuery({
+    name: 'after',
+    required: false,
+    schema: { type: 'string', format: 'uuid' },
+    description: 'exclusive cursor — a message id (use the previous page nextCursor)',
+  })
+  @ApiOkResponse({
+    type: MessagePageDto,
+    description: 'a page of ciphertext messages + next cursor',
+  })
+  @ApiNotFoundResponse({ description: 'conversation not found or caller is not a member' })
+  @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
+  async listMessages(
+    @CurrentAuth() auth: VerifiedAuth,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @Query(new ZodValidationPipe(ListMessagesQuerySchema)) query: ListMessagesQuery,
+  ): Promise<MessagePageDto> {
+    return this.messaging.listMessages(auth, conversationId, query);
   }
 }

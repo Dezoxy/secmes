@@ -139,4 +139,53 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
       NotFoundException,
     );
   });
+
+  // ── fetch / list (checkpoint 27 server half) ─────────────────────────────────────────────────────
+  it('a member lists messages in chronological order; ciphertext is returned verbatim', async () => {
+    const conv = await newConversation();
+    await svc.sendMessage(aliceAuth, conv, msg({ ciphertext: 'b3Vu' })); // 'oun'
+    await svc.sendMessage(bobAuth, conv, msg({ ciphertext: 'dHdv' })); // 'two'
+    const page = await svc.listMessages(bobAuth, conv, { limit: 50 });
+    expect(page.messages.map((m) => m.ciphertext)).toEqual(['b3Vu', 'dHdv']); // chronological, opaque
+    expect(page.messages[0]?.senderUserId).toBe(aliceId);
+    expect(page.nextCursor).toBeNull(); // partial page → no more
+  });
+
+  it('keyset pagination walks the whole conversation without overlap', async () => {
+    const conv = await newConversation();
+    const sent: string[] = [];
+    for (let i = 0; i < 5; i++) sent.push((await svc.sendMessage(bobAuth, conv, msg())).messageId);
+
+    const p1 = await svc.listMessages(bobAuth, conv, { limit: 2 });
+    expect(p1.messages.map((m) => m.id)).toEqual(sent.slice(0, 2));
+    expect(p1.nextCursor).toBe(sent[1]);
+    const p2 = await svc.listMessages(bobAuth, conv, { limit: 2, after: p1.nextCursor! });
+    expect(p2.messages.map((m) => m.id)).toEqual(sent.slice(2, 4));
+    const p3 = await svc.listMessages(bobAuth, conv, { limit: 2, after: p2.nextCursor! });
+    expect(p3.messages.map((m) => m.id)).toEqual(sent.slice(4));
+    expect(p3.nextCursor).toBeNull();
+  });
+
+  it('a non-member (same tenant) cannot list — 404', async () => {
+    const conv = await newConversation();
+    await svc.sendMessage(bobAuth, conv, msg());
+    await expect(svc.listMessages(daveAuth, conv, { limit: 50 })).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it("another tenant's user cannot list — 404", async () => {
+    const conv = await newConversation();
+    await svc.sendMessage(bobAuth, conv, msg());
+    await expect(svc.listMessages(carolAuth, conv, { limit: 50 })).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it('listing an empty conversation returns no messages and a null cursor', async () => {
+    const conv = await newConversation();
+    const page = await svc.listMessages(aliceAuth, conv, { limit: 50 });
+    expect(page.messages).toEqual([]);
+    expect(page.nextCursor).toBeNull();
+  });
 });
