@@ -82,6 +82,22 @@ export const messages = pgTable('messages', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Delivery/read high-water-marks per (conversation, member) — METADATA only (roadmap 31). RLS in 0010.
+export const conversationReceipts = pgTable('conversation_receipts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  conversationId: uuid('conversation_id').notNull(),
+  userId: uuid('user_id').notNull(),
+  deliveredThroughMessageId: uuid('delivered_through_message_id'),
+  deliveredThroughCreatedAt: timestamp('delivered_through_created_at', { withTimezone: true }),
+  deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+  readThroughMessageId: uuid('read_through_message_id'),
+  readThroughCreatedAt: timestamp('read_through_created_at', { withTimezone: true }),
+  readAt: timestamp('read_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Append-only audit log (IDs + metadata only — never content/secrets). RLS + grants in 0002.
 export const auditEvents = pgTable('audit_events', {
   id: uuid('id').primaryKey().defaultRandom(),

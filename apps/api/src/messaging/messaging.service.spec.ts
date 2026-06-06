@@ -302,4 +302,49 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     expect(page.messages.some((m) => m.id === my)).toBe(true); // sync still works for Y
     expect(page.messages.some((m) => m.conversationId === x)).toBe(false); // X (left) excluded
   });
+
+  // ── delivery receipts (checkpoint 31) ────────────────────────────────────────────────────────────
+  it('records a delivered + read watermark and returns it per member', async () => {
+    const conv = await newConversation();
+    const m1 = (await svc.sendMessage(aliceAuth, conv, msg())).messageId;
+    await svc.recordReceipt(bobAuth, conv, { status: 'delivered', throughMessageId: m1 });
+    await svc.recordReceipt(bobAuth, conv, { status: 'read', throughMessageId: m1 });
+
+    const receipts = await svc.getReceipts(aliceAuth, conv);
+    const bob = receipts.find((r) => r.userId === bobId);
+    expect(bob?.deliveredThroughMessageId).toBe(m1);
+    expect(bob?.readThroughMessageId).toBe(m1);
+    expect(bob?.deliveredAt).not.toBeNull();
+    expect(bob?.readAt).not.toBeNull();
+  });
+
+  it('advances watermarks forward only (monotonic — no rollback)', async () => {
+    const conv = await newConversation();
+    const m1 = (await svc.sendMessage(aliceAuth, conv, msg())).messageId;
+    const m2 = (await svc.sendMessage(aliceAuth, conv, msg())).messageId;
+    await svc.recordReceipt(bobAuth, conv, { status: 'read', throughMessageId: m2 });
+    await svc.recordReceipt(bobAuth, conv, { status: 'read', throughMessageId: m1 }); // older → ignored
+
+    const bob = (await svc.getReceipts(aliceAuth, conv)).find((r) => r.userId === bobId);
+    expect(bob?.readThroughMessageId).toBe(m2); // stayed at the later message
+  });
+
+  it('a non-member cannot record or read receipts (404)', async () => {
+    const conv = await newConversation();
+    const m1 = (await svc.sendMessage(aliceAuth, conv, msg())).messageId;
+    await expect(
+      svc.recordReceipt(daveAuth, conv, { status: 'read', throughMessageId: m1 }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(svc.getReceipts(daveAuth, conv)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(svc.getReceipts(carolAuth, conv)).rejects.toBeInstanceOf(NotFoundException); // cross-tenant
+  });
+
+  it('rejects a receipt for a message not in the conversation', async () => {
+    const conv = await newConversation();
+    const other = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
+    const foreign = (await svc.sendMessage(aliceAuth, other, msg())).messageId; // message in a DIFFERENT conv
+    await expect(
+      svc.recordReceipt(bobAuth, conv, { status: 'read', throughMessageId: foreign }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
 });

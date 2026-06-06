@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { RealtimeBusModule } from '../realtime/realtime-bus.module.js';
 import { MessagingController } from './messaging.controller.js';
 import { MessagingService } from './messaging.service.js';
+import { ReceiptsController } from './receipts.controller.js';
 import { SyncController } from './sync.controller.js';
 
 // Protected by the global JwtAuthGuard (AuthModule). Stores CIPHERTEXT ONLY; enforces conversation
@@ -11,7 +12,7 @@ import { SyncController } from './sync.controller.js';
 // SyncController serves the cross-conversation catch-up (30).
 @Module({
   imports: [RealtimeBusModule],
-  controllers: [MessagingController, SyncController],
+  controllers: [MessagingController, SyncController, ReceiptsController],
   providers: [MessagingService],
   exports: [MessagingService],
 })

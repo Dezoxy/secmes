@@ -22,6 +22,7 @@ export function createOpenApiDocument(app: INestApplication): OpenAPIObject {
     'BackupBody',
     'CreateConversationBody',
     'SendMessageBody',
+    'RecordReceiptBody',
   ];
   for (const name of STRICT_INPUT_SCHEMAS) {
     const schema = doc.components?.schemas?.[name];
