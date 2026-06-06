@@ -5,6 +5,8 @@ import App from './App';
 import Callback from './routes/Callback';
 import ChatScreen from './features/chat/ChatScreen';
 import { AuthProvider, RequireAuth } from './features/auth/AuthContext';
+import { DeviceProvider } from './features/device/DeviceContext';
+import { UnlockGate } from './features/device/UnlockGate';
 import './index.css';
 
 const root = document.getElementById('root');
@@ -20,7 +22,11 @@ createRoot(root).render(
             path="/chat"
             element={
               <RequireAuth>
-                <ChatScreen />
+                <DeviceProvider>
+                  <UnlockGate>
+                    <ChatScreen />
+                  </UnlockGate>
+                </DeviceProvider>
               </RequireAuth>
             }
           />

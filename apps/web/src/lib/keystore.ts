@@ -3,11 +3,14 @@ import {
   MlsEngine,
   deserializeDeviceIdentity,
   deserializeDeviceKeys,
+  deserializeDeviceKeysArray,
   deviceIdentity,
+  deviceSignaturePublicKeyB64,
   openBackup,
   sealBackup,
   serializeDeviceIdentity,
   serializeDeviceKeys,
+  serializeDeviceKeysArray,
   type Argon2Params,
   type DeviceKeys,
   type SealedBackup,
@@ -26,14 +29,26 @@ import { openDB, type IDBPDatabase } from 'idb';
 // into this one, delete the old) BEFORE getOrCreateDevice mints a fresh device. See device-keystore.md.
 const DB_NAME = 'argus-keystore';
 // v1 stored an UNSEALED `{ identity, keys }` record at the same DB/store/key. v2 stores only the sealed
-// blob. The shapes are incompatible: a stale v1 record would be misread as a sealed device and fail to
-// unlock. The upgrade drops the legacy store so those unsealed secrets are also cleared from disk.
-const DB_VERSION = 2;
+// blob. v3 adds the one-time KeyPackage POOL store (device provisioning, Slice 2). Shapes are
+// incompatible across v1→v2: a stale v1 record would be misread as a sealed device and fail to unlock,
+// so the upgrade drops the legacy store; v2→v3 only ADDS the pool store.
+const DB_VERSION = 3;
 const STORE = 'device';
+const POOL_STORE = 'key-package-pool'; // sealed one-time KeyPackage pool (privates retained for join)
 const SELF = 'self'; // single device per user in v1 (multi-device is deferred, B2)
+const POOL_TARGET = 10; // one-time KeyPackages kept published so peers can claim one to add this device
 
 interface StoredDevice {
   identity: string;
+  sealed: SealedBackup;
+}
+
+// The sealed KeyPackage pool is additionally bound to the device's SIGNATURE PUBLIC KEY — so a stale pool
+// from a re-created/recovered device (same identity string, different key) is never reused (its retained
+// privates would be orphaned, useless to the live key). Fail-closed against orphaned-key republishing.
+interface StoredPool {
+  identity: string;
+  signaturePublicKey: string;
   sealed: SealedBackup;
 }
 
@@ -89,6 +104,8 @@ export class DeviceKeystore {
           database.deleteObjectStore(STORE);
         }
         if (!database.objectStoreNames.contains(STORE)) database.createObjectStore(STORE);
+        // v3: the sealed one-time KeyPackage pool (device provisioning). Additive — keeps the device store.
+        if (!database.objectStoreNames.contains(POOL_STORE)) database.createObjectStore(POOL_STORE);
       },
     });
     return new DeviceKeystore(db, engine ?? (await MlsEngine.create()), argon);
@@ -119,6 +136,52 @@ export class DeviceKeystore {
     const stored = (await this.db.get(STORE, SELF)) as StoredDevice | undefined;
     if (!stored) return undefined;
     return this.unseal(stored, identity, passphrase);
+  }
+
+  /**
+   * Ensure the device's sealed one-time KeyPackage POOL holds at least `target` members, minting fresh
+   * KeyPackages under the device's STABLE signature identity as needed, and return the full pool. Each
+   * member's PRIVATE is retained (sealed) so the Welcome later sealed to its public KeyPackage can be
+   * joined — never reuse a member across joins (forward secrecy; consumed members are removed on join).
+   * The caller publishes the members' PUBLIC KeyPackages to the directory (#19). Pass the already-unlocked
+   * `device` (avoids a redundant unseal); `passphrase` seals the pool under the same key as the device.
+   */
+  async ensurePool(
+    device: DeviceKeys,
+    passphrase: string,
+    target: number = POOL_TARGET,
+  ): Promise<DeviceKeys[]> {
+    const identity = deviceIdentity(device);
+    const signaturePublicKey = deviceSignaturePublicKeyB64(device);
+    const stored = (await this.db.get(POOL_STORE, SELF)) as StoredPool | undefined;
+    let pool: DeviceKeys[] = [];
+    // Reuse the sealed pool ONLY if it's for THIS device's identity AND signature key. A stale pool from
+    // a re-created/recovered device (same identity string, different key) is discarded — its retained
+    // privates are orphaned, so republishing them would advertise KeyPackages the live device can't back.
+    if (
+      stored &&
+      stored.identity === identity &&
+      stored.signaturePublicKey === signaturePublicKey
+    ) {
+      const opened = await openBackup(stored.sealed, passphrase);
+      try {
+        pool = deserializeDeviceKeysArray(opened);
+      } finally {
+        opened.fill(0); // wipe the transient unsealed plaintext (it holds retained HPKE privates)
+      }
+    }
+    if (pool.length >= target) return pool;
+
+    while (pool.length < target) pool.push(await this.engine.mintKeyPackage(device));
+    const plaintext = serializeDeviceKeysArray(pool);
+    const sealed = await sealBackup(plaintext, passphrase, this.argon);
+    plaintext.fill(0); // best-effort wipe of the transient pool plaintext after sealing
+    await this.db.put(
+      POOL_STORE,
+      { identity, signaturePublicKey, sealed } satisfies StoredPool,
+      SELF,
+    );
+    return pool;
   }
 
   /**
@@ -175,9 +238,13 @@ export class DeviceKeystore {
     return keys;
   }
 
-  /** Remove the stored device — to recover from a bad import or reset this profile before re-importing. */
+  /**
+   * Remove the stored device AND its KeyPackage pool — to recover from a bad import or reset this profile
+   * before re-importing. The pool privates are tied to the cleared device's identity, so they go too.
+   */
   async clearDevice(): Promise<void> {
     await this.db.delete(STORE, SELF);
+    await this.db.delete(POOL_STORE, SELF);
   }
 
   /** Whether a sealed device is stored for this profile. Metadata only — no passphrase, no unseal. */

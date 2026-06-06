@@ -1,4 +1,10 @@
-import { MlsEngine, type Argon2Params, type DeviceKeys } from '@argus/crypto';
+import {
+  MlsEngine,
+  deviceIdentity,
+  serializeKeyPackage,
+  type Argon2Params,
+  type DeviceKeys,
+} from '@argus/crypto';
 import { IDBFactory } from 'fake-indexeddb';
 import { openDB } from 'idb';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -183,6 +189,61 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     // before persisting, and nothing is stored under bob.
     await expect(ks2.importRecoveryArtifact('bob', blob, 'shared pw')).rejects.toThrow();
     expect(await ks2.loadDevice('bob', 'shared pw')).toBeUndefined();
+  });
+
+  it('ensurePool mints a one-time pool to target — distinct, usable, same identity', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('alice', 'pw');
+
+    const pool = await ks.ensurePool(device, 'pw', 3);
+    expect(pool).toHaveLength(3);
+    // each member shares the device's STABLE signature identity but is a DISTINCT one-time KeyPackage
+    expect(pool.every((m) => deviceIdentity(m) === deviceIdentity(device))).toBe(true);
+    expect(new Set(pool.map((m) => serializeKeyPackage(m.publicPackage))).size).toBe(3);
+    // a pool member can join a group (its private was retained)
+    const inviter = await engine.generateDeviceKeys('inviter');
+    const conv = await engine.createConversation('r', inviter);
+    const invite = await conv.addMember(pool[0]!.publicPackage);
+    const joined = await engine.joinConversation(pool[0]!, invite);
+    expect(await joined.decrypt(await conv.encrypt('hi'))).toBe('hi');
+  });
+
+  it('ensurePool is idempotent once full and persists across reopen', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const first = (await ks.ensurePool(device, 'pw', 3)).map((m) =>
+      serializeKeyPackage(m.publicPackage),
+    );
+    const again = (await ks.ensurePool(device, 'pw', 3)).map((m) =>
+      serializeKeyPackage(m.publicPackage),
+    );
+    expect(again).toEqual(first); // no re-mint when already at target
+
+    const reopened = await DeviceKeystore.open(engine, FAST);
+    const dev2 = await reopened.loadDevice('alice', 'pw');
+    if (!dev2) throw new Error('expected a persisted device');
+    const persisted = (await reopened.ensurePool(dev2, 'pw', 3)).map((m) =>
+      serializeKeyPackage(m.publicPackage),
+    );
+    expect([...persisted].sort()).toEqual([...first].sort()); // pool survived reopen
+  });
+
+  it('clearDevice also clears the KeyPackage pool (fresh mints afterwards)', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const before = new Set(
+      (await ks.ensurePool(device, 'pw', 2)).map((m) => serializeKeyPackage(m.publicPackage)),
+    );
+
+    await ks.clearDevice();
+
+    const device2 = await ks.getOrCreateDevice('alice', 'pw');
+    const after = await ks.ensurePool(device2, 'pw', 2);
+    // none of the new members is an old one → the pool store was genuinely cleared + re-minted
+    expect(after.every((m) => !before.has(serializeKeyPackage(m.publicPackage)))).toBe(true);
   });
 
   it('clearDevice lets a profile recover from a stored device and re-import', async () => {

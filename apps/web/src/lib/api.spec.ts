@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Mock the auth module so these tests don't pull in oidc-client-ts and we can control the token.
 vi.mock('./auth', () => ({ accessToken: vi.fn() }));
 import { accessToken } from './auth';
-import { apiFetch, establishSession } from './api';
+import { apiFetch, establishSession, publishKeyPackages } from './api';
 
 const token = vi.mocked(accessToken);
 
@@ -53,5 +53,29 @@ describe('api client', () => {
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
       .mockResolvedValueOnce(new Response('nope', { status: 401 }));
     await expect(establishSession()).rejects.toThrow('/me → 401');
+  });
+
+  it('publishKeyPackages POSTs the device public material to the directory', async () => {
+    token.mockResolvedValue('tok');
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(JSON.stringify({ deviceId: 'd', published: 2 }), { status: 200 }),
+      );
+    const res = await publishKeyPackages('sigpub==', ['kpA', 'kpB']);
+    expect(res).toEqual({ deviceId: 'd', published: 2 });
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe('/api/devices/me/key-packages');
+    const init = fetchSpy.mock.calls[0]?.[1];
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(init?.body as string)).toEqual({
+      signaturePublicKey: 'sigpub==',
+      keyPackages: ['kpA', 'kpB'],
+    });
+  });
+
+  it('publishKeyPackages throws on a non-ok response', async () => {
+    token.mockResolvedValue('tok');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('nope', { status: 400 }));
+    await expect(publishKeyPackages('s', ['k'])).rejects.toThrow('key-packages → 400');
   });
 });

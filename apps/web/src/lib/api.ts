@@ -40,3 +40,28 @@ export async function establishSession(): Promise<Me> {
   if (!me.ok) throw new Error(`GET /me → ${me.status}`);
   return (await me.json()) as Me;
 }
+
+/** Result of publishing one-time KeyPackages to the directory. */
+export interface PublishResult {
+  deviceId: string;
+  published: number;
+}
+
+/**
+ * Publish this device's PUBLIC key material to the key directory (#19): the signature public key
+ * (registers/upserts the device) + a batch of one-time-use KeyPackages a peer can claim to add this
+ * device to a group. PUBLIC base64 only — no private keys leave the device. Idempotent: the server
+ * dedups already-published packages, so re-publishing the pool each login is safe. Throws on non-OK.
+ */
+export async function publishKeyPackages(
+  signaturePublicKey: string,
+  keyPackages: string[],
+): Promise<PublishResult> {
+  const res = await apiFetch('/devices/me/key-packages', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ signaturePublicKey, keyPackages }),
+  });
+  if (!res.ok) throw new Error(`POST /devices/me/key-packages → ${res.status}`);
+  return (await res.json()) as PublishResult;
+}
