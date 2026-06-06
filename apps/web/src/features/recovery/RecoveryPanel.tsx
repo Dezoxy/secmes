@@ -189,6 +189,11 @@ export function RecoveryPanel({ onClose }: RecoveryPanelProps) {
           </div>
         ) : (
           <div className="space-y-3">
+            <p className="text-xs leading-relaxed text-white/40">
+              Restoring brings back your <strong>account</strong> on this device —{' '}
+              <strong>not</strong> your past messages. For forward secrecy, earlier messages cannot
+              be decrypted by a recovered device; you re-join conversations for new messages.
+            </p>
             <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-white/10 bg-[#1a1a26] px-4 py-3 text-sm text-white/60 transition-colors hover:border-purple-500/40">
               <Upload className="h-4 w-4 shrink-0 text-white/40" />
               <span className="truncate">{file ? file.name : 'Choose your recovery file…'}</span>
