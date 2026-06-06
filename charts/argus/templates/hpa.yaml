@@ -1,0 +1,30 @@
+{{- if .Values.autoscaling.enabled }}
+# Horizontal Pod Autoscaler for the api Deployment (checkpoint 29). Multi-pod delivery is correct
+# because the Redis backplane fans messages across pods; on scale-down, dropped WebSocket clients
+# reconnect to a surviving pod and back-fill missed messages via the REST fetch (DB is source of truth).
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api
+  labels:
+    {{- include "argus.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+  behavior:
+    scaleDown:
+      # Long-lived WebSockets: damp scale-down so we don't churn connections on brief load dips.
+      stabilizationWindowSeconds: 300
+{{- end }}

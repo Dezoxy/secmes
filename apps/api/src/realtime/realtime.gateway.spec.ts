@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AuthService } from '../auth/auth.service.js';
 import type { MessagingService } from '../messaging/messaging.service.js';
-import { RealtimeBus, type MessageCreatedEvent } from './realtime-bus.js';
+import { InProcessRealtimeBus } from './in-process-realtime-bus.js';
+import { type MessageCreatedEvent } from './realtime-bus.js';
 import { RealtimeGateway } from './realtime.gateway.js';
 
 // Deterministic gateway tests with MOCK sockets — no real WebSocket server. Validates the security
@@ -24,14 +25,14 @@ const lastSend = (s: MockSocket): { event: string; data: unknown } | undefined =
 const sock = (s: MockSocket) => s as unknown as Parameters<RealtimeGateway['handleConnection']>[0];
 
 describe('RealtimeGateway', () => {
-  let bus: RealtimeBus;
+  let bus: InProcessRealtimeBus;
   let auth: { verify: ReturnType<typeof vi.fn> };
   let messaging: { isMember: ReturnType<typeof vi.fn> };
   let gw: RealtimeGateway;
 
   beforeEach(() => {
     vi.useFakeTimers();
-    bus = new RealtimeBus();
+    bus = new InProcessRealtimeBus();
     auth = { verify: vi.fn() };
     messaging = { isMember: vi.fn() };
     gw = new RealtimeGateway(
