@@ -31,8 +31,10 @@ import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import {
   ConsumeWelcomeQuerySchema,
   DeliverWelcomeSchema,
+  ListWelcomesQuerySchema,
   type ConsumeWelcomeQuery,
   type DeliverWelcome,
+  type ListWelcomesQuery,
 } from './messaging.schemas.js';
 import { MessagingService } from './messaging.service.js';
 
@@ -120,7 +122,8 @@ export class WelcomesController {
 
   @Get('welcomes')
   @ApiOperation({
-    summary: "Fetch the calling device's pending welcomes to join (caller + device scoped)",
+    summary:
+      "Fetch the calling device's pending welcomes to join (caller + device scoped, bounded)",
     operationId: 'listWelcomes',
   })
   @ApiQuery({
@@ -129,14 +132,21 @@ export class WelcomesController {
     schema: { type: 'string', format: 'uuid' },
     description: "the calling device's id — returns only welcomes sealed to its KeyPackage",
   })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    schema: { type: 'integer', minimum: 1, maximum: 100, default: 50 },
+    description:
+      'max welcomes to return (oldest first); drain the rest by consuming these + re-fetching',
+  })
   @ApiOkResponse({ type: [PendingWelcomeDto] })
-  @ApiBadRequestResponse({ description: 'missing or invalid deviceId' })
+  @ApiBadRequestResponse({ description: 'missing or invalid deviceId / limit' })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async list(
     @CurrentAuth() auth: VerifiedAuth,
-    @Query('deviceId', ParseUUIDPipe) deviceId: string,
+    @Query(new ZodValidationPipe(ListWelcomesQuerySchema)) query: ListWelcomesQuery,
   ): Promise<PendingWelcomeDto[]> {
-    return this.messaging.listMyWelcomes(auth, deviceId);
+    return this.messaging.listMyWelcomes(auth, query.deviceId, query.limit);
   }
 
   @Delete('welcomes/:welcomeId')

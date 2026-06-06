@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ConsumeWelcomeQuerySchema,
   CreateConversationSchema,
   DeliverWelcomeSchema,
   ListMessagesQuerySchema,
+  ListWelcomesQuerySchema,
   SendMessageSchema,
 } from './messaging.schemas.js';
 
@@ -79,6 +81,45 @@ describe('DeliverWelcomeSchema', () => {
   });
   it('rejects a welcome blob over the 32 KiB bound (DoS guard)', () => {
     expect(DeliverWelcomeSchema.safeParse({ ...ok, welcome: 'A'.repeat(32769) }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe('ListWelcomesQuerySchema', () => {
+  it('defaults limit to 50, coerces a string limit, requires a uuid deviceId', () => {
+    expect(ListWelcomesQuerySchema.parse({ deviceId: uuid })).toEqual({
+      deviceId: uuid,
+      limit: 50,
+    });
+    expect(ListWelcomesQuerySchema.parse({ deviceId: uuid, limit: '10' })).toEqual({
+      deviceId: uuid,
+      limit: 10,
+    });
+  });
+  it('rejects a non-uuid deviceId, out-of-range limit, and unknown keys', () => {
+    expect(ListWelcomesQuerySchema.safeParse({ deviceId: 'nope' }).success).toBe(false);
+    expect(ListWelcomesQuerySchema.safeParse({ deviceId: uuid, limit: 0 }).success).toBe(false);
+    expect(ListWelcomesQuerySchema.safeParse({ deviceId: uuid, limit: 101 }).success).toBe(false);
+    expect(ListWelcomesQuerySchema.safeParse({ deviceId: uuid, x: 1 }).success).toBe(false);
+  });
+});
+
+describe('ConsumeWelcomeQuerySchema', () => {
+  const proof = 'abc-_DEF123'; // base64url charset
+  it('accepts a uuid deviceId + base64url proof', () => {
+    expect(ConsumeWelcomeQuerySchema.safeParse({ deviceId: uuid, proof }).success).toBe(true);
+  });
+  it('rejects a non-uuid device, non-base64url / oversized proof, missing fields, unknown keys', () => {
+    expect(ConsumeWelcomeQuerySchema.safeParse({ deviceId: 'nope', proof }).success).toBe(false);
+    expect(
+      ConsumeWelcomeQuerySchema.safeParse({ deviceId: uuid, proof: 'has+slash/' }).success,
+    ).toBe(false);
+    expect(
+      ConsumeWelcomeQuerySchema.safeParse({ deviceId: uuid, proof: 'A'.repeat(257) }).success,
+    ).toBe(false);
+    expect(ConsumeWelcomeQuerySchema.safeParse({ deviceId: uuid }).success).toBe(false);
+    expect(ConsumeWelcomeQuerySchema.safeParse({ deviceId: uuid, proof, x: 1 }).success).toBe(
       false,
     );
   });

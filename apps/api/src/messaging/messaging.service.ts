@@ -270,9 +270,15 @@ export class MessagingService {
    * `deviceId` is client-asserted (the access token carries the user, not the device); it can only narrow
    * within the caller's own welcomes, so it routes, it does not authorize. CIPHERTEXT ONLY.
    */
-  async listMyWelcomes(auth: VerifiedAuth, deviceId: string): Promise<PendingWelcome[]> {
+  async listMyWelcomes(
+    auth: VerifiedAuth,
+    deviceId: string,
+    limit = 50,
+  ): Promise<PendingWelcome[]> {
     return withTenant(auth.tenantId, async (tx) => {
       const me = await this.requireUser(tx, auth.sub);
+      // Oldest-first + bounded `limit`: the response can't grow without limit if a member spams an
+      // offline device. The client consumes each welcome (deleting it), then re-fetches to drain the rest.
       const rows = await tx
         .select({
           id: schema.conversationWelcomes.id,
@@ -288,7 +294,8 @@ export class MessagingService {
             eq(schema.conversationWelcomes.recipientDeviceId, deviceId),
           ),
         )
-        .orderBy(asc(schema.conversationWelcomes.createdAt));
+        .orderBy(asc(schema.conversationWelcomes.createdAt))
+        .limit(limit);
       return rows.map((r) => ({
         id: r.id,
         conversationId: r.conversationId,

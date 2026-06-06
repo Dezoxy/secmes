@@ -502,6 +502,17 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     expect(await svc.listMyWelcomes(carolAuth, crypto.randomUUID())).toEqual([]); // cross-tenant: nothing
   });
 
+  it('bounds the pending-welcome fetch by `limit` (welcome spam can’t make GET /welcomes unbounded)', async () => {
+    const conv = await newConversation();
+    await svc.deliverWelcome(aliceAuth, conv, wel({ welcome: 'bGltMQ==' }));
+    await svc.deliverWelcome(aliceAuth, conv, wel({ welcome: 'bGltMg==' }));
+    // at least these two are pending for dave's device now
+    expect(await svc.listMyWelcomes(daveAuth, daveDeviceId, 1)).toHaveLength(1); // capped to the limit
+    expect((await svc.listMyWelcomes(daveAuth, daveDeviceId, 100)).length).toBeGreaterThanOrEqual(
+      2,
+    );
+  });
+
   it('the recipient consumes their welcome with a valid proof; it is gone, and re-consume is 404', async () => {
     const conv = await newConversation();
     await svc.deliverWelcome(aliceAuth, conv, wel({ welcome: 'b25l' }));

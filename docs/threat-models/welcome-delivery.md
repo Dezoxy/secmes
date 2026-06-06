@@ -64,8 +64,11 @@ to that device's KeyPackage key). Server stores + forwards opaque base64 only �
 - **MITM at add-time:** a malicious server could hand the inviter the **attacker's** KeyPackage under the
   peer's name (key directory). That is **not** closed here — it's closed by out-of-band fingerprint
   verification (#20, built) BEFORE trusting the add. This feature relays the welcome; #20 verifies the key.
-- **DoS / welcome spam:** a member could deliver many welcomes. v1 accepts it; welcomes are transient
-  (consumed on join) and prunable, and global rate-limiting is #46.
+- **DoS / welcome spam:** a member could deliver many welcomes to an offline device. The connect-time
+  **fetch is bounded** — `GET /welcomes` takes a `limit` (≤100, default 50), so the response can't grow
+  without limit even if a row carries two 32 KiB blobs; the client drains the transient queue by consuming
+  each welcome and re-fetching. Bounding *storage* (a spammer filling the DB) stays the accepted welcome-spam
+  residual: welcomes are transient (consumed on join) + prunable, and global rate-limiting is #46.
 
 ## 4. Invariant check
 

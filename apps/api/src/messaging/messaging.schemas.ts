@@ -60,6 +60,18 @@ export const DeliverWelcomeSchema = z
   .strict();
 export type DeliverWelcome = z.infer<typeof DeliverWelcomeSchema>;
 
+export const ListWelcomesQuerySchema = z
+  .object({
+    // The calling device — returns only welcomes sealed to its KeyPackage.
+    deviceId: z.string().uuid(),
+    // Bound the connect-time fetch so a member spamming an offline device can't make GET /welcomes grow
+    // without limit (each row carries two ≤32 KiB blobs). Welcomes are transient: the client drains the
+    // queue by consuming each one, then re-fetching — so a plain cap (no cursor) is enough.
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+  })
+  .strict();
+export type ListWelcomesQuery = z.infer<typeof ListWelcomesQuerySchema>;
+
 export const ConsumeWelcomeQuerySchema = z
   .object({
     // The calling device — must be a device of the verified caller; the welcome is sealed to it.
