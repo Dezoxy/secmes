@@ -8,6 +8,7 @@ import { ChatHeader } from './ChatHeader';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { ImagePreviewModal } from './ImagePreviewModal';
+import { RecoveryPanel } from '../recovery/RecoveryPanel';
 
 /**
  * Chat experience, rebuilt in the Vite PWA from the design (Phase-5 #41 shell).
@@ -22,6 +23,7 @@ export default function ChatScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(seedConversations[0]?.id ?? null);
   const [preview, setPreview] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
 
   const selected = conversations.find((c) => c.id === selectedId);
 
@@ -84,6 +86,7 @@ export default function ChatScreen() {
             conversations={conversations}
             selectedId={selectedId}
             onSelect={select}
+            onSettings={() => setRecoveryOpen(true)}
           />
         </div>
 
@@ -107,6 +110,7 @@ export default function ChatScreen() {
         </div>
       </div>
       <ImagePreviewModal src={preview} onClose={() => setPreview(null)} />
+      {recoveryOpen && <RecoveryPanel onClose={() => setRecoveryOpen(false)} />}
     </div>
   );
 }
