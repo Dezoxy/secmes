@@ -1,27 +1,28 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { completeLogin } from '../lib/auth';
 
-/** OIDC redirect target. Validates state; the back-channel token exchange lands in Phase 1 (apps/api). */
+/**
+ * OIDC redirect target. Completes the Authorization-Code + PKCE exchange (oidc-client-ts verifies
+ * `state` and swaps the code for tokens against Zitadel), then routes into the app. No password or
+ * code is logged. On failure the user sees a message and can retry from the login screen.
+ */
 export default function Callback() {
   const [status, setStatus] = useState('Completing sign-in…');
+  const navigate = useNavigate();
+  const ran = useRef(false);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const error = params.get('error');
-    const code = params.get('code');
-    const state = params.get('state');
-    const expectedState = sessionStorage.getItem('oidc_state');
-
-    if (error) {
-      setStatus(`Sign-in failed: ${error}`);
-      return;
-    }
-    if (!code || !state || state !== expectedState) {
-      setStatus('Invalid callback (state mismatch).');
-      return;
-    }
-    // TODO(Phase 1): POST { code, code_verifier } to apps/api for the back-channel token exchange.
-    setStatus('Authorization code received — token exchange happens server-side in Phase 1.');
-  }, []);
+    // signinCallback() is single-use (it consumes the code + PKCE state); guard the StrictMode
+    // double-invoke so the second run doesn't error on an already-spent code.
+    if (ran.current) return;
+    ran.current = true;
+    completeLogin()
+      .then(() => navigate('/chat', { replace: true }))
+      .catch((e: unknown) =>
+        setStatus(`Sign-in failed: ${e instanceof Error ? e.message : 'unknown error'}`),
+      );
+  }, [navigate]);
 
   return (
     <div className="min-h-screen bg-[#1a1a24] flex items-center justify-center p-4 text-white/80">

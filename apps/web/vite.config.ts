@@ -5,6 +5,17 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 // React + Vite PWA — the static, crypto-blind-friendly client for argus.
 export default defineConfig({
+  // Dev-only: proxy `/api/*` to the local API so the browser talks same-origin (no CORS). The API
+  // runs on the host via `make api-dev`; see docs/local-auth.md. Prod uses a real origin (VITE_API_URL).
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+    },
+  },
   plugins: [
     react(),
     tailwindcss(),

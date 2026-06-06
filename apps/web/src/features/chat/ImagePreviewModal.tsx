@@ -1,45 +1,69 @@
 import { useEffect } from 'react';
-import { X } from 'lucide-react';
+import { X, Download, ZoomIn, ZoomOut } from 'lucide-react';
 
 interface ImagePreviewModalProps {
-  src: string | null;
+  imageUrl: string | null;
   onClose: () => void;
 }
 
-export function ImagePreviewModal({ src, onClose }: ImagePreviewModalProps) {
+export function ImagePreviewModal({ imageUrl, onClose }: ImagePreviewModalProps) {
   useEffect(() => {
-    if (!src) return undefined;
-    const onKey = (e: KeyboardEvent) => {
+    const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [src, onClose]);
+    if (imageUrl) {
+      document.addEventListener('keydown', handleEscape);
+      document.body.style.overflow = 'hidden';
+    }
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+      document.body.style.overflow = '';
+    };
+  }, [imageUrl, onClose]);
 
-  if (!src) return null;
+  if (!imageUrl) return null;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm transition-opacity duration-200"
       onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Image preview"
     >
       <button
         type="button"
         onClick={onClose}
-        className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white/80 transition-colors hover:bg-white/20 hover:text-white"
-        aria-label="Close preview"
+        className="absolute top-4 right-4 p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-all duration-300 z-10"
       >
-        <X className="h-5 w-5" />
+        <X className="w-6 h-6" />
       </button>
-      <img
-        src={src}
-        alt="Attachment preview"
-        className="max-h-[85vh] max-w-[90vw] rounded-xl object-contain"
-        onClick={(e) => e.stopPropagation()}
-      />
+
+      <div className="absolute top-4 left-4 flex gap-2 z-10">
+        <button
+          type="button"
+          className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-all duration-300"
+        >
+          <ZoomIn className="w-5 h-5" />
+        </button>
+        <button
+          type="button"
+          className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-all duration-300"
+        >
+          <ZoomOut className="w-5 h-5" />
+        </button>
+        <button
+          type="button"
+          className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-all duration-300"
+        >
+          <Download className="w-5 h-5" />
+        </button>
+      </div>
+
+      <div className="relative max-w-[90vw] max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+        <img
+          src={imageUrl}
+          alt="Preview"
+          className="object-contain max-h-[90vh] max-w-[90vw] rounded-lg"
+        />
+      </div>
     </div>
   );
 }
