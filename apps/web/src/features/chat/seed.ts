@@ -368,13 +368,14 @@ export function formatMessageTime(date: Date): string {
   if (minutes < 60) return `${minutes}m ago`;
   if (hours < 24) return `${hours}h ago`;
   if (days === 1) return 'Yesterday';
-  const month = date.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
-  return `${month} ${date.getUTCDate()}`;
+  const month = date.toLocaleString('en-US', { month: 'short' });
+  return `${month} ${date.getDate()}`;
 }
 
 export function formatFullTime(date: Date): string {
-  const hours = date.getUTCHours();
-  const minutes = date.getUTCMinutes();
+  // Local time — timestamps are real (load-anchored seed + actual send time), so show the user's clock.
+  const hours = date.getHours();
+  const minutes = date.getMinutes();
   const ampm = hours >= 12 ? 'PM' : 'AM';
   const hour12 = hours % 12 || 12;
   return `${hour12}:${minutes.toString().padStart(2, '0')} ${ampm}`;
