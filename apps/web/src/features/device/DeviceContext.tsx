@@ -15,10 +15,22 @@ import { useAuth } from '../auth/AuthContext';
 export type DeviceStatus =
   | 'loading' // opening the keystore
   | 'needs-create' // first run on this profile — set a passphrase
-  | 'needs-unlock' // a sealed device exists — enter the passphrase
+  | 'needs-unlock' // a sealed device exists for THIS account — enter the passphrase
+  | 'needs-switch' // a device for a DIFFERENT account is on this browser (single slot) — reset to continue
   | 'unlocking' // unsealing + provisioning
   | 'ready' // unlocked + pool published (or demo passthrough)
   | 'error';
+
+/**
+ * Map the browser's single device slot to a gate status for the signed-in user — keyed by IDENTITY, not
+ * mere presence. No stored device → first-run create; same identity → unlock; a DIFFERENT account's device
+ * holds the slot → switch/reset (v1 is one device per browser). Used for both initial detection and the
+ * post-failure fallback, so neither path strands a user behind another account's device.
+ */
+function statusForStored(stored: string | undefined, userId: string): DeviceStatus {
+  if (!stored) return 'needs-create';
+  return stored === userId ? 'needs-unlock' : 'needs-switch';
+}
 
 interface DeviceState {
   device: DeviceKeys | null;
@@ -35,6 +47,12 @@ interface DeviceState {
    * one first. Updates provider state in place (no reload).
    */
   restore: (artifactJson: string, passphrase: string) => Promise<void>;
+  /**
+   * Clear a DIFFERENT account's device occupying this browser's single slot, then set up the signed-in
+   * account fresh. The replaced account needs its recovery file to use this browser again (single-device
+   * v1; multi-account-per-browser is deferred).
+   */
+  resetForNewAccount: () => Promise<void>;
 }
 
 const DeviceCtx = createContext<DeviceState | null>(null);
@@ -53,10 +71,16 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
     let active = true;
     void (async () => {
       try {
-        const ks = await DeviceKeystore.open();
+        const ks = keystore ?? (await DeviceKeystore.open());
         if (!active) return;
-        setKeystore(ks);
-        setStatus((await ks.hasDevice()) ? 'needs-unlock' : 'needs-create');
+        if (!keystore) setKeystore(ks);
+        const stored = await ks.storedIdentity(); // plaintext identity, no passphrase
+        if (!active) return;
+        setStatus((prev) => {
+          if (prev === 'unlocking' || prev === 'ready') return prev; // don't interrupt an active flow
+          if (!profile) return 'loading'; // wait until we know which account is signing in
+          return statusForStored(stored, profile.userId);
+        });
       } catch {
         if (active) {
           setError('could not open the local keystore');
@@ -67,7 +91,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
     return () => {
       active = false;
     };
-  }, [configured]);
+  }, [configured, profile, keystore]);
 
   const unlock = useCallback(
     async (passphrase: string): Promise<void> => {
@@ -80,7 +104,9 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
       setStatus('unlocking');
       setError(null);
       try {
-        const creating = !(await keystore.hasDevice());
+        // "Creating" iff this browser holds NO device for ME (none, or another account's) — identity-keyed,
+        // not mere presence, so a foreign slot never forces us into a doomed loadDevice.
+        const creating = (await keystore.storedIdentity()) !== identity;
         const dev = creating
           ? await keystore.getOrCreateDevice(identity, passphrase)
           : await keystore.loadDevice(identity, passphrase);
@@ -93,7 +119,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         // openBackup fails closed on a wrong passphrase (GCM auth) — surface that distinctly.
         const wrong = err instanceof Error && /passphrase|decrypt/i.test(err.message);
         setError(wrong ? 'wrong passphrase' : 'could not unlock the device');
-        setStatus((await keystore.hasDevice()) ? 'needs-unlock' : 'needs-create');
+        setStatus(statusForStored(await keystore.storedIdentity(), identity));
       }
     },
     [keystore, profile],
@@ -123,13 +149,29 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
           err instanceof Error &&
           /passphrase|decrypt|identity|artifact|recovery/i.test(err.message);
         setError(bad ? 'wrong passphrase or recovery file' : 'could not restore the device');
-        setStatus((await keystore.hasDevice()) ? 'needs-unlock' : 'needs-create');
+        setStatus(statusForStored(await keystore.storedIdentity(), identity));
       }
     },
     [keystore, profile],
   );
 
-  const value: DeviceState = { device, pool, keystore, status, error, unlock, restore };
+  const resetForNewAccount = useCallback(async (): Promise<void> => {
+    if (!keystore) return;
+    await keystore.clearDevice(); // wipes the other account's device + pool from this browser's single slot
+    setError(null);
+    setStatus('needs-create');
+  }, [keystore]);
+
+  const value: DeviceState = {
+    device,
+    pool,
+    keystore,
+    status,
+    error,
+    unlock,
+    restore,
+    resetForNewAccount,
+  };
   return <DeviceCtx.Provider value={value}>{children}</DeviceCtx.Provider>;
 }
 

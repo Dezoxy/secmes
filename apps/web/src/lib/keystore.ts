@@ -266,6 +266,16 @@ export class DeviceKeystore {
     return (await this.db.get(STORE, SELF)) !== undefined;
   }
 
+  /**
+   * The IDENTITY of the stored device, if any — plaintext metadata (no passphrase, no unseal). Lets the
+   * app detect a device belonging to a DIFFERENT signed-in account on this browser (single device slot in
+   * v1): a mismatch means "switch/reset", not "wrong passphrase".
+   */
+  async storedIdentity(): Promise<string | undefined> {
+    const stored = (await this.db.get(STORE, SELF)) as StoredDevice | undefined;
+    return stored?.identity;
+  }
+
   private async unseal(
     stored: StoredDevice,
     identity: string,
