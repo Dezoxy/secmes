@@ -1,0 +1,124 @@
+#!/bin/sh
+# Provision the local Zitadel instance for argus (LOCAL DEV ONLY). Idempotent: safe to re-run.
+# Uses the bootstrap machine PAT (written by FirstInstance to /bootstrap/admin.pat) against the
+# Management API to create — if absent — the project, the SPA (User-Agent, PKCE, JWT access tokens)
+# OIDC app, and the token Action that asserts the flat `tenant_id` UUID + email/name claims onto the
+# access token (Complement-Token flow → Pre-Access-Token trigger). Writes the generated client/project
+# ids to /bootstrap/{api,web}.env.local for the Makefile to materialise on the host.
+#
+# Every value here is a LOCAL throwaway — never a real secret. Verified against Zitadel v4.15.0.
+set -eu
+
+BASE="http://zitadel:8080"            # compose DNS; Host header is zitadel:8080 → matches ExternalDomain
+PROJECT_NAME="argus"
+APP_NAME="argus-web"
+ACTION_NAME="argusClaims"
+REDIRECT_URI="http://localhost:5173/auth/callback"
+POST_LOGOUT_URI="http://localhost:5173/"
+# MUST match apps/api/src/db/seed.dev.ts DEV_TENANT_ID — the Action asserts it, the API casts it to tenants.id.
+DEV_TENANT_ID="00000000-0000-4000-a000-000000000001"
+# Zitadel flow/trigger ids (global enums): flow 2 = Complement Token, trigger 5 = Pre Access Token Creation.
+FLOW_COMPLEMENT_TOKEN=2
+TRIGGER_PRE_ACCESS_TOKEN=5
+
+log() { echo "[provision] $*"; }
+
+# 1) Wait for the OP discovery endpoint, then read the bootstrap PAT.
+log "waiting for Zitadel discovery..."
+i=0
+until [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/.well-known/openid-configuration")" = "200" ]; do
+  i=$((i + 1)); [ "$i" -gt 60 ] && { log "FATAL: Zitadel not ready after 120s"; exit 1; }
+  sleep 2
+done
+[ -s /bootstrap/admin.pat ] || { log "FATAL: /bootstrap/admin.pat missing (FirstInstance did not run?)"; exit 1; }
+PAT="$(cat /bootstrap/admin.pat)"
+log "Zitadel ready; PAT loaded."
+
+# zcurl METHOD PATH [json-body]  → response body on stdout
+zcurl() {
+  _m="$1"; _p="$2"; _b="${3:-}"
+  if [ -n "$_b" ]; then
+    curl -s -X "$_m" -H "Authorization: Bearer $PAT" -H 'Content-Type: application/json' \
+      "$BASE$_p" -d "$_b"
+  else
+    curl -s -X "$_m" -H "Authorization: Bearer $PAT" -H 'Content-Type: application/json' "$BASE$_p"
+  fi
+}
+
+# 2) Project (search-first for idempotency — Zitadel does not enforce unique project names).
+PROJECT_ID="$(zcurl POST /management/v1/projects/_search \
+  "{\"queries\":[{\"nameQuery\":{\"name\":\"$PROJECT_NAME\",\"method\":\"TEXT_QUERY_METHOD_EQUALS\"}}]}" \
+  | jq -r '.result[0].id // empty')"
+if [ -z "$PROJECT_ID" ]; then
+  PROJECT_ID="$(zcurl POST /management/v1/projects "{\"name\":\"$PROJECT_NAME\"}" | jq -r '.id')"
+  log "created project $PROJECT_ID"
+else
+  log "reusing project $PROJECT_ID"
+fi
+[ -n "$PROJECT_ID" ] && [ "$PROJECT_ID" != "null" ] || { log "FATAL: no project id"; exit 1; }
+
+# 3) SPA OIDC app (User-Agent + PKCE + JWT access tokens; devMode allows the http localhost redirect).
+APP_JSON="$(zcurl POST "/management/v1/projects/$PROJECT_ID/apps/_search" \
+  "{\"queries\":[{\"nameQuery\":{\"name\":\"$APP_NAME\",\"method\":\"TEXT_QUERY_METHOD_EQUALS\"}}]}")"
+CLIENT_ID="$(echo "$APP_JSON" | jq -r '.result[0].oidcConfig.clientId // empty')"
+if [ -z "$CLIENT_ID" ]; then
+  CREATE_APP="$(zcurl POST "/management/v1/projects/$PROJECT_ID/apps/oidc" "$(cat <<JSON
+{
+  "name": "$APP_NAME",
+  "redirectUris": ["$REDIRECT_URI"],
+  "postLogoutRedirectUris": ["$POST_LOGOUT_URI"],
+  "responseTypes": ["OIDC_RESPONSE_TYPE_CODE"],
+  "grantTypes": ["OIDC_GRANT_TYPE_AUTHORIZATION_CODE"],
+  "appType": "OIDC_APP_TYPE_USER_AGENT",
+  "authMethodType": "OIDC_AUTH_METHOD_TYPE_NONE",
+  "version": "OIDC_VERSION_1_0",
+  "devMode": true,
+  "accessTokenType": "OIDC_TOKEN_TYPE_JWT",
+  "accessTokenRoleAssertion": true
+}
+JSON
+)")"
+  CLIENT_ID="$(echo "$CREATE_APP" | jq -r '.clientId')"
+  log "created app, clientId $CLIENT_ID"
+else
+  log "reusing app, clientId $CLIENT_ID"
+fi
+[ -n "$CLIENT_ID" ] && [ "$CLIENT_ID" != "null" ] || { log "FATAL: no client id"; exit 1; }
+
+# 4) Token Action: assert flat tenant_id (+ email/name from the user) onto the access token.
+#    The function name MUST equal the action name. setClaim only sets if the key is absent.
+ACTION_SCRIPT="function $ACTION_NAME(ctx, api) { api.v1.claims.setClaim('tenant_id', '$DEV_TENANT_ID'); var u = ctx.v1.getUser(); if (u && u.human) { if (u.human.isEmailVerified && u.human.email) { api.v1.claims.setClaim('email', u.human.email); } if (u.human.displayName) { api.v1.claims.setClaim('name', u.human.displayName); } } }"
+ACTION_BODY="$(jq -n --arg n "$ACTION_NAME" --arg s "$ACTION_SCRIPT" \
+  '{name:$n, script:$s, timeout:"10s", allowedToFail:false}')"
+ACTION_ID="$(zcurl POST /management/v1/actions/_search '{}' \
+  | jq -r --arg n "$ACTION_NAME" '.result[]? | select(.name==$n) | .id' | head -n1)"
+if [ -z "$ACTION_ID" ]; then
+  ACTION_ID="$(zcurl POST /management/v1/actions "$ACTION_BODY" | jq -r '.id')"
+  log "created action $ACTION_ID"
+else
+  zcurl PUT "/management/v1/actions/$ACTION_ID" "$ACTION_BODY" >/dev/null
+  log "updated action $ACTION_ID"
+fi
+[ -n "$ACTION_ID" ] && [ "$ACTION_ID" != "null" ] || { log "FATAL: no action id"; exit 1; }
+
+# 5) Bind the action to Complement-Token → Pre-Access-Token-Creation (replaces the set, so idempotent).
+zcurl POST "/management/v1/flows/$FLOW_COMPLEMENT_TOKEN/trigger/$TRIGGER_PRE_ACCESS_TOKEN" \
+  "{\"actionIds\":[\"$ACTION_ID\"]}" >/dev/null
+log "bound action to Complement-Token / Pre-Access-Token-Creation"
+
+# 6) Emit env fragments for the Makefile to place on the host. ISSUER + audience(project id) for the
+#    API; issuer + client id for the SPA. JWKS defaults to <issuer>/oauth/v2/keys (compose-reachable).
+cat > /bootstrap/api.env.local <<ENV
+# generated by infra/local/zitadel/provision.sh — gitignored, local dev only
+OIDC_ISSUER=$BASE
+OIDC_AUDIENCE=$PROJECT_ID
+OIDC_TENANT_CLAIM=tenant_id
+ENV
+cat > /bootstrap/web.env.local <<ENV
+# generated by infra/local/zitadel/provision.sh — gitignored, local dev only
+VITE_OIDC_ISSUER=$BASE
+VITE_OIDC_CLIENT_ID=$CLIENT_ID
+VITE_OIDC_REDIRECT_URI=$REDIRECT_URI
+ENV
+
+log "done. project=$PROJECT_ID client=$CLIENT_ID action=$ACTION_ID"

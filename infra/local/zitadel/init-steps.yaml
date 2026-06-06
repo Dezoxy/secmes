@@ -1,0 +1,24 @@
+# Zitadel FirstInstance bootstrap (LOCAL DEV ONLY) — runs once on the very first init.
+# Creates: the org, a VERIFIED human admin (so JIT provisioning's required email claim is present),
+# and a machine service account whose PAT is written to /bootstrap/admin.pat. The provision one-shot
+# (compose `zitadel-provision`) reads that PAT to create the project / SPA app / tenant-claim Action.
+# All credentials here are local throwaways — never real secrets (see docs/threat-models/auth-tenant-context.md §9).
+FirstInstance:
+  PatPath: /bootstrap/admin.pat
+  Org:
+    Name: argus-local
+    Human:
+      UserName: admin
+      FirstName: Argus
+      LastName: Admin
+      Email:
+        Address: admin@argus.local
+        Verified: true
+      Password: Password1!
+      PasswordChangeRequired: false
+    Machine:
+      Machine:
+        Username: bootstrap
+        Name: Bootstrap
+      Pat:
+        ExpirationDate: 2099-12-31T23:59:59Z
