@@ -299,6 +299,11 @@ export class MessagingService {
    * `nextCursor` to fetch everything it missed in one paginated stream (the durable `messages` table is
    * the offline queue). AUTHZ: the inner join to `conversation_members` (caller) under RLS means only
    * conversations the caller is a member of are returned — never another member's or tenant's messages.
+   *
+   * NOTE: this `(created_at, id)` keyset is an ORDERING building block, not a standalone no-loss
+   * guarantee — a message committing late with an earlier `created_at` can fall behind the cursor. The
+   * client's reconnect protocol (subscribe-first → sync → dedup by id → overlap the cursor) plus the WS
+   * post-commit fan-out is what guarantees no missed messages. See realtime-delivery.md §6.
    */
   async syncMessages(auth: VerifiedAuth, query: ListMessagesQuery): Promise<SyncPage> {
     return withTenant(auth.tenantId, async (tx) => {
