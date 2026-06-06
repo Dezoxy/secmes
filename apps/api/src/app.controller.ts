@@ -1,5 +1,11 @@
 import { Controller, Get } from '@nestjs/common';
-import { ApiOkResponse, ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
+import {
+  ApiExcludeEndpoint,
+  ApiOkResponse,
+  ApiOperation,
+  ApiProperty,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Public } from './auth/public.decorator.js';
 
 const SERVICE = 'argus-api';
@@ -27,6 +33,7 @@ export class AppController {
   /** Liveness/readiness probe target. Must stay cheap and dependency-free. Public by design. */
   @Public()
   @Get('healthz')
+  @ApiExcludeEndpoint() // operational probe, not part of the audited API contract
   @ApiOperation({ summary: 'Liveness/readiness probe', operationId: 'getHealth' })
   @ApiOkResponse({ type: HealthResponse })
   health(): HealthResponse {
@@ -35,6 +42,7 @@ export class AppController {
 
   @Public()
   @Get()
+  @ApiExcludeEndpoint() // service banner, not part of the audited API contract
   @ApiOperation({ summary: 'Service identity + version', operationId: 'getServiceInfo' })
   @ApiOkResponse({ type: ServiceInfoResponse })
   root(): ServiceInfoResponse {
