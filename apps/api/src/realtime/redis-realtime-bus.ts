@@ -25,8 +25,13 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
 
   constructor(url: string) {
     super();
-    this.pub = new Redis(url, { maxRetriesPerRequest: null });
-    this.sub = this.pub.duplicate();
+    // Publisher: NO offline queue. Real-time delivery is best-effort — the message is already durable in
+    // the DB and the recipient back-fills via REST on reconnect. If Redis is down, a publish must fail
+    // fast and be dropped, NOT accumulate unboundedly in ioredis' in-memory offline queue.
+    this.pub = new Redis(url, { enableOfflineQueue: false });
+    // Subscriber: a separate connection (subscribed connections can't issue normal commands). Keep its
+    // default queue + no per-request retry cap so it re-subscribes cleanly across reconnects.
+    this.sub = new Redis(url, { maxRetriesPerRequest: null });
     // A transient Redis error must not crash the process (ioredis reconnects automatically). No secret
     // is in these errors; operational logging/metrics are a later concern.
     this.pub.on('error', () => {});
@@ -48,7 +53,9 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
   }
 
   emitMessageCreated(event: MessageCreatedEvent): void {
-    void this.pub.publish(CHANNEL, JSON.stringify(event));
+    // Fire-and-forget; with enableOfflineQueue:false a publish REJECTS when Redis is down, so we must
+    // swallow it (an unhandled rejection would crash the process). Dropping it is correct — best-effort.
+    this.pub.publish(CHANNEL, JSON.stringify(event)).catch(() => {});
   }
 
   onMessageCreated(listener: (event: MessageCreatedEvent) => void): void {
