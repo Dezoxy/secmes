@@ -38,6 +38,8 @@ export {
   serializeDeviceIdentity,
   deserializeDeviceIdentity,
 } from './device-codec.js';
+// A peer's PUBLIC key material (what the key directory publishes) — the input to `safetyNumber`.
+export type { KeyPackage } from 'ts-mls';
 
 // Classic suite for v1 (single-device). Post-quantum (X-Wing) is available in ts-mls and a later option.
 export const CIPHERSUITE = 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519' as const;
@@ -112,15 +114,19 @@ function compareBytes(a: Uint8Array, b: Uint8Array): number {
   return a.length - b.length;
 }
 
-// Per-device fingerprint over (domain || length-prefixed identity || signature public key). The
-// signature key is the device's stable identity; the length prefix removes identity/key boundary
-// ambiguity. Throws (via deviceIdentity) on a non-Basic credential.
-async function deviceFingerprint(keys: DeviceKeys): Promise<Uint8Array> {
-  const identity = te.encode(deviceIdentity(keys));
+// Per-device fingerprint over (domain || length-prefixed identity || signature public key), all read
+// from a PUBLIC KeyPackage (the peer's published material) — no private key needed. The signature key
+// is the device's stable identity; the length prefix removes identity/key boundary ambiguity.
+async function deviceFingerprint(pkg: KeyPackage): Promise<Uint8Array> {
+  const cred = pkg.leafNode.credential;
+  if (cred.credentialType !== 'basic') {
+    throw new Error(`unsupported credential type: ${cred.credentialType}`);
+  }
+  const identity = cred.identity; // raw identity bytes (avoids any lossy UTF-8 round-trip)
   // The 16-bit length prefix is what removes identity/key boundary ambiguity; enforce its bound so a
   // future longer identity can't silently wrap it and reintroduce the ambiguity.
   if (identity.length > 0xffff) throw new Error('identity too long for the safety-number encoding');
-  const sigPub = keys.publicPackage.leafNode.signaturePublicKey;
+  const sigPub = pkg.leafNode.signaturePublicKey;
   const idLen = new Uint8Array([(identity.length >>> 8) & 0xff, identity.length & 0xff]);
   return sha256(concatBytes(FP_DOMAIN, idLen, identity, sigPub));
 }
@@ -136,12 +142,14 @@ function renderSafetyNumber(digest: Uint8Array): string {
 }
 
 /**
- * The two-party SAFETY NUMBER both peers compare out-of-band (checkpoint 20). Derived only from the two
- * devices' identity (signature) public keys + identities — **symmetric** (sorted, so both sides get the
- * same string) and **deterministic**. A mismatch means a key was swapped (MITM). Stable across
- * KeyPackage re-mints (the signature identity is preserved); changes only if an identity key changes.
+ * The two-party SAFETY NUMBER both peers compare out-of-band (checkpoint 20). Takes the two devices'
+ * published **KeyPackages** (PUBLIC material only — for a remote peer this is exactly what the key
+ * directory hands you before `addMember`, so no private key is needed). Derived from the identity
+ * (signature) public keys + identities — **symmetric** (sorted, so both sides get the same string) and
+ * **deterministic**. A mismatch means a key was swapped (MITM). Stable across KeyPackage re-mints (the
+ * signature identity is preserved); changes only if an identity key changes.
  */
-export async function safetyNumber(local: DeviceKeys, remote: DeviceKeys): Promise<string> {
+export async function safetyNumber(local: KeyPackage, remote: KeyPackage): Promise<string> {
   const a = await deviceFingerprint(local);
   const b = await deviceFingerprint(remote);
   const [first, second] = compareBytes(a, b) <= 0 ? [a, b] : [b, a];

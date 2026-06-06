@@ -54,7 +54,8 @@ export default function ChatScreen() {
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [verifyOpen, setVerifyOpen] = useState(false);
   const [sessionNumber, setSessionNumber] = useState<string | null>(null);
-  const [verifiedNumber, setVerifiedNumber] = useState<string | null>(null);
+  // Per-conversation verification: conversationId → the safety number marked verified for it.
+  const [verifiedByConv, setVerifiedByConv] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setMounted(true);
@@ -67,10 +68,16 @@ export default function ChatScreen() {
       .catch(() => setSessionNumber(null));
   }, []);
 
-  // Verified only while the marked number still matches the current key (resets if the key changes).
-  const verified = sessionNumber !== null && verifiedNumber === sessionNumber;
-
   const selectedConversation = conversations.find((c) => c.id === selectedId);
+  // Safety-number verification is 2-party only (group safety numbers are deferred —
+  // fingerprint-verification.md §6) and per-conversation. Verified only while the number marked for
+  // THIS conversation still matches the current key (resets if the key changes).
+  const isDirect = selectedConversation?.type === 'direct';
+  const verified =
+    !!isDirect &&
+    selectedId !== null &&
+    sessionNumber !== null &&
+    verifiedByConv[selectedId] === sessionNumber;
 
   const handleSelect = (id: string) => {
     setSelectedId(id);
@@ -169,7 +176,7 @@ export default function ChatScreen() {
                 conversation={selectedConversation}
                 onBack={() => setShowSidebar(true)}
                 verified={verified}
-                onVerify={() => setVerifyOpen(true)}
+                onVerify={isDirect ? () => setVerifyOpen(true) : undefined}
               />
               <MessageList conversation={selectedConversation} onImageClick={setPreviewImage} />
               <ChatInput onSend={handleSend} />
@@ -190,7 +197,7 @@ export default function ChatScreen() {
 
       <ImagePreviewModal imageUrl={previewImage} onClose={() => setPreviewImage(null)} />
       {recoveryOpen && <RecoveryPanel onClose={() => setRecoveryOpen(false)} />}
-      {verifyOpen && (
+      {verifyOpen && isDirect && (
         <VerifySecurity
           peerName={
             selectedConversation
@@ -199,7 +206,14 @@ export default function ChatScreen() {
           }
           safetyNumber={sessionNumber}
           verified={verified}
-          onVerifiedChange={(v) => setVerifiedNumber(v ? sessionNumber : null)}
+          onVerifiedChange={(v) =>
+            setVerifiedByConv((prev) => {
+              const next = { ...prev };
+              if (v && selectedId && sessionNumber) next[selectedId] = sessionNumber;
+              else if (selectedId) delete next[selectedId];
+              return next;
+            })
+          }
           onClose={() => setVerifyOpen(false)}
         />
       )}

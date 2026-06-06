@@ -48,7 +48,8 @@ export async function createE2eeSession(conversationId: string): Promise<E2eeSes
   const invite = await yourConversation.addMember(peer.publicPackage);
   const peerConversation: Conversation = await engine.joinConversation(peer, invite);
   // The number both sides would compare out-of-band to confirm no key was swapped (MITM, #20).
-  const sn = await safetyNumber(you, peer);
+  // Derived from PUBLIC KeyPackages — in the live flow the peer's comes from the key directory.
+  const sn = await safetyNumber(you.publicPackage, peer.publicPackage);
   return {
     safetyNumber: sn,
     async send(text: string): Promise<EncryptResult> {
