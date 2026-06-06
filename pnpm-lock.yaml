@@ -35,6 +35,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@argus/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
       '@nestjs/common':
         specifier: ^11.1.24
         version: 11.1.24(reflect-metadata@0.2.2)(rxjs@7.8.2)

@@ -1,3 +1,4 @@
+import { verifyWelcomeConsume } from '@argus/crypto/device-proof';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -299,16 +300,42 @@ export class MessagingService {
   }
 
   /**
-   * Consume (delete) a welcome after the calling DEVICE has joined the group. Scoped to
-   * `recipient_user_id = the verified caller` (authz boundary) AND `recipient_device_id = deviceId`
-   * (routing), so a device can only consume the welcome sealed to ITS OWN KeyPackage — a second device
-   * of the same user can NOT delete (and thereby lose) another device's pending welcome. 0 rows deleted
-   * → 404 — the SAME 404 whether the id is foreign, wrong-tenant (RLS-hidden), for another device, or
-   * already consumed, so nothing about other welcomes is revealed.
+   * Consume (delete) a welcome after the calling DEVICE has joined the group. The bearer token proves the
+   * USER, not the device, so the caller must additionally **prove possession of the device's signature
+   * private key**: `proof` is an Ed25519 signature over (deviceId, welcomeId) verified against the
+   * device's PUBLIC signature key (key directory). This stops a sibling device/session of the SAME user
+   * from deleting — and thereby destroying — another device's pending welcome by passing its id. The
+   * delete is also scoped to `recipient_user_id = the verified caller` (authz boundary) AND
+   * `recipient_device_id = deviceId`. Any failure → the SAME opaque 404 (unknown device, bad proof,
+   * foreign / wrong-tenant / other-device / already-consumed welcome), so nothing is revealed.
    */
-  async consumeWelcome(auth: VerifiedAuth, welcomeId: string, deviceId: string): Promise<void> {
+  async consumeWelcome(
+    auth: VerifiedAuth,
+    welcomeId: string,
+    deviceId: string,
+    proof: string,
+  ): Promise<void> {
     await withTenant(auth.tenantId, async (tx) => {
       const me = await this.requireUser(tx, auth.sub);
+
+      // The proving device must be a device OF THE VERIFIED CALLER (RLS scopes to the tenant). Load its
+      // PUBLIC signature key to verify the proof — verifying a public-key signature is an auth check, not
+      // content decryption, so the server stays crypto-blind.
+      const [device] = await tx
+        .select({ signaturePublicKey: schema.devices.signaturePublicKey })
+        .from(schema.devices)
+        .where(and(eq(schema.devices.id, deviceId), eq(schema.devices.userId, me)))
+        .limit(1);
+      if (!device) throw new NotFoundException('welcome not found');
+
+      const proven = verifyWelcomeConsume(
+        Buffer.from(device.signaturePublicKey, 'base64'),
+        deviceId,
+        welcomeId,
+        Buffer.from(proof, 'base64url'),
+      );
+      if (!proven) throw new NotFoundException('welcome not found');
+
       const deleted = await tx
         .delete(schema.conversationWelcomes)
         .where(

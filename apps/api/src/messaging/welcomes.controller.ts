@@ -28,7 +28,12 @@ import {
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { CurrentAuth } from '../auth/current-auth.decorator.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
-import { DeliverWelcomeSchema, type DeliverWelcome } from './messaging.schemas.js';
+import {
+  ConsumeWelcomeQuerySchema,
+  DeliverWelcomeSchema,
+  type ConsumeWelcomeQuery,
+  type DeliverWelcome,
+} from './messaging.schemas.js';
 import { MessagingService } from './messaging.service.js';
 
 const BASE64_PATTERN = '^[A-Za-z0-9+/]+={0,2}$';
@@ -145,20 +150,26 @@ export class WelcomesController {
     name: 'deviceId',
     required: true,
     schema: { type: 'string', format: 'uuid' },
+    description: "the calling device's id — the welcome must be sealed to it",
+  })
+  @ApiQuery({
+    name: 'proof',
+    required: true,
+    schema: { type: 'string', maxLength: 256, pattern: '^[A-Za-z0-9_-]+$' },
     description:
-      "the calling device's id — only the device the welcome is sealed to may consume it",
+      "base64url Ed25519 proof-of-possession of the device's signature key over (deviceId, welcomeId)",
   })
   @ApiNoContentResponse({ description: 'welcome consumed' })
-  @ApiBadRequestResponse({ description: 'missing or invalid deviceId' })
+  @ApiBadRequestResponse({ description: 'missing or invalid deviceId / proof' })
   @ApiNotFoundResponse({
-    description: 'welcome not found, or not addressed to this caller + device',
+    description: 'welcome not found, proof invalid, or not addressed to this caller + device',
   })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async consume(
     @CurrentAuth() auth: VerifiedAuth,
     @Param('welcomeId', ParseUUIDPipe) welcomeId: string,
-    @Query('deviceId', ParseUUIDPipe) deviceId: string,
+    @Query(new ZodValidationPipe(ConsumeWelcomeQuerySchema)) query: ConsumeWelcomeQuery,
   ): Promise<void> {
-    await this.messaging.consumeWelcome(auth, welcomeId, deviceId);
+    await this.messaging.consumeWelcome(auth, welcomeId, query.deviceId, query.proof);
   }
 }

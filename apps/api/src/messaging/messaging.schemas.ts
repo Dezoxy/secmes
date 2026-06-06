@@ -4,6 +4,7 @@ import { z } from 'zod';
 // package when the web client sends messages. `.strict()` rejects unknown keys (fail-closed).
 
 const base64 = z.string().regex(/^[A-Za-z0-9+/]+={0,2}$/, 'must be base64');
+const base64url = z.string().regex(/^[A-Za-z0-9_-]+$/, 'must be base64url');
 
 export const CreateConversationSchema = z
   .object({
@@ -58,6 +59,19 @@ export const DeliverWelcomeSchema = z
   })
   .strict();
 export type DeliverWelcome = z.infer<typeof DeliverWelcomeSchema>;
+
+export const ConsumeWelcomeQuerySchema = z
+  .object({
+    // The calling device — must be a device of the verified caller; the welcome is sealed to it.
+    deviceId: z.string().uuid(),
+    // Proof of possession of that device's signature private key over (deviceId, welcomeId): an Ed25519
+    // signature, base64url. A 64-byte sig is 86 base64url chars; 256 is generous headroom. NOT a secret —
+    // it's a single-use signature over public ids, bound to a row that's deleted on first consume — so a
+    // query param (vs a header/body) is fine; it carries no token/credential value if it lands in a log.
+    proof: base64url.min(1).max(256),
+  })
+  .strict();
+export type ConsumeWelcomeQuery = z.infer<typeof ConsumeWelcomeQuerySchema>;
 
 export const SendMessageSchema = z
   .object({
