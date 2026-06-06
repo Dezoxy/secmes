@@ -98,6 +98,20 @@ export const conversationReceipts = pgTable('conversation_receipts', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Encrypted image attachments — METADATA + ciphertext REFS only (0011). The ciphertext blob lives in
+// object storage; the content key lives only in the MLS envelope. No content / content-key / plaintext
+// content-type column. RLS + composite-FK tenant pinning in 0011. See encrypted-attachments.md.
+export const attachments = pgTable('attachments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  conversationId: uuid('conversation_id').notNull(),
+  objectKey: text('object_key').notNull(),
+  byteSize: bigint('byte_size', { mode: 'number' }).notNull(),
+  uploadedBy: uuid('uploaded_by').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }),
+});
+
 // Append-only audit log (IDs + metadata only — never content/secrets). RLS + grants in 0002.
 export const auditEvents = pgTable('audit_events', {
   id: uuid('id').primaryKey().defaultRandom(),
