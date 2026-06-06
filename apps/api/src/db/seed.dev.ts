@@ -7,8 +7,10 @@ import postgres from 'postgres';
 // `tenants.id`, and JIT provisioning (auth-tenant-context.md §7) creates the user under it — so
 // this row MUST exist before the first login. Idempotent.
 //
-// This is NOT a migration: a hardcoded tenant must never land in a real database. It is gated on
-// a non-production NODE_ENV and run by hand against the local Docker stack.
+// This is NOT a migration: a hardcoded tenant must never land in a real database. Two enforced
+// guards make that true regardless of how it's invoked: it refuses `NODE_ENV=production`, AND it
+// refuses any non-loopback DB host — so a stray `DATABASE_URL`/`MIGRATION_DATABASE_URL` pointing at
+// staging/prod (e.g. with `NODE_ENV` unset) can never receive the tenant. Run by hand (`make seed`).
 
 // A deliberately synthetic, all-but-zero UUID so it's unmistakable in data/logs as the dev tenant.
 // Keep in lockstep with the Zitadel bootstrap (the Action emits this exact value).
@@ -23,6 +25,21 @@ if (process.env.NODE_ENV === 'production') {
 const url = process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL;
 if (!url) {
   console.error('Set DATABASE_URL (owner connection) to run the dev seed.');
+  process.exit(1);
+}
+
+// Hard local-only guard: only a loopback Postgres may be seeded. Anything else (a managed host, a
+// compose service name, a remote) is refused, so the fixed dev tenant can't pollute a real database.
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+let dbHost: string;
+try {
+  dbHost = new URL(url).hostname;
+} catch {
+  console.error('DATABASE_URL is not a valid URL');
+  process.exit(1);
+}
+if (!LOOPBACK_HOSTS.has(dbHost)) {
+  console.error(`refusing to run the dev seed against a non-local database (host: ${dbHost})`);
   process.exit(1);
 }
 
