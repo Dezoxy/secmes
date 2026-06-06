@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant, type Tx } from '../db/index.js';
-import { RealtimeBus } from '../realtime/realtime-bus.js';
+import { RealtimeBus, type MessageCreatedEvent } from '../realtime/realtime-bus.js';
 import type { ListMessagesQuery, SendMessage } from './messaging.schemas.js';
 
 export interface CreatedConversation {
@@ -150,7 +150,10 @@ export class MessagingService {
     conversationId: string,
     body: SendMessage,
   ): Promise<SentMessage> {
-    return withTenant(auth.tenantId, async (tx) => {
+    // Carry the fan-out event OUT of the transaction so we only emit AFTER it commits — otherwise the
+    // gateway could push a 'message' frame before the row is durable (phantom delivery if the commit
+    // fails) and a recipient that reacts by fetching could race the uncommitted write.
+    const { result, event } = await withTenant(auth.tenantId, async (tx) => {
       const sender = await this.requireUser(tx, auth.sub);
       await this.requireMembership(tx, conversationId, sender);
 
@@ -171,23 +174,25 @@ export class MessagingService {
 
       if (inserted[0]) {
         const createdAt = inserted[0].createdAt.toISOString();
-        // Announce for real-time fan-out (gateway, 28). Only on a genuinely-new insert — an idempotent
-        // retry must not re-deliver. CIPHERTEXT ONLY; the bus/gateway never see plaintext.
-        this.bus.emitMessageCreated({
-          tenantId: auth.tenantId,
-          conversationId,
-          message: {
-            id: inserted[0].id,
-            senderUserId: sender,
-            clientMessageId: body.clientMessageId,
-            ciphertext: body.ciphertext,
-            alg: body.alg,
-            epoch: body.epoch,
-            attachmentObjectKey: body.attachmentObjectKey ?? null,
-            createdAt,
-          },
-        });
-        return { messageId: inserted[0].id, createdAt, deduplicated: false };
+        return {
+          result: { messageId: inserted[0].id, createdAt, deduplicated: false },
+          // Only a genuinely-new insert announces for fan-out — an idempotent retry must not re-deliver.
+          // CIPHERTEXT ONLY; the bus/gateway never see plaintext.
+          event: {
+            tenantId: auth.tenantId,
+            conversationId,
+            message: {
+              id: inserted[0].id,
+              senderUserId: sender,
+              clientMessageId: body.clientMessageId,
+              ciphertext: body.ciphertext,
+              alg: body.alg,
+              epoch: body.epoch,
+              attachmentObjectKey: body.attachmentObjectKey ?? null,
+              createdAt,
+            },
+          } satisfies MessageCreatedEvent,
+        };
       }
 
       // Conflict: this (conversation, sender, clientMessageId) was already stored — return that row,
@@ -205,11 +210,18 @@ export class MessagingService {
         .limit(1);
       if (!existing) throw new Error('idempotency conflict but no existing message found');
       return {
-        messageId: existing.id,
-        createdAt: existing.createdAt.toISOString(),
-        deduplicated: true,
+        result: {
+          messageId: existing.id,
+          createdAt: existing.createdAt.toISOString(),
+          deduplicated: true,
+        },
+        event: null,
       };
     });
+
+    // Post-commit: the row is durable + visible to a subsequent fetch before any client is notified.
+    if (event) this.bus.emitMessageCreated(event);
+    return result;
   }
 
   /**
