@@ -72,18 +72,20 @@ export const ListWelcomesQuerySchema = z
   .strict();
 export type ListWelcomesQuery = z.infer<typeof ListWelcomesQuerySchema>;
 
-export const ConsumeWelcomeQuerySchema = z
+// Shared by the proof-gated welcome ops (fetch-material + consume): both prove possession of the device's
+// signature key over (deviceId, welcomeId) before the server hands over / deletes the device's join material.
+export const WelcomeProofQuerySchema = z
   .object({
     // The calling device — must be a device of the verified caller; the welcome is sealed to it.
     deviceId: z.string().uuid(),
     // Proof of possession of that device's signature private key over (deviceId, welcomeId): an Ed25519
     // signature, base64url. A 64-byte sig is 86 base64url chars; 256 is generous headroom. NOT a secret —
-    // it's a single-use signature over public ids, bound to a row that's deleted on first consume — so a
-    // query param (vs a header/body) is fine; it carries no token/credential value if it lands in a log.
+    // it's a single-use signature over public ids — so a query param (vs a header/body) is fine; it carries
+    // no token/credential value if it lands in a log.
     proof: base64url.min(1).max(256),
   })
   .strict();
-export type ConsumeWelcomeQuery = z.infer<typeof ConsumeWelcomeQuerySchema>;
+export type WelcomeProofQuery = z.infer<typeof WelcomeProofQuerySchema>;
 
 export const SendMessageSchema = z
   .object({

@@ -1,4 +1,8 @@
-import { generateSignatureKeypair, signWelcomeConsume } from '@argus/crypto/device-proof';
+import {
+  generateSignatureKeypair,
+  signWelcomeConsume,
+  signWelcomeFetch,
+} from '@argus/crypto/device-proof';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -406,9 +410,11 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     ...over,
   });
 
-  // Proof-of-possession of a device's signature key over (deviceId, welcomeId), base64url for the wire.
+  // Proofs-of-possession of a device's signature key over (deviceId, welcomeId), base64url for the wire.
   const proofFor = (priv: Uint8Array, deviceId: string, welcomeId: string): string =>
-    Buffer.from(signWelcomeConsume(priv, deviceId, welcomeId)).toString('base64url');
+    Buffer.from(signWelcomeConsume(priv, deviceId, welcomeId)).toString('base64url'); // CONSUME proof
+  const fetchProofFor = (priv: Uint8Array, deviceId: string, welcomeId: string): string =>
+    Buffer.from(signWelcomeFetch(priv, deviceId, welcomeId)).toString('base64url'); // FETCH proof
 
   it('deliver adds the recipient as a member and stores the opaque welcome verbatim', async () => {
     const conv = await newConversation(); // alice + bob; dave is NOT yet a member
@@ -474,26 +480,79 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('the recipient device fetches only its OWN welcome, never another member’s', async () => {
+  it('list is metadata-only; material is fetched per-welcome with a device proof, device-isolated', async () => {
     const conv = await newConversation();
-    await svc.deliverWelcome(
+    const { welcomeId: daveW } = await svc.deliverWelcome(
       aliceAuth,
       conv,
       wel({ recipientUserId: daveId, welcome: 'ZGF2ZQ==' }),
     );
-    await svc.deliverWelcome(
+    const { welcomeId: bobW } = await svc.deliverWelcome(
       aliceAuth,
       conv,
       wel({ recipientUserId: bobId, recipientDeviceId: bobDeviceId, welcome: 'Ym9i' }),
     );
 
+    // list returns METADATA only — ids, never the blobs — and is device-isolated.
     const daves = await svc.listMyWelcomes(daveAuth, daveDeviceId);
-    expect(daves.every((w) => w.welcome !== 'Ym9i')).toBe(true); // never sees bob's
-    expect(daves.some((w) => w.welcome === 'ZGF2ZQ==' && w.conversationId === conv)).toBe(true);
+    expect(daves.find((w) => w.id === daveW)).toBeDefined();
+    expect(daves.find((w) => w.id === daveW)).not.toHaveProperty('welcome'); // no join material listed
+    expect(daves.some((w) => w.id === bobW)).toBe(false); // never sees bob's welcome id
+    expect((await svc.listMyWelcomes(bobAuth, bobDeviceId)).some((w) => w.id === daveW)).toBe(
+      false,
+    );
 
-    const bobs = await svc.listMyWelcomes(bobAuth, bobDeviceId);
-    expect(bobs.some((w) => w.welcome === 'Ym9i' && w.conversationId === conv)).toBe(true);
-    expect(bobs.every((w) => w.welcome !== 'ZGF2ZQ==')).toBe(true); // never sees dave's
+    // the blobs come from getWelcomeMaterial, gated by a FETCH proof; dave gets dave's blobs verbatim.
+    const mat = await svc.getWelcomeMaterial(
+      daveAuth,
+      daveW,
+      daveDeviceId,
+      fetchProofFor(daveDev1Priv, daveDeviceId, daveW),
+    );
+    expect(mat).toEqual({ welcome: 'ZGF2ZQ==', ratchetTree: 'dHJlZQ==' });
+  });
+
+  it('getWelcomeMaterial requires a FETCH proof from the sealed-to device (no sibling / forgery / cross-op)', async () => {
+    const conv = await newConversation();
+    const { welcomeId } = await svc.deliverWelcome(aliceAuth, conv, wel({ welcome: 'bWF0' }));
+    // device 2 fetching via its own id → wrong recipient_device → 404
+    await expect(
+      svc.getWelcomeMaterial(
+        daveAuth,
+        welcomeId,
+        daveDevice2Id,
+        fetchProofFor(daveDev2Priv, daveDevice2Id, welcomeId),
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    // device 2 forging device 1's fetch (signs with its own key) → proof fails → 404
+    await expect(
+      svc.getWelcomeMaterial(
+        daveAuth,
+        welcomeId,
+        daveDeviceId,
+        fetchProofFor(daveDev2Priv, daveDeviceId, welcomeId),
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    // a CONSUME proof is NOT a valid fetch proof (domain separation) → 404
+    await expect(
+      svc.getWelcomeMaterial(
+        daveAuth,
+        welcomeId,
+        daveDeviceId,
+        proofFor(daveDev1Priv, daveDeviceId, welcomeId),
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    // device 1 with a valid FETCH proof gets the blobs
+    expect(
+      (
+        await svc.getWelcomeMaterial(
+          daveAuth,
+          welcomeId,
+          daveDeviceId,
+          fetchProofFor(daveDev1Priv, daveDeviceId, welcomeId),
+        )
+      ).welcome,
+    ).toBe('bWF0');
   });
 
   it("another tenant's user fetches no welcomes from this tenant (RLS)", async () => {
@@ -515,25 +574,25 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
 
   it('the recipient consumes their welcome with a valid proof; it is gone, and re-consume is 404', async () => {
     const conv = await newConversation();
-    await svc.deliverWelcome(aliceAuth, conv, wel({ welcome: 'b25l' }));
-    const before = await svc.listMyWelcomes(daveAuth, daveDeviceId);
-    const mine = before.find((w) => w.welcome === 'b25l' && w.conversationId === conv);
-    expect(mine).toBeDefined();
+    const { welcomeId } = await svc.deliverWelcome(aliceAuth, conv, wel({ welcome: 'b25l' }));
+    expect((await svc.listMyWelcomes(daveAuth, daveDeviceId)).some((w) => w.id === welcomeId)).toBe(
+      true,
+    );
 
     await svc.consumeWelcome(
       daveAuth,
-      mine!.id,
+      welcomeId,
       daveDeviceId,
-      proofFor(daveDev1Priv, daveDeviceId, mine!.id),
+      proofFor(daveDev1Priv, daveDeviceId, welcomeId),
     );
     const after = await svc.listMyWelcomes(daveAuth, daveDeviceId);
-    expect(after.some((w) => w.id === mine!.id)).toBe(false); // consumed
+    expect(after.some((w) => w.id === welcomeId)).toBe(false); // consumed
     await expect(
       svc.consumeWelcome(
         daveAuth,
-        mine!.id,
+        welcomeId,
         daveDeviceId,
-        proofFor(daveDev1Priv, daveDeviceId, mine!.id),
+        proofFor(daveDev1Priv, daveDeviceId, welcomeId),
       ),
     ).rejects.toBeInstanceOf(NotFoundException);
   });

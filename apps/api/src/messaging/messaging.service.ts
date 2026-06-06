@@ -1,4 +1,4 @@
-import { verifyWelcomeConsume } from '@argus/crypto/device-proof';
+import { verifyWelcomeConsume, verifyWelcomeFetch } from '@argus/crypto/device-proof';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { and, asc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -18,13 +18,19 @@ export interface CreatedConversation {
   conversationId: string;
 }
 
-/** A pending MLS Welcome the recipient fetches on connect to join the group — opaque blobs only. */
+/** A pending MLS Welcome's METADATA, listed on connect. The opaque blobs are fetched SEPARATELY via a
+ * device proof-of-possession (see WelcomeMaterial / getWelcomeMaterial), so listing leaks no join
+ * material — a sibling session that spoofs a deviceId sees only ids, never another device's sealed blobs. */
 export interface PendingWelcome {
   id: string;
   conversationId: string;
+  createdAt: string;
+}
+
+/** The opaque join material for one welcome — CIPHERTEXT ONLY (HPKE-sealed to the recipient device). */
+export interface WelcomeMaterial {
   welcome: string;
   ratchetTree: string;
-  createdAt: string;
 }
 
 export interface SentMessage {
@@ -262,13 +268,12 @@ export class MessagingService {
   }
 
   /**
-   * The calling DEVICE's PENDING welcomes across every conversation it was added to (fetched on connect
-   * to run `joinConversation()` locally). Scoped to `recipient_user_id = the verified caller` (the authz
-   * boundary — a member never sees another member's welcome, which is sealed to that member's HPKE key
-   * anyway) AND `recipient_device_id = deviceId` (intra-account routing — each device gets only the
-   * welcomes sealed to ITS KeyPackage, so a phone never picks up the laptop's). RLS scopes to the tenant.
-   * `deviceId` is client-asserted (the access token carries the user, not the device); it can only narrow
-   * within the caller's own welcomes, so it routes, it does not authorize. CIPHERTEXT ONLY.
+   * The calling DEVICE's PENDING welcomes across every conversation it was added to (listed on connect).
+   * METADATA ONLY — ids + conversationId, NOT the opaque blobs. The actual join material is fetched
+   * separately with a device proof (`getWelcomeMaterial`), so even though `deviceId` here is client-asserted
+   * (the token carries the user, not the device), a sibling session that spoofs a deviceId sees only the
+   * ids of another device's pending welcomes, never its sealed join material. Scoped to
+   * `recipient_user_id = the verified caller` (authz boundary, RLS-tenant) AND `recipient_device_id`.
    */
   async listMyWelcomes(
     auth: VerifiedAuth,
@@ -277,14 +282,12 @@ export class MessagingService {
   ): Promise<PendingWelcome[]> {
     return withTenant(auth.tenantId, async (tx) => {
       const me = await this.requireUser(tx, auth.sub);
-      // Oldest-first + bounded `limit`: the response can't grow without limit if a member spams an
-      // offline device. The client consumes each welcome (deleting it), then re-fetches to drain the rest.
+      // Oldest-first + bounded `limit`: the response can't grow without limit if a member spams an offline
+      // device. The client fetches each welcome's material (with a proof), joins, consumes, then re-fetches.
       const rows = await tx
         .select({
           id: schema.conversationWelcomes.id,
           conversationId: schema.conversationWelcomes.conversationId,
-          welcome: schema.conversationWelcomes.welcome,
-          ratchetTree: schema.conversationWelcomes.ratchetTree,
           createdAt: schema.conversationWelcomes.createdAt,
         })
         .from(schema.conversationWelcomes)
@@ -299,10 +302,74 @@ export class MessagingService {
       return rows.map((r) => ({
         id: r.id,
         conversationId: r.conversationId,
-        welcome: r.welcome,
-        ratchetTree: r.ratchetTree,
         createdAt: r.createdAt.toISOString(),
       }));
+    });
+  }
+
+  /**
+   * Verify a device proof-of-possession for a welcome op, scoped to the VERIFIED caller. Loads the
+   * proving device's PUBLIC signature key (must be a device of `me`, RLS-tenant) and verifies the
+   * Ed25519 `proof` over (deviceId, welcomeId) with `verifyProof` (consume- or fetch-domain). Any failure
+   * → the SAME opaque 404 (unknown/foreign device, bad proof). Verifying a public-key signature is an
+   * auth check, not content decryption — the server stays crypto-blind. Returns the resolved caller id.
+   */
+  private async requireDeviceProof(
+    tx: Tx,
+    me: string,
+    deviceId: string,
+    welcomeId: string,
+    proof: string,
+    verifyProof: (pub: Uint8Array, deviceId: string, welcomeId: string, sig: Uint8Array) => boolean,
+  ): Promise<void> {
+    const [device] = await tx
+      .select({ signaturePublicKey: schema.devices.signaturePublicKey })
+      .from(schema.devices)
+      .where(and(eq(schema.devices.id, deviceId), eq(schema.devices.userId, me)))
+      .limit(1);
+    if (!device) throw new NotFoundException('welcome not found');
+    const proven = verifyProof(
+      Buffer.from(device.signaturePublicKey, 'base64'),
+      deviceId,
+      welcomeId,
+      Buffer.from(proof, 'base64url'),
+    );
+    if (!proven) throw new NotFoundException('welcome not found');
+  }
+
+  /**
+   * Fetch one welcome's opaque join material (welcome + ratchetTree) for the calling device. Listing is
+   * metadata-only; the blobs come from HERE, gated by a device **fetch-proof** — so only the device the
+   * Welcome is sealed to can pull its join material, not a sibling session that spoofs the deviceId. CIPHERTEXT
+   * ONLY (the server never decrypts). Scoped to `recipient_user_id = caller` AND `recipient_device_id`; any
+   * failure (bad proof, foreign / other-device / consumed welcome) → the SAME opaque 404.
+   */
+  async getWelcomeMaterial(
+    auth: VerifiedAuth,
+    welcomeId: string,
+    deviceId: string,
+    proof: string,
+  ): Promise<WelcomeMaterial> {
+    return withTenant(auth.tenantId, async (tx) => {
+      const me = await this.requireUser(tx, auth.sub);
+      await this.requireDeviceProof(tx, me, deviceId, welcomeId, proof, verifyWelcomeFetch);
+
+      const [row] = await tx
+        .select({
+          welcome: schema.conversationWelcomes.welcome,
+          ratchetTree: schema.conversationWelcomes.ratchetTree,
+        })
+        .from(schema.conversationWelcomes)
+        .where(
+          and(
+            eq(schema.conversationWelcomes.id, welcomeId),
+            eq(schema.conversationWelcomes.recipientUserId, me),
+            eq(schema.conversationWelcomes.recipientDeviceId, deviceId),
+          ),
+        )
+        .limit(1);
+      if (!row) throw new NotFoundException('welcome not found');
+      return { welcome: row.welcome, ratchetTree: row.ratchetTree };
     });
   }
 
@@ -324,24 +391,7 @@ export class MessagingService {
   ): Promise<void> {
     await withTenant(auth.tenantId, async (tx) => {
       const me = await this.requireUser(tx, auth.sub);
-
-      // The proving device must be a device OF THE VERIFIED CALLER (RLS scopes to the tenant). Load its
-      // PUBLIC signature key to verify the proof — verifying a public-key signature is an auth check, not
-      // content decryption, so the server stays crypto-blind.
-      const [device] = await tx
-        .select({ signaturePublicKey: schema.devices.signaturePublicKey })
-        .from(schema.devices)
-        .where(and(eq(schema.devices.id, deviceId), eq(schema.devices.userId, me)))
-        .limit(1);
-      if (!device) throw new NotFoundException('welcome not found');
-
-      const proven = verifyWelcomeConsume(
-        Buffer.from(device.signaturePublicKey, 'base64'),
-        deviceId,
-        welcomeId,
-        Buffer.from(proof, 'base64url'),
-      );
-      if (!proven) throw new NotFoundException('welcome not found');
+      await this.requireDeviceProof(tx, me, deviceId, welcomeId, proof, verifyWelcomeConsume);
 
       const deleted = await tx
         .delete(schema.conversationWelcomes)

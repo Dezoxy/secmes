@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  ConsumeWelcomeQuerySchema,
   CreateConversationSchema,
   DeliverWelcomeSchema,
   ListMessagesQuerySchema,
   ListWelcomesQuerySchema,
   SendMessageSchema,
+  WelcomeProofQuerySchema,
 } from './messaging.schemas.js';
 
 const uuid = '550e8400-e29b-41d4-a716-446655440000'; // a valid RFC-4122 UUID (correct version + variant)
@@ -105,22 +105,20 @@ describe('ListWelcomesQuerySchema', () => {
   });
 });
 
-describe('ConsumeWelcomeQuerySchema', () => {
+describe('WelcomeProofQuerySchema', () => {
   const proof = 'abc-_DEF123'; // base64url charset
   it('accepts a uuid deviceId + base64url proof', () => {
-    expect(ConsumeWelcomeQuerySchema.safeParse({ deviceId: uuid, proof }).success).toBe(true);
+    expect(WelcomeProofQuerySchema.safeParse({ deviceId: uuid, proof }).success).toBe(true);
   });
   it('rejects a non-uuid device, non-base64url / oversized proof, missing fields, unknown keys', () => {
-    expect(ConsumeWelcomeQuerySchema.safeParse({ deviceId: 'nope', proof }).success).toBe(false);
-    expect(
-      ConsumeWelcomeQuerySchema.safeParse({ deviceId: uuid, proof: 'has+slash/' }).success,
-    ).toBe(false);
-    expect(
-      ConsumeWelcomeQuerySchema.safeParse({ deviceId: uuid, proof: 'A'.repeat(257) }).success,
-    ).toBe(false);
-    expect(ConsumeWelcomeQuerySchema.safeParse({ deviceId: uuid }).success).toBe(false);
-    expect(ConsumeWelcomeQuerySchema.safeParse({ deviceId: uuid, proof, x: 1 }).success).toBe(
+    expect(WelcomeProofQuerySchema.safeParse({ deviceId: 'nope', proof }).success).toBe(false);
+    expect(WelcomeProofQuerySchema.safeParse({ deviceId: uuid, proof: 'has+slash/' }).success).toBe(
       false,
     );
+    expect(
+      WelcomeProofQuerySchema.safeParse({ deviceId: uuid, proof: 'A'.repeat(257) }).success,
+    ).toBe(false);
+    expect(WelcomeProofQuerySchema.safeParse({ deviceId: uuid }).success).toBe(false);
+    expect(WelcomeProofQuerySchema.safeParse({ deviceId: uuid, proof, x: 1 }).success).toBe(false);
   });
 });

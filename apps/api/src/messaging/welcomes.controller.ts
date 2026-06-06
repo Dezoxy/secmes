@@ -29,12 +29,12 @@ import type { VerifiedAuth } from '../auth/auth.service.js';
 import { CurrentAuth } from '../auth/current-auth.decorator.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import {
-  ConsumeWelcomeQuerySchema,
   DeliverWelcomeSchema,
   ListWelcomesQuerySchema,
-  type ConsumeWelcomeQuery,
+  WelcomeProofQuerySchema,
   type DeliverWelcome,
   type ListWelcomesQuery,
+  type WelcomeProofQuery,
 } from './messaging.schemas.js';
 import { MessagingService } from './messaging.service.js';
 
@@ -82,14 +82,24 @@ class PendingWelcomeDto {
   @ApiProperty({ format: 'uuid', description: 'the conversation to join with this welcome' })
   conversationId!: string;
 
-  @ApiProperty({ description: 'opaque base64 MLS Welcome — the server never decrypts it' })
-  welcome!: string;
-
-  @ApiProperty({ description: 'opaque base64 MLS RatchetTree — the server never decrypts it' })
-  ratchetTree!: string;
-
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
+}
+
+class WelcomeMaterialDto {
+  @ApiProperty({
+    description: 'opaque base64 MLS Welcome — the server never decrypts it',
+    maxLength: 32768,
+    pattern: BASE64_PATTERN,
+  })
+  welcome!: string;
+
+  @ApiProperty({
+    description: 'opaque base64 MLS RatchetTree — the server never decrypts it',
+    maxLength: 32768,
+    pattern: BASE64_PATTERN,
+  })
+  ratchetTree!: string;
 }
 
 // Relays opaque MLS Welcome material so an added member can join a group (the live message loop).
@@ -149,6 +159,38 @@ export class WelcomesController {
     return this.messaging.listMyWelcomes(auth, query.deviceId, query.limit);
   }
 
+  @Get('welcomes/:welcomeId/material')
+  @ApiOperation({
+    summary: "Fetch one welcome's sealed join material (device proof-of-possession required)",
+    operationId: 'getWelcomeMaterial',
+  })
+  @ApiParam({ name: 'welcomeId', format: 'uuid' })
+  @ApiQuery({
+    name: 'deviceId',
+    required: true,
+    schema: { type: 'string', format: 'uuid' },
+    description: "the calling device's id — the welcome must be sealed to it",
+  })
+  @ApiQuery({
+    name: 'proof',
+    required: true,
+    schema: { type: 'string', maxLength: 256, pattern: '^[A-Za-z0-9_-]+$' },
+    description: 'base64url Ed25519 FETCH proof-of-possession over (deviceId, welcomeId)',
+  })
+  @ApiOkResponse({ type: WelcomeMaterialDto })
+  @ApiBadRequestResponse({ description: 'missing or invalid deviceId / proof' })
+  @ApiNotFoundResponse({
+    description: 'welcome not found, proof invalid, or not addressed to this caller + device',
+  })
+  @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
+  async material(
+    @CurrentAuth() auth: VerifiedAuth,
+    @Param('welcomeId', ParseUUIDPipe) welcomeId: string,
+    @Query(new ZodValidationPipe(WelcomeProofQuerySchema)) query: WelcomeProofQuery,
+  ): Promise<WelcomeMaterialDto> {
+    return this.messaging.getWelcomeMaterial(auth, welcomeId, query.deviceId, query.proof);
+  }
+
   @Delete('welcomes/:welcomeId')
   @HttpCode(204)
   @ApiOperation({
@@ -166,8 +208,7 @@ export class WelcomesController {
     name: 'proof',
     required: true,
     schema: { type: 'string', maxLength: 256, pattern: '^[A-Za-z0-9_-]+$' },
-    description:
-      "base64url Ed25519 proof-of-possession of the device's signature key over (deviceId, welcomeId)",
+    description: 'base64url Ed25519 CONSUME proof-of-possession over (deviceId, welcomeId)',
   })
   @ApiNoContentResponse({ description: 'welcome consumed' })
   @ApiBadRequestResponse({ description: 'missing or invalid deviceId / proof' })
@@ -178,7 +219,7 @@ export class WelcomesController {
   async consume(
     @CurrentAuth() auth: VerifiedAuth,
     @Param('welcomeId', ParseUUIDPipe) welcomeId: string,
-    @Query(new ZodValidationPipe(ConsumeWelcomeQuerySchema)) query: ConsumeWelcomeQuery,
+    @Query(new ZodValidationPipe(WelcomeProofQuerySchema)) query: WelcomeProofQuery,
   ): Promise<void> {
     await this.messaging.consumeWelcome(auth, welcomeId, query.deviceId, query.proof);
   }

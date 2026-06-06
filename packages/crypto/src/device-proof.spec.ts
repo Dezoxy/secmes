@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   generateSignatureKeypair,
   signWelcomeConsume,
+  signWelcomeFetch,
   verifyWelcomeConsume,
+  verifyWelcomeFetch,
 } from './device-proof.js';
 
 const deviceId = '11111111-1111-1111-1111-111111111111';
@@ -56,5 +58,19 @@ describe('device-proof (welcome consume)', () => {
     expect(verifyWelcomeConsume(publicKey, deviceId, welcomeId, new Uint8Array(0))).toBe(false);
     expect(verifyWelcomeConsume(publicKey, deviceId, welcomeId, new Uint8Array(10))).toBe(false);
     expect(verifyWelcomeConsume(publicKey, deviceId, welcomeId, new Uint8Array(63))).toBe(false);
+  });
+
+  it('verifies a FETCH proof made by the matching device key', () => {
+    const { privateKey, publicKey } = generateSignatureKeypair();
+    const sig = signWelcomeFetch(privateKey, deviceId, welcomeId);
+    expect(verifyWelcomeFetch(publicKey, deviceId, welcomeId, sig)).toBe(true);
+  });
+
+  it('is domain-separated: a consume proof is not a valid fetch proof, and vice versa (least authority)', () => {
+    const { privateKey, publicKey } = generateSignatureKeypair();
+    const consumeSig = signWelcomeConsume(privateKey, deviceId, welcomeId);
+    const fetchSig = signWelcomeFetch(privateKey, deviceId, welcomeId);
+    expect(verifyWelcomeFetch(publicKey, deviceId, welcomeId, consumeSig)).toBe(false); // can't reuse to fetch
+    expect(verifyWelcomeConsume(publicKey, deviceId, welcomeId, fetchSig)).toBe(false); // can't reuse to delete
   });
 });
