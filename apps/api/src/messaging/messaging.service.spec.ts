@@ -339,6 +339,19 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     await expect(svc.getReceipts(carolAuth, conv)).rejects.toBeInstanceOf(NotFoundException); // cross-tenant
   });
 
+  it('stores the watermark created_at at full microsecond precision (not ms-truncated)', async () => {
+    const conv = await newConversation();
+    const m1 = (await svc.sendMessage(aliceAuth, conv, msg())).messageId;
+    // Force a non-zero microsecond part that a ms-only round-trip (123456 → 123) would lose.
+    await sql`update messages set created_at = '2026-01-01 00:00:00.123456+00' where id = ${m1}`;
+    await svc.recordReceipt(bobAuth, conv, { status: 'delivered', throughMessageId: m1 });
+
+    const [row] = await sql`
+      select to_char(delivered_through_created_at at time zone 'utc', 'US') as us
+      from conversation_receipts where conversation_id = ${conv} and user_id = ${bobId}`;
+    expect((row as { us: string }).us).toBe('123456'); // full µs preserved (would be 123000 if truncated)
+  });
+
   it('rejects a receipt for a message not in the conversation', async () => {
     const conv = await newConversation();
     const other = (await svc.createConversation(aliceAuth, [bobId])).conversationId;

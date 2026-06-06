@@ -411,8 +411,13 @@ export class MessagingService {
       const user = await this.requireUser(tx, auth.sub);
       await this.requireMembership(tx, conversationId, user);
 
+      // Fetch the watermark message's created_at as FULL microsecond text (the driver's JS Date is only
+      // ms — too lossy: two same-ms messages would then order by random uuid, mis-advancing the watermark).
       const [m] = await tx
-        .select({ id: schema.messages.id, createdAt: schema.messages.createdAt })
+        .select({
+          id: schema.messages.id,
+          createdAtIso: sql<string>`to_char(${schema.messages.createdAt} at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+        })
         .from(schema.messages)
         .where(
           and(
@@ -429,7 +434,7 @@ export class MessagingService {
       await tx.execute(sql`
         insert into conversation_receipts
           (tenant_id, conversation_id, user_id, ${c}_through_message_id, ${c}_through_created_at, ${c}_at)
-        values (${auth.tenantId}, ${conversationId}, ${user}, ${m.id}, ${m.createdAt.toISOString()}, now())
+        values (${auth.tenantId}, ${conversationId}, ${user}, ${m.id}, ${m.createdAtIso}::timestamptz, now())
         on conflict (tenant_id, conversation_id, user_id) do update set
           ${c}_through_message_id = excluded.${c}_through_message_id,
           ${c}_through_created_at = excluded.${c}_through_created_at,
