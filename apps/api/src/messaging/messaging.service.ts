@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant, type Tx } from '../db/index.js';
+import { RealtimeBus, type MessageCreatedEvent } from '../realtime/realtime-bus.js';
 import type { ListMessagesQuery, SendMessage } from './messaging.schemas.js';
 
 export interface CreatedConversation {
@@ -50,6 +51,26 @@ const MessageRowSchema = z.object({
 
 @Injectable()
 export class MessagingService {
+  constructor(private readonly bus: RealtimeBus) {}
+
+  /** Is the verified caller a member of `conversationId`? Used by the realtime gateway's subscribe authz. */
+  async isMember(auth: VerifiedAuth, conversationId: string): Promise<boolean> {
+    return withTenant(auth.tenantId, async (tx) => {
+      const user = await this.requireUser(tx, auth.sub);
+      const [member] = await tx
+        .select({ id: schema.conversationMembers.id })
+        .from(schema.conversationMembers)
+        .where(
+          and(
+            eq(schema.conversationMembers.conversationId, conversationId),
+            eq(schema.conversationMembers.userId, user),
+          ),
+        )
+        .limit(1);
+      return !!member;
+    });
+  }
+
   /**
    * Resolve the VERIFIED caller (OIDC sub) to a tenant user id. Never trusts a client-supplied id, and
    * only resolves an **active** user — a soft-deleted/suspended member (offboarding sets `users.status`)
@@ -129,7 +150,10 @@ export class MessagingService {
     conversationId: string,
     body: SendMessage,
   ): Promise<SentMessage> {
-    return withTenant(auth.tenantId, async (tx) => {
+    // Carry the fan-out event OUT of the transaction so we only emit AFTER it commits — otherwise the
+    // gateway could push a 'message' frame before the row is durable (phantom delivery if the commit
+    // fails) and a recipient that reacts by fetching could race the uncommitted write.
+    const { result, event } = await withTenant(auth.tenantId, async (tx) => {
       const sender = await this.requireUser(tx, auth.sub);
       await this.requireMembership(tx, conversationId, sender);
 
@@ -149,10 +173,25 @@ export class MessagingService {
         .returning({ id: schema.messages.id, createdAt: schema.messages.createdAt });
 
       if (inserted[0]) {
+        const createdAt = inserted[0].createdAt.toISOString();
         return {
-          messageId: inserted[0].id,
-          createdAt: inserted[0].createdAt.toISOString(),
-          deduplicated: false,
+          result: { messageId: inserted[0].id, createdAt, deduplicated: false },
+          // Only a genuinely-new insert announces for fan-out — an idempotent retry must not re-deliver.
+          // CIPHERTEXT ONLY; the bus/gateway never see plaintext.
+          event: {
+            tenantId: auth.tenantId,
+            conversationId,
+            message: {
+              id: inserted[0].id,
+              senderUserId: sender,
+              clientMessageId: body.clientMessageId,
+              ciphertext: body.ciphertext,
+              alg: body.alg,
+              epoch: body.epoch,
+              attachmentObjectKey: body.attachmentObjectKey ?? null,
+              createdAt,
+            },
+          } satisfies MessageCreatedEvent,
         };
       }
 
@@ -171,11 +210,18 @@ export class MessagingService {
         .limit(1);
       if (!existing) throw new Error('idempotency conflict but no existing message found');
       return {
-        messageId: existing.id,
-        createdAt: existing.createdAt.toISOString(),
-        deduplicated: true,
+        result: {
+          messageId: existing.id,
+          createdAt: existing.createdAt.toISOString(),
+          deduplicated: true,
+        },
+        event: null,
       };
     });
+
+    // Post-commit: the row is durable + visible to a subsequent fetch before any client is notified.
+    if (event) this.bus.emitMessageCreated(event);
+    return result;
   }
 
   /**

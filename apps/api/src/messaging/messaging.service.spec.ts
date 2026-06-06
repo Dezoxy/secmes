@@ -1,8 +1,9 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { getDb } from '../db/index.js';
+import { RealtimeBus } from '../realtime/realtime-bus.js';
 import { MessagingService } from './messaging.service.js';
 import type { SendMessage } from './messaging.schemas.js';
 
@@ -16,7 +17,7 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
   let aliceId: string;
   let bobId: string;
   let carolId: string;
-  const svc = new MessagingService();
+  const svc = new MessagingService(new RealtimeBus());
 
   let aliceAuth: VerifiedAuth; // tenant A, conversation creator + member
   let bobAuth: VerifiedAuth; // tenant A, member
@@ -111,6 +112,24 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     const [row] =
       await sql`select count(*)::int as n from messages where client_message_id = ${body.clientMessageId}`;
     expect((row as { n: number }).n).toBe(1);
+  });
+
+  it('emits a realtime event on a new send (after commit), but not on a dedup retry', async () => {
+    const bus = new RealtimeBus();
+    const spy = vi.spyOn(bus, 'emitMessageCreated');
+    const svc2 = new MessagingService(bus);
+    const conv = await newConversation();
+    const body = msg({ ciphertext: 'ZXZlbnQ=' });
+
+    await svc2.sendMessage(bobAuth, conv, body);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0]?.[0]).toMatchObject({
+      conversationId: conv,
+      message: { ciphertext: 'ZXZlbnQ=', senderUserId: bobId },
+    });
+
+    await svc2.sendMessage(bobAuth, conv, body); // idempotent retry
+    expect(spy).toHaveBeenCalledTimes(1); // no re-delivery
   });
 
   it('idempotency is per-conversation: the same clientMessageId in two conversations both store', async () => {

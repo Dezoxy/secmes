@@ -5,6 +5,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { KeyBackupModule } from './key-backup/key-backup.module.js';
 import { KeyDirectoryModule } from './key-directory/key-directory.module.js';
 import { MessagingModule } from './messaging/messaging.module.js';
+import { RealtimeModule } from './realtime/realtime.module.js';
 import { UsersModule } from './users/users.module.js';
 
 @Module({
@@ -15,6 +16,7 @@ import { UsersModule } from './users/users.module.js';
     KeyDirectoryModule,
     KeyBackupModule,
     MessagingModule,
+    RealtimeModule,
   ],
   controllers: [AppController],
 })

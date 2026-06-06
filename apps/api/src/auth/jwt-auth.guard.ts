@@ -18,6 +18,12 @@ export class JwtAuthGuard implements CanActivate {
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
+    // This global guard protects HTTP routes only. The WebSocket gateway authenticates itself with a
+    // first-frame token (see realtime.gateway), so skip the 'ws' context — and ONLY 'ws'. Any other
+    // future transport (e.g. an 'rpc'/microservice handler) falls through to the HTTP branch and fails
+    // LOUDLY rather than being silently exempted; whoever adds one must re-evaluate this branch.
+    if (ctx.getType() === 'ws') return true;
+
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       ctx.getHandler(),
       ctx.getClass(),
