@@ -1,5 +1,6 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiOkResponse,
   ApiOperation,
@@ -12,7 +13,7 @@ import {
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { CurrentAuth } from '../auth/current-auth.decorator.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
-import { ListMessagesQuerySchema, type ListMessagesQuery } from './messaging.schemas.js';
+import { SyncQuerySchema, type SyncQuery } from './messaging.schemas.js';
 import { MessagingService } from './messaging.service.js';
 
 class SyncedMessageDto {
@@ -55,8 +56,7 @@ class SyncPageDto {
   @ApiProperty({
     required: false,
     nullable: true,
-    format: 'uuid',
-    description: 'pass as `after` to fetch the next page; null when caught up',
+    description: 'opaque cursor — pass as `after` to fetch the next page; null when caught up',
   })
   nextCursor!: string | null;
 }
@@ -80,14 +80,15 @@ export class SyncController {
   @ApiQuery({
     name: 'after',
     required: false,
-    schema: { type: 'string', format: 'uuid' },
-    description: 'exclusive cursor — a message id (use the previous page nextCursor)',
+    schema: { type: 'string', maxLength: 256 },
+    description: 'opaque cursor — echo the previous page nextCursor',
   })
   @ApiOkResponse({ type: SyncPageDto, description: 'interleaved messages + next cursor' })
+  @ApiBadRequestResponse({ description: 'malformed cursor' })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async sync(
     @CurrentAuth() auth: VerifiedAuth,
-    @Query(new ZodValidationPipe(ListMessagesQuerySchema)) query: ListMessagesQuery,
+    @Query(new ZodValidationPipe(SyncQuerySchema)) query: SyncQuery,
   ): Promise<SyncPageDto> {
     return this.messaging.syncMessages(auth, query);
   }

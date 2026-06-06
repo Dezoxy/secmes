@@ -5,7 +5,7 @@ import { z } from 'zod';
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant, type Tx } from '../db/index.js';
 import { RealtimeBus, type MessageCreatedEvent } from '../realtime/realtime-bus.js';
-import type { ListMessagesQuery, SendMessage } from './messaging.schemas.js';
+import type { ListMessagesQuery, SendMessage, SyncQuery } from './messaging.schemas.js';
 
 export interface CreatedConversation {
   conversationId: string;
@@ -60,8 +60,32 @@ const MessageRowSchema = z.object({
   created_at: z.coerce.date(),
 });
 
-// The sync row adds the conversation id (cross-conversation stream).
-const SyncRowSchema = MessageRowSchema.extend({ conversation_id: z.string().uuid() });
+// The sync row adds the conversation id (cross-conversation stream) + a full-precision created_at text
+// for the opaque cursor (the driver's JS Date is only ms — too lossy to page on).
+const SyncRowSchema = MessageRowSchema.extend({
+  conversation_id: z.string().uuid(),
+  created_at_iso: z.string(),
+});
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// The sync cursor is an OPAQUE token carrying the (created_at, id) the client last saw — NOT a message
+// id the server looks up. This avoids (a) an existence/timing oracle (no per-id lookup) and (b) breaking
+// a client whose last-seen message is in a conversation they've since left (no membership dependency on
+// the cursor). The client treats it as opaque and echoes back the previous page's nextCursor.
+function encodeSyncCursor(createdAtIso: string, id: string): string {
+  return Buffer.from(`${createdAtIso}|${id}`, 'utf8').toString('base64url');
+}
+function decodeSyncCursor(token: string): { createdAt: string; id: string } {
+  const decoded = Buffer.from(token, 'base64url').toString('utf8');
+  const sep = decoded.lastIndexOf('|');
+  const createdAt = sep >= 0 ? decoded.slice(0, sep) : '';
+  const id = sep >= 0 ? decoded.slice(sep + 1) : '';
+  if (!UUID_RE.test(id) || Number.isNaN(Date.parse(createdAt))) {
+    throw new BadRequestException('invalid cursor');
+  }
+  return { createdAt, id };
+}
 
 @Injectable()
 export class MessagingService {
@@ -305,25 +329,24 @@ export class MessagingService {
    * client's reconnect protocol (subscribe-first → sync → dedup by id → overlap the cursor) plus the WS
    * post-commit fan-out is what guarantees no missed messages. See realtime-delivery.md §6.
    */
-  async syncMessages(auth: VerifiedAuth, query: ListMessagesQuery): Promise<SyncPage> {
+  async syncMessages(auth: VerifiedAuth, query: SyncQuery): Promise<SyncPage> {
+    // Decode the opaque cursor up front (throws 400 on a malformed token). The (created_at, id) is used
+    // directly in the keyset — no message lookup, so it's neither an existence oracle nor dependent on
+    // the caller still being a member of the cursor message's conversation. Bound params, no injection.
+    const cursorPos = query.after ? decodeSyncCursor(query.after) : null;
     return withTenant(auth.tenantId, async (tx) => {
       const user = await this.requireUser(tx, auth.sub);
 
-      // Exclusive keyset cursor over the whole (caller-visible) stream. The cursor row is looked up
-      // through the caller's OWN memberships — so a message id from a conversation the caller isn't in
-      // (even same-tenant) resolves to NULL → empty page, identical to a non-existent id. This makes the
-      // cursor's visibility match the result set's, closing an intra-tenant existence/timing oracle.
-      // Bound params, no SQL injection.
-      const cursor = query.after
-        ? sql`and (m.created_at, m.id) > (
-            select mm.created_at, mm.id from messages mm
-            join conversation_members cm2
-              on cm2.conversation_id = mm.conversation_id and cm2.user_id = ${user}
-            where mm.id = ${query.after})`
+      const cursor = cursorPos
+        ? sql`and (m.created_at, m.id) > (${cursorPos.createdAt}::timestamptz, ${cursorPos.id}::uuid)`
         : sql``;
+      // `created_at_iso` is the FULL microsecond-precision timestamp as text (the JS Date the driver
+      // returns is only millisecond — too lossy for the cursor, which would then never advance past its
+      // own row). It's used solely to build the opaque cursor; the response `createdAt` uses the Date.
       const rows = (await tx.execute(sql`
         select m.id, m.conversation_id, m.sender_user_id, m.client_message_id, m.ciphertext, m.alg,
-               m.epoch, m.attachment_object_key, m.created_at
+               m.epoch, m.attachment_object_key, m.created_at,
+               to_char(m.created_at at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as created_at_iso
         from messages m
         join conversation_members cm
           on cm.conversation_id = m.conversation_id and cm.user_id = ${user}
@@ -332,24 +355,27 @@ export class MessagingService {
         limit ${query.limit}
       `)) as unknown as unknown[];
 
-      const messages: SyncedMessage[] = rows.map((raw) => {
+      const parsedRows = rows.map((raw) => {
         const parsed = SyncRowSchema.safeParse(raw); // content-free error (never echo ciphertext)
         if (!parsed.success) throw new Error('message row shape drift');
-        const r = parsed.data;
-        return {
-          id: r.id,
-          conversationId: r.conversation_id,
-          senderUserId: r.sender_user_id,
-          clientMessageId: r.client_message_id,
-          ciphertext: r.ciphertext,
-          alg: r.alg,
-          epoch: r.epoch,
-          attachmentObjectKey: r.attachment_object_key,
-          createdAt: r.created_at.toISOString(),
-        };
+        return parsed.data;
       });
-      const last = messages.at(-1);
-      const nextCursor = last && messages.length === query.limit ? last.id : null;
+      const messages: SyncedMessage[] = parsedRows.map((r) => ({
+        id: r.id,
+        conversationId: r.conversation_id,
+        senderUserId: r.sender_user_id,
+        clientMessageId: r.client_message_id,
+        ciphertext: r.ciphertext,
+        alg: r.alg,
+        epoch: r.epoch,
+        attachmentObjectKey: r.attachment_object_key,
+        createdAt: r.created_at.toISOString(),
+      }));
+      const lastRow = parsedRows.at(-1);
+      const nextCursor =
+        lastRow && messages.length === query.limit
+          ? encodeSyncCursor(lastRow.created_at_iso, lastRow.id)
+          : null;
       return { messages, nextCursor };
     });
   }
