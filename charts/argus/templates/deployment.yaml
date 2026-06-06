@@ -1,3 +1,6 @@
+{{- if and (not .Values.api.redisSecret.name) (or .Values.autoscaling.enabled (gt (int .Values.api.replicas) 1)) }}
+{{- fail "Multi-pod (api.replicas > 1 or autoscaling.enabled) requires the Redis backplane: set api.redisSecret.name (checkpoint 29). Without it each pod has an isolated in-process bus and cross-pod real-time delivery breaks." }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -6,7 +9,9 @@ metadata:
     {{- include "argus.labels" . | nindent 4 }}
     app.kubernetes.io/component: api
 spec:
-  replicas: {{ .Values.api.replicas }}
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.api.replicas }}   # when autoscaling is enabled the HPA owns replicas (omit here)
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/component: api
@@ -32,6 +37,14 @@ spec:
               value: "{{ .Values.api.port }}"
             - name: APP_VERSION
               value: "{{ .Values.api.image.tag }}"
+            {{- if .Values.api.redisSecret.name }}
+            # Redis connection string carries auth → injected from a Secret, never a plaintext value.
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.api.redisSecret.name }}
+                  key: {{ .Values.api.redisSecret.key | default "redis-url" }}
+            {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

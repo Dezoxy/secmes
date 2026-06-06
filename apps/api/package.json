@@ -21,6 +21,7 @@
     "@nestjs/swagger": "^11.4.4",
     "@nestjs/websockets": "^11",
     "drizzle-orm": "^0.45.2",
+    "ioredis": "^5.11.1",
     "jose": "^6.2.3",
     "postgres": "^3.4.9",
     "reflect-metadata": "^0.2.2",

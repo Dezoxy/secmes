@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { getDb } from '../db/index.js';
-import { RealtimeBus } from '../realtime/realtime-bus.js';
+import { InProcessRealtimeBus } from '../realtime/in-process-realtime-bus.js';
 import { MessagingService } from './messaging.service.js';
 import type { SendMessage } from './messaging.schemas.js';
 
@@ -17,7 +17,7 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
   let aliceId: string;
   let bobId: string;
   let carolId: string;
-  const svc = new MessagingService(new RealtimeBus());
+  const svc = new MessagingService(new InProcessRealtimeBus());
 
   let aliceAuth: VerifiedAuth; // tenant A, conversation creator + member
   let bobAuth: VerifiedAuth; // tenant A, member
@@ -115,7 +115,7 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
   });
 
   it('emits a realtime event on a new send (after commit), but not on a dedup retry', async () => {
-    const bus = new RealtimeBus();
+    const bus = new InProcessRealtimeBus();
     const spy = vi.spyOn(bus, 'emitMessageCreated');
     const svc2 = new MessagingService(bus);
     const conv = await newConversation();

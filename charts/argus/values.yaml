@@ -4,8 +4,17 @@ api:
     repository: REPLACE_ME.azurecr.io/argus-api
     tag: "dev"
     pullPolicy: IfNotPresent
-  replicas: 2
+  # Single pod by default. Going multi-pod — replicas > 1 OR autoscaling.enabled — REQUIRES the Redis
+  # backplane (api.redisSecret below); the chart fails loud otherwise (a multi-pod in-process bus would
+  # silently break cross-pod real-time delivery). Used only when autoscaling.enabled is false.
+  replicas: 1
   port: 3000
+  # Cross-pod WebSocket fan-out (checkpoint 29) needs Redis. The connection string is a SECRET (it carries
+  # auth) — reference a Kubernetes Secret (populated from Key Vault via the Secrets Store CSI driver at
+  # checkpoint 8), NEVER a plaintext value/Helm value. Empty name → single-pod in-process bus only.
+  redisSecret:
+    name: '' # e.g. "argus-redis" — a Secret holding the redis-url key
+    key: redis-url
   resources:
     requests:
       cpu: 50m
@@ -13,6 +22,15 @@ api:
     limits:
       cpu: 500m
       memory: 256Mi
+
+# HPA for the api Deployment (checkpoint 29). Disabled by default: enable it ONLY once api.redisSecret is
+# set, since scaling past one pod needs the Redis backplane to deliver across pods (the chart enforces
+# this). On scale-down, dropped WebSocket clients reconnect + back-fill via REST (DB is source of truth).
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
 
 ingress:
   enabled: true
