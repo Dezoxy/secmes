@@ -40,11 +40,8 @@ export default function ChatScreen() {
       body,
       sentAt: Date.now(),
       status: 'sending',
-      images: images.map((f, i) => ({
-        id: `${id}-${i}`,
-        src: URL.createObjectURL(f),
-        alt: f.name,
-      })),
+      // Shell: carry the file name only — rendering a decrypted thumbnail is the encrypted-image slice.
+      images: images.map((f, i) => ({ id: `${id}-${i}`, name: f.name })),
     };
     setConversations((prev) =>
       prev.map((c) => (c.id === selectedId ? { ...c, messages: [...c.messages, message] } : c)),

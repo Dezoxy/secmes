@@ -15,9 +15,13 @@ export interface Contact {
 
 export interface ImageAttachment {
   id: string;
-  /** An in-memory object URL / data URI for the DECRYPTED image — never a server URL. */
-  src: string;
-  alt: string;
+  /** File name — shown as a chip when there is no renderable preview yet. */
+  name: string;
+  /**
+   * Renderable URL for the DECRYPTED image: a safe data URI (seed) or, in the live app, an object URL
+   * of the locally-decrypted blob. Never a server URL. Absent until the image is decrypted/rendered.
+   */
+  src?: string;
 }
 
 export interface ChatMessage {

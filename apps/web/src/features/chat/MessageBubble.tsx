@@ -1,4 +1,4 @@
-import { Check, CheckCheck } from 'lucide-react';
+import { Check, CheckCheck, Image as ImageIcon } from 'lucide-react';
 import type { ChatMessage, Contact, DeliveryStatus } from './types';
 import { ME } from './types';
 import { formatClockTime } from './format';
@@ -40,20 +40,31 @@ export function MessageBubble({
         >
           {images.length > 0 && (
             <div className="mb-2 space-y-2">
-              {images.map((img) => (
-                <button
-                  key={img.id}
-                  type="button"
-                  onClick={() => onImageClick?.(img.src)}
-                  className="block overflow-hidden rounded-lg"
-                >
-                  <img
-                    src={img.src}
-                    alt={img.alt}
-                    className="h-auto max-h-64 w-full max-w-[260px] rounded-lg object-cover transition-transform duration-300 hover:scale-[1.03]"
-                  />
-                </button>
-              ))}
+              {images.map((img) => {
+                const src = img.src;
+                return src ? (
+                  <button
+                    key={img.id}
+                    type="button"
+                    onClick={() => onImageClick?.(src)}
+                    className="block overflow-hidden rounded-lg"
+                  >
+                    <img
+                      src={src}
+                      alt={img.name}
+                      className="h-auto max-h-64 w-full max-w-[260px] rounded-lg object-cover transition-transform duration-300 hover:scale-[1.03]"
+                    />
+                  </button>
+                ) : (
+                  <div
+                    key={img.id}
+                    className="flex items-center gap-2 rounded-lg bg-black/20 px-3 py-2 text-sm"
+                  >
+                    <ImageIcon className="h-4 w-4 shrink-0 text-purple-300" />
+                    <span className="truncate">{img.name}</span>
+                  </div>
+                );
+              })}
             </div>
           )}
           {message.body && (

@@ -8,20 +8,13 @@ interface ChatInputProps {
 export function ChatInput({ onSend }: ChatInputProps) {
   const [body, setBody] = useState('');
   const [images, setImages] = useState<File[]>([]);
-  const [previews, setPreviews] = useState<string[]>([]);
   const imageInputRef = useRef<HTMLInputElement>(null);
-
-  const reset = () => {
-    previews.forEach((p) => URL.revokeObjectURL(p));
-    setBody('');
-    setImages([]);
-    setPreviews([]);
-  };
 
   const send = () => {
     if (!body.trim() && images.length === 0) return;
     onSend(body.trim(), images);
-    reset();
+    setBody('');
+    setImages([]);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -32,38 +25,36 @@ export function ChatInput({ onSend }: ChatInputProps) {
   };
 
   const onPick = (e: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []).filter((f) => f.type.startsWith('image/'));
-    setImages((prev) => [...prev, ...files]);
-    setPreviews((prev) => [...prev, ...files.map((f) => URL.createObjectURL(f))]);
+    const picked = Array.from(e.target.files ?? []).filter((f) => f.type.startsWith('image/'));
+    setImages((prev) => [...prev, ...picked]);
     e.target.value = '';
   };
 
-  const remove = (i: number) => {
-    URL.revokeObjectURL(previews[i] ?? '');
-    setImages((prev) => prev.filter((_, idx) => idx !== i));
-    setPreviews((prev) => prev.filter((_, idx) => idx !== i));
-  };
+  const remove = (i: number) => setImages((prev) => prev.filter((_, idx) => idx !== i));
 
   const canSend = body.trim().length > 0 || images.length > 0;
 
   return (
     <div className="border-t border-white/5 bg-[#0f0f16] p-4">
-      {previews.length > 0 && (
-        <div className="mb-3 flex gap-2 overflow-x-auto pb-2">
-          {previews.map((src, i) => (
-            <div key={src} className="group relative shrink-0">
-              <img
-                src={src}
-                alt="Attachment preview"
-                className="h-20 w-20 rounded-lg object-cover"
-              />
+      {/* Pending-attachment chips. We deliberately do NOT render a thumbnail from the raw file here —
+          rich, decrypted thumbnails belong to the encrypted-image pipeline (attachments table + content
+          key), not a local object-URL preview. Chips keep the composer simple and the bundle XSS-clean. */}
+      {images.length > 0 && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {images.map((file, i) => (
+            <div
+              key={`${file.name}-${file.size}-${i}`}
+              className="flex items-center gap-2 rounded-lg border border-white/5 bg-[#1a1a26] py-1.5 pl-2.5 pr-1.5 text-sm text-white/80"
+            >
+              <ImageIcon className="h-4 w-4 shrink-0 text-purple-400" />
+              <span className="max-w-[160px] truncate">{file.name}</span>
               <button
                 type="button"
                 onClick={() => remove(i)}
-                className="absolute -right-2 -top-2 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 opacity-0 transition-opacity group-hover:opacity-100"
-                aria-label="Remove image"
+                className="rounded-md p-1 text-white/40 transition-colors hover:bg-white/5 hover:text-white/70"
+                aria-label={`Remove ${file.name}`}
               >
-                <X className="h-3 w-3 text-white" />
+                <X className="h-3.5 w-3.5" />
               </button>
             </div>
           ))}

@@ -48,7 +48,7 @@ export const seedConversations: Conversation[] = [
         body: 'Sharing a reference I had in mind:',
         sentAt: base - 30 * m,
         status: 'read',
-        images: [{ id: 'img-1', src: gradientImage(280), alt: 'design reference' }],
+        images: [{ id: 'img-1', name: 'design-reference.svg', src: gradientImage(280) }],
       },
       {
         id: 'm4',
