@@ -1,3 +1,8 @@
+import {
+  generateSignatureKeypair,
+  signWelcomeConsume,
+  signWelcomeFetch,
+} from '@argus/crypto/device-proof';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -18,6 +23,12 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
   let bobId: string;
   let daveId: string;
   let carolId: string;
+  let daveDeviceId: string; // dave's primary device (welcomes sealed here)
+  let daveDevice2Id: string; // dave's SECOND device (must not see/consume device 1's welcome)
+  let bobDeviceId: string; // bob's device
+  let daveDev1Priv: Uint8Array; // signature private keys, to forge proofs of possession on consume
+  let daveDev2Priv: Uint8Array;
+  let bobDevPriv: Uint8Array;
   const svc = new MessagingService(new InProcessRealtimeBus());
 
   let aliceAuth: VerifiedAuth; // tenant A, conversation creator + member
@@ -48,6 +59,22 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
       await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantB}, 'm-carol', 'c@b.test') returning id`;
     await sql`insert into users (tenant_id, external_identity_id, email, status)
               values (${tenantA}, 'm-frank', 'frank@a.test', 'suspended')`;
+
+    // Devices for the welcome-delivery tests (key directory #19). A welcome is sealed to ONE device, and
+    // the device's Ed25519 signature key is what proves possession on consume — so use REAL keypairs and
+    // store the public key the server verifies against.
+    const dDev1 = generateSignatureKeypair();
+    const dDev2 = generateSignatureKeypair();
+    const bDev = generateSignatureKeypair();
+    daveDev1Priv = dDev1.privateKey;
+    daveDev2Priv = dDev2.privateKey;
+    bobDevPriv = bDev.privateKey;
+    [{ id: daveDeviceId }] =
+      await sql`insert into devices (tenant_id, user_id, signature_public_key) values (${tenantA}, ${daveId}, ${Buffer.from(dDev1.publicKey).toString('base64')}) returning id`;
+    [{ id: daveDevice2Id }] =
+      await sql`insert into devices (tenant_id, user_id, signature_public_key) values (${tenantA}, ${daveId}, ${Buffer.from(dDev2.publicKey).toString('base64')}) returning id`;
+    [{ id: bobDeviceId }] =
+      await sql`insert into devices (tenant_id, user_id, signature_public_key) values (${tenantA}, ${bobId}, ${Buffer.from(bDev.publicKey).toString('base64')}) returning id`;
 
     aliceAuth = { sub: 'm-alice', tenantId: tenantA };
     bobAuth = { sub: 'm-bob', tenantId: tenantA };
@@ -365,5 +392,304 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     await expect(
       svc.recordReceipt(bobAuth, conv, { status: 'read', throughMessageId: foreign }),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  // ── MLS Welcome delivery (live message loop, welcome-delivery.md) ─────────────────────────────────
+  const wel = (
+    over: Partial<{
+      recipientUserId: string;
+      recipientDeviceId: string;
+      welcome: string;
+      ratchetTree: string;
+    }> = {},
+  ) => ({
+    recipientUserId: daveId,
+    recipientDeviceId: daveDeviceId, // a welcome is HPKE-sealed to ONE device's KeyPackage
+    welcome: 'd2VsY29tZQ==', // "welcome" — opaque base64; the server never decrypts it
+    ratchetTree: 'dHJlZQ==', // "tree"
+    ...over,
+  });
+
+  // Proofs-of-possession of a device's signature key over (deviceId, welcomeId), base64url for the wire.
+  const proofFor = (priv: Uint8Array, deviceId: string, welcomeId: string): string =>
+    Buffer.from(signWelcomeConsume(priv, deviceId, welcomeId)).toString('base64url'); // CONSUME proof
+  const fetchProofFor = (priv: Uint8Array, deviceId: string, welcomeId: string): string =>
+    Buffer.from(signWelcomeFetch(priv, deviceId, welcomeId)).toString('base64url'); // FETCH proof
+
+  it('deliver adds the recipient as a member and stores the opaque welcome verbatim', async () => {
+    const conv = await newConversation(); // alice + bob; dave is NOT yet a member
+    const { welcomeId } = await svc.deliverWelcome(aliceAuth, conv, wel());
+    expect(welcomeId).toBeTruthy();
+
+    // dave is now a member of the conversation.
+    const [member] =
+      await sql`select 1 as ok from conversation_members where conversation_id = ${conv} and user_id = ${daveId}`;
+    expect(member?.ok).toBe(1);
+
+    // the blobs are stored verbatim, the sender is the VERIFIED caller, and it is bound to the device.
+    const [row] =
+      await sql`select welcome, ratchet_tree, sender_user_id, recipient_user_id, recipient_device_id from conversation_welcomes where id = ${welcomeId}`;
+    expect(row?.welcome).toBe('d2VsY29tZQ==');
+    expect(row?.ratchet_tree).toBe('dHJlZQ==');
+    expect(row?.sender_user_id).toBe(aliceId);
+    expect(row?.recipient_user_id).toBe(daveId);
+    expect(row?.recipient_device_id).toBe(daveDeviceId);
+  });
+
+  it('a non-member (same tenant) cannot deliver — 404, no existence leak', async () => {
+    const conv = await newConversation(); // dave is not a member
+    await expect(
+      svc.deliverWelcome(
+        daveAuth,
+        conv,
+        wel({ recipientUserId: bobId, recipientDeviceId: bobDeviceId }),
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it("another tenant's user cannot deliver — 404", async () => {
+    const conv = await newConversation();
+    await expect(svc.deliverWelcome(carolAuth, conv, wel())).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+
+  it('rejects a recipient from another tenant (composite FK → 400)', async () => {
+    const conv = await newConversation();
+    await expect(
+      svc.deliverWelcome(aliceAuth, conv, wel({ recipientUserId: carolId })),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects a non-existent recipient (composite FK → 400)', async () => {
+    const conv = await newConversation();
+    await expect(
+      svc.deliverWelcome(aliceAuth, conv, wel({ recipientUserId: crypto.randomUUID() })),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it("rejects a device that isn't the recipient's (composite FK → 400)", async () => {
+    const conv = await newConversation();
+    // dave is a valid recipient, but bob's device is not dave's — the (tenant, user, device) FK rejects it.
+    await expect(
+      svc.deliverWelcome(
+        aliceAuth,
+        conv,
+        wel({ recipientUserId: daveId, recipientDeviceId: bobDeviceId }),
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('list is metadata-only; material is fetched per-welcome with a device proof, device-isolated', async () => {
+    const conv = await newConversation();
+    const { welcomeId: daveW } = await svc.deliverWelcome(
+      aliceAuth,
+      conv,
+      wel({ recipientUserId: daveId, welcome: 'ZGF2ZQ==' }),
+    );
+    const { welcomeId: bobW } = await svc.deliverWelcome(
+      aliceAuth,
+      conv,
+      wel({ recipientUserId: bobId, recipientDeviceId: bobDeviceId, welcome: 'Ym9i' }),
+    );
+
+    // list returns METADATA only — ids, never the blobs — and is device-isolated.
+    const daves = await svc.listMyWelcomes(daveAuth, daveDeviceId);
+    expect(daves.find((w) => w.id === daveW)).toBeDefined();
+    expect(daves.find((w) => w.id === daveW)).not.toHaveProperty('welcome'); // no join material listed
+    expect(daves.some((w) => w.id === bobW)).toBe(false); // never sees bob's welcome id
+    expect((await svc.listMyWelcomes(bobAuth, bobDeviceId)).some((w) => w.id === daveW)).toBe(
+      false,
+    );
+
+    // the blobs come from getWelcomeMaterial, gated by a FETCH proof; dave gets dave's blobs verbatim.
+    const mat = await svc.getWelcomeMaterial(
+      daveAuth,
+      daveW,
+      daveDeviceId,
+      fetchProofFor(daveDev1Priv, daveDeviceId, daveW),
+    );
+    expect(mat).toEqual({ welcome: 'ZGF2ZQ==', ratchetTree: 'dHJlZQ==' });
+  });
+
+  it('getWelcomeMaterial requires a FETCH proof from the sealed-to device (no sibling / forgery / cross-op)', async () => {
+    const conv = await newConversation();
+    const { welcomeId } = await svc.deliverWelcome(aliceAuth, conv, wel({ welcome: 'bWF0' }));
+    // device 2 fetching via its own id → wrong recipient_device → 404
+    await expect(
+      svc.getWelcomeMaterial(
+        daveAuth,
+        welcomeId,
+        daveDevice2Id,
+        fetchProofFor(daveDev2Priv, daveDevice2Id, welcomeId),
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    // device 2 forging device 1's fetch (signs with its own key) → proof fails → 404
+    await expect(
+      svc.getWelcomeMaterial(
+        daveAuth,
+        welcomeId,
+        daveDeviceId,
+        fetchProofFor(daveDev2Priv, daveDeviceId, welcomeId),
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    // a CONSUME proof is NOT a valid fetch proof (domain separation) → 404
+    await expect(
+      svc.getWelcomeMaterial(
+        daveAuth,
+        welcomeId,
+        daveDeviceId,
+        proofFor(daveDev1Priv, daveDeviceId, welcomeId),
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    // device 1 with a valid FETCH proof gets the blobs
+    expect(
+      (
+        await svc.getWelcomeMaterial(
+          daveAuth,
+          welcomeId,
+          daveDeviceId,
+          fetchProofFor(daveDev1Priv, daveDeviceId, welcomeId),
+        )
+      ).welcome,
+    ).toBe('bWF0');
+  });
+
+  it("another tenant's user fetches no welcomes from this tenant (RLS)", async () => {
+    const conv = await newConversation();
+    await svc.deliverWelcome(aliceAuth, conv, wel());
+    expect(await svc.listMyWelcomes(carolAuth, crypto.randomUUID())).toEqual([]); // cross-tenant: nothing
+  });
+
+  it('bounds the pending-welcome fetch by `limit` (welcome spam can’t make GET /welcomes unbounded)', async () => {
+    const conv = await newConversation();
+    await svc.deliverWelcome(aliceAuth, conv, wel({ welcome: 'bGltMQ==' }));
+    await svc.deliverWelcome(aliceAuth, conv, wel({ welcome: 'bGltMg==' }));
+    // at least these two are pending for dave's device now
+    expect(await svc.listMyWelcomes(daveAuth, daveDeviceId, 1)).toHaveLength(1); // capped to the limit
+    expect((await svc.listMyWelcomes(daveAuth, daveDeviceId, 100)).length).toBeGreaterThanOrEqual(
+      2,
+    );
+  });
+
+  it('the recipient consumes their welcome with a valid proof; it is gone, and re-consume is 404', async () => {
+    const conv = await newConversation();
+    const { welcomeId } = await svc.deliverWelcome(aliceAuth, conv, wel({ welcome: 'b25l' }));
+    expect((await svc.listMyWelcomes(daveAuth, daveDeviceId)).some((w) => w.id === welcomeId)).toBe(
+      true,
+    );
+
+    await svc.consumeWelcome(
+      daveAuth,
+      welcomeId,
+      daveDeviceId,
+      proofFor(daveDev1Priv, daveDeviceId, welcomeId),
+    );
+    const after = await svc.listMyWelcomes(daveAuth, daveDeviceId);
+    expect(after.some((w) => w.id === welcomeId)).toBe(false); // consumed
+    await expect(
+      svc.consumeWelcome(
+        daveAuth,
+        welcomeId,
+        daveDeviceId,
+        proofFor(daveDev1Priv, daveDeviceId, welcomeId),
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('rejects consume with an invalid proof — 404, and the welcome survives', async () => {
+    const conv = await newConversation();
+    const { welcomeId } = await svc.deliverWelcome(aliceAuth, conv, wel({ welcome: 'YmFkcA==' }));
+    // A proof over the WRONG welcomeId won't verify for this one.
+    const wrongProof = proofFor(daveDev1Priv, daveDeviceId, crypto.randomUUID());
+    await expect(
+      svc.consumeWelcome(daveAuth, welcomeId, daveDeviceId, wrongProof),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect((await svc.listMyWelcomes(daveAuth, daveDeviceId)).some((w) => w.id === welcomeId)).toBe(
+      true,
+    );
+  });
+
+  it('a non-recipient cannot consume another member’s welcome — 404, and the row survives', async () => {
+    const conv = await newConversation();
+    const { welcomeId } = await svc.deliverWelcome(aliceAuth, conv, wel({ welcome: 'a2VlcA==' }));
+    // bob (a member, but not the recipient) — even with a valid proof for his OWN device — can't: the
+    // welcome's recipient is dave's device, so the delete predicate matches nothing.
+    await expect(
+      svc.consumeWelcome(
+        bobAuth,
+        welcomeId,
+        bobDeviceId,
+        proofFor(bobDevPriv, bobDeviceId, welcomeId),
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    // dave (the recipient) still has it.
+    expect((await svc.listMyWelcomes(daveAuth, daveDeviceId)).some((w) => w.id === welcomeId)).toBe(
+      true,
+    );
+  });
+
+  it('a SECOND device of the same user cannot see, forge, or consume device 1’s welcome (multi-device)', async () => {
+    const conv = await newConversation();
+    const { welcomeId } = await svc.deliverWelcome(aliceAuth, conv, wel({ welcome: 'bXVsdGk=' }));
+    // dave's device 2 does not see device 1's welcome...
+    expect(
+      (await svc.listMyWelcomes(daveAuth, daveDevice2Id)).some((w) => w.id === welcomeId),
+    ).toBe(false);
+    // ...cannot consume via its own id (wrong recipient_device → no row)...
+    await expect(
+      svc.consumeWelcome(
+        daveAuth,
+        welcomeId,
+        daveDevice2Id,
+        proofFor(daveDev2Priv, daveDevice2Id, welcomeId),
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    // ...and cannot FORGE device 1's consume: passing device 1's id but signing with device 2's key
+    // fails the proof (it doesn't hold device 1's private key) — the core of Codex P2 #3.
+    await expect(
+      svc.consumeWelcome(
+        daveAuth,
+        welcomeId,
+        daveDeviceId,
+        proofFor(daveDev2Priv, daveDeviceId, welcomeId),
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    // device 1 still has it and, with a valid proof, can consume it.
+    expect((await svc.listMyWelcomes(daveAuth, daveDeviceId)).some((w) => w.id === welcomeId)).toBe(
+      true,
+    );
+    await svc.consumeWelcome(
+      daveAuth,
+      welcomeId,
+      daveDeviceId,
+      proofFor(daveDev1Priv, daveDeviceId, welcomeId),
+    );
+  });
+
+  it('a revoked member no longer receives the pending welcome (membership cascade)', async () => {
+    const conv = await newConversation(); // alice + bob
+    await svc.deliverWelcome(aliceAuth, conv, wel({ welcome: 'cmV2b2tl' })); // dave added + welcome
+    expect(
+      (await svc.listMyWelcomes(daveAuth, daveDeviceId)).some((w) => w.conversationId === conv),
+    ).toBe(true);
+
+    // Revoke dave's app-level membership — the pending welcome must not survive it (no join after remove).
+    await sql`delete from conversation_members where conversation_id = ${conv} and user_id = ${daveId}`;
+    expect(
+      (await svc.listMyWelcomes(daveAuth, daveDeviceId)).some((w) => w.conversationId === conv),
+    ).toBe(false); // cascaded away — no stale join material
+  });
+
+  it('delivering to an existing member is idempotent on membership (no duplicate member row)', async () => {
+    const conv = await newConversation(); // bob is already a member
+    await svc.deliverWelcome(
+      aliceAuth,
+      conv,
+      wel({ recipientUserId: bobId, recipientDeviceId: bobDeviceId }),
+    );
+    const [row] =
+      await sql`select count(*)::int as n from conversation_members where conversation_id = ${conv} and user_id = ${bobId}`;
+    expect((row as { n: number }).n).toBe(1); // still exactly one membership
   });
 });

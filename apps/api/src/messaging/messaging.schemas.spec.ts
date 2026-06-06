@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CreateConversationSchema,
+  DeliverWelcomeSchema,
   ListMessagesQuerySchema,
+  ListWelcomesQuerySchema,
   SendMessageSchema,
+  WelcomeProofQuerySchema,
 } from './messaging.schemas.js';
 
 const uuid = '550e8400-e29b-41d4-a716-446655440000'; // a valid RFC-4122 UUID (correct version + variant)
@@ -51,5 +54,71 @@ describe('SendMessageSchema', () => {
     expect(
       SendMessageSchema.safeParse({ ...ok, attachmentObjectKey: 'tenant/abc/blob1' }).success,
     ).toBe(true);
+  });
+});
+
+describe('DeliverWelcomeSchema', () => {
+  const ok = {
+    recipientUserId: uuid,
+    recipientDeviceId: uuid,
+    welcome: 'AAAA',
+    ratchetTree: 'BBBB',
+  };
+
+  it('accepts a well-formed welcome delivery', () => {
+    expect(DeliverWelcomeSchema.safeParse(ok).success).toBe(true);
+  });
+  it('rejects a non-uuid recipient/device, non-base64 blobs, empty blobs, missing device, unknown keys', () => {
+    expect(DeliverWelcomeSchema.safeParse({ ...ok, recipientUserId: 'nope' }).success).toBe(false);
+    expect(DeliverWelcomeSchema.safeParse({ ...ok, recipientDeviceId: 'nope' }).success).toBe(
+      false,
+    );
+    expect(DeliverWelcomeSchema.safeParse({ ...ok, welcome: 'not base64!' }).success).toBe(false);
+    expect(DeliverWelcomeSchema.safeParse({ ...ok, ratchetTree: '' }).success).toBe(false);
+    const noDevice = { recipientUserId: uuid, welcome: 'AAAA', ratchetTree: 'BBBB' };
+    expect(DeliverWelcomeSchema.safeParse(noDevice).success).toBe(false); // device is required
+    expect(DeliverWelcomeSchema.safeParse({ ...ok, surprise: true }).success).toBe(false);
+  });
+  it('rejects a welcome blob over the 32 KiB bound (DoS guard)', () => {
+    expect(DeliverWelcomeSchema.safeParse({ ...ok, welcome: 'A'.repeat(32769) }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe('ListWelcomesQuerySchema', () => {
+  it('defaults limit to 50, coerces a string limit, requires a uuid deviceId', () => {
+    expect(ListWelcomesQuerySchema.parse({ deviceId: uuid })).toEqual({
+      deviceId: uuid,
+      limit: 50,
+    });
+    expect(ListWelcomesQuerySchema.parse({ deviceId: uuid, limit: '10' })).toEqual({
+      deviceId: uuid,
+      limit: 10,
+    });
+  });
+  it('rejects a non-uuid deviceId, out-of-range limit, and unknown keys', () => {
+    expect(ListWelcomesQuerySchema.safeParse({ deviceId: 'nope' }).success).toBe(false);
+    expect(ListWelcomesQuerySchema.safeParse({ deviceId: uuid, limit: 0 }).success).toBe(false);
+    expect(ListWelcomesQuerySchema.safeParse({ deviceId: uuid, limit: 101 }).success).toBe(false);
+    expect(ListWelcomesQuerySchema.safeParse({ deviceId: uuid, x: 1 }).success).toBe(false);
+  });
+});
+
+describe('WelcomeProofQuerySchema', () => {
+  const proof = 'abc-_DEF123'; // base64url charset
+  it('accepts a uuid deviceId + base64url proof', () => {
+    expect(WelcomeProofQuerySchema.safeParse({ deviceId: uuid, proof }).success).toBe(true);
+  });
+  it('rejects a non-uuid device, non-base64url / oversized proof, missing fields, unknown keys', () => {
+    expect(WelcomeProofQuerySchema.safeParse({ deviceId: 'nope', proof }).success).toBe(false);
+    expect(WelcomeProofQuerySchema.safeParse({ deviceId: uuid, proof: 'has+slash/' }).success).toBe(
+      false,
+    );
+    expect(
+      WelcomeProofQuerySchema.safeParse({ deviceId: uuid, proof: 'A'.repeat(257) }).success,
+    ).toBe(false);
+    expect(WelcomeProofQuerySchema.safeParse({ deviceId: uuid }).success).toBe(false);
+    expect(WelcomeProofQuerySchema.safeParse({ deviceId: uuid, proof, x: 1 }).success).toBe(false);
   });
 });

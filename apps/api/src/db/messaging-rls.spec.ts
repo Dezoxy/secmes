@@ -14,6 +14,7 @@ describe.skipIf(!DB_URL)('messaging schema RLS + append-only (checkpoint 25)', (
   let tenantB: string;
   let userA: string;
   let userB: string;
+  let deviceA: string; // a device of userA (welcomes are sealed to a specific device)
   let convA: string; // a conversation owned by tenant A
   let convB: string; // a conversation owned by tenant B (proves disjoint isolation)
 
@@ -35,6 +36,8 @@ describe.skipIf(!DB_URL)('messaging schema RLS + append-only (checkpoint 25)', (
                                 values (${tenantA}, 'msg-ext-a', 'msg-a@a.test') returning id`;
     [{ id: userB }] = await sql`insert into users (tenant_id, external_identity_id, email)
                                 values (${tenantB}, 'msg-ext-b', 'msg-b@b.test') returning id`;
+    [{ id: deviceA }] = await sql`insert into devices (tenant_id, user_id, signature_public_key)
+                                  values (${tenantA}, ${userA}, 'msg-rls-sig-a') returning id`;
   });
 
   afterAll(async () => {
@@ -232,6 +235,103 @@ describe.skipIf(!DB_URL)('messaging schema RLS + append-only (checkpoint 25)', (
       sql.begin(async (tx) => {
         await tx`set local role argus_app`;
         return tx`select count(*) from messages`;
+      }),
+    ).rejects.toThrow();
+  });
+
+  // ── MLS Welcome delivery (welcome-delivery.md) ───────────────────────────────────────────────────
+  it('conversation_welcomes isolates by tenant (RLS) and WITH CHECK blocks cross-tenant writes', async () => {
+    // A welcome in tenant A (recipient + sender = userA, device = deviceA, in convA — opaque blobs).
+    await asTenant(
+      tenantA,
+      (tx) => tx`insert into conversation_welcomes
+                   (tenant_id, conversation_id, recipient_user_id, recipient_device_id, sender_user_id, welcome, ratchet_tree)
+                 values (${tenantA}, ${convA}, ${userA}, ${deviceA}, ${userA}, 'b64-welcome', 'b64-tree')`,
+    );
+    // Tenant B sees NONE of A's welcomes.
+    const [bSees] = (await asTenant(
+      tenantB,
+      (tx) => tx`select count(*)::int as n from conversation_welcomes`,
+    )) as Array<{ n: number }>;
+    expect((bSees as { n: number }).n).toBe(0);
+    // Tenant A sees its own.
+    const [aSees] = (await asTenant(
+      tenantA,
+      (tx) =>
+        tx`select count(*)::int as n from conversation_welcomes where conversation_id = ${convA}`,
+    )) as Array<{ n: number }>;
+    expect((aSees as { n: number }).n).toBeGreaterThan(0);
+    // WITH CHECK: tenant A cannot write a welcome stamped tenant B.
+    await expect(
+      asTenant(
+        tenantA,
+        (tx) => tx`insert into conversation_welcomes
+                     (tenant_id, conversation_id, recipient_user_id, recipient_device_id, sender_user_id, welcome, ratchet_tree)
+                   values (${tenantB}, ${convA}, ${userA}, ${deviceA}, ${userA}, 'x', 'y')`,
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('welcomes are transient for the app role: delete is granted, update is NOT', async () => {
+    // argus_app holds select/insert/delete (the recipient consumes on join) but NO update — a stored
+    // welcome can't be silently altered server-side.
+    await expect(
+      asTenant(tenantA, (tx) => tx`update conversation_welcomes set welcome = 'tampered'`),
+    ).rejects.toThrow();
+    // delete IS allowed (consume).
+    await asTenant(
+      tenantA,
+      (tx) => tx`delete from conversation_welcomes where conversation_id = ${convA}`,
+    );
+  });
+
+  it('deleting a conversation cascades its pending welcomes', async () => {
+    // A conversation with a member + a welcome (the welcome's membership FK requires the member to exist).
+    const cid = (await asTenant(tenantA, async (tx) => {
+      const [c] = await tx`insert into conversations (tenant_id, created_by)
+                           values (${tenantA}, ${userA}) returning id`;
+      const id = (c as { id: string }).id;
+      await tx`insert into conversation_members (tenant_id, conversation_id, user_id)
+               values (${tenantA}, ${id}, ${userA})`;
+      await tx`insert into conversation_welcomes
+                 (tenant_id, conversation_id, recipient_user_id, recipient_device_id, sender_user_id, welcome, ratchet_tree)
+               values (${tenantA}, ${id}, ${userA}, ${deviceA}, ${userA}, 'w', 't')`;
+      return id;
+    })) as string;
+    await sql`delete from conversations where id = ${cid}`; // composite FK ON DELETE CASCADE removes the welcome
+    const [row] =
+      await sql`select count(*)::int as n from conversation_welcomes where conversation_id = ${cid}`;
+    expect((row as { n: number }).n).toBe(0);
+  });
+
+  it('revoking a membership cascade-deletes that member’s pending welcome', async () => {
+    // A pending welcome is OWNED BY the recipient's membership — an app-level remove must NOT leave stale
+    // join material the removed member could still fetch and use to join. (Mirrors the receipts cascade.)
+    const cid = await makeConversation(tenantA, userA); // conversation + membership(userA) + a message
+    await asTenant(
+      tenantA,
+      (tx) => tx`insert into conversation_welcomes
+                   (tenant_id, conversation_id, recipient_user_id, recipient_device_id, sender_user_id, welcome, ratchet_tree)
+                 values (${tenantA}, ${cid}, ${userA}, ${deviceA}, ${userA}, 'w', 't')`,
+    );
+    await asTenant(
+      tenantA,
+      (tx) =>
+        tx`delete from conversation_members where conversation_id = ${cid} and user_id = ${userA}`,
+    );
+    const [row] =
+      await sql`select count(*)::int as n from conversation_welcomes where conversation_id = ${cid}`;
+    expect((row as { n: number }).n).toBe(0); // cascaded — no stale join material survives the remove
+    // The message stays (its FK is to the conversation, not the membership) — removal ≠ deleting history.
+    const [msg] = await sql`select count(*)::int as n from messages where conversation_id = ${cid}`;
+    expect((msg as { n: number }).n).toBeGreaterThan(0);
+  });
+
+  it('no tenant context => fail closed on conversation_welcomes', async () => {
+    await expect(
+      sql.begin(async (tx) => {
+        await tx`set local role argus_app`;
+        return tx`select count(*) from conversation_welcomes`;
       }),
     ).rejects.toThrow();
   });
