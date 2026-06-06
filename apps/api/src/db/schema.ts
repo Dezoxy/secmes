@@ -104,6 +104,7 @@ export const conversationReceipts = pgTable('conversation_receipts', {
 export const attachments = pgTable('attachments', {
   id: uuid('id').primaryKey().defaultRandom(),
   tenantId: uuid('tenant_id').notNull(),
+  conversationId: uuid('conversation_id').notNull(),
   objectKey: text('object_key').notNull(),
   byteSize: bigint('byte_size', { mode: 'number' }).notNull(),
   uploadedBy: uuid('uploaded_by').notNull(),

@@ -7,14 +7,16 @@
 ```
 upload:
   client: image --(AEAD, random CONTENT KEY, CSPRNG)--> ciphertext blob
-  client --POST /attachments {byteSize}--> API: mints a short-TTL, single-object
-          presigned PUT to a PRIVATE container (cred from Key Vault) -> {objectKey, uploadUrl}
-          API records attachments row (METADATA ONLY); NEVER persists/logs uploadUrl
+  client --POST /attachments {conversationId, byteSize}--> API: VERIFIES caller is a member of
+          conversationId; mints a short-TTL, single-object presigned PUT to a PRIVATE container
+          (cred from Key Vault) -> {objectKey, uploadUrl}; records the attachments row BOUND to
+          conversationId (METADATA ONLY); NEVER persists/logs uploadUrl
   client --PUT ciphertext--> blob storage        (DIRECT; the API never sees the bytes)
   client: wraps CONTENT KEY for recipients via MLS, sends a message referencing objectKey
 download:
   recipient: unwrap CONTENT KEY via MLS
-  recipient --GET /attachments/:id/url--> API (member-only): presigned GET -> {downloadUrl}
+  recipient --GET /attachments/:id/url--> API: authorizes from the ROW's conversation_id (member
+          only, 404 otherwise) — NOT the client message ref; presigned GET -> {downloadUrl}
   recipient --GET ciphertext--> blob storage; decrypt with CONTENT KEY; render
 ```
 
@@ -31,7 +33,7 @@ The server is **never in the data path** and **never holds the content key** —
 - **Tampering — swap/corrupt a blob.** The content-key **AEAD tag** fails closed on any modification; a recipient decrypting a tampered blob gets an auth-failure, not garbage. Upload grants are write-only to a fresh key (no overwrite of an existing object).
 - **Information disclosure — the big one.** (a) Server/operator must never see plaintext or the content key — upheld by client-side encryption + key-in-envelope. (b) **Presigned URLs are secrets** (they embed a capability) → **never logged or persisted** (invariant #2); logs carry `objectKey`/IDs only. (c) Private container, **no public/anonymous access**. (d) RLS + membership stop cross-tenant / non-member reads. (e) Metadata leakage (size/type) minimized: store **no plaintext content-type**; size is unavoidable metadata.
 - **DoS — upload abuse / storage exhaustion.** Enforce **byte-size + (encrypted) type limits** at grant time and in the row; short upload-URL TTL; **expiry + cleanup** of unreferenced/expired blobs (roadmap 37). Per-caller quota is a follow-up.
-- **Elevation — read another conversation's image.** Download grant is **member-only**, same membership-404 (no existence oracle) as messaging; the composite FK pins the attachment to its tenant.
+- **Elevation / confused-deputy — read another conversation's image.** The send path stores **any** client-supplied `attachmentObjectKey` on a message, so authorizing a download from "a conversation that references this key" would let a same-tenant user echo another blob's key into a conversation they control and mint a URL for it (IDOR). **Mitigation:** the attachment is bound at upload to a **server-verified `conversation_id`** (the uploader's membership is checked at the grant), and downloads authorize from **that row's `conversation_id`** — never from a client message ref. Member-only, same membership-404 (no existence oracle); composite FKs pin the attachment's conversation + uploader to its tenant.
 
 ## 4. Invariant check
 
@@ -47,7 +49,7 @@ The server is **never in the data path** and **never holds the content key** —
 ## 5. Decision & mitigations
 
 - Build the **server slice** behind a `BlobStore` abstraction (mirrors `RealtimeBus`): an **Azure-Blob** impl run against **Azurite** locally / Azure Blob in prod. Endpoints: `POST /attachments` (mint upload grant + create row, **own-caller**, Zod-validated, size-bounded) and `GET /attachments/:id/url` (member-only download grant). `messages.attachment_object_key` already carries the ref.
-- Migration **`attachments`**: `tenant_id`, `object_key` (unique, tenant-prefixed), `byte_size`, `uploaded_by` (verified caller, NO-ACTION FK like `sender_user_id`), `created_at`, `expires_at` — **ciphertext refs only**, no content column, no plaintext content-type.
+- Migration **`attachments`**: `tenant_id`, **`conversation_id`** (server-verified owning conversation — composite-FK to `conversations`, ON DELETE CASCADE; drives download authz), `object_key` (unique, tenant-prefixed), `byte_size`, `uploaded_by` (verified caller, NO-ACTION FK like `sender_user_id`), `created_at`, `expires_at` — **ciphertext refs only**, no content column, no plaintext content-type. **Download authz is from the row's `conversation_id`, never a client message ref.**
 - Content-key primitive in `packages/crypto` (`encryptAttachment`/`decryptAttachment`): CSPRNG content key + AEAD over bytes; the key is exported for MLS-wrapping by the caller, never by the server.
 - **Gates:** `crypto-reviewer` (content-key encryption) + `security-boundary-auditor` (presigned endpoints, RLS, **no-URL-logging**, download authz, no-IDOR) + `infra-reviewer` (private container, no public endpoint, least-priv SAS, EU region). Tests: RLS isolation, member-only download 404, **presigned URL never appears in logs/DB**, size-limit rejection, AEAD tamper-fail. `42Crunch` re-audit incl. attachment routes (roadmap 38).
 
