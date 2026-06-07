@@ -5,8 +5,15 @@
 # All credentials here are local throwaways — never real secrets (see docs/threat-models/auth-tenant-context.md §9).
 FirstInstance:
   PatPath: /bootstrap/admin.pat
+  LoginClientPatPath: /bootstrap/login-client.pat
   Org:
     Name: argus-local
+    LoginClient:
+      Machine:
+        Username: login-client
+        Name: Login Client
+      Pat:
+        ExpirationDate: 2099-12-31T23:59:59Z
     Human:
       UserName: admin
       FirstName: Argus
