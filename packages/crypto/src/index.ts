@@ -458,4 +458,17 @@ export class Conversation {
       return td.decode(result.message);
     });
   }
+
+  /**
+   * The current MLS epoch — non-secret group metadata the server stores alongside the ciphertext (for
+   * ordering/observability; the server stays crypto-blind). v1 1:1 is single-epoch, so this stays small.
+   * Narrowed from the underlying bigint; fails LOUD past 2^53 rather than silently losing precision (a
+   * deferred group-chat/PCS path could advance the epoch far — better to throw than emit wrong metadata).
+   */
+  get epoch(): number {
+    const epoch = this.state.groupContext.epoch;
+    if (epoch > BigInt(Number.MAX_SAFE_INTEGER))
+      throw new Error('MLS epoch exceeds safe integer range');
+    return Number(epoch);
+  }
 }

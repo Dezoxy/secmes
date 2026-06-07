@@ -1,7 +1,8 @@
-import { MlsEngine, serializeInvite } from '@argus/crypto';
+import { MlsEngine, deserializeInvite, serializeInvite, type Argon2Params } from '@argus/crypto';
+import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Mock the directory/server calls; the crypto (join + proofs) is real.
+// Mock the directory/server calls; the crypto (join + proofs) and the keystore (real IndexedDB seal) are real.
 vi.mock('./api', () => ({
   listWelcomes: vi.fn(),
   fetchWelcomeMaterial: vi.fn(),
@@ -9,25 +10,38 @@ vi.mock('./api', () => ({
 }));
 import { consumeWelcome, fetchWelcomeMaterial, listWelcomes } from './api';
 import { joinPendingConversations, type JoinedConversation } from './join';
+import { DeviceKeystore } from './keystore';
 
 const list = vi.mocked(listWelcomes);
 const fetchMaterial = vi.mocked(fetchWelcomeMaterial);
 const consume = vi.mocked(consumeWelcome);
 
+// Clears the key-backup Argon2 floor while keeping the seal/unseal fast in tests.
+const FAST: Argon2Params = { m: 8192, t: 2, p: 1 };
+
+/** The non-crypto deps every call needs: a fresh sealed keystore + the session passphrase. */
+async function persistenceDeps(
+  engine: MlsEngine,
+): Promise<{ keystore: DeviceKeystore; passphrase: string }> {
+  return { keystore: await DeviceKeystore.open(engine, FAST), passphrase: 'pw' };
+}
+
 describe('joinPendingConversations', () => {
   beforeEach(() => {
+    globalThis.indexedDB = new IDBFactory(); // fresh IndexedDB per test (sealed group-state store)
     list.mockReset();
     fetchMaterial.mockReset();
     consume.mockReset();
     consume.mockResolvedValue(undefined);
   });
 
-  it('joins a pending welcome and surfaces it — WITHOUT consuming it (kept as the reload anchor)', async () => {
+  it('joins a pending welcome, persists it, surfaces it, and consumes the Welcome', async () => {
     const engine = await MlsEngine.create();
     const alice = await engine.generateDeviceKeys('alice');
     const bob = await engine.generateDeviceKeys('bob');
     const bobPool = [bob, await engine.mintKeyPackage(bob)];
     const target = bobPool[1]!; // the directory sealed the welcome to THIS pool member
+    const { keystore, passphrase } = await persistenceDeps(engine);
 
     const aliceConv = await engine.createConversation('grp', alice);
     const material = serializeInvite(await aliceConv.addMember(target.publicPackage));
@@ -40,6 +54,8 @@ describe('joinPendingConversations', () => {
       device: bob,
       pool: bobPool,
       deviceId: 'dev',
+      keystore,
+      passphrase,
       onJoined: (j) => joined.push(j),
     });
 
@@ -52,16 +68,20 @@ describe('joinPendingConversations', () => {
     expect(joined).toHaveLength(1);
     expect(joined[0]!.conversationId).toBe('c1');
     expect(await joined[0]!.conversation.decrypt(await aliceConv.encrypt('hi'))).toBe('hi');
-    // The Welcome is NOT consumed (no durable group state until Slice 5 — keep it for reload recovery).
-    expect(consume).not.toHaveBeenCalled();
+    // The group state is now PERSISTED (5A), so a reload recovers it without re-joining...
+    expect((await keystore.loadConversations(bob, passphrase)).has('c1')).toBe(true);
+    // ...and the Welcome is consumed (forward secrecy — the sealed join material is no longer needed).
+    expect(consume).toHaveBeenCalledWith('w1', 'dev', expect.any(String));
+    expect(consume).toHaveBeenCalledTimes(1);
   });
 
-  it('clears a stranded welcome (consumes it without joining) and continues to join the good one', async () => {
+  it('clears a stranded welcome and joins+consumes the good one', async () => {
     const engine = await MlsEngine.create();
     const alice = await engine.generateDeviceKeys('alice');
     const bob = await engine.generateDeviceKeys('bob');
     const bobPool = [bob];
     const stranded = await engine.mintKeyPackage(bob); // a key NOT retained in bob's pool
+    const { keystore, passphrase } = await persistenceDeps(engine);
 
     const strandedMaterial = serializeInvite(
       await (await engine.createConversation('g1', alice)).addMember(stranded.publicPackage),
@@ -83,19 +103,24 @@ describe('joinPendingConversations', () => {
       device: bob,
       pool: bobPool,
       deviceId: 'dev',
+      keystore,
+      passphrase,
       onJoined: (j) => joined.push(j),
     });
 
-    // The stranded welcome is CLEARED (consumed without joining); the good one is joined but NOT consumed.
+    // The good one joins; BOTH welcomes are consumed — the stranded one cleared, the good one after its
+    // durable save.
     expect(joined.map((j) => j.conversationId)).toEqual(['c-good']);
-    expect(consume).toHaveBeenCalledTimes(1);
     expect(consume).toHaveBeenCalledWith('w-stranded', 'dev', expect.any(String));
+    expect(consume).toHaveBeenCalledWith('w-good', 'dev', expect.any(String));
+    expect(consume).toHaveBeenCalledTimes(2);
   });
 
-  it('leaves a transient fetch failure pending (does not clear it) and joins the rest', async () => {
+  it('leaves a transient fetch failure pending (does not consume it) and joins the rest', async () => {
     const engine = await MlsEngine.create();
     const alice = await engine.generateDeviceKeys('alice');
     const bob = await engine.generateDeviceKeys('bob');
+    const { keystore, passphrase } = await persistenceDeps(engine);
 
     const goodMaterial = serializeInvite(
       await (await engine.createConversation('g', alice)).addMember(bob.publicPackage),
@@ -113,12 +138,15 @@ describe('joinPendingConversations', () => {
       device: bob,
       pool: [bob],
       deviceId: 'dev',
+      keystore,
+      passphrase,
       onJoined: (j) => joined.push(j),
     });
 
-    // The flaky one is left pending (NOT consumed → retried next connect); the good one still joins.
+    // The flaky one is left pending (NOT consumed → retried next connect); the good one joins + consumes.
     expect(joined.map((j) => j.conversationId)).toEqual(['c-good']);
-    expect(consume).not.toHaveBeenCalled();
+    expect(consume).toHaveBeenCalledTimes(1);
+    expect(consume).toHaveBeenCalledWith('w-good', 'dev', expect.any(String));
   });
 
   it('drains across multiple list pages, re-listing until the queue is empty', async () => {
@@ -126,6 +154,7 @@ describe('joinPendingConversations', () => {
     const alice = await engine.generateDeviceKeys('alice');
     const bob = await engine.generateDeviceKeys('bob');
     const pool = [bob, await engine.mintKeyPackage(bob), await engine.mintKeyPackage(bob)];
+    const { keystore, passphrase } = await persistenceDeps(engine);
     const seal = async (
       m: (typeof pool)[number],
       g: string,
@@ -152,12 +181,14 @@ describe('joinPendingConversations', () => {
       device: bob,
       pool,
       deviceId: 'dev',
+      keystore,
+      passphrase,
       onJoined: (j) => joined.push(j),
     });
 
-    // All three pages are joined (the drain re-lists beyond the first page); none is consumed.
+    // All three pages join (the drain re-lists beyond the first page); each is consumed after its save.
     expect(joined.map((j) => j.conversationId)).toEqual(['c1', 'c2', 'c3']);
-    expect(consume).not.toHaveBeenCalled();
+    expect(consume).toHaveBeenCalledTimes(3);
     expect(list.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -167,6 +198,7 @@ describe('joinPendingConversations', () => {
     const bob = await engine.generateDeviceKeys('bob');
     const pool = [bob, await engine.mintKeyPackage(bob)];
     const target = pool[1]!;
+    const { keystore, passphrase } = await persistenceDeps(engine);
     // TWO welcomes both sealed to the SAME pool member (a deliver duplicate / replay / reused claim).
     const w1mat = serializeInvite(
       await (await engine.createConversation('g1', alice)).addMember(target.publicPackage),
@@ -188,14 +220,60 @@ describe('joinPendingConversations', () => {
       device: bob,
       pool,
       deviceId: 'dev',
+      keystore,
+      passphrase,
       onJoined: (j) => joined.push(j),
     });
 
-    // Only the FIRST joins (kept pending); the second can't reuse the now-spent private (NoMatchingPoolMember)
-    // → it is cleared (consumed without joining), never joined.
+    // Only the FIRST joins (+ consumes); the second can't reuse the now-spent private (NoMatchingPoolMember)
+    // → it is cleared (consumed without joining). Both ids are consumed, neither survives.
     expect(joined.map((j) => j.conversationId)).toEqual(['c1']);
-    expect(consume).toHaveBeenCalledTimes(1);
+    expect(consume).toHaveBeenCalledWith('w1', 'dev', expect.any(String));
     expect(consume).toHaveBeenCalledWith('w2', 'dev', expect.any(String));
+    expect(consume).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not overwrite an already-persisted (advanced) conversation when its Welcome is replayed (no rollback)', async () => {
+    const engine = await MlsEngine.create();
+    const alice = await engine.generateDeviceKeys('alice');
+    const bob = await engine.generateDeviceKeys('bob');
+    const bobPool = [bob, await engine.mintKeyPackage(bob)];
+    const target = bobPool[1]!;
+    const { keystore, passphrase } = await persistenceDeps(engine);
+
+    const aliceConv = await engine.createConversation('grp', alice);
+    const material = serializeInvite(await aliceConv.addMember(target.publicPackage));
+
+    // Simulate a PRIOR join whose consume+prune FAILED: join, ADVANCE the ratchet (receive a message),
+    // persist the advanced state, and seed the keystore CAS base (as rehydrate-on-unlock would).
+    const pre = await engine.joinConversationFromPool([...bobPool], deserializeInvite(material));
+    const m1wire = await aliceConv.encrypt('m1');
+    await pre.conversation.decrypt(m1wire); // advance bob's receive ratchet past alice's generation 0
+    await keystore.saveConversationState(bob, 'c1', pre.conversation, passphrase);
+    await keystore.loadConversations(bob, passphrase); // sets the CAS base to the persisted version
+
+    // The SAME Welcome is still pending (consume failed before); the drain replays it.
+    list.mockResolvedValue([{ id: 'w1', conversationId: 'c1', createdAt: 't' }]);
+    fetchMaterial.mockResolvedValue(material);
+    const joined: JoinedConversation[] = [];
+
+    await joinPendingConversations({
+      device: bob,
+      pool: bobPool,
+      deviceId: 'dev',
+      keystore,
+      passphrase,
+      onJoined: (j) => joined.push(j),
+    });
+
+    // It must NOT surface a duplicate and must NOT overwrite the advanced state...
+    expect(joined).toHaveLength(0);
+    // ...the persisted state is still the ADVANCED one — it already consumed alice's generation 0, so
+    // re-decrypting m1 throws (a rolled-back fresh-join state would instead decrypt it). The rollback proof.
+    const restored = (await keystore.loadConversations(bob, passphrase)).get('c1')!;
+    await expect(restored.decrypt(m1wire)).rejects.toThrow();
+    // ...and the redundant Welcome was cleared.
+    expect(consume).toHaveBeenCalledWith('w1', 'dev', expect.any(String));
   });
 
   it('clears a stranded welcome blocking the cursorless page so a valid welcome behind it is reached', async () => {
@@ -204,6 +282,7 @@ describe('joinPendingConversations', () => {
     const bob = await engine.generateDeviceKeys('bob');
     const stranded = await engine.mintKeyPackage(bob); // NOT retained in bob's pool
     const pool = [bob]; // only `bob` is joinable
+    const { keystore, passphrase } = await persistenceDeps(engine);
 
     const strandedMat = serializeInvite(
       await (await engine.createConversation('gs', alice)).addMember(stranded.publicPackage),
@@ -237,12 +316,14 @@ describe('joinPendingConversations', () => {
       device: bob,
       pool,
       deviceId: 'dev',
+      keystore,
+      passphrase,
       onJoined: (j) => joined.push(j),
     });
 
     // w-stranded sat at the head and (without a cursor) would hide w-good behind it; clearing it lets the
-    // drain reach + join w-good. The joined w-good stays pending (not consumed — the reload anchor).
+    // drain reach + join w-good. Now that a joined Welcome is consumed too, the queue fully drains.
     expect(joined.map((j) => j.conversationId)).toEqual(['c-good']);
-    expect([...queue.keys()]).toEqual(['w-good']);
+    expect([...queue.keys()]).toEqual([]);
   });
 });

@@ -366,6 +366,20 @@ export class DeviceKeystore {
     return out;
   }
 
+  /**
+   * Whether THIS device already has persisted group state for a conversation — metadata only, no unseal, no
+   * passphrase. Lets the join drain detect an already-recovered conversation and NOT overwrite its advanced
+   * ratchet with a replayed Welcome's fresh post-join state (which would roll the group back).
+   */
+  async hasConversationState(device: DeviceKeys, conversationId: string): Promise<boolean> {
+    const rec = (await this.db.get(GROUP_STORE, conversationId)) as StoredGroupState | undefined;
+    return (
+      !!rec &&
+      rec.identity === deviceIdentity(device) &&
+      rec.signaturePublicKey === deviceSignaturePublicKeyB64(device)
+    );
+  }
+
   /** Remove a conversation's persisted group state (e.g. on leave / cleanup). */
   async deleteConversationState(conversationId: string): Promise<void> {
     await this.db.delete(GROUP_STORE, conversationId);

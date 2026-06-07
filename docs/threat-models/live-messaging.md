@@ -88,9 +88,17 @@ ciphertext** — never plaintext, never keys. All MLS work is client-side.
   wipe transients. Reviewer: **`crypto-reviewer`** (FS of persisted state, the codec, atomicity). Perf note:
   PR-5A seals per explicit save (one-shot Argon2 is fine); 5B's per-message persistence should derive a
   session key once at unlock rather than re-running Argon2 on every message.
-- **PR-5B (send + fetch):** `api.ts` `sendMessage`/`fetchMessages`/`fetchSync`; wire the join flow to
-  persist → consume → prune; the in-mutex persist hook on `encrypt`/`decrypt`; rehydrate on unlock.
-  Reviewer: **`security-boundary-auditor`** (ciphertext-only client, no secret logging).
+- **PR-5B (send + fetch) — DONE:** `api.ts` `sendMessage`/`fetchMessages` (typed, ciphertext + metadata
+  only); cross-conversation `/sync` lands in 5C with its reconnect caller. `lib/messaging.ts`:
+  `sendLiveMessage` does **encrypt → persist → POST** and
+  `backfillConversation` does **fetch → decrypt (peer only) → persist**, both under a per-conversation
+  **single-writer lock** (`lib/locks.ts`, Web Locks with an in-process fallback) — this is the lock promised
+  in PR-5A's rollback note, gating the ratchet ops across tabs. The join flow now **persists → consumes →
+  prunes** (closing the Slice-4 deferral). `DeviceContext` retains the session passphrase (in memory) to seal
+  advances and rehydrates conversations on unlock (`loadConversations`); `ChatScreen` routes live sends/opens
+  through these and drops the demo loopback for live conversations. Reviewer: **`security-boundary-auditor`**
+  (ciphertext-only client, no secret logging). Perf: still one Argon2 seal per user action (send / backfill
+  batch) — acceptable; the per-unlock session key remains the optimization.
 - **PR-5C (WebSocket):** a reconnecting `ws` client (first-frame auth, never token-in-URL) + subscribe +
   decrypt-on-message + reconnect→`/sync`→dedup. Reviewer: **`security-boundary-auditor`** (WS auth).
 - **Tests:** the persistence round-trip — `encrypt → serialize → seal → reload → deserialize → decrypt
@@ -105,10 +113,20 @@ ciphertext** — never plaintext, never keys. All MLS work is client-side.
   re-processing (dedup by `id`). Documented, not eliminated in v1.
 - **Group-state migration:** Slice 4 left joined conversations in memory only; the first run after Slice 5
   persists them on next join (the still-pending Welcome re-joins, then persists). No data loss.
-- **Multi-tab concurrent send:** the version/CAS keeps the *durable* group state monotonic (a stale tab's
-  write is refused, never a rollback), but it does not stop two simultaneously-active tabs from each calling
-  `encrypt` and emitting the same MLS generation before either persists — an in-memory nonce reuse the
-  persistence layer can't see. For v1 we treat the app as single-active-tab and accept this; the complete fix
-  (a `navigator.locks` single-writer lock gating `encrypt`, with `GroupStateConflict` demoting a follower
-  tab) is wired with the send path (5B). Documented, not eliminated in PR-5A.
+- **No persisted plaintext history:** 5B persists the sealed *ratchet state*, never message **plaintext**.
+  So after a reload a conversation opens empty and back-fill shows only messages NEWER than the rehydrated
+  ratchet — older ciphertext is at an already-consumed generation and is skipped (undecryptable). Own sent
+  messages are never re-derivable from MLS state at all (the sending secret is consumed on `encrypt`), so
+  back-fill skips self; they appear via local echo only for the session that sent them. A local **sealed
+  message log** (plaintext at rest under the device passphrase) is the follow-up that makes history durable.
+- **Receive is fetch-on-open (5B):** a peer's message appears when the conversation is (re)opened, not pushed
+  live. Live delivery without re-opening is the WebSocket path (5C). Attachments are not transmitted on live
+  conversations yet (only the text body is encrypted + sent); blob storage is a later feature.
+- **Multi-tab concurrent send:** the per-conversation single-writer lock (5B) serializes ratchet ops across
+  tabs, and the version/CAS keeps the *durable* state monotonic (a stale write is refused, never a rollback).
+  What remains is the in-memory window where two tabs each `encrypt` from the same loaded state before either
+  takes the lock+persists (each reloads its in-memory group only on its next op, not on the other tab's
+  write) — an in-memory generation reuse the lock alone can't close. The complete fix is true leader election
+  (one tab owns the group; followers go read-only on `GroupStateConflict` and rehydrate). For v1 we treat the
+  app as single-active-tab; documented, not fully eliminated.
 - **Group chat / PCS rekey:** v1 is 1:1, single-epoch; multi-member commits + PCS fan-out are deferred (B1).

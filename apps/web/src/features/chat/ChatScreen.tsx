@@ -4,6 +4,8 @@ import type { Conversation as MlsGroup } from '@argus/crypto';
 import type { UserSummary } from '../../lib/api';
 import { ConversationManager, type ConversationSession } from '../../lib/conversations';
 import { joinPendingConversations } from '../../lib/join';
+import { GroupStateConflict } from '../../lib/keystore';
+import { backfillConversation, sendLiveMessage, type MessagingDeps } from '../../lib/messaging';
 import { getMlsSession } from '../../lib/mls';
 import { useAuth } from '../auth/AuthContext';
 import { useDevice } from '../device/DeviceContext';
@@ -53,6 +55,27 @@ async function toAttachment(file: File): Promise<Attachment> {
   return { id, type: 'file', url: '#', name: file.name, size };
 }
 
+// The sidebar entry for a LIVE conversation surfaced without a known peer identity (joined on connect, or
+// rehydrated on unlock). The inviter's identity isn't in the welcome/persistence metadata (it would leak the
+// social graph to the server), so we show a neutral placeholder; verification (#20) names it out-of-band.
+function liveConversationShell(conversationId: string): Conversation {
+  return {
+    id: conversationId,
+    type: 'direct',
+    participants: [
+      currentUser,
+      {
+        id: `peer-${conversationId}`,
+        name: 'New contact',
+        avatar: generatedAvatar(conversationId),
+        isOnline: false,
+      },
+    ],
+    messages: [],
+    unreadCount: 0,
+  };
+}
+
 export default function ChatScreen() {
   const [mounted, setMounted] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>(initialConversations);
@@ -66,24 +89,48 @@ export default function ChatScreen() {
   // Per-conversation verification: conversationId → the safety number marked verified for it.
   const [verifiedByConv, setVerifiedByConv] = useState<Record<string, string>>({});
 
-  const { device, pool, deviceId } = useDevice();
+  const { device, pool, deviceId, keystore, passphrase } = useDevice();
   const { profile } = useAuth();
+  // What every live send/receive needs to seal the advanced ratchet at rest (Slice 5). Null in demo mode.
+  const messagingDeps = useMemo<MessagingDeps | null>(
+    () => (device && keystore && passphrase ? { device, keystore, passphrase } : null),
+    [device, keystore, passphrase],
+  );
   // A live conversation manager exists only with an unlocked device (not demo mode). New conversations
-  // route through it (claim → #20 gate → create + deliver); demo mode keeps the seed/loopback path.
+  // route through it (claim → #20 gate → create + persist + deliver); demo mode keeps the seed/loopback path.
   const manager = useMemo(
-    () => (device && profile?.userId ? new ConversationManager(device, profile.userId) : null),
-    [device, profile],
+    () =>
+      messagingDeps && profile?.userId
+        ? new ConversationManager(
+            messagingDeps.device,
+            profile.userId,
+            messagingDeps.keystore,
+            messagingDeps.passphrase,
+          )
+        : null,
+    [messagingDeps, profile],
   );
   const [startOpen, setStartOpen] = useState(false);
-  // Conversations JOINED on connect (Slice 4): their ids drive the live-conversation checks below, and
-  // their in-memory MLS groups are retained (ref) for Slice 5's send/fetch.
-  const [joinedIds, setJoinedIds] = useState<Set<string>>(() => new Set());
-  const joinedGroups = useRef(new Map<string, MlsGroup>());
+  // LIVE conversations (real MLS over the network): started via the manager, joined on connect, or rehydrated
+  // on unlock. `liveIds` drives the UI checks; `liveGroups` retains each in-memory MLS group for send/fetch.
+  // `fetchCursors` is the per-conversation keyset high-water mark so re-opening fetches only newer messages.
+  const [liveIds, setLiveIds] = useState<Set<string>>(() => new Set());
+  const liveGroups = useRef(new Map<string, MlsGroup>());
+  const fetchCursors = useRef(new Map<string, string>());
+  const backfilling = useRef(new Set<string>());
   const joinRanRef = useRef(false);
+  const rehydratedRef = useRef(false);
 
-  // A conversation is "live" (real MLS, no send path until Slice 5) if it was started via the manager OR
-  // joined on connect. Demo/seed conversations are not live and keep the loopback path.
-  const isLive = (id: string | null): boolean => !!id && (!!manager?.get(id) || joinedIds.has(id));
+  // Register a live conversation's MLS group and mark its id live (idempotent). The ref holds the group for
+  // encrypt/decrypt; the id set is React state so the UI re-renders (enables the composer, drives `isLive`).
+  const addLive = (conversationId: string, conversation: MlsGroup): void => {
+    liveGroups.current.set(conversationId, conversation);
+    setLiveIds((prev) => (prev.has(conversationId) ? prev : new Set(prev).add(conversationId)));
+  };
+
+  // A conversation is "live" (real MLS over the network) iff it has a retained group. Demo/seed
+  // conversations are not live and keep the local loopback round-trip.
+  const isLive = (id: string | null): boolean => !!id && liveIds.has(id);
 
   useEffect(() => {
     setMounted(true);
@@ -94,6 +141,7 @@ export default function ChatScreen() {
   const handleStarted = (session: ConversationSession, peer: UserSummary): void => {
     const name = peer.displayName || peer.email;
     const peerUser: User = { id: peer.id, name, avatar: generatedAvatar(name), isOnline: false };
+    addLive(session.conversationId, session.conversation); // retain its MLS group for live send/fetch
     setConversations((prev) =>
       prev.some((c) => c.id === session.conversationId)
         ? prev
@@ -114,51 +162,59 @@ export default function ChatScreen() {
     setStartOpen(false);
   };
 
-  // Join on connect (Slice 4): once unlocked + provisioned, drain pending Welcomes into live conversations.
+  // Join on connect (Slice 4 + 5B): once unlocked + provisioned, drain pending Welcomes into live
+  // conversations — now persisting each group (5A) then consuming its Welcome + pruning the spent private.
   // Runs once per session. onJoined surfaces each joined conversation (placeholder peer — the inviter's
-  // identity isn't in the welcome list yet; join-conversation.md §6) and retains its MLS group for Slice 5.
+  // identity isn't in the welcome list; join-conversation.md §6) and retains its MLS group for send/fetch.
   useEffect(() => {
-    if (!device || !pool || !deviceId || joinRanRef.current) return;
+    if (!device || !pool || !deviceId || !messagingDeps || joinRanRef.current) return;
     joinRanRef.current = true;
     joinPendingConversations({
       device,
       pool,
       deviceId,
+      keystore: messagingDeps.keystore,
+      passphrase: messagingDeps.passphrase,
       onJoined: ({ conversationId, conversation }) => {
-        joinedGroups.current.set(conversationId, conversation);
-        setJoinedIds((prev) =>
-          prev.has(conversationId) ? prev : new Set(prev).add(conversationId),
-        );
+        addLive(conversationId, conversation);
         setConversations((prev) =>
           prev.some((c) => c.id === conversationId)
             ? prev
-            : [
-                {
-                  id: conversationId,
-                  type: 'direct',
-                  participants: [
-                    currentUser,
-                    {
-                      id: `peer-${conversationId}`,
-                      name: 'New contact',
-                      avatar: generatedAvatar(conversationId),
-                      isOnline: false,
-                    },
-                  ],
-                  messages: [],
-                  unreadCount: 0,
-                },
-                ...prev,
-              ],
+            : [liveConversationShell(conversationId), ...prev],
         );
       },
     }).catch((err: unknown) => {
       // A whole-drain failure (e.g. listWelcomes errored) is not retried this session; it rides the next
-      // unlock and Slice 5's reconnect-sync. Per-Welcome failures are already isolated inside the drain.
+      // unlock and Slice 5C's reconnect-sync. Per-Welcome failures are already isolated inside the drain.
       // eslint-disable-next-line no-console
       console.warn('join-on-connect drain failed', err instanceof Error ? err.message : err);
     });
-  }, [device, pool, deviceId]);
+  }, [device, pool, deviceId, messagingDeps]);
+
+  // Rehydrate on unlock (Slice 5): load every persisted conversation's sealed group state into a live MLS
+  // group and surface it. These were joined/started in a prior session and consumed their Welcome, so the
+  // sealed group-state store (not a re-join) is how they come back. Runs once per unlock.
+  useEffect(() => {
+    if (!messagingDeps || rehydratedRef.current) return;
+    rehydratedRef.current = true;
+    const { keystore: ks, device: dev, passphrase: pass } = messagingDeps;
+    void (async () => {
+      try {
+        const restored = await ks.loadConversations(dev, pass);
+        for (const [conversationId, conversation] of restored) {
+          addLive(conversationId, conversation);
+          setConversations((prev) =>
+            prev.some((c) => c.id === conversationId)
+              ? prev
+              : [liveConversationShell(conversationId), ...prev],
+          );
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('rehydrate conversations failed', err instanceof Error ? err.message : err);
+      }
+    })();
+  }, [messagingDeps]);
 
   const selectedConversation = conversations.find((c) => c.id === selectedId);
   // Safety-number verification is 2-party only (group safety numbers are deferred —
@@ -166,10 +222,10 @@ export default function ChatScreen() {
   const isDirect = selectedConversation?.type === 'direct';
 
   // Compute the selected DIRECT conversation's own safety number (from its own loopback session), once.
-  // LIVE conversations (started or joined) are skipped — a started one already holds its REAL number, and
-  // neither should spin up a loopback session (which would compute the wrong, local number).
+  // LIVE conversations are skipped — a started one already holds its REAL number, and none should spin up a
+  // loopback session (which would compute the wrong, local number).
   useEffect(() => {
-    if (!selectedId || !isDirect || !!manager?.get(selectedId) || joinedIds.has(selectedId)) return;
+    if (!selectedId || !isDirect || isLive(selectedId)) return;
     void getMlsSession(selectedId)
       .then((s) =>
         setNumbersByConv((prev) =>
@@ -177,7 +233,60 @@ export default function ChatScreen() {
         ),
       )
       .catch(() => {});
-  }, [selectedId, isDirect, manager, joinedIds]);
+  }, [selectedId, isDirect, liveIds]);
+
+  // Fetch-on-open (Slice 5): when a LIVE conversation is selected, back-fill new ciphertext from the server,
+  // decrypt it against the retained group, and append the peer's messages. The keyset cursor advances so a
+  // re-open pulls only newer rows. Live PUSH (no re-open needed) is the WebSocket path (5C). The in-flight
+  // guard prevents overlapping backfills for the same conversation.
+  useEffect(() => {
+    if (!selectedId || !isLive(selectedId) || !messagingDeps || !profile?.userId) return;
+    const convId = selectedId;
+    const group = liveGroups.current.get(convId);
+    if (!group || backfilling.current.has(convId)) return;
+    const selfUserId = profile.userId;
+    backfilling.current.add(convId);
+    void (async () => {
+      try {
+        const after = fetchCursors.current.get(convId);
+        const { messages, cursor } = await backfillConversation(
+          messagingDeps,
+          convId,
+          group,
+          selfUserId,
+          after,
+        );
+        if (cursor) fetchCursors.current.set(convId, cursor);
+        if (messages.length === 0) return;
+        setConversations((prev) =>
+          prev.map((c) => {
+            if (c.id !== convId) return c;
+            const existing = new Set(c.messages.map((m) => m.id));
+            const incoming: Message[] = messages
+              .filter((m) => !existing.has(m.serverId))
+              .map((m) => ({
+                id: m.serverId,
+                senderId: m.senderUserId,
+                content: m.plaintext,
+                timestamp: new Date(m.createdAt),
+                status: 'read',
+                encrypted: true,
+              }));
+            if (incoming.length === 0) return c;
+            const merged = [...c.messages, ...incoming].sort(
+              (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+            );
+            return { ...c, messages: merged };
+          }),
+        );
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('backfill failed', convId, err instanceof Error ? err.message : err);
+      } finally {
+        backfilling.current.delete(convId);
+      }
+    })();
+  }, [selectedId, liveIds, messagingDeps, profile]);
 
   const currentNumber = selectedId ? (numbersByConv[selectedId] ?? null) : null;
   // Verified only while the number marked for THIS conversation still matches the current key.
@@ -202,14 +311,57 @@ export default function ChatScreen() {
     );
   };
 
+  // Live send (Slice 5): encrypt → persist the advanced ratchet → POST the ciphertext (all under the
+  // conversation's single-writer lock, in lib/messaging). The local bubble echoes optimistically; the peer
+  // receives it on their next fetch (5C makes that a live push). Attachments aren't transmitted on live
+  // conversations yet (blob storage is a later feature) — only the text body is encrypted + sent.
+  const sendLive = (
+    convId: string,
+    group: MlsGroup,
+    deps: MessagingDeps,
+    content: string,
+  ): void => {
+    const id = `msg-${crypto.randomUUID()}`;
+    const message: Message = {
+      id,
+      senderId: currentUser.id,
+      content,
+      timestamp: new Date(),
+      status: 'sending',
+    };
+    setConversations((prev) =>
+      prev.map((c) => (c.id === convId ? { ...c, messages: [...c.messages, message] } : c)),
+    );
+    void (async () => {
+      try {
+        await sendLiveMessage(deps, convId, group, content);
+        patchMessage(convId, id, { status: 'sent', encrypted: true });
+      } catch (err) {
+        patchMessage(convId, id, { status: 'failed' });
+        // A GroupStateConflict means another tab advanced this conversation's durable state — this instance
+        // is stale and must rehydrate to send. id/metadata only in the log (never the plaintext).
+        // eslint-disable-next-line no-console
+        console.warn(
+          err instanceof GroupStateConflict
+            ? 'send: another tab is active for this conversation — reload to continue'
+            : 'send failed',
+          convId,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    })();
+  };
+
   const handleSend = (content: string, files?: File[]): void => {
     if (!selectedId) return;
     const convId = selectedId;
-    // Live conversations (started OR joined) have no send path yet (Slice 5). Never route them through the
-    // demo loopback (`getMlsSession`) — that would mark a message "encrypted/delivered/read" after a LOCAL
-    // round-trip even though nothing was sent to the peer, who could never receive it. The composer is
-    // disabled for live conversations; this is the defensive guard. Demo/seed conversations keep loopback.
-    if (isLive(convId)) return;
+    // Live conversations: encrypt + send for real over the network. Requires a non-empty text body (live
+    // attachments aren't wired yet) and the sealing deps; otherwise no-op rather than a false send signal.
+    if (isLive(convId)) {
+      const group = liveGroups.current.get(convId);
+      if (group && messagingDeps && content.trim()) sendLive(convId, group, messagingDeps, content);
+      return;
+    }
     const id = `msg-${crypto.randomUUID()}`; // CSPRNG id; the real client_message_id is minted the same way
     void (async () => {
       const attachments = files?.length ? await Promise.all(files.map(toAttachment)) : undefined;
@@ -224,9 +376,9 @@ export default function ChatScreen() {
       setConversations((prev) =>
         prev.map((c) => (c.id === convId ? { ...c, messages: [...c.messages, message] } : c)),
       );
-      // Run a REAL MLS encrypt→decrypt round-trip before marking the message sent — the recovered
-      // plaintext confirms the E2EE path and a lock shows. A failure marks the bubble failed, never
-      // sent (no false delivery signal); `encrypted` stays false so no lock shows.
+      // Demo/seed conversations: run a REAL MLS encrypt→decrypt round-trip before marking the message sent —
+      // the recovered plaintext confirms the E2EE path and a lock shows. A failure marks the bubble failed,
+      // never sent (no false delivery signal); `encrypted` stays false so no lock shows.
       try {
         const session = await getMlsSession(convId);
         await session.send(content || '(attachment)');
@@ -293,11 +445,7 @@ export default function ChatScreen() {
                 onVerify={isDirect && currentNumber ? () => setVerifyOpen(true) : undefined}
               />
               <MessageList conversation={selectedConversation} onImageClick={setPreviewImage} />
-              <ChatInput
-                onSend={handleSend}
-                disabled={isLive(selectedConversation.id)}
-                disabledNotice="This conversation is encrypted and ready — live messaging arrives in the next update."
-              />
+              <ChatInput onSend={handleSend} />
             </>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-center p-8">

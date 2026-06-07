@@ -196,3 +196,83 @@ export async function consumeWelcome(
   );
   if (!res.ok) throw new Error(`DELETE /welcomes/${welcomeId} → ${res.status}`);
 }
+
+/**
+ * The send payload — opaque base64 `ciphertext` plus non-secret routing metadata. `clientMessageId` is the
+ * per-(sender, conversation) idempotency key (a retry returns the same row, no double fan-out). The server
+ * stores and forwards this blind; it never sees plaintext or keys.
+ */
+export interface SendMessageBody {
+  clientMessageId: string;
+  ciphertext: string;
+  alg: string;
+  epoch: number;
+  attachmentObjectKey?: string;
+}
+
+/** The server's ack for a sent message. `deduplicated` = an idempotent retry matched an existing row. */
+export interface SentMessage {
+  messageId: string;
+  createdAt: string;
+  deduplicated: boolean;
+}
+
+/** Send one MLS-encrypted message to a conversation. Idempotent on `clientMessageId`. Throws on non-OK. */
+export async function sendMessage(
+  conversationId: string,
+  body: SendMessageBody,
+): Promise<SentMessage> {
+  const res = await apiFetch(`/conversations/${encodeURIComponent(conversationId)}/messages`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`POST /conversations/${conversationId}/messages → ${res.status}`);
+  return (await res.json()) as SentMessage;
+}
+
+/**
+ * A message as the server returns it — opaque base64 `ciphertext` + metadata, NEVER plaintext. The client
+ * decrypts `ciphertext` locally with the conversation's MLS state. `senderUserId` lets the UI attribute it;
+ * `id` is the server's stable id used to dedup across fetch + sync (+ WS in 5C).
+ */
+export interface FetchedMessage {
+  id: string;
+  senderUserId: string;
+  clientMessageId: string;
+  ciphertext: string;
+  alg: string;
+  epoch: number;
+  attachmentObjectKey: string | null;
+  createdAt: string;
+}
+
+/** One page of a conversation's history. `nextCursor` (a message id) feeds the next `after`; null ends it. */
+export interface MessagePage {
+  messages: FetchedMessage[];
+  nextCursor: string | null;
+}
+
+/**
+ * Fetch a page of a conversation's history, oldest-first (keyset on `(created_at, id)`). `after` is the
+ * previous page's `nextCursor` (a message id); omit for the first page. The client decrypts each ciphertext
+ * in order against the rehydrated MLS state. Throws on non-OK.
+ */
+export async function fetchMessages(
+  conversationId: string,
+  opts: { after?: string; limit?: number } = {},
+): Promise<MessagePage> {
+  const params = new URLSearchParams();
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  if (opts.after) params.set('after', opts.after);
+  const qs = params.toString();
+  const res = await apiFetch(
+    `/conversations/${encodeURIComponent(conversationId)}/messages${qs ? `?${qs}` : ''}`,
+  );
+  if (!res.ok) throw new Error(`GET /conversations/${conversationId}/messages → ${res.status}`);
+  return (await res.json()) as MessagePage;
+}
+
+// NOTE: cross-conversation catch-up (`GET /sync`) lands with the WebSocket client in 5C (reconnect → /sync →
+// dedup), where its caller lives. 5B back-fills per-conversation on open (fetchMessages), so /sync would be
+// unused dead code here — added in 5C with its consumer + tests.

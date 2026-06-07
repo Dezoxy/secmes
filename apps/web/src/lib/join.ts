@@ -1,22 +1,25 @@
-// Join on connect (Slice 4, recipient side). When the device is unlocked + provisioned, drain its pending
-// Welcomes: list → fetch (with a proof) → join with the matching retained private → surface the group.
-// We do NOT consume the Welcome or prune the private yet — the in-memory group state isn't persisted until
-// Slice 5, so the still-pending Welcome (+ its retained private) is the ONLY durable way to recover a
-// conversation after a reload. Consuming now would make a refresh-after-join lose the conversation
-// permanently. Slice 5 persists group state, after which consume + prune become safe. Stranded (permanently
-// unjoinable) Welcomes ARE cleared — they have no joinable state to lose. Per-Welcome failures are isolated.
+// Join on connect (Slice 4 recipient side; persistence closed in Slice 5 PR-5B). When the device is unlocked
+// + provisioned, drain its pending Welcomes: list → fetch (with a proof) → join with the matching retained
+// private → PERSIST the group state (5A) → surface → consume the Welcome → prune the spent private. The
+// persist runs BEFORE the consume: consuming the Welcome (and pruning the one-time private) before a durable
+// save was the Slice-4 data-loss risk (a refresh-after-join would lose the conversation forever), which is
+// why it was deferred until 5A's sealed group-state store existed. Now a joined group survives a reload via
+// persistence, so the Welcome + private can be released for forward secrecy. Stranded (permanently
+// unjoinable) Welcomes are still cleared. Per-Welcome failures are isolated so the drain continues.
 
 import {
   MlsEngine,
   NoMatchingPoolMember,
   deserializeInvite,
   deviceSignatureSeed,
+  serializeKeyPackage,
   type Conversation,
   type DeviceKeys,
 } from '@argus/crypto';
 import { signWelcomeConsume, signWelcomeFetch } from '@argus/crypto/device-proof';
 
 import { consumeWelcome, fetchWelcomeMaterial, listWelcomes } from './api';
+import type { DeviceKeystore } from './keystore';
 
 let enginePromise: Promise<MlsEngine> | null = null;
 function getEngine(): Promise<MlsEngine> {
@@ -45,6 +48,10 @@ export interface JoinDeps {
   pool: DeviceKeys[];
   /** This device's server id — for the list/fetch/consume(-clear) calls and the proofs. */
   deviceId: string;
+  /** The sealed keystore — persists each joined group's state (5A) before its Welcome/private are released. */
+  keystore: DeviceKeystore;
+  /** The session passphrase — seals the persisted group state + reseals the pruned pool. In memory only. */
+  passphrase: string;
   /** Surface a newly joined conversation to the UI. */
   onJoined: (joined: JoinedConversation) => void;
 }
@@ -53,21 +60,22 @@ export interface JoinDeps {
  * Join every pending Welcome for this device, draining ACROSS pages. `listWelcomes` returns one bounded
  * page (the server caps it at 100); we re-list until no FRESH (not-yet-tried) Welcome remains — a `seen`
  * set both terminates the loop and stops re-processing, and `MAX_DRAIN_PAGES` caps it. Per Welcome: fetch →
- * join with the matching retained private → surface. We do NOT consume or prune a JOINED Welcome (no durable
- * group-state store until Slice 5 — the pending Welcome is the only way to recover the conversation on
- * reload). A stranded `NoMatchingPoolMember` (permanently unjoinable) IS consumed to clear it from the
- * cursorless list, so a head of stranded Welcomes can't hide valid newer ones. A `workingPool` shrinks as
- * one-time members are spent — once a private has opened a Welcome it is NEVER reused within the drain
- * (forward secrecy), so a duplicate/replayed delivery sealed to the same package gets `NoMatchingPoolMember`
- * and is cleared. Per-Welcome failures are isolated so the drain continues.
+ * join with the matching retained private → PERSIST the group state → surface → consume the Welcome → prune
+ * the spent private. The persist precedes the consume/prune (consuming before a durable save was the
+ * Slice-4 data-loss risk). A stranded `NoMatchingPoolMember` (permanently unjoinable) is consumed to clear
+ * it from the cursorless list, so a head of stranded Welcomes can't hide valid newer ones. A `workingPool`
+ * shrinks as one-time members are spent — once a private has opened a Welcome it is NEVER reused within the
+ * drain (forward secrecy), so a duplicate/replayed delivery sealed to the same package gets
+ * `NoMatchingPoolMember` and is cleared. Per-Welcome failures are isolated so the drain continues.
  *
- * NOTE the bounded, cursorless list means joined-but-unconsumed Welcomes hold their slots, so a device in
- * more than one page of conversations joins only the oldest page per connect until Slice 5's persistence
- * lets consumption (and thus drop-off) happen — strictly better than the permanent loss that consuming
- * before persistence would cause.
+ * Now that joins consume their Welcome on success, the bounded cursorless list drains fully each connect
+ * (no joined-but-unconsumed Welcomes holding slots), so a device in many conversations joins them all rather
+ * than only the oldest page. Already-joined conversations come back via 5A persistence (rehydrate on unlock),
+ * not a re-join. A persist failure (e.g. a cross-tab `GroupStateConflict`) leaves the Welcome pending for the
+ * owning tab — never consumed without a durable save.
  */
 export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
-  const { device, pool, deviceId, onJoined } = deps;
+  const { device, pool, deviceId, keystore, passphrase, onJoined } = deps;
   const engine = await getEngine();
   const signKey = deviceSignatureSeed(device); // ts-mls' 48-byte PKCS8 key → the bare 32-byte Ed25519 seed
   const workingPool = [...pool]; // shrinks as members are spent — never reuse a one-time private in a drain
@@ -92,9 +100,53 @@ export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
         // it — it gets NoMatchingPoolMember and is cleared.
         const spent = workingPool.indexOf(joined.member);
         if (spent !== -1) workingPool.splice(spent, 1);
-        // Surface the joined group, but leave the Welcome PENDING (no consume/prune until Slice 5 persists
-        // the group state) so a reload can re-join from it — consuming now would lose the conversation.
-        onJoined({ conversationId: w.conversationId, conversation: joined.conversation });
+        // If this device ALREADY has durable state for this conversation, a prior join persisted it (and
+        // advanced it) but its cleanup failed, so the Welcome is being replayed. Re-saving this Welcome's
+        // FRESH post-join state would overwrite the advanced ratchet — a rollback the CAS can't catch
+        // (same instance, matching version, after rehydrate set the base). So SKIP the save + surface (the
+        // conversation is already recovered via rehydrate-on-unlock) and fall through to clear the redundant
+        // Welcome + prune the private.
+        if (!(await keystore.hasConversationState(device, w.conversationId))) {
+          // Persist FIRST (5A) so a reload recovers it; only then surface. If the save throws (e.g. a
+          // cross-tab GroupStateConflict — another tab joined + persisted this conversation), skip
+          // consume/prune and leave the Welcome to the owner.
+          await keystore.saveConversationState(
+            device,
+            w.conversationId,
+            joined.conversation,
+            passphrase,
+          );
+          onJoined({ conversationId: w.conversationId, conversation: joined.conversation });
+        }
+        // Best-effort cleanup AFTER the durable save. Consume the Welcome (forward secrecy — the sealed join
+        // material is no longer needed) then prune the spent one-time private from the sealed pool so it can
+        // never reopen a (replayed) Welcome. Either failing is non-fatal: the persisted group already
+        // recovers the conversation; a lingering Welcome/private is bounded + self-healing.
+        try {
+          const consumeProof = toBase64Url(signWelcomeConsume(signKey, deviceId, w.id));
+          await consumeWelcome(w.id, deviceId, consumeProof);
+        } catch (consumeErr) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            'join: persisted but could not consume welcome',
+            w.id,
+            consumeErr instanceof Error ? consumeErr.message : consumeErr,
+          );
+        }
+        try {
+          await keystore.removePoolMember(
+            device,
+            passphrase,
+            serializeKeyPackage(joined.member.publicPackage),
+          );
+        } catch (pruneErr) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            'join: persisted but could not prune pool member',
+            w.id,
+            pruneErr instanceof Error ? pruneErr.message : pruneErr,
+          );
+        }
       } catch (err) {
         if (err instanceof NoMatchingPoolMember) {
           // A stranded Welcome — sealed to a private this device discarded (reset/recovery) or to a

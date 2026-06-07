@@ -39,6 +39,12 @@ interface DeviceState {
   /** This device's server id (from provisioning) — needed to list/fetch/consume Welcomes (Slice 4). */
   deviceId: string | null;
   keystore: DeviceKeystore | null;
+  /**
+   * The session passphrase, retained IN MEMORY only — it seals each advanced MLS group state on send/receive
+   * (Slice 5). Never persisted, logged, or transmitted. It is no more exposed than the already-unsealed
+   * device keys in `device`; a per-unlock derived session key (to avoid per-message Argon2) is the follow-up.
+   */
+  passphrase: string | null;
   status: DeviceStatus;
   error: string | null;
   /** Unlock (or create on first run) the device, then provision + publish its KeyPackage pool. */
@@ -65,6 +71,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
   const [device, setDevice] = useState<DeviceKeys | null>(null);
   const [pool, setPool] = useState<DeviceKeys[] | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
+  const [passphrase, setPassphrase] = useState<string | null>(null);
   // Demo mode has no real device — render the chat (seed-driven) without a gate.
   const [status, setStatus] = useState<DeviceStatus>(configured ? 'loading' : 'ready');
   const [error, setError] = useState<string | null>(null);
@@ -118,6 +125,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         setDevice(dev);
         setPool(provisioned);
         setDeviceId(result.deviceId);
+        setPassphrase(passphrase); // retained in memory to seal advanced group state on send/receive (Slice 5)
         setStatus('ready');
       } catch (err) {
         // openBackup fails closed on a wrong passphrase (GCM auth) — surface that distinctly.
@@ -147,6 +155,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         setDevice(dev);
         setPool(provisioned);
         setDeviceId(result.deviceId);
+        setPassphrase(passphrase); // see unlock — sealing key for advanced group state (Slice 5)
         setStatus('ready');
       } catch (err) {
         // restore fails closed on a wrong passphrase / file / identity mismatch — keep the existing device.
@@ -163,6 +172,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
   const resetForNewAccount = useCallback(async (): Promise<void> => {
     if (!keystore) return;
     await keystore.clearDevice(); // wipes the other account's device + pool from this browser's single slot
+    setPassphrase(null);
     setError(null);
     setStatus('needs-create');
   }, [keystore]);
@@ -172,6 +182,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
     pool,
     deviceId,
     keystore,
+    passphrase,
     status,
     error,
     unlock,

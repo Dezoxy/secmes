@@ -1,7 +1,9 @@
-// Live 1:1 conversations (Slice 3, initiator side). Replaces the loopback `mls.ts` demo for real peers:
-// claim a peer's KeyPackage from the directory → verify the safety number out-of-band (#20) → MLS
-// `addMember` → create the conversation + deliver the sealed Welcome. The recipient's join is Slice 4;
-// live send/fetch + group-state persistence are Slice 5 (sessions are in-memory here).
+// Live 1:1 conversations (Slice 3, initiator side; persistence wired in Slice 5). Replaces the loopback
+// `mls.ts` demo for real peers: claim a peer's KeyPackage from the directory → verify the safety number
+// out-of-band (#20) → MLS `addMember` → create the conversation → deliver the sealed Welcome → PERSIST the
+// group state. The persist runs only AFTER delivery succeeds, so a reload before the first send recovers the
+// conversation, yet a delivery failure leaves no durable phantom. Recipient join is Slice 4; live send/fetch
+// is Slice 5 (lib/messaging).
 
 import {
   MlsEngine,
@@ -14,6 +16,7 @@ import {
 } from '@argus/crypto';
 
 import { claimKeyPackage, createConversation, deliverWelcome } from './api';
+import type { DeviceKeystore } from './keystore';
 
 /** The peer device a conversation is being started with — ids + the signature key (no private material). */
 export interface PeerRef {
@@ -57,6 +60,10 @@ export class ConversationManager {
     private readonly device: DeviceKeys,
     /** The signed-in user's id — used to create a SOLO conversation (see `confirm`). */
     private readonly selfUserId: string,
+    /** The sealed keystore — persists the new group state before the peer can join (see `confirm`). */
+    private readonly keystore: DeviceKeystore,
+    /** The session passphrase — seals the persisted group state. In memory only; never logged/transmitted. */
+    private readonly passphrase: string,
   ) {}
 
   private engine(): Promise<MlsEngine> {
@@ -102,6 +109,17 @@ export class ConversationManager {
       recipientDeviceId: pending.peer.deviceId,
       ...serializeInvite(invite),
     });
+    // Persist the group state only AFTER delivery SUCCEEDS — the durable state must exist before `confirm()`
+    // returns (so a reload before the first send recovers it), but NOT on a delivery failure: persisting
+    // first would leave a phantom conversation (rehydrated on next unlock) whose peer was never added
+    // server-side, so its sends would go nowhere. `deliverWelcome` doesn't touch the local MLS state
+    // (`addMember` already advanced it), so this persists the same post-add state, just gated on delivery.
+    await this.keystore.saveConversationState(
+      this.device,
+      conversationId,
+      conversation,
+      this.passphrase,
+    );
     const session: ConversationSession = {
       conversationId,
       conversation,
@@ -112,7 +130,8 @@ export class ConversationManager {
     return session;
   }
 
-  /** The live session for a conversation, if one was started this page load (in-memory; Slice 5 persists). */
+  /** The live session for a conversation started this page load (in-memory cache; the durable copy is sealed
+   * on `confirm` and reloaded on unlock via the keystore). */
   get(conversationId: string): ConversationSession | undefined {
     return this.sessions.get(conversationId);
   }
