@@ -31,22 +31,24 @@ export class AttachmentsService {
    * presigned URL — it never transits the API; the content key rides E2E in the MLS message, never here.
    */
   async createUploadGrant(auth: VerifiedAuth, body: CreateUploadGrant): Promise<UploadGrant> {
-    const objectKey = await withTenant(auth.tenantId, async (tx) => {
+    return withTenant(auth.tenantId, async (tx) => {
       const user = await requireUser(tx, auth.sub);
       await requireMembership(tx, body.conversationId, user);
       // Server-minted, tenant-prefixed (the table CHECK requires `object_key LIKE tenant_id || '/%'`).
-      const key = `${auth.tenantId}/${randomUUID()}`;
+      const objectKey = `${auth.tenantId}/${randomUUID()}`;
       await tx.insert(schema.attachments).values({
         tenantId: auth.tenantId,
         conversationId: body.conversationId,
-        objectKey: key,
+        objectKey,
         byteSize: body.byteSize,
         uploadedBy: user, // VERIFIED caller — never client input
       });
-      return key;
+      // Presign INSIDE the tx: if it throws (store unconfigured / temporarily broken) the row insert is
+      // rolled back, so a failed grant leaves NO orphan metadata for an object that can't be uploaded
+      // (Codex P2). presignPut makes no DB call — it only signs a SAS (any key fetch hits Azure, not PG).
+      const uploadUrl = await this.blobStore.presignPut(objectKey);
+      return { objectKey, uploadUrl };
     });
-    const uploadUrl = await this.blobStore.presignPut(objectKey);
-    return { objectKey, uploadUrl };
   }
 
   /**

@@ -66,6 +66,18 @@ describe.skipIf(!DB_URL)('AttachmentsService — membership-gated grants', () =>
     expect(row!.tenant_id).toBe(tenantA);
   });
 
+  it('upload grant: a failed presign rolls back the row (atomic — no orphan metadata)', async () => {
+    const [before] =
+      await sql`select count(*)::int as n from attachments where tenant_id = ${tenantA}`;
+    blob.presignPut.mockRejectedValueOnce(new Error('blob store is not configured'));
+    await expect(
+      svc.createUploadGrant(aliceAuth, { conversationId: convId, byteSize: 16 }),
+    ).rejects.toThrow('blob store is not configured');
+    const [after] =
+      await sql`select count(*)::int as n from attachments where tenant_id = ${tenantA}`;
+    expect(after!.n).toBe(before!.n); // the row insert was rolled back — no orphan
+  });
+
   it('upload grant: a non-member is 404 (same as non-existent) and writes nothing', async () => {
     await expect(
       svc.createUploadGrant(daveAuth, { conversationId: convId, byteSize: 10 }),
