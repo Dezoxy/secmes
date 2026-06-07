@@ -24,6 +24,9 @@ import {
   type RatchetTree,
   type Welcome,
 } from 'ts-mls';
+// `makeKeyPackageRef` isn't on the ts-mls barrel (types only) — reach it via the package subpath, the same
+// pattern as `@argus/crypto/device-proof`. Used to match a Welcome to the retained private it was sealed to.
+import { makeKeyPackageRef } from 'ts-mls/keyPackage.js';
 
 export {
   sealBackup,
@@ -183,6 +186,20 @@ export interface ConversationInvite {
   ratchetTree: RatchetTree;
 }
 
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/** Thrown by {@link MlsEngine.joinConversationFromPool} when no retained KeyPackage matches the Welcome. */
+export class NoMatchingPoolMember extends Error {
+  constructor() {
+    super('no retained KeyPackage matches this Welcome');
+    this.name = 'NoMatchingPoolMember';
+  }
+}
+
 /** Stateless holder of the ciphersuite primitives. Create once, reuse. */
 export class MlsEngine {
   private constructor(private readonly cs: CiphersuiteImpl) {}
@@ -275,6 +292,39 @@ export class MlsEngine {
       invite.ratchetTree,
     );
     return new Conversation(this.cs, state);
+  }
+
+  /**
+   * The MLS `key_package_ref` for a device's KeyPackage — the value a Welcome carries in
+   * `secrets[].newMember` to address the recipient. Used to match a Welcome to the retained private it was
+   * sealed to. Derived from PUBLIC material only.
+   */
+  async keyPackageRef(keys: DeviceKeys): Promise<Uint8Array> {
+    return makeKeyPackageRef(keys.publicPackage, this.cs.hash);
+  }
+
+  /**
+   * Join from a Welcome by selecting the ONE retained pool member it was HPKE-sealed to. A Welcome targets
+   * a single one-time KeyPackage; `joinConversation` needs exactly that member's private. Match each
+   * retained member's `key_package_ref` against the Welcome's `secrets[].newMember` and join with the hit.
+   * Returns the joined conversation AND the matched member so the caller can prune it — a consumed one-time
+   * private must never be reused (forward secrecy). Throws {@link NoMatchingPoolMember} if none fits (e.g.
+   * the Welcome targets a KeyPackage whose private was already discarded — a stranded package), so the
+   * caller can skip that Welcome without aborting the rest. Comparing one's OWN public refs, so plain
+   * byte-equality is fine (no secret comparison → no timing concern).
+   */
+  async joinConversationFromPool(
+    pool: DeviceKeys[],
+    invite: ConversationInvite,
+  ): Promise<{ conversation: Conversation; member: DeviceKeys }> {
+    const wanted = invite.welcome.secrets.map((s) => s.newMember);
+    for (const member of pool) {
+      const ref = await this.keyPackageRef(member);
+      if (wanted.some((w) => bytesEqual(w, ref))) {
+        return { conversation: await this.joinConversation(member, invite), member };
+      }
+    }
+    throw new NoMatchingPoolMember();
   }
 }
 

@@ -255,6 +255,76 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     expect(stored).toEqual(sa);
   });
 
+  it('removePoolMember drops exactly the consumed member and persists the removal', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const pool = await ks.ensurePool(device, 'pw', 3);
+    const removed = serializeKeyPackage(pool[0]!.publicPackage);
+
+    await ks.removePoolMember(device, 'pw', removed);
+
+    const reopened = await DeviceKeystore.open(engine, FAST);
+    const dev2 = await reopened.loadDevice('alice', 'pw');
+    if (!dev2) throw new Error('expected a persisted device');
+    const left = (await reopened.ensurePool(dev2, 'pw', 1)).map((m) =>
+      serializeKeyPackage(m.publicPackage),
+    );
+    expect(left).toHaveLength(2); // 3 − 1, and ensurePool(target 1) doesn't re-mint
+    expect(left).not.toContain(removed);
+  });
+
+  it('removePoolMember is idempotent: removing an absent or already-removed member is a no-op', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const before = (await ks.ensurePool(device, 'pw', 2)).map((m) =>
+      serializeKeyPackage(m.publicPackage),
+    );
+
+    await ks.removePoolMember(device, 'pw', 'not-a-member-keypackage'); // absent → no-op
+    await ks.removePoolMember(device, 'pw', before[0]!); // remove once
+    await ks.removePoolMember(device, 'pw', before[0]!); // removing again → no-op
+
+    const after = (await ks.ensurePool(device, 'pw', 1)).map((m) =>
+      serializeKeyPackage(m.publicPackage),
+    );
+    expect(after).toEqual([before[1]]); // exactly the one survivor
+  });
+
+  it('removePoolMember is final: a consumed private is never resurrected by a later replenish (FS)', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const removed = serializeKeyPackage((await ks.ensurePool(device, 'pw', 2))[0]!.publicPackage);
+
+    await ks.removePoolMember(device, 'pw', removed);
+    // Replenish back to target: the gap is filled by a FRESH mint, never the dropped member.
+    const refilled = (await ks.ensurePool(device, 'pw', 2)).map((m) =>
+      serializeKeyPackage(m.publicPackage),
+    );
+    expect(refilled).toHaveLength(2);
+    expect(refilled).not.toContain(removed); // the consumed one-time key never comes back
+  });
+
+  it('removePoolMember is race-safe against a concurrent replenish (the removed member stays gone)', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const removed = serializeKeyPackage((await ks.ensurePool(device, 'pw', 3))[0]!.publicPackage);
+
+    // A prune racing a replenish must never let the consumed member survive (CAS + re-apply on lost race).
+    await Promise.all([ks.removePoolMember(device, 'pw', removed), ks.ensurePool(device, 'pw', 3)]);
+
+    const reopened = await DeviceKeystore.open(engine, FAST);
+    const dev2 = await reopened.loadDevice('alice', 'pw');
+    if (!dev2) throw new Error('expected a persisted device');
+    const final = (await reopened.ensurePool(dev2, 'pw', 1)).map((m) =>
+      serializeKeyPackage(m.publicPackage),
+    );
+    expect(final).not.toContain(removed);
+  });
+
   it('clearDevice also clears the KeyPackage pool (fresh mints afterwards)', async () => {
     const engine = await MlsEngine.create();
     const ks = await DeviceKeystore.open(engine, FAST);
