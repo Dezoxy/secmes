@@ -59,9 +59,9 @@ export function userManager(): UserManager {
   return manager;
 }
 
-/** Begin the OIDC redirect to Zitadel. */
+/** Begin the OIDC redirect to Zitadel's hosted login. */
 export async function login(): Promise<void> {
-  await userManager().signinRedirect();
+  await userManager().signinRedirect({ prompt: 'login' });
 }
 
 /** Complete the redirect on the callback route: exchange the code for tokens (PKCE). */

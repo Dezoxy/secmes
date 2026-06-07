@@ -1,7 +1,28 @@
-import { Phone, Video, MoreVertical, ArrowLeft, Users, Shield, ShieldCheck } from 'lucide-react';
-import type { Conversation } from './seed';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  ArrowLeft,
+  Bell,
+  BellOff,
+  FileText,
+  Image as ImageIcon,
+  Info,
+  LockKeyhole,
+  MoreVertical,
+  Phone,
+  Search,
+  Shield,
+  ShieldCheck,
+  Trash2,
+  UserMinus,
+  Users,
+  Video,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
+import type { Attachment, Conversation, Message } from './seed';
 import {
   currentUser,
+  formatMessageTime,
   getConversationDisplayName,
   getConversationAvatar,
   getOtherParticipant,
@@ -15,11 +36,80 @@ interface ChatHeaderProps {
   onVerify?: () => void;
 }
 
+type HeaderPanel = 'info' | 'members' | 'search' | 'media' | 'notifications' | 'security';
+
+const HEADER_BUTTON =
+  'rounded-xl p-2.5 text-white/40 transition-all duration-300 hover:bg-[#1a1a26] hover:text-white/70';
+
+function MenuItem({
+  icon: Icon,
+  label,
+  value,
+  danger = false,
+  disabled = false,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value?: string;
+  danger?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
+        danger
+          ? 'text-red-300 hover:bg-red-500/10 hover:text-red-200'
+          : 'text-white/65 hover:bg-white/[0.05] hover:text-white'
+      } disabled:cursor-not-allowed disabled:text-white/25 disabled:hover:bg-transparent`}
+      role="menuitem"
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {value && <span className="shrink-0 text-xs text-white/35">{value}</span>}
+    </button>
+  );
+}
+
+function PanelRow({ title, value }: { title: string; value: ReactNode }) {
+  return (
+    <div className="rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3">
+      <p className="text-xs font-medium uppercase tracking-[0.08em] text-white/35">{title}</p>
+      <div className="mt-1 text-sm text-white/75">{value}</div>
+    </div>
+  );
+}
+
+function collectAttachments(messages: Message[]): Array<Attachment & { senderName: string }> {
+  return messages.flatMap((message) => {
+    const sender = message.senderId === currentUser.id ? currentUser : undefined;
+    return (message.attachments ?? []).map((attachment) => ({
+      ...attachment,
+      senderName: sender?.name ?? 'Participant',
+    }));
+  });
+}
+
 export function ChatHeader({ conversation, onBack, verified, onVerify }: ChatHeaderProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [activePanel, setActivePanel] = useState<HeaderPanel | null>(null);
+  const [muted, setMuted] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const menuRef = useRef<HTMLDivElement>(null);
   const displayName = getConversationDisplayName(conversation, currentUser.id);
   const avatar = getConversationAvatar(conversation, currentUser.id);
   const otherUser = getOtherParticipant(conversation, currentUser.id);
   const isOnline = conversation.type === 'direct' && otherUser?.isOnline;
+  const attachments = useMemo(() => collectAttachments(conversation.messages), [conversation]);
+  const searchResults = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return conversation.messages.slice(-5);
+    return conversation.messages.filter((message) => message.content.toLowerCase().includes(query));
+  }, [conversation.messages, searchQuery]);
 
   const statusText =
     conversation.type === 'group'
@@ -28,36 +118,76 @@ export function ChatHeader({ conversation, onBack, verified, onVerify }: ChatHea
         ? 'Online'
         : 'Offline';
 
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMenuOpen(false);
+        setActivePanel(null);
+      }
+    };
+
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [menuOpen]);
+
+  const openPanel = (panel: HeaderPanel) => {
+    setActivePanel(panel);
+    setMenuOpen(false);
+  };
+
+  const panelTitle =
+    activePanel === 'info'
+      ? 'Conversation info'
+      : activePanel === 'members'
+        ? 'Members'
+        : activePanel === 'search'
+          ? 'Search in conversation'
+          : activePanel === 'media'
+            ? 'Media, files, links'
+            : activePanel === 'notifications'
+              ? 'Notifications'
+              : 'Security details';
+
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-[#0f0f16]">
+    <div className="flex items-center justify-between border-b border-white/5 bg-[#0f0f16] px-4 py-3">
       <div className="flex items-center gap-3">
         {onBack && (
           <button
             type="button"
             onClick={onBack}
-            className="lg:hidden p-2 -ml-2 rounded-xl text-white/60 hover:text-white hover:bg-[#1a1a26] transition-all duration-300"
+            className="-ml-2 rounded-xl p-2 text-white/60 transition-all duration-300 hover:bg-[#1a1a26] hover:text-white lg:hidden"
+            aria-label="Back to conversations"
           >
-            <ArrowLeft className="w-5 h-5" />
+            <ArrowLeft className="h-5 w-5" />
           </button>
         )}
 
         <div className="relative">
-          <div className="w-10 h-10 rounded-full overflow-hidden ring-2 ring-white/5">
-            <img src={avatar} alt={displayName} className="object-cover w-full h-full" />
+          <div className="h-10 w-10 overflow-hidden rounded-full ring-2 ring-white/5">
+            <img src={avatar} alt={displayName} className="h-full w-full object-cover" />
           </div>
           {isOnline && (
-            <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full ring-2 ring-[#0f0f16]" />
+            <div className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-green-500 ring-2 ring-[#0f0f16]" />
           )}
           {conversation.type === 'group' && (
-            <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-purple-500 rounded-full flex items-center justify-center ring-2 ring-[#0f0f16]">
-              <Users className="w-2.5 h-2.5 text-white" />
+            <div className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-purple-500 ring-2 ring-[#0f0f16]">
+              <Users className="h-2.5 w-2.5 text-white" />
             </div>
           )}
         </div>
 
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            <h2 className="font-semibold text-white">{displayName}</h2>
+            <h2 className="truncate font-semibold text-white">{displayName}</h2>
             {onVerify && (
               <button
                 type="button"
@@ -81,25 +211,266 @@ export function ChatHeader({ conversation, onBack, verified, onVerify }: ChatHea
       </div>
 
       <div className="flex items-center gap-1">
-        <button
-          type="button"
-          className="p-2.5 rounded-xl text-white/40 hover:text-white/70 hover:bg-[#1a1a26] transition-all duration-300"
-        >
-          <Phone className="w-5 h-5" />
+        <button type="button" className={HEADER_BUTTON} aria-label="Start voice call">
+          <Phone className="h-5 w-5" />
         </button>
-        <button
-          type="button"
-          className="p-2.5 rounded-xl text-white/40 hover:text-white/70 hover:bg-[#1a1a26] transition-all duration-300"
-        >
-          <Video className="w-5 h-5" />
+        <button type="button" className={HEADER_BUTTON} aria-label="Start video call">
+          <Video className="h-5 w-5" />
         </button>
-        <button
-          type="button"
-          className="p-2.5 rounded-xl text-white/40 hover:text-white/70 hover:bg-[#1a1a26] transition-all duration-300"
-        >
-          <MoreVertical className="w-5 h-5" />
-        </button>
+        <div ref={menuRef} className="relative">
+          <button
+            type="button"
+            onClick={() => setMenuOpen((open) => !open)}
+            className={`${HEADER_BUTTON} ${menuOpen ? 'bg-[#1a1a26] text-white/80' : ''}`}
+            aria-label="Open conversation actions"
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+          >
+            <MoreVertical className="h-5 w-5" />
+          </button>
+
+          <div
+            className={`absolute right-0 top-full z-30 mt-3 w-72 origin-top-right rounded-2xl border border-white/10 bg-[#151520] p-2 shadow-2xl shadow-black/50 transition-all duration-200 ease-out motion-reduce:transition-none ${
+              menuOpen
+                ? 'translate-y-0 scale-100 opacity-100'
+                : 'pointer-events-none -translate-y-2 scale-95 opacity-0'
+            }`}
+            role="menu"
+            aria-label="Conversation actions"
+          >
+            <MenuItem icon={Info} label="Conversation info" onClick={() => openPanel('info')} />
+            <MenuItem
+              icon={Users}
+              label={conversation.type === 'group' ? 'Members' : 'Contact details'}
+              value={`${conversation.participants.length}`}
+              onClick={() => openPanel('members')}
+            />
+            <MenuItem
+              icon={Search}
+              label="Search in conversation"
+              onClick={() => openPanel('search')}
+            />
+            <MenuItem
+              icon={ImageIcon}
+              label="Media, files, links"
+              value={`${attachments.length}`}
+              onClick={() => openPanel('media')}
+            />
+            <MenuItem
+              icon={muted ? Bell : BellOff}
+              label={muted ? 'Unmute notifications' : 'Mute notifications'}
+              onClick={() => {
+                setMuted((value) => !value);
+                setMenuOpen(false);
+              }}
+            />
+            <MenuItem
+              icon={LockKeyhole}
+              label="Security details"
+              onClick={() => openPanel('security')}
+            />
+            {onVerify && (
+              <MenuItem
+                icon={verified ? ShieldCheck : Shield}
+                label={verified ? 'Review safety number' : 'Verify safety number'}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onVerify();
+                }}
+              />
+            )}
+            <div className="my-1 h-px bg-white/5" />
+            <MenuItem icon={Trash2} label="Clear local cache" value="Later" disabled />
+            <MenuItem
+              icon={UserMinus}
+              label={conversation.type === 'group' ? 'Leave group' : 'Block user'}
+              value="Later"
+              danger
+              disabled
+            />
+          </div>
+        </div>
       </div>
+
+      {activePanel && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label={panelTitle}
+        >
+          <div className="max-h-[86vh] w-full overflow-hidden rounded-t-2xl border border-white/5 bg-[#12121a] shadow-2xl shadow-black/50 sm:max-w-lg sm:rounded-2xl">
+            <div className="flex items-center justify-between border-b border-white/5 px-5 py-4">
+              <div>
+                <h3 className="text-base font-semibold text-white">{panelTitle}</h3>
+                <p className="text-xs text-white/40">{displayName}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePanel(null)}
+                className="rounded-lg p-2 text-white/45 transition-colors hover:bg-white/5 hover:text-white"
+                aria-label="Close panel"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="max-h-[70vh] overflow-y-auto p-5">
+              {activePanel === 'info' && (
+                <div className="space-y-3">
+                  <PanelRow
+                    title="Type"
+                    value={conversation.type === 'group' ? 'Group' : 'Direct'}
+                  />
+                  <PanelRow title="Status" value={statusText} />
+                  <PanelRow title="Messages" value={conversation.messages.length} />
+                  <PanelRow title="Unread" value={conversation.unreadCount} />
+                </div>
+              )}
+
+              {activePanel === 'members' && (
+                <div className="space-y-2">
+                  {conversation.participants.map((participant) => (
+                    <div
+                      key={participant.id}
+                      className="flex items-center gap-3 rounded-xl border border-white/5 bg-white/[0.03] p-3"
+                    >
+                      <img
+                        src={participant.avatar}
+                        alt={participant.name}
+                        className="h-9 w-9 rounded-full"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-white">
+                          {participant.name}
+                        </p>
+                        <p className="text-xs text-white/40">
+                          {participant.id === currentUser.id
+                            ? 'You'
+                            : participant.isOnline
+                              ? 'Online'
+                              : 'Offline'}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {activePanel === 'search' && (
+                <div className="space-y-3">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30" />
+                    <input
+                      value={searchQuery}
+                      onChange={(event) => setSearchQuery(event.target.value)}
+                      placeholder="Search messages"
+                      className="w-full rounded-xl border border-white/5 bg-[#1a1a26] py-2.5 pl-10 pr-4 text-sm text-white placeholder-white/30 transition-all focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    {searchResults.map((message) => (
+                      <div
+                        key={message.id}
+                        className="rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3"
+                      >
+                        <p className="line-clamp-2 text-sm text-white/75">{message.content}</p>
+                        <p className="mt-1 text-xs text-white/35">
+                          {formatMessageTime(message.timestamp)}
+                        </p>
+                      </div>
+                    ))}
+                    {searchResults.length === 0 && (
+                      <p className="rounded-xl border border-dashed border-white/10 p-4 text-sm text-white/40">
+                        No local message matches.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activePanel === 'media' && (
+                <div className="space-y-3">
+                  {attachments.length > 0 ? (
+                    attachments.map((attachment) => (
+                      <div
+                        key={attachment.id}
+                        className="flex items-center gap-3 rounded-xl border border-white/5 bg-white/[0.03] p-3"
+                      >
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-500/15">
+                          {attachment.type === 'image' ? (
+                            <ImageIcon className="h-5 w-5 text-purple-300" />
+                          ) : (
+                            <FileText className="h-5 w-5 text-purple-300" />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-white">
+                            {attachment.name}
+                          </p>
+                          <p className="text-xs text-white/40">
+                            {attachment.type === 'image' ? 'Image' : (attachment.size ?? 'File')}
+                          </p>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="rounded-xl border border-dashed border-white/10 p-4 text-sm text-white/40">
+                      No local media or files in this conversation.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {activePanel === 'notifications' && (
+                <div className="space-y-3">
+                  <PanelRow
+                    title="Notification state"
+                    value={muted ? 'Muted on this device' : 'Enabled on this device'}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setMuted((value) => !value)}
+                    className="w-full rounded-xl bg-purple-500 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-purple-400"
+                  >
+                    {muted ? 'Unmute notifications' : 'Mute notifications'}
+                  </button>
+                </div>
+              )}
+
+              {activePanel === 'security' && (
+                <div className="space-y-3">
+                  <PanelRow title="Encryption" value="End-to-end encrypted with MLS" />
+                  <PanelRow
+                    title="Server access"
+                    value="Ciphertext only; server stays crypto-blind"
+                  />
+                  <PanelRow
+                    title="Verification"
+                    value={verified ? 'Safety number verified' : 'Safety number not verified yet'}
+                  />
+                  <PanelRow
+                    title="Local cache"
+                    value="Messages shown here are decrypted only in this browser"
+                  />
+                  {onVerify && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActivePanel(null);
+                        onVerify();
+                      }}
+                      className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-sm font-medium text-white/70 transition-colors hover:border-purple-500/40 hover:text-white"
+                    >
+                      {verified ? 'Review safety number' : 'Verify safety number'}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
