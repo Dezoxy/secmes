@@ -61,7 +61,7 @@ describe('joinPendingConversations', () => {
     expect(await joined[0]!.conversation.decrypt(await aliceConv.encrypt('hi'))).toBe('hi');
   });
 
-  it('skips a stranded welcome (no matching pool key) and continues the drain', async () => {
+  it('clears a stranded welcome (consumes it without joining) and continues the drain', async () => {
     const engine = await MlsEngine.create();
     const alice = await engine.generateDeviceKeys('alice');
     const bob = await engine.generateDeviceKeys('bob');
@@ -94,11 +94,13 @@ describe('joinPendingConversations', () => {
       onJoined: (j) => joined.push(j),
     });
 
-    // The stranded welcome is skipped (never consumed/pruned/surfaced); the good one is fully processed.
+    // The stranded welcome is CLEARED (consumed without joining) so it can't block the queue; the good one
+    // is joined+consumed+pruned.
     expect(joined.map((j) => j.conversationId)).toEqual(['c-good']);
-    expect(consume).toHaveBeenCalledTimes(1);
+    expect(consume).toHaveBeenCalledTimes(2);
+    expect(consume).toHaveBeenCalledWith('w-stranded', 'dev', expect.any(String));
     expect(consume).toHaveBeenCalledWith('w-good', 'dev', expect.any(String));
-    expect(prune).toHaveBeenCalledTimes(1);
+    expect(prune).toHaveBeenCalledTimes(1); // only the joined welcome prunes its member
     expect(prune).toHaveBeenCalledWith(serializeKeyPackage(bob.publicPackage));
   });
 
@@ -206,11 +208,63 @@ describe('joinPendingConversations', () => {
       onJoined: (j) => joined.push(j),
     });
 
-    // Only the FIRST is joined+consumed+pruned; the second can't reuse the now-spent private → skipped.
+    // Only the FIRST joins; the second can't reuse the now-spent private (NoMatchingPoolMember) → it is
+    // cleared (consumed without joining), never joined or pruned.
     expect(joined.map((j) => j.conversationId)).toEqual(['c1']);
-    expect(consume).toHaveBeenCalledTimes(1);
+    expect(consume).toHaveBeenCalledTimes(2);
     expect(consume).toHaveBeenCalledWith('w1', 'dev', expect.any(String));
-    expect(prune).toHaveBeenCalledTimes(1);
+    expect(consume).toHaveBeenCalledWith('w2', 'dev', expect.any(String));
+    expect(prune).toHaveBeenCalledTimes(1); // only w1 joined → only its member is pruned
     expect(prune).toHaveBeenCalledWith(serializeKeyPackage(target.publicPackage));
+  });
+
+  it('clears a stranded welcome blocking the cursorless page so a valid welcome behind it is reached', async () => {
+    const engine = await MlsEngine.create();
+    const alice = await engine.generateDeviceKeys('alice');
+    const bob = await engine.generateDeviceKeys('bob');
+    const stranded = await engine.mintKeyPackage(bob); // NOT retained in bob's pool
+    const pool = [bob]; // only `bob` is joinable
+
+    const strandedMat = serializeInvite(
+      await (await engine.createConversation('gs', alice)).addMember(stranded.publicPackage),
+    );
+    const goodMat = serializeInvite(
+      await (await engine.createConversation('gg', alice)).addMember(bob.publicPackage),
+    );
+
+    // Model the server's oldest-first, CURSORLESS list with page size 1; consume removes from the queue.
+    const queue = new Map([
+      ['w-stranded', 'c-stranded'],
+      ['w-good', 'c-good'],
+    ]);
+    list.mockImplementation(() =>
+      Promise.resolve(
+        [...queue.entries()]
+          .slice(0, 1)
+          .map(([id, conversationId]) => ({ id, conversationId, createdAt: 't' })),
+      ),
+    );
+    fetchMaterial.mockImplementation((id) =>
+      Promise.resolve(id === 'w-stranded' ? strandedMat : goodMat),
+    );
+    consume.mockImplementation((id) => {
+      queue.delete(id);
+      return Promise.resolve();
+    });
+    const prune = vi.fn().mockResolvedValue(undefined);
+    const joined: JoinedConversation[] = [];
+
+    await joinPendingConversations({
+      device: bob,
+      pool,
+      deviceId: 'dev',
+      prunePoolMember: prune,
+      onJoined: (j) => joined.push(j),
+    });
+
+    // w-stranded sat at the head and (without a cursor) would hide w-good behind it; clearing it lets the
+    // drain reach + join w-good. Both leave the queue.
+    expect(joined.map((j) => j.conversationId)).toEqual(['c-good']);
+    expect(queue.size).toBe(0);
   });
 });

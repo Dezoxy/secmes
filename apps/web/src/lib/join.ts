@@ -54,11 +54,12 @@ export interface JoinDeps {
  * page (the server caps it at 100); consumed Welcomes drop off, so we re-list until no FRESH (not-yet-tried)
  * Welcome remains — a `seen` set both terminates the loop and stops re-processing already-skipped ones, and
  * `MAX_DRAIN_PAGES` caps it. Per Welcome: join → consume → surface → prune. consume runs only after a
- * successful join (a stranded `NoMatchingPoolMember` is skipped for an idempotent retry); the conversation
- * is surfaced only after a successful consume; the FS prune runs LAST and best-effort. A `workingPool`
+ * successful join; the conversation is surfaced only after a successful consume; the FS prune runs LAST and
+ * best-effort. A stranded `NoMatchingPoolMember` (permanently unjoinable) is instead CONSUMED to clear it
+ * from the cursorless list, so a head of stranded Welcomes can't hide valid newer ones. A `workingPool`
  * shrinks as one-time members are spent — once a private has opened a Welcome it is NEVER reused within the
  * drain (forward secrecy), so a duplicate/replayed delivery sealed to the same package can't reuse it (it
- * gets `NoMatchingPoolMember` and is skipped). Per-Welcome failures are isolated so the drain continues.
+ * gets `NoMatchingPoolMember` and is cleared). Per-Welcome failures are isolated so the drain continues.
  */
 export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
   const { device, pool, deviceId, prunePoolMember, onJoined } = deps;
@@ -92,9 +93,24 @@ export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
         await consumeWelcome(w.id, deviceId, consumeProof);
         onJoined({ conversationId: w.conversationId, conversation: joined.conversation });
       } catch (err) {
-        // A stranded Welcome (its sealed-to private was discarded) matches no member — expected, skip
-        // quietly. Anything else: warn (non-secret — id + message only, never key bytes) and continue.
-        if (!(err instanceof NoMatchingPoolMember)) {
+        if (err instanceof NoMatchingPoolMember) {
+          // A stranded Welcome — sealed to a private this device discarded (reset/recovery) or to a
+          // one-time package already spent earlier in this drain — is permanently unjoinable. CONSUME it to
+          // drop it from the bounded, CURSORLESS list; otherwise a head of stranded Welcomes would hide
+          // valid newer ones behind it. The consume proof needs only the device signature key, not a join.
+          try {
+            const clearProof = toBase64Url(signWelcomeConsume(signKey, deviceId, w.id));
+            await consumeWelcome(w.id, deviceId, clearProof);
+          } catch (clearErr) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              'join: could not clear stranded welcome',
+              w.id,
+              clearErr instanceof Error ? clearErr.message : clearErr,
+            );
+          }
+        } else {
+          // A transient/unexpected error (e.g. fetch failed) — leave the Welcome pending for a retry.
           // Constant format string (the id is a separate arg) — never interpolate untrusted data into a
           // console format string (semgrep unsafe-formatstring).
           // eslint-disable-next-line no-console

@@ -92,8 +92,12 @@ plaintext, never private keys. All MLS work is client-side. Joined group state l
 ## 6. Residual risk
 
 - **Stranded Welcome (no matching private):** a Welcome sealed to a KeyPackage whose private was discarded
-  (device reset/recovery — `device-provisioning.md` §6) matches no pool member → `NoMatchingPoolMember`,
-  skipped. Availability degradation only; FS preserved (the private is gone, so no one can open it).
+  (device reset/recovery — `device-provisioning.md` §6) matches no pool member → `NoMatchingPoolMember`. It
+  is permanently unjoinable, so the drain **consumes it to clear it** (the consume proof needs only the
+  device signature key, not a join) — otherwise, because the welcome list is bounded and **cursorless**
+  (oldest-first), a head of stranded Welcomes would hide valid newer ones behind it. Availability
+  degradation only; FS preserved (the private is gone, so no one — including this device — can ever open it,
+  so deleting it loses nothing recoverable).
 - **Consume succeeds but prune fails (FS-relevant):** the used private lingers in the sealed pool and could
   later be re-published; if a peer then claims it and seals a new Welcome, this browser could open it with
   an already-used private — an FS regression. **Mitigation:** order **consume → prune**; a failed consume
