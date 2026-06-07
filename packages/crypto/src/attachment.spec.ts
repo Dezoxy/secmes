@@ -37,4 +37,14 @@ describe('attachment content-key encryption', () => {
     const enc = await encryptAttachment(new Uint8Array([1]));
     await expect(decryptAttachment('AAAA', enc.iv, enc.ciphertext)).rejects.toThrow(/32 bytes/);
   });
+
+  it('rejects a malformed IV length', async () => {
+    const enc = await encryptAttachment(new Uint8Array([1]));
+    await expect(decryptAttachment(enc.key, 'AAAA', enc.ciphertext)).rejects.toThrow(/12 bytes/);
+  });
+
+  it('round-trips a zero-byte attachment', async () => {
+    const enc = await encryptAttachment(new Uint8Array(0));
+    expect((await decryptAttachment(enc.key, enc.iv, enc.ciphertext)).length).toBe(0);
+  });
 });

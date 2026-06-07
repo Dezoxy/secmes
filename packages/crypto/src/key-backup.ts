@@ -240,11 +240,21 @@ export interface EncryptedAttachment {
   ciphertext: Uint8Array;
 }
 
+// A sanity ceiling so a bug/abuse can't buffer an absurd blob into memory before a clear error (AES-GCM with
+// a fresh key is itself safe far beyond this). The real per-attachment policy cap is enforced upstream — the
+// server upload-grant's `byteSize` and the client's pre-encrypt file check.
+const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024; // 100 MiB
+
 /** Encrypt blob bytes under a FRESH random content key (CSPRNG). Returns the key (for the envelope) + IV + ciphertext. */
 export async function encryptAttachment(plaintext: Uint8Array): Promise<EncryptedAttachment> {
+  if (plaintext.length > MAX_ATTACHMENT_BYTES) {
+    throw new Error('attachment exceeds the maximum encryptable size');
+  }
   const raw = crypto.getRandomValues(new Uint8Array(32));
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await crypto.subtle.importKey('raw', bytes(raw), 'AES-GCM', false, ['encrypt']);
+  const keyBytes = bytes(raw);
+  const key = await crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['encrypt']);
+  keyBytes.fill(0); // wipe the transient import copy (matches deriveKey's discipline)
   const ct = new Uint8Array(
     await crypto.subtle.encrypt({ name: 'AES-GCM', iv: bytes(iv) }, key, bytes(plaintext)),
   );
@@ -263,7 +273,9 @@ export async function decryptAttachment(
   const iv = fromB64(ivB64);
   if (raw.length !== 32) throw new Error('attachment content key must be 32 bytes');
   if (iv.length !== 12) throw new Error('attachment IV must be 12 bytes');
-  const key = await crypto.subtle.importKey('raw', bytes(raw), 'AES-GCM', false, ['decrypt']);
+  const keyBytes = bytes(raw);
+  const key = await crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['decrypt']);
+  keyBytes.fill(0);
   raw.fill(0);
   try {
     return new Uint8Array(
