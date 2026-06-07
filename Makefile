@@ -31,7 +31,7 @@ clean-tools: ## Remove the Python venv
 	rm -rf $(VENV)
 
 up: ## Start the local stack (postgres, redis, minio, zitadel) + provision OIDC
-	docker compose up -d --build postgres redis minio createbuckets zitadel-db zitadel-bootstrap-perms zitadel
+	docker compose up -d --build postgres redis minio createbuckets zitadel-db zitadel-bootstrap-perms zitadel zitadel-login
 	$(MAKE) auth-provision
 	@echo ""
 	@echo "Stack up. One-time: add '127.0.0.1 zitadel' to /etc/hosts (see docs/local-auth.md)."
@@ -56,6 +56,8 @@ api-dev: ## Run the API on the host (loads generated OIDC env; needs the stack u
 	set -a; . ./.env.local; set +a; \
 	DATABASE_URL="$(LOCAL_DATABASE_URL)" \
 	REDIS_URL="redis://localhost:6379" \
+	BLOB_ENDPOINT="localhost" BLOB_PORT="9000" BLOB_USE_SSL="false" \
+	BLOB_ACCESS_KEY="argus" BLOB_SECRET_KEY="argus_local_dev" BLOB_BUCKET="argus-attachments" \
 	pnpm --filter @argus/api dev
 
 down: ## Stop the local stack (keeps data)

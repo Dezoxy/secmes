@@ -1,6 +1,6 @@
 # Threat model: encrypted image attachments
 
-> Status: **DRAFT for ratification.** Roadmap **Phase 4 (checkpoints 33–37)** — send/receive images the server **cannot read**. The image is encrypted client-side under a fresh per-attachment **content key**; the server only brokers **presigned URLs** to a private blob container and stores **metadata + opaque ciphertext refs**. Server half (presigned-grant endpoints + `attachments` table + the `packages/crypto` content-key primitive) is buildable now against **Azurite**; the Azure-Blob prod credential + the picker/render UI land with Phase 0 / the client (#39).
+> Status: **Server slice (A2) BUILT.** Roadmap **Phase 4 (checkpoints 33–37)** — send/receive images the server **cannot read**. The image is encrypted client-side under a fresh per-attachment **content key**; the server only brokers **presigned URLs** to a private bucket and stores **metadata + opaque ciphertext refs**. Done: the `attachments` table (#57), the `packages/crypto` content-key primitive (A1), and the presigned-grant endpoints + `BlobStore` (A2). The blob store is **S3-compatible** (MinIO locally; AWS S3 / Cloudflare R2 / Backblaze B2 / any S3 store in prod — portable, no Azure lock-in; an Azure-Blob impl could slot behind the same `BlobStore` interface). The picker/render UI lands with the client (A3).
 
 ## 1. Feature & data flow
 
@@ -15,8 +15,9 @@ upload:
   client: wraps CONTENT KEY for recipients via MLS, sends a message referencing objectKey
 download:
   recipient: unwrap CONTENT KEY via MLS
-  recipient --GET /attachments/:id/url--> API: authorizes from the ROW's conversation_id (member
-          only, 404 otherwise) — NOT the client message ref; presigned GET -> {downloadUrl}
+  recipient --POST /attachments/download-url {objectKey}--> API: looks up the row by objectKey,
+          authorizes from the ROW's conversation_id (member only, 404 otherwise) — NOT the client
+          message ref; presigned GET -> {url}
   recipient --GET ciphertext--> blob storage; decrypt with CONTENT KEY; render
 ```
 
@@ -41,21 +42,23 @@ The server is **never in the data path** and **never holds the content key** —
 - **#2 no secret logging** — **load-bearing here**: presigned URLs are capabilities → minted and forgotten, never persisted/logged; content key never touches the server. Logs = object keys + IDs.
 - **#3 RLS** — `attachments` is tenant-scoped: `tenant_id` + ENABLE/FORCE RLS + WITH CHECK + leading-`tenant_id` index + composite-FK tenant pinning, like the messaging tables.
 - **#4 no hand-rolled crypto** — the content-key AEAD is a **vetted primitive in `packages/crypto`** (CSPRNG key/nonce; reuse the MLS lib's AEAD or the same `@noble` path used elsewhere). No primitives outside `packages/crypto`.
-- **#5 secrets via Key Vault** — the storage-account credential that **mints** presigned URLs comes from Key Vault via Workload ID; never in pods/env/Helm values. (Locally: Azurite well-known dev key, never committed as a real secret.)
+- **#5 secrets via Key Vault** — the S3 access key/secret that **mints** presigned URLs comes from Key Vault via Workload ID; never in pods/env/Helm values. (Locally: MinIO dev creds injected via `make api-dev`'s `BLOB_*` env, never committed as a real secret.)
 - **#6 no admin path to content** — admin/ops surfaces expose attachment **metadata** only (size, timing, refs); never the image, never a download URL.
 
 **No invariant conflict** — encrypted-blob attachments *strengthen* the crypto-blind posture. Proceed.
 
 ## 5. Decision & mitigations
 
-- Build the **server slice** behind a `BlobStore` abstraction (mirrors `RealtimeBus`): an **Azure-Blob** impl run against **Azurite** locally / Azure Blob in prod. Endpoints: `POST /attachments` (mint upload grant + create row, **own-caller**, Zod-validated, size-bounded) and `GET /attachments/:id/url` (member-only download grant). `messages.attachment_object_key` already carries the ref.
+- **BUILT (A2):** the **server slice** behind a `BlobStore` abstraction (mirrors `RealtimeBus`): an **S3-compatible** `S3BlobStore` (`minio` client) run against **MinIO** locally / AWS S3 · Cloudflare R2 · Backblaze B2 · any S3 store in prod, plus a fail-closed `UnconfiguredBlobStore` selected by a `useFactory` when no blob config is present. Endpoints: `POST /attachments` (mint upload grant + create row, **member-only**, Zod-validated, **25 MiB** `byteSize` cap) and `POST /attachments/download-url` (member-only download grant, takes the opaque `objectKey` — never a URL). Both presigns run **outside** the RLS tx; TTL 300 s, single object + verb. Membership authz (`requireUser` → verified tenant user; `requireMembership` → same-404) is extracted to a shared `messaging/membership.ts` so the attachment paths and the message paths share **one** authz impl (no IDOR drift). `messages.attachment_object_key` already carries the ref.
 - Migration **`attachments`**: `tenant_id`, **`conversation_id`** (server-verified owning conversation — composite-FK to `conversations`, ON DELETE CASCADE; drives download authz), `object_key` (**globally unique** + a CHECK pinning it to the row's `tenant_id` prefix — the blob store is OUTSIDE Postgres RLS, so cross-tenant blob aliasing fails closed at the schema, not just by app convention), `byte_size`, `uploaded_by` (verified caller, NO-ACTION FK like `sender_user_id`), `created_at`, `expires_at` — **ciphertext refs only**, no content column, no plaintext content-type. **Download authz is from the row's `conversation_id`, never a client message ref.**
 - Content-key primitive in `packages/crypto` (`encryptAttachment`/`decryptAttachment`): CSPRNG content key + AEAD over bytes; the key is exported for MLS-wrapping by the caller, never by the server.
-- **Gates:** `crypto-reviewer` (content-key encryption) + `security-boundary-auditor` (presigned endpoints, RLS, **no-URL-logging**, download authz, no-IDOR) + `infra-reviewer` (private container, no public endpoint, least-priv SAS, EU region). Tests: RLS isolation, member-only download 404, **presigned URL never appears in logs/DB**, size-limit rejection, AEAD tamper-fail. `42Crunch` re-audit incl. attachment routes (roadmap 38).
+- **Prod-wiring hand-off (deferred, NOT in the A2 code slice — `infra-reviewer` P2):** the bucket + credential land with Terraform later; that PR MUST (a) create the bucket in an **EU region**, (b) set `BLOB_REGION` to that EU region explicitly (don't ride the `us-east-1` SDK-signing default), (c) **block public access** at the bucket (no anonymous read/write), (d) scope the prod credential to **`s3:PutObject`/`s3:GetObject` on `arn:.../argus-attachments/*` only** (no `s3:*`, no bucket-policy/ACL perms) via Entra **Workload ID** → Key Vault, and (e) set **`BLOB_USE_SSL=true`** (the app now warns at boot on a configured-but-plaintext remote endpoint). The blob store's security posture is only *real* once these exist.
+- **Gates:** `crypto-reviewer` (content-key encryption, A1) + `security-boundary-auditor` (presigned endpoints, RLS, **no-URL-logging**, download authz, no-IDOR) + `infra-reviewer` (private bucket, no public/anonymous access, least-priv access key, EU region). Tests built: A1 — AEAD tamper-fail + size-limit reject (`packages/crypto`); A2 — live-DB membership grants (member upload writes a tenant-prefixed row; non-member/other-tenant/unknown-key all 404; download authz from the row's conversation, no IDOR) + schema bounds (oversize/extra-key/non-UUID/URL rejected). `42Crunch` re-audit incl. attachment routes (roadmap 38).
 
 ## 6. Residual risk
 
 - **Metadata to the operator** — attachment **count / size / timing** per conversation is visible (on top of message metadata). Disclosed in plan §14/§15 + DPA; size is intrinsic to object storage.
 - **Storage provider sees ciphertext + access patterns** — accepted: the blob is opaque AEAD ciphertext in a private, EU-region container; the provider can't read it.
 - **Presigned-URL TTL window** — a leaked URL is usable until expiry; mitigated by short TTL + single-object/verb scope. Acceptable for this phase.
+- **Declared vs. actual upload size** — the 25 MiB cap is enforced on the **declared** `byteSize` at grant time; a plain `presignedPutObject` URL does not bind `Content-Length`, so a client could PUT more (or fewer) bytes than declared. The blob is opaque ciphertext in a **private** bucket (no amplification to third parties), and expiry/cleanup (roadmap 37) bounds storage. Hard enforcement (a signed content-length, a post-upload size reconciliation, or a bucket object-size policy) is a follow-up with the lifecycle worker.
 - **Per-caller upload quota** not yet enforced (size cap + expiry only) — abuse quota rides with rate limiting (#46).
