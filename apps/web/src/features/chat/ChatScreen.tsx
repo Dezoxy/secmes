@@ -318,8 +318,9 @@ export default function ChatScreen() {
 
   // Realtime push (Slice 5C): one reconnecting WebSocket to the `/ws` gateway, authenticated in the first
   // frame (never a token in the URL). It pushes ciphertext for the conversations we subscribe (each live
-  // group, via addLive). On a message we decrypt + persist + merge (deduped by server id); on every
-  // (re)connect we run a per-conversation catch-up back-fill for anything missed while the socket was down.
+  // group, via addLive). On a message we decrypt + persist + merge (deduped by server id). Catch-up runs
+  // per conversation on its `subscribed` ACK — only then is the socket in the gateway's room, so no message
+  // can slip between the catch-up fetch and the live subscription.
   useEffect(() => {
     if (!messagingDeps || !profile?.userId) return;
     const deps = messagingDeps;
@@ -342,10 +343,9 @@ export default function ChatScreen() {
             );
           });
       },
-      onReady: () => {
-        for (const [conversationId, group] of liveGroups.current) {
-          void backfillInto(conversationId, group, selfUserId);
-        }
+      onSubscribed: (conversationId) => {
+        const group = liveGroups.current.get(conversationId);
+        if (group) void backfillInto(conversationId, group, selfUserId);
       },
     });
     socketRef.current = socket;

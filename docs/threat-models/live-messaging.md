@@ -103,9 +103,10 @@ ciphertext** — never plaintext, never keys. All MLS work is client-side.
   in the **first app frame** (`{event:'auth',data:{token}}`, never a token in the URL/query), subscribes each
   live conversation, and surfaces pushed envelopes. `lib/messaging.ts` `receiveLiveMessage` decrypts +
   persists one push under the conversation lock (skips self/undecryptable). On every (re)connect the socket
-  re-auths + re-subscribes, then runs a per-conversation **catch-up back-fill** (reusing 5B's
-  `backfillConversation` from each conversation's keyset cursor — no `/sync` needed) so nothing missed while
-  disconnected is lost; dedup across push + fetch is by the server message id. Exponential reconnect backoff.
+  re-auths + re-subscribes; the per-conversation **catch-up back-fill** then runs on each `subscribed` ACK —
+  i.e. only after the gateway has actually joined the socket to the room, so no message can slip between the
+  catch-up's fetch and the live subscription (it reuses 5B's `backfillConversation` from each keyset cursor —
+  no `/sync` needed). Dedup across push + fetch is by the server message id. Exponential reconnect backoff.
   `ChatScreen` owns one socket; `addLive` subscribes new conversations. Dev: a Vite `/ws` proxy. Reviewer:
   **`security-boundary-auditor`** (WS auth, token-not-in-URL, no secret logging).
 - **Tests:** the persistence round-trip — `encrypt → serialize → seal → reload → deserialize → decrypt

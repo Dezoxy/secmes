@@ -22,8 +22,15 @@ export interface MessageSocketOptions {
   token: () => Promise<string | null>;
   /** A ciphertext envelope was pushed for a subscribed conversation. */
   onMessage: (msg: IncomingMessage) => void;
-  /** (Re)connected + authenticated + re-subscribed — run a catch-up fetch for messages missed while down. */
+  /** (Re)connected + authenticated + re-subscribed. A connection-status signal (catch-up runs per-room). */
   onReady?: () => void;
+  /**
+   * The gateway ACKNOWLEDGED a subscription — the socket is now IN the room, so it's safe to run a catch-up
+   * fetch for this conversation. Doing it here (not on `onReady`) closes a race: the server joins the room
+   * only after an async membership check, so a message committed between a too-early catch-up and the join
+   * would be neither fetched nor pushed. After the ack, anything past the catch-up's cursor is pushed live.
+   */
+  onSubscribed?: (conversationId: string) => void;
   /** Injectable WebSocket constructor (tests). Defaults to the global. */
   WebSocketImpl?: typeof WebSocket;
   /** Reconnect backoff knobs (tests tune these down). */
@@ -82,8 +89,15 @@ export function createMessageSocket(opts: MessageSocketOptions): MessageSocket {
       if (data && typeof data.conversationId === 'string' && data.message) {
         opts.onMessage({ conversationId: data.conversationId, message: data.message });
       }
+      return;
     }
-    // 'subscribed' / 'error' frames need no client action (membership/authz is server-enforced).
+    if (frame.event === 'subscribed') {
+      // The room join is confirmed — now safe to catch up this conversation (see onSubscribed).
+      const id = (frame.data as { conversationId?: unknown } | null)?.conversationId;
+      if (typeof id === 'string') opts.onSubscribed?.(id);
+      return;
+    }
+    // 'error' frames need no client action (membership/authz is server-enforced; the keys gate content).
   };
 
   const scheduleReconnect = (): void => {

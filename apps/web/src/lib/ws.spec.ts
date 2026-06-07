@@ -49,7 +49,7 @@ describe('createMessageSocket', () => {
 
   it('authenticates in the FIRST FRAME and never puts the token in the URL', async () => {
     const sock = createMessageSocket({
-      url: 'ws://host/ws',
+      url: 'wss://host/ws',
       token: async () => 'secret-token',
       onMessage: () => {},
       WebSocketImpl: Impl,
@@ -57,7 +57,7 @@ describe('createMessageSocket', () => {
     last().open();
     await flush();
 
-    expect(last().url).toBe('ws://host/ws'); // token NOT in the URL/query
+    expect(last().url).toBe('wss://host/ws'); // token NOT in the URL/query
     expect(parsed(last())[0]).toEqual({ event: 'auth', data: { token: 'secret-token' } });
     sock.close();
   });
@@ -65,7 +65,7 @@ describe('createMessageSocket', () => {
   it('subscribes tracked conversations on `ready` (and immediately once authenticated) + fires onReady', async () => {
     const onReady = vi.fn();
     const sock = createMessageSocket({
-      url: 'ws://host/ws',
+      url: 'wss://host/ws',
       token: async () => 't',
       onMessage: () => {},
       onReady,
@@ -90,7 +90,7 @@ describe('createMessageSocket', () => {
   it('forwards `message` frames to onMessage', async () => {
     const got: IncomingMessage[] = [];
     const sock = createMessageSocket({
-      url: 'ws://host/ws',
+      url: 'wss://host/ws',
       token: async () => 't',
       onMessage: (m) => got.push(m),
       WebSocketImpl: Impl,
@@ -115,10 +115,28 @@ describe('createMessageSocket', () => {
     sock.close();
   });
 
+  it('fires onSubscribed with the conversationId on a `subscribed` ack (the catch-up trigger)', async () => {
+    const onSubscribed = vi.fn();
+    const sock = createMessageSocket({
+      url: 'wss://host/ws',
+      token: async () => 't',
+      onMessage: () => {},
+      onSubscribed,
+      WebSocketImpl: Impl,
+    });
+    last().open();
+    await flush();
+    last().deliver({ event: 'ready', data: {} });
+
+    last().deliver({ event: 'subscribed', data: { conversationId: 'conv-9' } });
+    expect(onSubscribed).toHaveBeenCalledWith('conv-9'); // catch-up fires only AFTER the room-join ack
+    sock.close();
+  });
+
   it('reconnects after a drop: re-authenticates, re-subscribes, and fires onReady again', async () => {
     const onReady = vi.fn();
     const sock = createMessageSocket({
-      url: 'ws://host/ws',
+      url: 'wss://host/ws',
       token: async () => 't',
       onMessage: () => {},
       onReady,
@@ -139,14 +157,14 @@ describe('createMessageSocket', () => {
     await flush();
     expect(parsed(last())[0]).toEqual({ event: 'auth', data: { token: 't' } }); // re-auth on the new socket
     last().deliver({ event: 'ready', data: {} });
-    expect(onReady).toHaveBeenCalledTimes(2); // catch-up trigger on every (re)connect
+    expect(onReady).toHaveBeenCalledTimes(2); // connection signal fires on every (re)connect
     expect(parsed(last()).some((f) => f.event === 'subscribe')).toBe(true); // re-subscribed
     sock.close();
   });
 
   it('close() stops reconnection', async () => {
     const sock = createMessageSocket({
-      url: 'ws://host/ws',
+      url: 'wss://host/ws',
       token: async () => 't',
       onMessage: () => {},
       WebSocketImpl: Impl,
