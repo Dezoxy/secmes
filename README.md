@@ -5,6 +5,12 @@ The server is **crypto-blind**: it stores ciphertext + metadata only.
 
 Architecture: [`docs/secure_messaging_platform_plan.md`](docs/secure_messaging_platform_plan.md).
 
+> **Deployment update (2026-06):** the target is now a **single Azure VM** (Docker Compose) running
+> self-hosted **Postgres + Redis + Zitadel**, with attachment blobs on **Backblaze B2** (S3-compatible, EU
+> `eu-central-003`), DB backups to a separate private EU B2 bucket, and secrets in **Azure Key Vault** fetched
+> via the VM's **Managed Identity**. The `infra/` (AKS), `charts/` (Helm), and `gitops/` (Argo CD) scaffolds
+> below are **legacy** — kept until/unless Kubernetes is re-opened. Canonical: `AGENTS.md` → *Stack & conventions*.
+
 ## Repo layout
 
 ```text

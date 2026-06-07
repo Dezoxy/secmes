@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { Injectable, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { BlobStore } from '../blob/blob-store.js';
@@ -45,7 +45,7 @@ export class AttachmentsService {
       });
       // Presign INSIDE the tx: if it throws (store unconfigured / temporarily broken) the row insert is
       // rolled back, so a failed grant leaves NO orphan metadata for an object that can't be uploaded
-      // (Codex P2). presignPut makes no DB call — it only signs a SAS (any key fetch hits Azure, not PG).
+      // (Codex P2). presignPut makes no DB call — it signs the S3 URL locally (pure HMAC, no network).
       const uploadUrl = await this.blobStore.presignPut(objectKey);
       return { objectKey, uploadUrl };
     });
@@ -62,12 +62,19 @@ export class AttachmentsService {
       const [att] = await tx
         .select({ conversationId: schema.attachments.conversationId })
         .from(schema.attachments)
-        .where(eq(schema.attachments.objectKey, objectKey))
+        // RLS already scopes this to the caller's tenant; the explicit tenant_id predicate is
+        // defense-in-depth (invariant #3) so a future RLS misconfig fails at the query, not silently.
+        .where(
+          and(
+            eq(schema.attachments.objectKey, objectKey),
+            eq(schema.attachments.tenantId, auth.tenantId),
+          ),
+        )
         .limit(1);
       if (!att) throw new NotFoundException('attachment not found');
       await requireMembership(tx, att.conversationId, user);
     });
-    // Hard size-cap enforcement: a SAS PUT can't bind Content-Length, so verify the ACTUAL stored size and
+    // Hard size-cap enforcement: an S3 presigned PUT can't bind Content-Length, so verify the ACTUAL size and
     // refuse to serve a blob over the cap (an oversized upload is reclaimed by the lifecycle worker, #37).
     // Size is metadata — the server never reads the ciphertext.
     const size = await this.blobStore.blobSize(objectKey);

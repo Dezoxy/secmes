@@ -2,7 +2,7 @@ name: argus-local
 
 # Local dev stack — stands in for the managed Azure services. NOT for production.
 # Credentials below are LOCAL-ONLY throwaway defaults, never real secrets.
-#   postgres -> Azure DB for PostgreSQL | redis -> Azure Cache | azurite -> Azure Blob
+#   postgres -> self-hosted Postgres | redis -> self-hosted Redis | minio -> Backblaze B2 (S3, prod)
 # Start:  make up      Stop: make down      Wipe data: make reset
 
 services:
@@ -29,15 +29,39 @@ services:
       timeout: 3s
       retries: 12
 
-  # Azure Blob Storage emulator — local stand-in for the prod Azure Blob account. The API signs SAS against
-  # it with the public well-known dev key (account-key SAS); prod signs with a user-delegation key via
-  # Workload Identity (no account key in the pod). The `argus-attachments` container is created by the API on
-  # boot (BLOB_CREATE_CONTAINER=true), so no one-shot is needed. Azurite has no anonymous access unless granted.
-  azurite:
-    image: mcr.microsoft.com/azure-storage/azurite:latest
-    command: azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
-    ports: ['10000:10000'] # blob endpoint
-    volumes: ['azuritedata:/data']
+  # MinIO — S3-compatible object storage; local stand-in for the prod Backblaze B2 attachment bucket. The API
+  # presigns S3 PUT/GET against it. LOCAL throwaway root creds, never real secrets. Private by default (no
+  # anonymous access). The app NEVER creates the bucket (prod uses a bucket-scoped B2 key that can't); the
+  # `minio-setup` one-shot below provisions the `argus-attachments` bucket idempotently.
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin # local-only, not a secret
+      MINIO_ROOT_PASSWORD: minioadmin # local-only, not a secret
+      # The browser PUTs/GETs ciphertext directly to MinIO (cross-origin from the Vite dev server), so allow
+      # CORS for local dev. Prod B2 needs an equivalent bucket CORS rule (see encrypted-attachments.md §5(f)).
+      MINIO_API_CORS_ALLOW_ORIGIN: '*' # local dev only
+    ports: ['9000:9000', '9001:9001'] # S3 API + web console
+    volumes: ['miniodata:/data']
+
+  # One-shot: wait for MinIO, then create the PRIVATE attachment bucket idempotently. Mirrors the prod B2
+  # bucket (provisioned out-of-band) — the app's scoped key only ever does object read/write/delete.
+  minio-setup:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        until mc alias set local http://minio:9000 minioadmin minioadmin; do
+          echo 'waiting for minio...'; sleep 1;
+        done
+        mc mb --ignore-existing local/argus-attachments
+        mc anonymous set none local/argus-attachments
+        echo 'minio bucket argus-attachments ready'
 
   # Dedicated Postgres for Zitadel — own volume so `make up` always inits cleanly and `make reset`
   # wipes it, isolated from the argus app DB. LOCAL creds only.
@@ -141,11 +165,12 @@ services:
       # Wired now, consumed from Phase 1 onward:
       DATABASE_URL: postgres://argus:argus_local_dev@postgres:5432/argus
       REDIS_URL: redis://redis:6379
-      BLOB_ACCOUNT_NAME: devstoreaccount1
-      BLOB_ACCOUNT_KEY: Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==
-      BLOB_ENDPOINT: http://azurite:10000/devstoreaccount1
-      BLOB_CONTAINER: argus-attachments
-      BLOB_CREATE_CONTAINER: 'true'
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: argus-attachments
+      S3_ACCESS_KEY_ID: minioadmin # local-only, not a secret
+      S3_SECRET_ACCESS_KEY: minioadmin # local-only, not a secret
+      S3_FORCE_PATH_STYLE: 'true' # MinIO needs path-style; B2 uses virtual-host
     # OIDC config (non-secret issuer/audience/tenant-claim) is generated per-instance by
     # `zitadel-provision` and materialised to .env.local by `make up`. Absent it, the API boots and
     # health works but protected routes fail closed with 401 — never silently unauthenticated.
@@ -166,6 +191,6 @@ services:
 
 volumes:
   pgdata:
-  azuritedata:
+  miniodata:
   zitadel-pgdata:
   zitadel-bootstrap:
