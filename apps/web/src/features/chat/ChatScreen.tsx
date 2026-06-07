@@ -568,22 +568,13 @@ export default function ChatScreen() {
     group: MlsGroup,
     deps: MessagingDeps,
     content: string,
-    attachments: AttachmentRef[] = [],
-    echo?: Attachment[],
+    files: File[] = [],
   ): void => {
     const id = `msg-${crypto.randomUUID()}`;
-    const message: Message = {
-      id,
-      senderId: currentUser.id,
-      content,
-      timestamp: new Date(),
-      status: 'sending',
-      attachments: echo,
-    };
-    setConversations((prev) =>
-      prev.map((c) => (c.id === convId ? { ...c, messages: [...c.messages, message] } : c)),
-    );
-    const ts = message.timestamp.toISOString();
+    const timestamp = new Date();
+    const ts = timestamp.toISOString();
+    // Filled after a successful upload, so a 'sent' history entry persists the refs (for reload).
+    let refs: AttachmentRef[] = [];
     const logSend = (status: string, encrypted = false): void =>
       appendHistory(convId, [
         {
@@ -593,20 +584,48 @@ export default function ChatScreen() {
           timestamp: ts,
           status,
           encrypted,
-          attachments: attachments.length ? attachments : undefined,
+          attachments: refs.length ? refs : undefined,
         },
       ]);
-    logSend('sending');
     void (async () => {
+      // Optimistic echo from the LOCAL bytes (data URIs for images). The bubble is created BEFORE the upload,
+      // so a failed grant/PUT marks THIS bubble failed — the user never silently loses a message+files
+      // (ChatInput clears the draft on send).
+      const echo: Attachment[] = await Promise.all(
+        files.map(
+          async (f): Promise<Attachment> => ({
+            id: `att-${crypto.randomUUID()}`,
+            type: f.type.startsWith('image/') ? 'image' : 'file',
+            name: f.name,
+            size: `${(f.size / 1024 / 1024).toFixed(1)} MB`,
+            url: f.type.startsWith('image/') ? await fileToDataUrl(f) : undefined,
+          }),
+        ),
+      );
+      const message: Message = {
+        id,
+        senderId: currentUser.id,
+        content,
+        timestamp,
+        status: 'sending',
+        attachments: echo.length ? echo : undefined,
+      };
+      setConversations((prev) =>
+        prev.map((c) => (c.id === convId ? { ...c, messages: [...c.messages, message] } : c)),
+      );
+      logSend('sending');
       try {
-        await sendLiveMessage(deps, convId, group, content, attachments);
+        // Encrypt + upload each file (outside the conversation lock), then send the refs in the envelope.
+        refs = await Promise.all(files.map((f) => uploadAttachment(convId, f)));
+        await sendLiveMessage(deps, convId, group, content, refs);
         patchMessage(convId, id, { status: 'sent', encrypted: true });
         logSend('sent', true);
       } catch (err) {
         patchMessage(convId, id, { status: 'failed' });
         logSend('failed');
-        // A GroupStateConflict means another tab advanced this conversation's durable state — this instance
-        // is stale and must rehydrate to send. id/metadata only in the log (never the plaintext).
+        // GroupStateConflict = another tab advanced the durable state (rehydrate to continue); an upload
+        // grant/PUT failure lands here too — the bubble shows failed instead of dropping silently.
+        // id/metadata only in the log (never the plaintext).
         // eslint-disable-next-line no-console
         console.warn(
           err instanceof GroupStateConflict
@@ -630,31 +649,8 @@ export default function ChatScreen() {
       if (!group || !deps) return;
       const fileList = files ?? [];
       if (!content.trim() && fileList.length === 0) return;
-      if (fileList.length === 0) {
-        sendLive(convId, group, deps, content);
-        return;
-      }
-      // Encrypt + upload each file FIRST (outside the conversation lock), then send the refs in the envelope.
-      // The local echo renders images immediately from the local bytes; the ref is kept for reload.
-      void (async () => {
-        try {
-          const refs = await Promise.all(fileList.map((f) => uploadAttachment(convId, f)));
-          const echo = await Promise.all(
-            fileList.map(async (f, i) => ({
-              ...refToUiAttachment(refs[i]!),
-              url: f.type.startsWith('image/') ? await fileToDataUrl(f) : undefined,
-            })),
-          );
-          sendLive(convId, group, deps, content, refs, echo);
-        } catch (err) {
-          // eslint-disable-next-line no-console
-          console.warn(
-            'attachment upload failed',
-            convId,
-            err instanceof Error ? err.message : err,
-          );
-        }
-      })();
+      // sendLive creates the optimistic bubble, then uploads + sends — so an upload failure marks it failed.
+      sendLive(convId, group, deps, content, fileList);
       return;
     }
     const id = `msg-${crypto.randomUUID()}`; // CSPRNG id; the real client_message_id is minted the same way
