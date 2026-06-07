@@ -618,7 +618,15 @@ export default function ChatScreen() {
         // Encrypt + upload each file (outside the conversation lock), then send the refs in the envelope.
         refs = await Promise.all(files.map((f) => uploadAttachment(convId, f)));
         await sendLiveMessage(deps, convId, group, content, refs);
-        patchMessage(convId, id, { status: 'sent', encrypted: true });
+        // Attach the uploaded refs to the echo (index-aligned with `files`) so the sender can Download/open
+        // their OWN files in-session — images already render from the local data URI; the file chip's
+        // Download button needs the ref. Without this it only works after a reload rehydrates from history.
+        const sentAttachments = echo.map((a, i) => ({ ...a, ref: refs[i] }));
+        patchMessage(convId, id, {
+          status: 'sent',
+          encrypted: true,
+          attachments: sentAttachments.length ? sentAttachments : undefined,
+        });
         logSend('sent', true);
       } catch (err) {
         patchMessage(convId, id, { status: 'failed' });
