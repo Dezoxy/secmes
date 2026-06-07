@@ -105,6 +105,23 @@ services:
       zitadel-bootstrap-perms:
         condition: service_completed_successfully
 
+  # Zitadel v4's hosted Login V2 UI is a separate app from the identity server. The main `zitadel`
+  # container handles OIDC/API/JWKS; this container renders the browser login screens. It reads the
+  # local IAM_LOGIN_CLIENT PAT from the shared volume (local throwaway, never committed) and talks to the
+  # API over the compose network. Exposed on host :3001 so browsers can reach http://zitadel:3001.
+  zitadel-login:
+    image: ghcr.io/zitadel/zitadel-login:v4.15.0
+    restart: unless-stopped
+    environment:
+      ZITADEL_API_URL: http://zitadel:8080
+      ZITADEL_SERVICE_USER_TOKEN_FILE: /bootstrap/login-client.pat
+    volumes:
+      - 'zitadel-bootstrap:/bootstrap:ro'
+    ports: ['3001:3000']
+    depends_on:
+      zitadel:
+        condition: service_started
+
   # One-shot provisioner — run by `make up`, profiled out of a bare `docker compose up`. Creates the
   # project, the SPA OIDC app, and the tenant-claim Action via the bootstrap PAT, then writes the
   # generated ids to the shared volume for the Makefile to place in .env.local. Idempotent.

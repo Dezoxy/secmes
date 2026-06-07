@@ -31,7 +31,7 @@ clean-tools: ## Remove the Python venv
 	rm -rf $(VENV)
 
 up: ## Start the local stack (postgres, redis, minio, zitadel) + provision OIDC
-	docker compose up -d --build postgres redis minio createbuckets zitadel-db zitadel-bootstrap-perms zitadel
+	docker compose up -d --build postgres redis minio createbuckets zitadel-db zitadel-bootstrap-perms zitadel zitadel-login
 	$(MAKE) auth-provision
 	@echo ""
 	@echo "Stack up. One-time: add '127.0.0.1 zitadel' to /etc/hosts (see docs/local-auth.md)."
