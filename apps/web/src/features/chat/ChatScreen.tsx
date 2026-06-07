@@ -145,6 +145,11 @@ export default function ChatScreen() {
   const handleSend = (content: string, files?: File[]): void => {
     if (!selectedId) return;
     const convId = selectedId;
+    // Live conversations have no send path yet (Slice 5). Never route them through the demo loopback
+    // (`getMlsSession`) — that would mark a message "encrypted/delivered/read" after a LOCAL round-trip
+    // even though nothing was sent to the peer, who could never receive it. The composer is disabled for
+    // live conversations; this is the defensive guard. Demo/seed conversations keep the loopback path.
+    if (manager?.get(convId)) return;
     const id = `msg-${crypto.randomUUID()}`; // CSPRNG id; the real client_message_id is minted the same way
     void (async () => {
       const attachments = files?.length ? await Promise.all(files.map(toAttachment)) : undefined;
@@ -228,7 +233,11 @@ export default function ChatScreen() {
                 onVerify={isDirect ? () => setVerifyOpen(true) : undefined}
               />
               <MessageList conversation={selectedConversation} onImageClick={setPreviewImage} />
-              <ChatInput onSend={handleSend} />
+              <ChatInput
+                onSend={handleSend}
+                disabled={!!manager?.get(selectedConversation.id)}
+                disabledNotice="This conversation is created and its safety number verified — live messaging arrives in the next update."
+              />
             </>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
