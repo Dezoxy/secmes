@@ -74,8 +74,10 @@ export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
       // A stranded Welcome (its sealed-to private was discarded) matches no member — expected, skip quietly.
       // Anything else is unexpected: warn (non-secret — id + message only, never key bytes) and continue.
       if (!(err instanceof NoMatchingPoolMember)) {
+        // Constant format string (the id is a separate arg) — never interpolate untrusted data into a
+        // console format string (semgrep unsafe-formatstring).
         // eslint-disable-next-line no-console
-        console.warn(`join: skipped welcome ${w.id}`, err instanceof Error ? err.message : err);
+        console.warn('join: skipped welcome', w.id, err instanceof Error ? err.message : err);
       }
       continue;
     }
@@ -84,7 +86,8 @@ export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn(
-        `join: pool prune failed for welcome ${w.id} (member lingers; see task #20)`,
+        'join: pool prune failed (member lingers; see task #20) for welcome',
+        w.id,
         err instanceof Error ? err.message : err,
       );
     }
