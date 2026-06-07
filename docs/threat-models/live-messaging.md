@@ -39,12 +39,16 @@ ciphertext** — never plaintext, never keys. All MLS work is client-side.
   `decodeGroupState` returns views over them, so they ARE the live in-memory group state (as resident as the
   device keys), not a transient copy.
 - **Rollback / nonce reuse (the headline correctness risk):** persisting a STALE group state behind a
-  ratchet advance would break decryption or, worse, let a future `encrypt` reuse an AEAD nonce. **Mitigation:**
-  the `Conversation` already serializes every stateful op through a single per-conversation mutex (`opQueue`);
-  the persist runs **inside that mutex, immediately after the state mutation, and is awaited before the op
-  resolves** — so `encrypt` only returns wire bytes once the new state is durably sealed (a failed seal fails
-  the send, never transmitting a message whose state wasn't saved). PR-5A lands the codec + sealed store;
-  the in-mutex hook is wired where ops ratchet (send/decrypt, 5B).
+  ratchet advance would break decryption or, worse, let a future `encrypt` reuse an AEAD nonce. The race is
+  concrete: if the snapshot is taken in the op mutex but the **seal + DB write run outside it**, two close
+  saves can reorder (a slow Argon2 seal lets an older snapshot's write land after a newer one's) and roll the
+  stored state back. **Mitigation:** `Conversation.persistVia(persister)` runs the snapshot AND the
+  persister's seal + write **inside** the per-conversation op mutex (`opQueue`), so saves are totally ordered
+  with ratchet ops and with each other — a later op's state can never be overwritten by an earlier one.
+  `keystore.saveConversationState` is built on `persistVia`; a concurrency test fires interleaved
+  encrypt+save and asserts the reload is the newest generation (a rollback would replay a consumed generation
+  and fail the peer's decrypt). PR-5A lands the codec, the ordered sealed store, and `persistVia`; 5B wires it
+  as the in-mutex hook on the ops that ratchet (send/decrypt).
 - **Crypto-blind violation:** only opaque ciphertext + ids + metadata cross the wire (send/fetch/sync/WS).
   The server stores ciphertext only (append-only `messages` table, RLS) and never decrypts.
 - **WS auth (5C):** the token authenticates the socket in the **first app frame**, never in the URL or a
@@ -67,10 +71,13 @@ ciphertext** — never plaintext, never keys. All MLS work is client-side.
 ## 5. Decision & mitigations
 
 - **PR-5A (`@argus/crypto` + keystore):** `Conversation.serialize()` (= `encodeGroupState(state)`) +
-  `MlsEngine.deserializeConversation(bytes)` (`decodeGroupState` → re-attach `defaultClientConfig` →
-  `new Conversation`). Keystore: a sealed, identity+signature-bound **`group-state`** store (IndexedDB v4,
-  additive) keyed by conversationId, mirroring the sealed-pool CAS pattern; wipe transients. Reviewer:
-  **`crypto-reviewer`** (FS of persisted state, the codec, atomicity).
+  `Conversation.persistVia(persister)` (snapshot + persister run in the op mutex, so saves are ordered with
+  ratchet ops — see Rollback above) + `MlsEngine.deserializeConversation(bytes)` (`decodeGroupState` →
+  re-attach `defaultClientConfig` → `new Conversation`). Keystore: a sealed, identity+signature-bound
+  **`group-state`** store (IndexedDB v4, additive) keyed by conversationId, written through `persistVia`;
+  wipe transients. Reviewer: **`crypto-reviewer`** (FS of persisted state, the codec, atomicity). Perf note:
+  PR-5A seals per explicit save (one-shot Argon2 is fine); 5B's per-message persistence should derive a
+  session key once at unlock rather than re-running Argon2 on every message.
 - **PR-5B (send + fetch):** `api.ts` `sendMessage`/`fetchMessages`/`fetchSync`; wire the join flow to
   persist → consume → prune; the in-mutex persist hook on `encrypt`/`decrypt`; rehydrate on unlock.
   Reviewer: **`security-boundary-auditor`** (ciphertext-only client, no secret logging).

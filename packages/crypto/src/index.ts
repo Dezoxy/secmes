@@ -381,6 +381,17 @@ export class Conversation {
   }
 
   /**
+   * Persist a consistent snapshot via `persister`, run INSIDE the op mutex — so the snapshot AND the
+   * persister's seal + write are ordered with every ratchet op. Two close persists can't reorder: a later
+   * op's snapshot is never overwritten by an earlier one (no rollback → no MLS desync / sending-generation
+   * reuse). The snapshot carries live SECRET key material; the persister must seal it immediately. (Doing
+   * the seal/write OUTSIDE this mutex — e.g. `await conv.serialize()` then seal — is the racy anti-pattern.)
+   */
+  async persistVia(persister: (snapshot: Uint8Array) => Promise<void>): Promise<void> {
+    return this.run(() => persister(encodeGroupState(this.state)));
+  }
+
+  /**
    * Add a member by their published KeyPackage; returns the invite to forward to them.
    *
    * ⚠️ IDENTITY BINDING: this wrapper does NOT verify that `memberPublicPackage` belongs to the

@@ -375,6 +375,41 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     expect(await peerConv.decrypt(await restored.encrypt('after reload'))).toBe('after reload');
   });
 
+  it('saveConversationState is ordered with the ratchet under concurrency (no rollback)', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const peer = await engine.generateDeviceKeys('peer');
+    const conv = await engine.createConversation('conv-1', device);
+    const peerConv = await engine.joinConversation(peer, await conv.addMember(peer.publicPackage));
+
+    // Fire several ratchet-advancing encrypts, each followed by a save, WITHOUT awaiting between them — so
+    // the saves race. persistVia runs seal+put INSIDE the op mutex, so each save's snapshot is taken in op
+    // order and the newest one is written last. If seal/put ran outside the mutex an older snapshot (a slow
+    // Argon2 seal) could land after a newer one and overwrite it — an MLS rollback.
+    const ciphertexts = await Promise.all(
+      Array.from({ length: 5 }, (_, i) =>
+        (async () => {
+          const ct = await conv.encrypt(`m${i}`);
+          await ks.saveConversationState(device, 'conv-1', conv, 'pw');
+          return ct;
+        })(),
+      ),
+    );
+
+    // The peer consumes every message in send order (the mutex serialized the encrypts in call order).
+    for (const ct of ciphertexts) await peerConv.decrypt(ct);
+
+    // Reload: the restored state must be the NEWEST, so its next send is a generation the peer has not seen.
+    // A rolled-back save would replay an already-consumed generation and the peer's decrypt would throw.
+    const reopened = await DeviceKeystore.open(engine, FAST);
+    const dev2 = await reopened.loadDevice('alice', 'pw');
+    if (!dev2) throw new Error('expected a persisted device');
+    const restored = (await reopened.loadConversations(dev2, 'pw')).get('conv-1');
+    if (!restored) throw new Error('expected a restored conversation');
+    expect(await peerConv.decrypt(await restored.encrypt('after'))).toBe('after');
+  });
+
   it('loadConversations skips a group bound to a different device signature key', async () => {
     const engine = await MlsEngine.create();
     const ks = await DeviceKeystore.open(engine, FAST);

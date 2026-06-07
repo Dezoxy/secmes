@@ -273,9 +273,10 @@ export class DeviceKeystore {
   /**
    * Persist a conversation's MLS group state, SEALED (the ratchet carries live secret key material, so it is
    * sealed exactly like the device + pool). Call after any op that advanced the ratchet so a reload can
-   * rehydrate the LIVE state — a stale/rolled-back save would desync the group or risk AEAD nonce reuse, so
-   * the caller persists INSIDE the conversation's op mutex (see `@argus/crypto`). Bound to the device
-   * identity + signature key.
+   * rehydrate the LIVE state. A stale/rolled-back save would desync the group or risk AEAD nonce reuse, so
+   * the snapshot AND its seal + DB write run INSIDE the conversation's op mutex via `persistVia` — two close
+   * saves can't reorder and clobber a newer state with an older one. Bound to the device identity + signature
+   * key.
    */
   async saveConversationState(
     device: DeviceKeys,
@@ -283,19 +284,20 @@ export class DeviceKeystore {
     conversation: Conversation,
     passphrase: string,
   ): Promise<void> {
-    const plaintext = await conversation.serialize();
-    const sealed = await sealBackup(plaintext, passphrase, this.argon);
-    plaintext.fill(0); // wipe the transient unsealed group-state bytes after sealing
-    await this.db.put(
-      GROUP_STORE,
-      {
-        identity: deviceIdentity(device),
-        signaturePublicKey: deviceSignaturePublicKeyB64(device),
+    await conversation.persistVia(async (snapshot) => {
+      const sealed = await sealBackup(snapshot, passphrase, this.argon);
+      snapshot.fill(0); // wipe the transient unsealed group-state bytes after sealing
+      await this.db.put(
+        GROUP_STORE,
+        {
+          identity: deviceIdentity(device),
+          signaturePublicKey: deviceSignaturePublicKeyB64(device),
+          conversationId,
+          sealed,
+        } satisfies StoredGroupState,
         conversationId,
-        sealed,
-      } satisfies StoredGroupState,
-      conversationId,
-    );
+      );
+    });
   }
 
   /** Rehydrate ALL of THIS device's persisted conversations (on unlock) → conversationId → Conversation. */
