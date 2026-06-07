@@ -50,6 +50,11 @@ const SELF = 'self'; // single device per user in v1 (multi-device is deferred, 
 
 const te = new TextEncoder();
 const td = new TextDecoder();
+
+// Message-log append CAS retry bound. Each round exactly one racer commits (its version advances), so N
+// concurrent appenders converge in ≤ N rounds — a single user's handful of tabs is far under this. The cap
+// only guards a pathological hot-loop; exhausting it throws (surfaced) rather than silently dropping entries.
+const MAX_APPEND_CAS_RETRIES = 50;
 // One-time KeyPackages kept AVAILABLE (unclaimed) in the directory so peers can claim one to add this
 // device. Provisioning replenishes back to this after others claim some (see provisioning.ts).
 export const POOL_TARGET = 10;
@@ -544,7 +549,7 @@ export class DeviceKeystore {
     // earlier (a history entry lost). Instead: read the current (version, log), merge OUR entries, then
     // commit only if the stored version is unchanged. On a lost CAS another tab appended — re-read its newer
     // log, RE-MERGE our entries into it, and retry, so neither tab's entries are dropped.
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (let attempt = 0; attempt < MAX_APPEND_CAS_RETRIES; attempt += 1) {
       const rec = (await this.db.get(MSGLOG_STORE, conversationId)) as StoredMessageLog | undefined;
       const base = rec?.version ?? -1;
       const existing = await this.openLog(rec, device, sessionKey); // [] if none / not this device
@@ -577,8 +582,10 @@ export class DeviceKeystore {
       }
       await tx.done; // lost the CAS — another tab appended; re-read + re-merge + retry
     }
-    // eslint-disable-next-line no-console
-    console.warn('persist history: gave up after write contention', conversationId);
+    // Each round one writer commits, so reaching here means sustained pathological contention. Surface a
+    // REAL failure (the caller logs it; the entries are still in the UI, just not yet persisted) rather than
+    // silently returning as if the append succeeded — which would drop locally-decrypted history.
+    throw new Error('could not persist message history after sustained write contention');
   }
 
   /** Remove a conversation's persisted history (e.g. on leave / clear-history). */
