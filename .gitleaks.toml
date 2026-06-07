@@ -9,4 +9,7 @@ description = "Ignore documented placeholders only (value-level, NOT whole files
 regexes = [
   '''00000000-0000-0000-0000-000000000000''',
   '''REPLACE_ME''',
+  # Azurite's PUBLIC well-known dev account key — a fixed, documented constant (same on every machine),
+  # used only to sign SAS against the LOCAL blob emulator. Not a real secret.
+  '''Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==''',
 ]

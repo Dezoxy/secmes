@@ -1,37 +1,42 @@
-// Config for the S3-compatible blob store (encrypted-attachment ciphertext). Endpoint/bucket/region are
-// non-secret; the access/secret keys come from env (Key Vault via Workload ID in prod, the local MinIO dev
-// creds locally). When unconfigured, the attachment endpoints fail closed (see blob-store.module.ts).
+// Config for the Azure Blob Storage attachment store (encrypted-attachment ciphertext). Two modes:
+//
+//   - LOCAL (Azurite): account name + KEY + blob endpoint → presign with an account-key SAS. The Azurite key
+//     is the public well-known dev key (NOT a secret); injected via `make api-dev`.
+//   - PROD (Azure): account URL only → presign with a USER-DELEGATION SAS signed via Workload Identity
+//     (`DefaultAzureCredential`). No account key ever lives in the pod (invariant #5).
+//
+// When unconfigured, the attachment endpoints fail closed (see blob-store.module.ts).
 
 export const BLOB_CONFIG = Symbol('BLOB_CONFIG');
 
 export interface BlobConfig {
-  /** Host only (no scheme/port) — e.g. `localhost` (MinIO) or `s3.eu-central-1.amazonaws.com` (AWS). */
-  endpoint: string;
-  port: number;
-  useSSL: boolean;
-  accessKey: string;
-  secretKey: string;
-  bucket: string;
-  region: string;
+  /** Storage account name (e.g. `devstoreaccount1` for Azurite, or the real account in prod). */
+  accountName: string;
+  /** Account key — present ONLY in the local Azurite path (account-key SAS); absent in prod (→ user-delegation). */
+  accountKey?: string;
+  /** Explicit blob-service URL for the account-key path (Azurite, e.g. `http://127.0.0.1:10000/devstoreaccount1`). */
+  endpoint?: string;
+  /** Account URL for the prod user-delegation path (e.g. `https://<account>.blob.core.windows.net`). */
+  accountUrl?: string;
+  /** Container that holds the (opaque, encrypted) attachment blobs. */
+  container: string;
+  /**
+   * Local-only convenience: create the container at startup if missing. NEVER set in prod — prod credentials
+   * get blob read/write only (least privilege); the container is provisioned by Terraform.
+   */
+  createContainer: boolean;
   configured: boolean;
 }
 
 export function loadBlobConfig(): BlobConfig {
-  const endpoint = process.env.BLOB_ENDPOINT ?? '';
-  const useSSL = process.env.BLOB_USE_SSL === 'true';
-  const port = Number(process.env.BLOB_PORT ?? (useSSL ? 443 : 9000));
-  const accessKey = process.env.BLOB_ACCESS_KEY ?? '';
-  const secretKey = process.env.BLOB_SECRET_KEY ?? '';
-  const bucket = process.env.BLOB_BUCKET ?? 'argus-attachments';
-  const region = process.env.BLOB_REGION ?? 'us-east-1';
-  return {
-    endpoint,
-    port,
-    useSSL,
-    accessKey,
-    secretKey,
-    bucket,
-    region,
-    configured: Boolean(endpoint && accessKey && secretKey && bucket),
-  };
+  const accountName = process.env.BLOB_ACCOUNT_NAME ?? '';
+  const accountKey = process.env.BLOB_ACCOUNT_KEY || undefined;
+  const endpoint = process.env.BLOB_ENDPOINT || undefined;
+  const accountUrl = process.env.BLOB_ACCOUNT_URL || undefined;
+  const container = process.env.BLOB_CONTAINER ?? 'argus-attachments';
+  const createContainer = process.env.BLOB_CREATE_CONTAINER === 'true';
+  // Configured when EITHER the local account-key path (name + key + endpoint) OR the prod path (account URL)
+  // is fully present, and a container is named.
+  const configured = Boolean(container && ((accountName && accountKey && endpoint) || accountUrl));
+  return { accountName, accountKey, endpoint, accountUrl, container, createContainer, configured };
 }
