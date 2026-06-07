@@ -141,3 +141,85 @@ export async function openBackup(backup: SealedBackup, passphrase: string): Prom
     throw new Error('backup decryption failed (wrong passphrase or tampered data)');
   }
 }
+
+// --- Session-key sealing (cheap per-message AES-GCM) -------------------------------------------------
+// `sealBackup`/`openBackup` run a 64 MiB Argon2id on EVERY call — right for a one-shot backup, far too slow
+// to seal each message. For data sealed many times per session (the local message-history log) we derive a
+// session key ONCE at unlock and reuse it: `deriveSessionKey` pays the KDF; `sealWithKey`/`openWithKey` are
+// plain AES-256-GCM. The key is non-extractable and lives in memory only — the caller never persists it.
+
+/** A blob sealed under a session key. Only the (random) IV + ciphertext are stored; the key is not. */
+export interface SealedBlob {
+  iv: string; // base64, 12-byte AES-GCM nonce — FRESH per seal (never reuse (key, IV))
+  ciphertext: string; // base64
+}
+
+// Domain separation: a constant AAD so a session-key blob can't be confused with a `sealBackup` blob.
+const SESSION_AAD = te.encode('argus-session 1');
+
+// Combine the domain-separation AAD with an optional per-record context (e.g. a conversationId) so a sealed
+// blob is bound to its slot — relocating it to another slot fails authentication.
+function sessionAad(context?: Uint8Array): Uint8Array {
+  if (!context || context.length === 0) return SESSION_AAD;
+  const out = new Uint8Array(SESSION_AAD.length + 1 + context.length);
+  out.set(SESSION_AAD);
+  out[SESSION_AAD.length] = 0x1f; // unit separator between the constant prefix and the context
+  out.set(context, SESSION_AAD.length + 1);
+  return out;
+}
+
+/**
+ * Derive a per-session AES-256-GCM key from the passphrase + a STORED per-profile salt (Argon2id). Reuse it
+ * for many `sealWithKey`/`openWithKey` calls so per-message persistence is cheap (no per-message KDF). The
+ * salt is not secret (stored in the clear); the key is non-extractable and must stay in memory only.
+ */
+export async function deriveSessionKey(
+  passphrase: string,
+  salt: Uint8Array,
+  params: Argon2Params = DEFAULT_ARGON2,
+): Promise<CryptoKey> {
+  assertParams(params);
+  if (salt.length < 16) throw new Error('session-key salt must be at least 16 bytes');
+  return deriveKey(passphrase, salt, params, ['encrypt', 'decrypt']);
+}
+
+/**
+ * Seal bytes under a session key. Fresh CSPRNG IV every call — `(key, IV)` is never reused. `context` binds
+ * the blob to its slot (e.g. a conversationId) so it can't be relocated; pass the SAME `context` to open it.
+ */
+export async function sealWithKey(
+  key: CryptoKey,
+  plaintext: Uint8Array,
+  context?: Uint8Array,
+): Promise<SealedBlob> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(
+    await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv: bytes(iv), additionalData: bytes(sessionAad(context)) },
+      key,
+      bytes(plaintext),
+    ),
+  );
+  return { iv: toB64(iv), ciphertext: toB64(ct) };
+}
+
+/** Open a session-key-sealed blob (with the same `context` it was sealed under). Throws on a wrong key, a
+ * wrong context, or any tampering (AES-GCM auth failure). */
+export async function openWithKey(
+  key: CryptoKey,
+  blob: SealedBlob,
+  context?: Uint8Array,
+): Promise<Uint8Array> {
+  const iv = fromB64(blob.iv);
+  if (iv.length !== 12) throw new Error('malformed sealed blob');
+  try {
+    const pt = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: bytes(iv), additionalData: bytes(sessionAad(context)) },
+      key,
+      bytes(fromB64(blob.ciphertext)),
+    );
+    return new Uint8Array(pt);
+  } catch {
+    throw new Error('sealed blob decryption failed (wrong key or tampered data)');
+  }
+}

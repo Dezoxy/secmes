@@ -1,13 +1,16 @@
 import {
   DEFAULT_ARGON2,
   MlsEngine,
+  deriveSessionKey as cryptoDeriveSessionKey,
   deserializeDeviceIdentity,
   deserializeDeviceKeys,
   deserializeDeviceKeysArray,
   deviceIdentity,
   deviceSignaturePublicKeyB64,
   openBackup,
+  openWithKey,
   sealBackup,
+  sealWithKey,
   serializeDeviceIdentity,
   serializeDeviceKeys,
   serializeDeviceKeysArray,
@@ -16,6 +19,7 @@ import {
   type Conversation,
   type DeviceKeys,
   type SealedBackup,
+  type SealedBlob,
 } from '@argus/crypto';
 import { openDB, type IDBPDatabase } from 'idb';
 
@@ -35,11 +39,22 @@ const DB_NAME = 'argus-keystore';
 // GROUP-STATE store (live messaging, Slice 5). Shapes are incompatible across v1→v2: a stale v1 record
 // would be misread as a sealed device and fail to unlock, so the upgrade drops the legacy store;
 // v2→v3 and v3→v4 only ADD a store.
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const STORE = 'device';
 const POOL_STORE = 'key-package-pool'; // sealed one-time KeyPackage pool (privates retained for join)
 const GROUP_STORE = 'group-state'; // sealed MLS group state per conversation (ratchet secrets — Slice 5)
+const MSGLOG_STORE = 'message-log'; // sealed decrypted message history per conversation (session-key, history)
+const META_STORE = 'meta'; // small non-secret per-profile values (the session-key salt)
+const SESSION_SALT_KEY = 'session-salt'; // META_STORE key — the per-profile Argon2 salt for the session key
 const SELF = 'self'; // single device per user in v1 (multi-device is deferred, B2)
+
+const te = new TextEncoder();
+const td = new TextDecoder();
+
+// Message-log append CAS retry bound. Each round exactly one racer commits (its version advances), so N
+// concurrent appenders converge in ≤ N rounds — a single user's handful of tabs is far under this. The cap
+// only guards a pathological hot-loop; exhausting it throws (surfaced) rather than silently dropping entries.
+const MAX_APPEND_CAS_RETRIES = 50;
 // One-time KeyPackages kept AVAILABLE (unclaimed) in the directory so peers can claim one to add this
 // device. Provisioning replenishes back to this after others claim some (see provisioning.ts).
 export const POOL_TARGET = 10;
@@ -69,6 +84,30 @@ interface StoredGroupState {
   sealed: SealedBackup;
   // Monotonic per-conversation version for the cross-instance CAS (see saveConversationState). Bumped on
   // every successful save; a write is only committed if the store still holds the version the writer last saw.
+  version: number;
+}
+
+/** One decrypted message in the local history log — PLAINTEXT, only ever stored SEALED (see StoredMessageLog). */
+export interface StoredMessage {
+  id: string; // the server message id (or local echo id) — dedup key
+  senderId: string;
+  content: string; // plaintext message text
+  timestamp: string; // ISO 8601
+  status: string; // 'sending' | 'sent' | 'delivered' | 'read' | 'failed'
+  encrypted?: boolean;
+}
+
+// A conversation's local message history, SEALED at rest under the per-unlock SESSION KEY (cheap AES-GCM,
+// no per-message Argon2). Bound to the device identity + signature key like the group state. The `sealed`
+// blob holds the JSON-encoded StoredMessage[]; the session key is never persisted (memory only). Keyed by
+// conversationId in the store.
+interface StoredMessageLog {
+  identity: string;
+  signaturePublicKey: string;
+  conversationId: string;
+  sealed: SealedBlob;
+  // Monotonic version for the cross-tab compare-and-swap (see appendMessagesUnlocked). A lost CAS means
+  // another tab appended concurrently — re-read + re-merge + retry, so neither tab's entries are dropped.
   version: number;
 }
 
@@ -121,6 +160,10 @@ export class DeviceKeystore {
   // Diverges from the store the moment another tab / unlock saves, so a stale write is caught (see
   // saveConversationState). Map ref is fixed; contents mutate.
   private readonly groupStateVersions = new Map<string, number>();
+  // Per-conversation append serializer for the message log — its read-modify-write (open → merge → seal →
+  // put) isn't atomic across awaits, so concurrent appends (a WS push during a backfill) chain instead of
+  // racing (a lost update would drop a message from history permanently).
+  private readonly appendChains = new Map<string, Promise<unknown>>();
 
   private constructor(
     private readonly db: IDBPDatabase,
@@ -147,6 +190,11 @@ export class DeviceKeystore {
         // v4: the sealed MLS group-state store (live messaging). Additive — keyed by conversationId.
         if (!database.objectStoreNames.contains(GROUP_STORE))
           database.createObjectStore(GROUP_STORE);
+        // v5: the sealed message-history log (per conversation) + a tiny meta store for the session-key
+        // salt. Additive — both keep all prior stores.
+        if (!database.objectStoreNames.contains(MSGLOG_STORE))
+          database.createObjectStore(MSGLOG_STORE);
+        if (!database.objectStoreNames.contains(META_STORE)) database.createObjectStore(META_STORE);
       },
     });
     return new DeviceKeystore(db, engine ?? (await MlsEngine.create()), argon);
@@ -386,6 +434,166 @@ export class DeviceKeystore {
     this.groupStateVersions.delete(conversationId);
   }
 
+  // ---- Message history (local, sealed under the per-unlock session key) ----------------------------------
+
+  /**
+   * The per-profile session-key derivation material (NOT secret) — a random salt + the Argon2 params it was
+   * minted under. Generated once, then reused. The params are STORED (like SealedBackup self-describes) so a
+   * future DEFAULT_ARGON2 bump re-derives the SAME key instead of silently dropping all history. The
+   * get-or-create runs in one readwrite tx, which IndexedDB serializes across tabs — effectively put-if-absent.
+   */
+  private async sessionKeyMaterial(): Promise<{ salt: Uint8Array; params: Argon2Params }> {
+    const tx = this.db.transaction(META_STORE, 'readwrite');
+    let rec = (await tx.store.get(SESSION_SALT_KEY)) as
+      | { salt: Uint8Array; params: Argon2Params }
+      | undefined;
+    if (!rec) {
+      rec = { salt: crypto.getRandomValues(new Uint8Array(16)), params: this.argon };
+      await tx.store.put(rec, SESSION_SALT_KEY);
+    }
+    await tx.done;
+    return rec;
+  }
+
+  /**
+   * Derive this session's AES-256-GCM message-log key from the passphrase + the stored per-profile salt +
+   * the STORED params (one Argon2id pass). Hold the returned key IN MEMORY ONLY for the session — it
+   * seals/opens the history log cheaply (no per-message KDF). Never persist it.
+   */
+  async deriveSessionKey(passphrase: string): Promise<CryptoKey> {
+    const { salt, params } = await this.sessionKeyMaterial();
+    return cryptoDeriveSessionKey(passphrase, salt, params);
+  }
+
+  /** Open + decode a message-log record, or [] if it isn't this device's or the key/blob doesn't verify. */
+  private async openLog(
+    rec: StoredMessageLog | undefined,
+    device: DeviceKeys,
+    sessionKey: CryptoKey,
+  ): Promise<StoredMessage[]> {
+    if (
+      !rec ||
+      rec.identity !== deviceIdentity(device) ||
+      rec.signaturePublicKey !== deviceSignaturePublicKeyB64(device)
+    ) {
+      return [];
+    }
+    try {
+      // The conversationId is bound into the seal's AAD — a blob relocated to another slot won't open.
+      const bytes = await openWithKey(sessionKey, rec.sealed, te.encode(rec.conversationId));
+      return JSON.parse(td.decode(bytes)) as StoredMessage[];
+    } catch {
+      // Wrong key (different passphrase) or tampered/relocated blob — treat as no history; never throw to UI.
+      return [];
+    }
+  }
+
+  /** A conversation's decrypted history (oldest-first), or [] if none / not this device. */
+  async loadMessageLog(
+    device: DeviceKeys,
+    conversationId: string,
+    sessionKey: CryptoKey,
+  ): Promise<StoredMessage[]> {
+    const rec = (await this.db.get(MSGLOG_STORE, conversationId)) as StoredMessageLog | undefined;
+    return this.openLog(rec, device, sessionKey);
+  }
+
+  /** ALL of this device's persisted histories (on unlock) → conversationId → messages. */
+  async loadAllMessageLogs(
+    device: DeviceKeys,
+    sessionKey: CryptoKey,
+  ): Promise<Map<string, StoredMessage[]>> {
+    const recs = (await this.db.getAll(MSGLOG_STORE)) as StoredMessageLog[];
+    const out = new Map<string, StoredMessage[]>();
+    for (const rec of recs) {
+      const msgs = await this.openLog(rec, device, sessionKey);
+      if (msgs.length > 0) out.set(rec.conversationId, msgs);
+    }
+    return out;
+  }
+
+  /**
+   * Append messages to a conversation's sealed history (upsert by id — a later status update replaces the
+   * prior entry), then re-seal the whole log. Serialized per conversation so a concurrent append (a WS push
+   * during a backfill) can't lose an update. PLAINTEXT in → sealed at rest under the session key.
+   */
+  async appendMessages(
+    device: DeviceKeys,
+    conversationId: string,
+    sessionKey: CryptoKey,
+    entries: StoredMessage[],
+  ): Promise<void> {
+    if (entries.length === 0) return;
+    const prev = this.appendChains.get(conversationId) ?? Promise.resolve();
+    const run = prev.then(() =>
+      this.appendMessagesUnlocked(device, conversationId, sessionKey, entries),
+    );
+    this.appendChains.set(
+      conversationId,
+      run.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return run;
+  }
+
+  private async appendMessagesUnlocked(
+    device: DeviceKeys,
+    conversationId: string,
+    sessionKey: CryptoKey,
+    entries: StoredMessage[],
+  ): Promise<void> {
+    // Cross-tab safe via a version CAS: the in-memory `appendChains` only orders appends within THIS tab, so
+    // two tabs could each read the same log, merge different entries, and the later put would clobber the
+    // earlier (a history entry lost). Instead: read the current (version, log), merge OUR entries, then
+    // commit only if the stored version is unchanged. On a lost CAS another tab appended — re-read its newer
+    // log, RE-MERGE our entries into it, and retry, so neither tab's entries are dropped.
+    for (let attempt = 0; attempt < MAX_APPEND_CAS_RETRIES; attempt += 1) {
+      const rec = (await this.db.get(MSGLOG_STORE, conversationId)) as StoredMessageLog | undefined;
+      const base = rec?.version ?? -1;
+      const existing = await this.openLog(rec, device, sessionKey); // [] if none / not this device
+      const byId = new Map(existing.map((m) => [m.id, m]));
+      for (const e of entries) byId.set(e.id, e); // upsert: latest status/content for an id wins
+      const merged = [...byId.values()].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+      // Bind the conversationId into the AAD so this blob is pinned to its slot (see openLog).
+      const sealed = await sealWithKey(
+        sessionKey,
+        te.encode(JSON.stringify(merged)),
+        te.encode(conversationId),
+      );
+
+      // The seal (async, non-IDB) ran OUTSIDE the tx; the get→check→put below is the atomic CAS.
+      const tx = this.db.transaction(MSGLOG_STORE, 'readwrite');
+      const current = (await tx.store.get(conversationId)) as StoredMessageLog | undefined;
+      if ((current?.version ?? -1) === base) {
+        await tx.store.put(
+          {
+            identity: deviceIdentity(device),
+            signaturePublicKey: deviceSignaturePublicKeyB64(device),
+            conversationId,
+            sealed,
+            version: base + 1,
+          } satisfies StoredMessageLog,
+          conversationId,
+        );
+        await tx.done;
+        return;
+      }
+      await tx.done; // lost the CAS — another tab appended; re-read + re-merge + retry
+    }
+    // Each round one writer commits, so reaching here means sustained pathological contention. Surface a
+    // REAL failure (the caller logs it; the entries are still in the UI, just not yet persisted) rather than
+    // silently returning as if the append succeeded — which would drop locally-decrypted history.
+    throw new Error('could not persist message history after sustained write contention');
+  }
+
+  /** Remove a conversation's persisted history (e.g. on leave / clear-history). */
+  async deleteMessageLog(conversationId: string): Promise<void> {
+    await this.db.delete(MSGLOG_STORE, conversationId);
+    this.appendChains.delete(conversationId);
+  }
+
   /**
    * The identity-only sealed artifact to upload for cross-device recovery (key-backup.md §4). Unseals the
    * local device with `passphrase`, strips it to identity material (no one-time KeyPackage HPKE private
@@ -457,7 +665,10 @@ export class DeviceKeystore {
     await this.db.delete(STORE, SELF);
     await this.db.delete(POOL_STORE, SELF);
     await this.db.clear(GROUP_STORE); // drop this profile's persisted conversations too (Slice 5)
+    await this.db.clear(MSGLOG_STORE); // drop this profile's message history (history feature)
+    await this.db.clear(META_STORE); // drop the session-key salt → a fresh account derives a fresh key
     this.groupStateVersions.clear();
+    this.appendChains.clear();
   }
 
   /** Whether a sealed device is stored for this profile. Metadata only — no passphrase, no unseal. */

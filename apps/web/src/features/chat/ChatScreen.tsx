@@ -5,7 +5,7 @@ import type { UserSummary } from '../../lib/api';
 import { accessToken } from '../../lib/auth';
 import { ConversationManager, type ConversationSession } from '../../lib/conversations';
 import { joinPendingConversations } from '../../lib/join';
-import { GroupStateConflict } from '../../lib/keystore';
+import { GroupStateConflict, type StoredMessage } from '../../lib/keystore';
 import {
   backfillConversation,
   receiveLiveMessage,
@@ -63,6 +63,18 @@ async function toAttachment(file: File): Promise<Attachment> {
   return { id, type: 'file', url: '#', name: file.name, size };
 }
 
+// Map a persisted history entry back to a UI Message (timestamp string → Date). Plaintext stays local.
+function storedToMessage(m: StoredMessage): Message {
+  return {
+    id: m.id,
+    senderId: m.senderId,
+    content: m.content,
+    timestamp: new Date(m.timestamp),
+    status: m.status as Message['status'],
+    encrypted: m.encrypted,
+  };
+}
+
 // The sidebar entry for a LIVE conversation surfaced without a known peer identity (joined on connect, or
 // rehydrated on unlock). The inviter's identity isn't in the welcome/persistence metadata (it would leak the
 // social graph to the server), so we show a neutral placeholder; verification (#20) names it out-of-band.
@@ -97,7 +109,7 @@ export default function ChatScreen() {
   // Per-conversation verification: conversationId → the safety number marked verified for it.
   const [verifiedByConv, setVerifiedByConv] = useState<Record<string, string>>({});
 
-  const { device, pool, deviceId, keystore, passphrase } = useDevice();
+  const { device, pool, deviceId, keystore, passphrase, sessionKey } = useDevice();
   const { profile } = useAuth();
   // What every live send/receive needs to seal the advanced ratchet at rest (Slice 5). Null in demo mode.
   const messagingDeps = useMemo<MessagingDeps | null>(
@@ -131,8 +143,28 @@ export default function ChatScreen() {
   const joinRanRef = useRef(false);
   const rehydratedRef = useRef(false);
 
+  // Persist messages to the local SEALED history log (fire-and-forget; upsert by id). Plaintext in →
+  // sealed at rest under the session key. Only LIVE conversations call this (seed/demo convs aren't logged).
+  const appendHistory = useCallback(
+    (conversationId: string, entries: StoredMessage[]): void => {
+      if (!messagingDeps || !sessionKey || entries.length === 0) return;
+      void messagingDeps.keystore
+        .appendMessages(messagingDeps.device, conversationId, sessionKey, entries)
+        .catch((err: unknown) => {
+          // eslint-disable-next-line no-console
+          console.warn(
+            'persist history failed',
+            conversationId,
+            err instanceof Error ? err.message : err,
+          );
+        });
+    },
+    [messagingDeps, sessionKey],
+  );
+
   // Merge decrypted incoming messages into a conversation, deduped by SERVER id (across fetch + WS push) and
-  // kept in time order. Shared by fetch-on-open, the WS push, and reconnect catch-up.
+  // kept in time order. Shared by fetch-on-open, the WS push, and reconnect catch-up. Also persists them to
+  // the local sealed history so they survive a reload.
   const mergeIncoming = useCallback(
     (conversationId: string, incoming: DecryptedMessage[]): void => {
       if (incoming.length === 0) return;
@@ -159,8 +191,19 @@ export default function ChatScreen() {
           };
         }),
       );
+      appendHistory(
+        conversationId,
+        incoming.map((m) => ({
+          id: m.serverId,
+          senderId: m.senderUserId,
+          content: m.plaintext,
+          timestamp: m.createdAt,
+          status: 'read',
+          encrypted: true,
+        })),
+      );
     },
-    [],
+    [appendHistory],
   );
 
   // Back-fill ONE live conversation from its keyset cursor → decrypt → merge. Drives both fetch-on-open and
@@ -274,22 +317,26 @@ export default function ChatScreen() {
     });
   }, [device, pool, deviceId, messagingDeps]);
 
-  // Rehydrate on unlock (Slice 5): load every persisted conversation's sealed group state into a live MLS
-  // group and surface it. These were joined/started in a prior session and consumed their Welcome, so the
-  // sealed group-state store (not a re-join) is how they come back. Runs once per unlock.
+  // Rehydrate on unlock (Slice 5 + history): load every persisted conversation's sealed group state into a
+  // live MLS group, seed its decrypted history from the sealed message log, and surface it. The group state
+  // is how a conversation comes back (not a re-join); the message log is how its PLAINTEXT history comes back
+  // (the ratchet can't re-derive consumed messages). Runs once per unlock; needs the session key for history.
   useEffect(() => {
-    if (!messagingDeps || rehydratedRef.current) return;
+    if (!messagingDeps || !sessionKey || rehydratedRef.current) return;
     rehydratedRef.current = true;
     const { keystore: ks, device: dev, passphrase: pass } = messagingDeps;
+    const sKey = sessionKey;
     void (async () => {
       try {
         const restored = await ks.loadConversations(dev, pass);
+        const logs = await ks.loadAllMessageLogs(dev, sKey);
         for (const [conversationId, conversation] of restored) {
           addLive(conversationId, conversation);
+          const history = (logs.get(conversationId) ?? []).map(storedToMessage);
           setConversations((prev) =>
             prev.some((c) => c.id === conversationId)
               ? prev
-              : [liveConversationShell(conversationId), ...prev],
+              : [{ ...liveConversationShell(conversationId), messages: history }, ...prev],
           );
         }
       } catch (err) {
@@ -297,7 +344,7 @@ export default function ChatScreen() {
         console.warn('rehydrate conversations failed', err instanceof Error ? err.message : err);
       }
     })();
-  }, [messagingDeps]);
+  }, [messagingDeps, sessionKey]);
 
   const selectedConversation = conversations.find((c) => c.id === selectedId);
   // Safety-number verification is 2-party only (group safety numbers are deferred —
@@ -412,12 +459,20 @@ export default function ChatScreen() {
     setConversations((prev) =>
       prev.map((c) => (c.id === convId ? { ...c, messages: [...c.messages, message] } : c)),
     );
+    const ts = message.timestamp.toISOString();
+    const logSend = (status: string, encrypted = false): void =>
+      appendHistory(convId, [
+        { id, senderId: currentUser.id, content, timestamp: ts, status, encrypted },
+      ]);
+    logSend('sending');
     void (async () => {
       try {
         await sendLiveMessage(deps, convId, group, content);
         patchMessage(convId, id, { status: 'sent', encrypted: true });
+        logSend('sent', true);
       } catch (err) {
         patchMessage(convId, id, { status: 'failed' });
+        logSend('failed');
         // A GroupStateConflict means another tab advanced this conversation's durable state — this instance
         // is stale and must rehydrate to send. id/metadata only in the log (never the plaintext).
         // eslint-disable-next-line no-console
