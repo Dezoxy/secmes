@@ -1,14 +1,16 @@
 // Join on connect (Slice 4, recipient side). When the device is unlocked + provisioned, drain its pending
-// Welcomes: list → fetch (with a proof) → join with the matching retained private → consume (with a proof)
-// → prune the used private (forward secrecy). Per-Welcome failures are isolated so one bad Welcome can't
-// block the rest. Live send/fetch is Slice 5; here we only join + surface the conversation.
+// Welcomes: list → fetch (with a proof) → join with the matching retained private → surface the group.
+// We do NOT consume the Welcome or prune the private yet — the in-memory group state isn't persisted until
+// Slice 5, so the still-pending Welcome (+ its retained private) is the ONLY durable way to recover a
+// conversation after a reload. Consuming now would make a refresh-after-join lose the conversation
+// permanently. Slice 5 persists group state, after which consume + prune become safe. Stranded (permanently
+// unjoinable) Welcomes ARE cleared — they have no joinable state to lose. Per-Welcome failures are isolated.
 
 import {
   MlsEngine,
   NoMatchingPoolMember,
   deserializeInvite,
   deviceSignatureSeed,
-  serializeKeyPackage,
   type Conversation,
   type DeviceKeys,
 } from '@argus/crypto';
@@ -41,28 +43,31 @@ export interface JoinedConversation {
 export interface JoinDeps {
   device: DeviceKeys;
   pool: DeviceKeys[];
-  /** This device's server id — for the list/fetch/consume calls and the proofs. */
+  /** This device's server id — for the list/fetch/consume(-clear) calls and the proofs. */
   deviceId: string;
-  /** Remove the consumed one-time member from the sealed + in-memory pool (forward secrecy). */
-  prunePoolMember: (publicKeyPackageB64: string) => Promise<void>;
   /** Surface a newly joined conversation to the UI. */
   onJoined: (joined: JoinedConversation) => void;
 }
 
 /**
  * Join every pending Welcome for this device, draining ACROSS pages. `listWelcomes` returns one bounded
- * page (the server caps it at 100); consumed Welcomes drop off, so we re-list until no FRESH (not-yet-tried)
- * Welcome remains — a `seen` set both terminates the loop and stops re-processing already-skipped ones, and
- * `MAX_DRAIN_PAGES` caps it. Per Welcome: join → consume → surface → prune. consume runs only after a
- * successful join; the conversation is surfaced only after a successful consume; the FS prune runs LAST and
- * best-effort. A stranded `NoMatchingPoolMember` (permanently unjoinable) is instead CONSUMED to clear it
- * from the cursorless list, so a head of stranded Welcomes can't hide valid newer ones. A `workingPool`
- * shrinks as one-time members are spent — once a private has opened a Welcome it is NEVER reused within the
- * drain (forward secrecy), so a duplicate/replayed delivery sealed to the same package can't reuse it (it
- * gets `NoMatchingPoolMember` and is cleared). Per-Welcome failures are isolated so the drain continues.
+ * page (the server caps it at 100); we re-list until no FRESH (not-yet-tried) Welcome remains — a `seen`
+ * set both terminates the loop and stops re-processing, and `MAX_DRAIN_PAGES` caps it. Per Welcome: fetch →
+ * join with the matching retained private → surface. We do NOT consume or prune a JOINED Welcome (no durable
+ * group-state store until Slice 5 — the pending Welcome is the only way to recover the conversation on
+ * reload). A stranded `NoMatchingPoolMember` (permanently unjoinable) IS consumed to clear it from the
+ * cursorless list, so a head of stranded Welcomes can't hide valid newer ones. A `workingPool` shrinks as
+ * one-time members are spent — once a private has opened a Welcome it is NEVER reused within the drain
+ * (forward secrecy), so a duplicate/replayed delivery sealed to the same package gets `NoMatchingPoolMember`
+ * and is cleared. Per-Welcome failures are isolated so the drain continues.
+ *
+ * NOTE the bounded, cursorless list means joined-but-unconsumed Welcomes hold their slots, so a device in
+ * more than one page of conversations joins only the oldest page per connect until Slice 5's persistence
+ * lets consumption (and thus drop-off) happen — strictly better than the permanent loss that consuming
+ * before persistence would cause.
  */
 export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
-  const { device, pool, deviceId, prunePoolMember, onJoined } = deps;
+  const { device, pool, deviceId, onJoined } = deps;
   const engine = await getEngine();
   const signKey = deviceSignatureSeed(device); // ts-mls' 48-byte PKCS8 key → the bare 32-byte Ed25519 seed
   const workingPool = [...pool]; // shrinks as members are spent — never reuse a one-time private in a drain
@@ -71,11 +76,10 @@ export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
   for (let page = 0; page < MAX_DRAIN_PAGES; page += 1) {
     const pending = await listWelcomes(deviceId, WELCOME_PAGE);
     const fresh = pending.filter((w) => !seen.has(w.id));
-    if (fresh.length === 0) break; // nothing new — consumed Welcomes are gone, the rest are already-tried skips
+    if (fresh.length === 0) break; // nothing new — already-tried Welcomes (joined/skipped) hold the page
 
     for (const w of fresh) {
       seen.add(w.id);
-      let member: DeviceKeys;
       try {
         const fetchProof = toBase64Url(signWelcomeFetch(signKey, deviceId, w.id));
         const material = await fetchWelcomeMaterial(w.id, deviceId, fetchProof);
@@ -83,21 +87,20 @@ export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
           workingPool,
           deserializeInvite(material),
         );
-        member = joined.member;
         // A one-time private, once it has opened a Welcome, must NEVER open another (forward secrecy). Drop
         // it from the working pool so a later Welcome in this drain sealed to the same package can't reuse
-        // it — it gets NoMatchingPoolMember and is skipped.
-        const spent = workingPool.indexOf(member);
+        // it — it gets NoMatchingPoolMember and is cleared.
+        const spent = workingPool.indexOf(joined.member);
         if (spent !== -1) workingPool.splice(spent, 1);
-        const consumeProof = toBase64Url(signWelcomeConsume(signKey, deviceId, w.id));
-        await consumeWelcome(w.id, deviceId, consumeProof);
+        // Surface the joined group, but leave the Welcome PENDING (no consume/prune until Slice 5 persists
+        // the group state) so a reload can re-join from it — consuming now would lose the conversation.
         onJoined({ conversationId: w.conversationId, conversation: joined.conversation });
       } catch (err) {
         if (err instanceof NoMatchingPoolMember) {
           // A stranded Welcome — sealed to a private this device discarded (reset/recovery) or to a
           // one-time package already spent earlier in this drain — is permanently unjoinable. CONSUME it to
-          // drop it from the bounded, CURSORLESS list; otherwise a head of stranded Welcomes would hide
-          // valid newer ones behind it. The consume proof needs only the device signature key, not a join.
+          // drop it from the bounded, CURSORLESS list (otherwise a head of stranded Welcomes would hide
+          // valid newer ones). Nothing recoverable is lost: the private is gone, so no one can ever open it.
           try {
             const clearProof = toBase64Url(signWelcomeConsume(signKey, deviceId, w.id));
             await consumeWelcome(w.id, deviceId, clearProof);
@@ -116,17 +119,6 @@ export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
           // eslint-disable-next-line no-console
           console.warn('join: skipped welcome', w.id, err instanceof Error ? err.message : err);
         }
-        continue;
-      }
-      try {
-        await prunePoolMember(serializeKeyPackage(member.publicPackage));
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          'join: pool prune failed (member lingers; see task #20) for welcome',
-          w.id,
-          err instanceof Error ? err.message : err,
-        );
       }
     }
   }

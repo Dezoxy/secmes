@@ -1,4 +1,4 @@
-import { MlsEngine, serializeInvite, serializeKeyPackage } from '@argus/crypto';
+import { MlsEngine, serializeInvite } from '@argus/crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock the directory/server calls; the crypto (join + proofs) is real.
@@ -19,9 +19,10 @@ describe('joinPendingConversations', () => {
     list.mockReset();
     fetchMaterial.mockReset();
     consume.mockReset();
+    consume.mockResolvedValue(undefined);
   });
 
-  it('drains a pending welcome: fetch → join → consume → prune, then surfaces the joined group', async () => {
+  it('joins a pending welcome and surfaces it — WITHOUT consuming it (kept as the reload anchor)', async () => {
     const engine = await MlsEngine.create();
     const alice = await engine.generateDeviceKeys('alice');
     const bob = await engine.generateDeviceKeys('bob');
@@ -33,35 +34,29 @@ describe('joinPendingConversations', () => {
 
     list.mockResolvedValue([{ id: 'w1', conversationId: 'c1', createdAt: 't' }]);
     fetchMaterial.mockResolvedValue(material);
-    consume.mockResolvedValue(undefined);
-    const prune = vi.fn().mockResolvedValue(undefined);
     const joined: JoinedConversation[] = [];
 
     await joinPendingConversations({
       device: bob,
       pool: bobPool,
       deviceId: 'dev',
-      prunePoolMember: prune,
       onJoined: (j) => joined.push(j),
     });
 
-    // fetch + consume carry a base64url proof; the matched pool member is pruned (forward secrecy).
+    // fetch carries a base64url proof; the joined group really decrypts a message from the inviter.
     expect(fetchMaterial).toHaveBeenCalledWith(
       'w1',
       'dev',
       expect.stringMatching(/^[A-Za-z0-9_-]+$/),
     );
-    expect(consume).toHaveBeenCalledWith('w1', 'dev', expect.stringMatching(/^[A-Za-z0-9_-]+$/));
-    expect(prune).toHaveBeenCalledWith(serializeKeyPackage(target.publicPackage));
-    // ordering: prune only AFTER consume.
-    expect(consume.mock.invocationCallOrder[0]!).toBeLessThan(prune.mock.invocationCallOrder[0]!);
-    // surfaced exactly the joined conversation, and its group really decrypts a message from the inviter.
     expect(joined).toHaveLength(1);
     expect(joined[0]!.conversationId).toBe('c1');
     expect(await joined[0]!.conversation.decrypt(await aliceConv.encrypt('hi'))).toBe('hi');
+    // The Welcome is NOT consumed (no durable group state until Slice 5 — keep it for reload recovery).
+    expect(consume).not.toHaveBeenCalled();
   });
 
-  it('clears a stranded welcome (consumes it without joining) and continues the drain', async () => {
+  it('clears a stranded welcome (consumes it without joining) and continues to join the good one', async () => {
     const engine = await MlsEngine.create();
     const alice = await engine.generateDeviceKeys('alice');
     const bob = await engine.generateDeviceKeys('bob');
@@ -82,57 +77,51 @@ describe('joinPendingConversations', () => {
     fetchMaterial.mockImplementation((id) =>
       Promise.resolve(id === 'w-stranded' ? strandedMaterial : goodMaterial),
     );
-    consume.mockResolvedValue(undefined);
-    const prune = vi.fn().mockResolvedValue(undefined);
     const joined: JoinedConversation[] = [];
 
     await joinPendingConversations({
       device: bob,
       pool: bobPool,
       deviceId: 'dev',
-      prunePoolMember: prune,
       onJoined: (j) => joined.push(j),
     });
 
-    // The stranded welcome is CLEARED (consumed without joining) so it can't block the queue; the good one
-    // is joined+consumed+pruned.
+    // The stranded welcome is CLEARED (consumed without joining); the good one is joined but NOT consumed.
     expect(joined.map((j) => j.conversationId)).toEqual(['c-good']);
-    expect(consume).toHaveBeenCalledTimes(2);
+    expect(consume).toHaveBeenCalledTimes(1);
     expect(consume).toHaveBeenCalledWith('w-stranded', 'dev', expect.any(String));
-    expect(consume).toHaveBeenCalledWith('w-good', 'dev', expect.any(String));
-    expect(prune).toHaveBeenCalledTimes(1); // only the joined welcome prunes its member
-    expect(prune).toHaveBeenCalledWith(serializeKeyPackage(bob.publicPackage));
   });
 
-  it('does not prune when consume fails — leaves the welcome for an idempotent retry', async () => {
+  it('leaves a transient fetch failure pending (does not clear it) and joins the rest', async () => {
     const engine = await MlsEngine.create();
     const alice = await engine.generateDeviceKeys('alice');
     const bob = await engine.generateDeviceKeys('bob');
 
-    const material = serializeInvite(
+    const goodMaterial = serializeInvite(
       await (await engine.createConversation('g', alice)).addMember(bob.publicPackage),
     );
-    list.mockResolvedValue([{ id: 'w1', conversationId: 'c1', createdAt: 't' }]);
-    fetchMaterial.mockResolvedValue(material);
-    consume.mockRejectedValue(new Error('network')); // consume fails after a successful join
-    const prune = vi.fn().mockResolvedValue(undefined);
+    list.mockResolvedValue([
+      { id: 'w-flaky', conversationId: 'c-flaky', createdAt: 't' },
+      { id: 'w-good', conversationId: 'c-good', createdAt: 't' },
+    ]);
+    fetchMaterial.mockImplementation((id) =>
+      id === 'w-flaky' ? Promise.reject(new Error('network')) : Promise.resolve(goodMaterial),
+    );
     const joined: JoinedConversation[] = [];
 
     await joinPendingConversations({
       device: bob,
       pool: [bob],
       deviceId: 'dev',
-      prunePoolMember: prune,
       onJoined: (j) => joined.push(j),
     });
 
-    // consume threw → the welcome is NOT surfaced and the member is NOT pruned (its private is kept so the
-    // next connect re-joins + re-consumes; never prune before a confirmed consume).
-    expect(joined).toHaveLength(0);
-    expect(prune).not.toHaveBeenCalled();
+    // The flaky one is left pending (NOT consumed → retried next connect); the good one still joins.
+    expect(joined.map((j) => j.conversationId)).toEqual(['c-good']);
+    expect(consume).not.toHaveBeenCalled();
   });
 
-  it('drains across multiple pages, re-listing until the welcome queue is empty', async () => {
+  it('drains across multiple list pages, re-listing until the queue is empty', async () => {
     const engine = await MlsEngine.create();
     const alice = await engine.generateDeviceKeys('alice');
     const bob = await engine.generateDeviceKeys('bob');
@@ -148,7 +137,7 @@ describe('joinPendingConversations', () => {
       w3: await seal(pool[2]!, 'g3'),
     };
 
-    // Page 1 (full-ish) → page 2 → empty. Consumed welcomes drop off, so re-listing yields the next page.
+    // Newer Welcomes appear across re-lists (page 1 → page 2 → empty).
     list
       .mockResolvedValueOnce([
         { id: 'w1', conversationId: 'c1', createdAt: 't' },
@@ -157,25 +146,22 @@ describe('joinPendingConversations', () => {
       .mockResolvedValueOnce([{ id: 'w3', conversationId: 'c3', createdAt: 't' }])
       .mockResolvedValue([]);
     fetchMaterial.mockImplementation((id) => Promise.resolve(mat[id]!));
-    consume.mockResolvedValue(undefined);
-    const prune = vi.fn().mockResolvedValue(undefined);
     const joined: JoinedConversation[] = [];
 
     await joinPendingConversations({
       device: bob,
       pool,
       deviceId: 'dev',
-      prunePoolMember: prune,
       onJoined: (j) => joined.push(j),
     });
 
-    // All three pages drained (not just the first), and we re-listed beyond the first page.
+    // All three pages are joined (the drain re-lists beyond the first page); none is consumed.
     expect(joined.map((j) => j.conversationId)).toEqual(['c1', 'c2', 'c3']);
-    expect(consume).toHaveBeenCalledTimes(3);
+    expect(consume).not.toHaveBeenCalled();
     expect(list.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('never reuses a spent one-time private: two welcomes sealed to the same package → second skipped (FS)', async () => {
+  it('never reuses a spent one-time private: a second welcome sealed to the same package is cleared (FS)', async () => {
     const engine = await MlsEngine.create();
     const alice = await engine.generateDeviceKeys('alice');
     const bob = await engine.generateDeviceKeys('bob');
@@ -196,26 +182,20 @@ describe('joinPendingConversations', () => {
       ])
       .mockResolvedValue([]);
     fetchMaterial.mockImplementation((id) => Promise.resolve(id === 'w1' ? w1mat : w2mat));
-    consume.mockResolvedValue(undefined);
-    const prune = vi.fn().mockResolvedValue(undefined);
     const joined: JoinedConversation[] = [];
 
     await joinPendingConversations({
       device: bob,
       pool,
       deviceId: 'dev',
-      prunePoolMember: prune,
       onJoined: (j) => joined.push(j),
     });
 
-    // Only the FIRST joins; the second can't reuse the now-spent private (NoMatchingPoolMember) → it is
-    // cleared (consumed without joining), never joined or pruned.
+    // Only the FIRST joins (kept pending); the second can't reuse the now-spent private (NoMatchingPoolMember)
+    // → it is cleared (consumed without joining), never joined.
     expect(joined.map((j) => j.conversationId)).toEqual(['c1']);
-    expect(consume).toHaveBeenCalledTimes(2);
-    expect(consume).toHaveBeenCalledWith('w1', 'dev', expect.any(String));
+    expect(consume).toHaveBeenCalledTimes(1);
     expect(consume).toHaveBeenCalledWith('w2', 'dev', expect.any(String));
-    expect(prune).toHaveBeenCalledTimes(1); // only w1 joined → only its member is pruned
-    expect(prune).toHaveBeenCalledWith(serializeKeyPackage(target.publicPackage));
   });
 
   it('clears a stranded welcome blocking the cursorless page so a valid welcome behind it is reached', async () => {
@@ -251,20 +231,18 @@ describe('joinPendingConversations', () => {
       queue.delete(id);
       return Promise.resolve();
     });
-    const prune = vi.fn().mockResolvedValue(undefined);
     const joined: JoinedConversation[] = [];
 
     await joinPendingConversations({
       device: bob,
       pool,
       deviceId: 'dev',
-      prunePoolMember: prune,
       onJoined: (j) => joined.push(j),
     });
 
     // w-stranded sat at the head and (without a cursor) would hide w-good behind it; clearing it lets the
-    // drain reach + join w-good. Both leave the queue.
+    // drain reach + join w-good. The joined w-good stays pending (not consumed — the reload anchor).
     expect(joined.map((j) => j.conversationId)).toEqual(['c-good']);
-    expect(queue.size).toBe(0);
+    expect([...queue.keys()]).toEqual(['w-good']);
   });
 });

@@ -1,14 +1,6 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 
-import { serializeKeyPackage, type DeviceKeys } from '@argus/crypto';
+import type { DeviceKeys } from '@argus/crypto';
 
 import { DeviceKeystore } from '../../lib/keystore';
 import { provisionDevice } from '../../lib/provisioning';
@@ -63,11 +55,6 @@ interface DeviceState {
    * v1; multi-account-per-browser is deferred).
    */
   resetForNewAccount: () => Promise<void>;
-  /**
-   * Drop a CONSUMED one-time KeyPackage from the sealed + in-memory pool once its Welcome is joined —
-   * forward secrecy (a one-time private is never reused or re-published). No-op until the device is unlocked.
-   */
-  prunePoolMember: (publicKeyPackageB64: string) => Promise<void>;
 }
 
 const DeviceCtx = createContext<DeviceState | null>(null);
@@ -78,10 +65,6 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
   const [device, setDevice] = useState<DeviceKeys | null>(null);
   const [pool, setPool] = useState<DeviceKeys[] | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
-  // The session passphrase, kept in memory (like the unlocked keys) only to re-seal the pool when a
-  // consumed member is pruned (Slice 4). Never logged, persisted, or transmitted. A ref — not state — so
-  // it stays out of the React tree and never triggers a re-render.
-  const passphraseRef = useRef<string | null>(null);
   // Demo mode has no real device — render the chat (seed-driven) without a gate.
   const [status, setStatus] = useState<DeviceStatus>(configured ? 'loading' : 'ready');
   const [error, setError] = useState<string | null>(null);
@@ -132,7 +115,6 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
           : await keystore.loadDevice(identity, passphrase);
         if (!dev) throw new Error('no device found to unlock');
         const { pool: provisioned, result } = await provisionDevice(keystore, dev, passphrase);
-        passphraseRef.current = passphrase;
         setDevice(dev);
         setPool(provisioned);
         setDeviceId(result.deviceId);
@@ -162,7 +144,6 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         const dev = await keystore.loadDevice(identity, passphrase);
         if (!dev) throw new Error('restore did not produce a device');
         const { pool: provisioned, result } = await provisionDevice(keystore, dev, passphrase);
-        passphraseRef.current = passphrase;
         setDevice(dev);
         setPool(provisioned);
         setDeviceId(result.deviceId);
@@ -186,19 +167,6 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
     setStatus('needs-create');
   }, [keystore]);
 
-  const prunePoolMember = useCallback(
-    async (publicKeyPackageB64: string): Promise<void> => {
-      const passphrase = passphraseRef.current;
-      if (!keystore || !device || !passphrase) return; // not unlocked yet — nothing to prune
-      await keystore.removePoolMember(device, passphrase, publicKeyPackageB64);
-      setPool(
-        (prev) =>
-          prev?.filter((m) => serializeKeyPackage(m.publicPackage) !== publicKeyPackageB64) ?? prev,
-      );
-    },
-    [keystore, device],
-  );
-
   const value: DeviceState = {
     device,
     pool,
@@ -209,7 +177,6 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
     unlock,
     restore,
     resetForNewAccount,
-    prunePoolMember,
   };
   return <DeviceCtx.Provider value={value}>{children}</DeviceCtx.Provider>;
 }

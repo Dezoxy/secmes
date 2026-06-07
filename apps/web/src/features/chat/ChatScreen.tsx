@@ -66,7 +66,7 @@ export default function ChatScreen() {
   // Per-conversation verification: conversationId → the safety number marked verified for it.
   const [verifiedByConv, setVerifiedByConv] = useState<Record<string, string>>({});
 
-  const { device, pool, deviceId, prunePoolMember } = useDevice();
+  const { device, pool, deviceId } = useDevice();
   const { profile } = useAuth();
   // A live conversation manager exists only with an unlocked device (not demo mode). New conversations
   // route through it (claim → #20 gate → create + deliver); demo mode keeps the seed/loopback path.
@@ -124,7 +124,6 @@ export default function ChatScreen() {
       device,
       pool,
       deviceId,
-      prunePoolMember,
       onJoined: ({ conversationId, conversation }) => {
         joinedGroups.current.set(conversationId, conversation);
         setJoinedIds((prev) =>
@@ -159,7 +158,7 @@ export default function ChatScreen() {
       // eslint-disable-next-line no-console
       console.warn('join-on-connect drain failed', err instanceof Error ? err.message : err);
     });
-  }, [device, pool, deviceId, prunePoolMember]);
+  }, [device, pool, deviceId]);
 
   const selectedConversation = conversations.find((c) => c.id === selectedId);
   // Safety-number verification is 2-party only (group safety numbers are deferred —
