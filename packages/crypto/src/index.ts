@@ -35,8 +35,13 @@ export {
 export {
   serializeDeviceKeys,
   deserializeDeviceKeys,
+  serializeDeviceKeysArray,
+  deserializeDeviceKeysArray,
   serializeDeviceIdentity,
   deserializeDeviceIdentity,
+  serializeKeyPackage,
+  deserializeKeyPackage,
+  deviceSignaturePublicKeyB64,
 } from './device-codec.js';
 // A peer's PUBLIC key material (what the key directory publishes) — the input to `safetyNumber`.
 export type { KeyPackage } from 'ts-mls';
@@ -231,6 +236,17 @@ export class MlsEngine {
       throw new Error('minted device identity does not match the recovery material');
     }
     return keys;
+  }
+
+  /**
+   * Mint a FRESH one-time KeyPackage under `device`'s stable signature identity: same Ed25519 signature
+   * key (→ same fingerprint / safety number) but a fresh HPKE init key (→ genuinely one-time). Use to
+   * fill the device's published KeyPackage pool (key directory #19). The returned DeviceKeys' PRIVATE must
+   * be RETAINED until the Welcome sealed to this KeyPackage is joined, and never reused across joins
+   * (forward secrecy). Reuses the recovery mint path (`exportIdentity` → `deviceFromIdentity`).
+   */
+  async mintKeyPackage(device: DeviceKeys): Promise<DeviceKeys> {
+    return this.deviceFromIdentity(this.exportIdentity(device));
   }
 
   /** Start a new conversation (MLS group) owned by `keys`. */

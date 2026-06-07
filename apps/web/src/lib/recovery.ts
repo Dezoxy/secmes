@@ -4,7 +4,10 @@
 // lost access. The artifact is IDENTITY-ONLY (no one-time KeyPackage HPKE private keys), so a leaked
 // artifact can't decrypt a retained Welcome — forward secrecy is preserved (key-backup.md §4). Nothing
 // here uploads to the server (that's PUT /backups/me, which needs auth); this is the local seal +
-// download + restore flow. The identity is a fixed demo value until the signed-in account supplies one.
+// download + restore flow. `identity` is the SIGNED-IN account's id (`profile.userId`) — the SAME identity
+// the device-provisioning gate seals the device under, so backup/restore and unlock operate on ONE device
+// (the keystore holds a single `SELF` device and rejects a mismatched identity). RECOVERY_IDENTITY is only
+// the demo fallback when no account is signed in.
 
 import { DeviceExistsError, DeviceKeystore } from './keystore';
 
@@ -23,19 +26,20 @@ export async function recoveryIsSetUp(): Promise<boolean> {
 
 /**
  * Ensure a sealed device exists under `passphrase`, then return the identity-only recovery artifact to
- * download. Idempotent for the same passphrase; throws on a wrong passphrase for an existing device.
+ * download. `identity` is the signed-in account (matches the unlock gate's device). Idempotent for the
+ * same passphrase; throws on a wrong passphrase for an existing device.
  */
-export async function setUpRecovery(passphrase: string): Promise<string> {
+export async function setUpRecovery(identity: string, passphrase: string): Promise<string> {
   const ks = await keystore();
-  await ks.getOrCreateDevice(RECOVERY_IDENTITY, passphrase);
-  const artifact = await ks.exportRecoveryArtifact(RECOVERY_IDENTITY, passphrase);
+  await ks.getOrCreateDevice(identity, passphrase);
+  const artifact = await ks.exportRecoveryArtifact(identity, passphrase);
   if (!artifact) throw new Error('no device to export');
   return artifact;
 }
 
 /** Re-download the artifact for an already-set-up device (verifies the passphrase). */
-export async function exportRecovery(passphrase: string): Promise<string> {
-  const artifact = await (await keystore()).exportRecoveryArtifact(RECOVERY_IDENTITY, passphrase);
+export async function exportRecovery(identity: string, passphrase: string): Promise<string> {
+  const artifact = await (await keystore()).exportRecoveryArtifact(identity, passphrase);
   if (!artifact) throw new Error('recovery is not set up yet');
   return artifact;
 }
@@ -47,14 +51,18 @@ export async function exportRecovery(passphrase: string): Promise<string> {
  * device exists — only then is it safe to clear + re-import. Any other error means nothing was verified,
  * so we rethrow without touching the stored device.
  */
-export async function restoreFromArtifact(artifactJson: string, passphrase: string): Promise<void> {
+export async function restoreFromArtifact(
+  identity: string,
+  artifactJson: string,
+  passphrase: string,
+): Promise<void> {
   const ks = await keystore();
   try {
-    await ks.importRecoveryArtifact(RECOVERY_IDENTITY, artifactJson, passphrase);
+    await ks.importRecoveryArtifact(identity, artifactJson, passphrase);
   } catch (e) {
     if (e instanceof DeviceExistsError) {
       await ks.clearDevice();
-      await ks.importRecoveryArtifact(RECOVERY_IDENTITY, artifactJson, passphrase);
+      await ks.importRecoveryArtifact(identity, artifactJson, passphrase);
     } else {
       throw e; // invalid artifact — the existing device is untouched
     }
