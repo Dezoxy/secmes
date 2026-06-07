@@ -5,6 +5,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { ServiceUnavailableException } from '@nestjs/common';
 
 import type { BlobConfig } from './blob-config.js';
 import { BlobStore, PRESIGN_EXPIRY_SECONDS } from './blob-store.js';
@@ -80,7 +81,9 @@ function isNotFound(err: unknown): boolean {
 /** Fail-closed store used when the blob config is absent — attachment endpoints 503 rather than misbehave. */
 export class UnconfiguredBlobStore extends BlobStore {
   private fail(): never {
-    throw new Error('blob store is not configured');
+    // 503 (not a generic 500): a missing/misconfigured store is "temporarily unavailable, retry", and it
+    // matches the documented fail-closed contract.
+    throw new ServiceUnavailableException('blob store is not configured');
   }
   presignPut(): Promise<string> {
     return this.fail();

@@ -1,7 +1,9 @@
 # Secure Messaging Platform — Architecture Plan v2
 
 > Supersedes `aws_secure_internal_messaging_architecture_plan.md` (kept as history / north-star).
-> This version reflects the decisions made: PWA-only, true E2EE (single device in v1), multi-tenant SaaS sold to other companies, privacy-first, EU-hosted, and **Kubernetes as a deliberate learning goal**.
+> This version reflects the decisions made: PWA-only, true E2EE (single device in v1), multi-tenant SaaS sold to other companies, privacy-first, EU-hosted. _(The original **Kubernetes learning goal** was dropped 2026-06 — see the banner.)_
+>
+> **⚠️ Composition update (2026-06 — supersedes the AKS / managed-data sections below):** Kubernetes/AKS was **dropped** as solo-dev overhead, and so were the **Azure managed data services** (managed Postgres / Cache). The deploy target is now a **single Azure VM** running **self-hosted Postgres + Redis + Zitadel** via Docker Compose; attachment blobs live on **Backblaze B2** (S3-compatible, EU `eu-central-003`, private buckets; MinIO locally); DB backups on a separate private EU B2 bucket; secrets in **Azure Key Vault**, fetched by the VM's **Managed Identity** and delivered as credential files (never env/Helm). **Azure stays** (the VM + Key Vault + Entra). The detailed AKS / Helm / Argo CD / managed-data sections below are **legacy** — read them as history. Canonical: `AGENTS.md` → _Stack & conventions_.
 
 ---
 
@@ -20,9 +22,9 @@ A **multi-tenant, end-to-end-encrypted messaging product** delivered as an insta
 | Database | **PostgreSQL** + Row-Level Security (multi-tenant) |
 | Client crypto | **MLS (RFC 9420)** via wasm — never hand-rolled |
 | Identity | **Zitadel** (self-hosted, EU), OIDC/SAML, multi-tenant |
-| Object storage | **Azure Blob Storage** (EU region, private containers) |
-| Orchestration | **Azure Kubernetes Service (AKS)**, Germany West Central / West Europe |
-| Deploy | **Helm + Argo CD** (GitOps) |
+| Object storage | **Backblaze B2** (S3-compatible, EU `eu-central-003`, private buckets) — MinIO locally _(was Azure Blob)_ |
+| Orchestration | **Single Azure VM** + Docker Compose (EU) _(AKS legacy)_ |
+| Deploy | **Docker Compose** on the VM (Caddy for TLS) _(Helm + Argo CD legacy)_ |
 
 **Why Azure (and the privacy trade you're accepting):** AKS gives you a **free control plane**, managed **Postgres / Blob / Key Vault** (far less ops than self-hosting), native **Entra ID** alignment for the Microsoft-shop companies you're selling to, and enterprise-standard cloud-native skills that transfer to any job. The honest cost: Azure is **US-owned**, so your privacy story shifts from *"EU-owned provider"* to *"E2EE (the cloud only ever holds ciphertext + metadata) + EU Data Boundary + a German region."* That's defensible, but a notch weaker than Hetzner/Scaleway on pure sovereignty. For stricter buyers later you can deploy via an Azure sovereign operator (Delos/Bleu) or move just the data plane to an EU-owned provider — Terraform + Helm keep you portable either way.
 
