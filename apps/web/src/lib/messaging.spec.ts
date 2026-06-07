@@ -7,6 +7,7 @@ vi.mock('./api', () => ({ sendMessage: vi.fn(), fetchMessages: vi.fn() }));
 import { fetchMessages, sendMessage, type FetchedMessage } from './api';
 import { fromBase64, toBase64 } from './base64';
 import { DeviceKeystore, GroupStateConflict } from './keystore';
+import { decodeEnvelope } from './message-envelope';
 import {
   backfillConversation,
   receiveLiveMessage,
@@ -72,6 +73,32 @@ describe('sendLiveMessage', () => {
     expect(await bobConv.decrypt(await reloaded!.encrypt('again'))).toBe('again');
   });
 
+  it('carries attachment refs E2E in the envelope; text-only stays a bare string (back-compat)', async () => {
+    const engine = await MlsEngine.create();
+    const { alice, aliceConv, bobConv } = await pair(engine);
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const deps: MessagingDeps = { keystore: ks, device: alice, passphrase: 'pw' };
+    send.mockResolvedValue({ messageId: 'm1', createdAt: 't', deduplicated: false });
+
+    const ref = {
+      objectKey: 'tenant/obj',
+      key: 'a2V5',
+      iv: 'aXY',
+      name: 'photo.png',
+      mime: 'image/png',
+      size: 4096,
+    };
+    await sendLiveMessage(deps, 'c1', aliceConv, 'look', [ref]);
+    // The peer decrypts the wire → the JSON envelope carries the content key/iv (E2E), never the server.
+    const withAtt = await bobConv.decrypt(fromBase64(send.mock.calls[0]![1].ciphertext));
+    expect(decodeEnvelope(withAtt)).toEqual({ text: 'look', attachments: [ref] });
+
+    // A text-only message stays a bare string — an older client still renders it as plain text.
+    await sendLiveMessage(deps, 'c1', aliceConv, 'just text');
+    const textOnly = await bobConv.decrypt(fromBase64(send.mock.calls[1]![1].ciphertext));
+    expect(textOnly).toBe('just text');
+  });
+
   it('persists the advanced state BEFORE the POST (a failed POST still leaves it saved)', async () => {
     const engine = await MlsEngine.create();
     const { alice, aliceConv } = await pair(engine);
@@ -127,7 +154,7 @@ describe('backfillConversation', () => {
 
     const result = await backfillConversation(deps, 'c1', aliceConv, 'alice-user');
 
-    expect(result.messages.map((m) => m.plaintext)).toEqual(['hi from bob', 'second from bob']);
+    expect(result.messages.map((m) => m.text)).toEqual(['hi from bob', 'second from bob']);
     expect(result.messages.map((m) => m.serverId)).toEqual(['m1', 'm3']);
     expect(result.cursor).toBe('m3'); // advanced past the skipped own message too
     // The advanced receive state was persisted (a reload still decrypts bob's NEXT message).
@@ -151,7 +178,7 @@ describe('backfillConversation', () => {
     const result = await backfillConversation(deps, 'c1', aliceConv, 'alice-user', 'm9');
 
     expect(fetch).toHaveBeenCalledWith('c1', { after: 'm9', limit: 100 });
-    expect(result.messages.map((m) => m.plaintext)).toEqual(['decryptable']); // garbage skipped, batch survives
+    expect(result.messages.map((m) => m.text)).toEqual(['decryptable']); // garbage skipped, batch survives
     expect(result.cursor).toBe('m11');
   });
 
@@ -197,7 +224,7 @@ describe('receiveLiveMessage', () => {
       'alice-user',
     );
 
-    expect(got?.plaintext).toBe('live!');
+    expect(got?.text).toBe('live!');
     expect(got?.serverId).toBe('m1');
     // Persisted: a reload continues the SAME ratchet (decrypts bob's next message).
     const reloaded = (await ks.loadConversations(alice, 'pw')).get('c1');

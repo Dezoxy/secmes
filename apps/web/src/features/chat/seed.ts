@@ -8,6 +8,8 @@
 // Avatars are GENERATED offline (initials on a deterministic gradient, as data-URI SVGs) — no external
 // image requests, replacing the design's stock-photo (Unsplash) avatars (privacy + offline PWA).
 
+import type { AttachmentRef } from '../../lib/message-envelope';
+
 export type User = {
   id: string;
   name: string;
@@ -21,10 +23,18 @@ export type MessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed'
 export type Attachment = {
   id: string;
   type: 'image' | 'file';
-  /** Renderable source: a generated data URI (seed) or a locally-decoded data URI. Never a server URL. */
-  url: string;
+  /**
+   * Renderable source: a generated/local data URI (seed, or own-send echo). Absent for a RECEIVED E2E
+   * attachment — that's downloaded + decrypted lazily from `ref`. Never a raw server URL.
+   */
+  url?: string;
   name: string;
   size?: string;
+  /**
+   * E2E attachment ref (objectKey + content key/iv) — drives lazy download+decrypt on view. Present for live
+   * attachments; the content key rides only here + the sealed log, never to the server.
+   */
+  ref?: AttachmentRef;
 };
 
 export type Message = {

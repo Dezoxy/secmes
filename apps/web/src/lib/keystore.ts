@@ -23,6 +23,8 @@ import {
 } from '@argus/crypto';
 import { openDB, type IDBPDatabase } from 'idb';
 
+import type { AttachmentRef } from './message-envelope';
+
 // SEALED at rest: the full device key material is stored in IndexedDB only as a passphrase-sealed blob
 // (Argon2id + AES-256-GCM, checkpoint 21); unlocking requires the passphrase. The server RECOVERY
 // artifact is a SEPARATE, narrower blob — identity-only (no one-time KeyPackage HPKE private keys) — so
@@ -95,6 +97,8 @@ export interface StoredMessage {
   timestamp: string; // ISO 8601
   status: string; // 'sending' | 'sent' | 'delivered' | 'read' | 'failed'
   encrypted?: boolean;
+  // E2E attachment refs (objectKey + content key/iv). Sealed at rest with the rest of the log, like `content`.
+  attachments?: AttachmentRef[];
 }
 
 // A conversation's local message history, SEALED at rest under the per-unlock SESSION KEY (cheap AES-GCM,

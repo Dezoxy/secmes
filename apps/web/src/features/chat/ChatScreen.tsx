@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MessageCircle } from 'lucide-react';
 import type { Conversation as MlsGroup } from '@argus/crypto';
 import type { UserSummary } from '../../lib/api';
+import { uploadAttachment } from '../../lib/attachments';
 import { accessToken } from '../../lib/auth';
 import { ConversationManager, type ConversationSession } from '../../lib/conversations';
 import { joinPendingConversations } from '../../lib/join';
 import { GroupStateConflict, type StoredMessage } from '../../lib/keystore';
+import type { AttachmentRef } from '../../lib/message-envelope';
 import {
   backfillConversation,
   receiveLiveMessage,
@@ -102,6 +104,18 @@ async function toAttachment(file: File): Promise<Attachment> {
   return { id, type: 'file', url: '#', name: file.name, size };
 }
 
+// A live (E2E) attachment ref → a UI attachment. Images download+decrypt lazily from `ref` (no `url`); files
+// get a chip with a working Download. Used for received messages + rehydrated history.
+function refToUiAttachment(ref: AttachmentRef): Attachment {
+  return {
+    id: `att-${ref.objectKey}`,
+    type: ref.mime.startsWith('image/') ? 'image' : 'file',
+    name: ref.name,
+    size: `${(ref.size / 1024 / 1024).toFixed(1)} MB`,
+    ref,
+  };
+}
+
 // Map a persisted history entry back to a UI Message (timestamp string → Date). Plaintext stays local.
 function storedToMessage(m: StoredMessage): Message {
   return {
@@ -111,6 +125,7 @@ function storedToMessage(m: StoredMessage): Message {
     timestamp: new Date(m.timestamp),
     status: m.status as Message['status'],
     encrypted: m.encrypted,
+    attachments: m.attachments?.map(refToUiAttachment),
   };
 }
 
@@ -249,10 +264,11 @@ export default function ChatScreen() {
             .map((m) => ({
               id: m.serverId,
               senderId: m.senderUserId,
-              content: m.plaintext,
+              content: m.text,
               timestamp: new Date(m.createdAt),
               status: 'read',
               encrypted: true,
+              attachments: m.attachments.length ? m.attachments.map(refToUiAttachment) : undefined,
             }));
           if (fresh.length === 0) return c;
           return {
@@ -268,10 +284,11 @@ export default function ChatScreen() {
         incoming.map((m) => ({
           id: m.serverId,
           senderId: m.senderUserId,
-          content: m.plaintext,
+          content: m.text,
           timestamp: m.createdAt,
           status: 'read',
           encrypted: true,
+          attachments: m.attachments.length ? m.attachments : undefined,
         })),
       );
     },
@@ -542,15 +559,17 @@ export default function ChatScreen() {
     );
   };
 
-  // Live send (Slice 5): encrypt → persist the advanced ratchet → POST the ciphertext (all under the
-  // conversation's single-writer lock, in lib/messaging). The local bubble echoes optimistically; the peer
-  // receives it on their next fetch (5C makes that a live push). Attachments aren't transmitted on live
-  // conversations yet (blob storage is a later feature) — only the text body is encrypted + sent.
+  // Live send (Slice 5 + attachments A3): encrypt → persist the advanced ratchet → POST the ciphertext (all
+  // under the conversation's single-writer lock, in lib/messaging). The local bubble echoes optimistically;
+  // the peer receives it via the live push / its next fetch. Attachment `refs` (already uploaded by the
+  // caller) ride E2E inside the MLS envelope; `echo` renders the just-sent images locally without a refetch.
   const sendLive = (
     convId: string,
     group: MlsGroup,
     deps: MessagingDeps,
     content: string,
+    attachments: AttachmentRef[] = [],
+    echo?: Attachment[],
   ): void => {
     const id = `msg-${crypto.randomUUID()}`;
     const message: Message = {
@@ -559,6 +578,7 @@ export default function ChatScreen() {
       content,
       timestamp: new Date(),
       status: 'sending',
+      attachments: echo,
     };
     setConversations((prev) =>
       prev.map((c) => (c.id === convId ? { ...c, messages: [...c.messages, message] } : c)),
@@ -566,12 +586,20 @@ export default function ChatScreen() {
     const ts = message.timestamp.toISOString();
     const logSend = (status: string, encrypted = false): void =>
       appendHistory(convId, [
-        { id, senderId: currentUser.id, content, timestamp: ts, status, encrypted },
+        {
+          id,
+          senderId: currentUser.id,
+          content,
+          timestamp: ts,
+          status,
+          encrypted,
+          attachments: attachments.length ? attachments : undefined,
+        },
       ]);
     logSend('sending');
     void (async () => {
       try {
-        await sendLiveMessage(deps, convId, group, content);
+        await sendLiveMessage(deps, convId, group, content, attachments);
         patchMessage(convId, id, { status: 'sent', encrypted: true });
         logSend('sent', true);
       } catch (err) {
@@ -594,11 +622,39 @@ export default function ChatScreen() {
   const handleSend = (content: string, files?: File[]): void => {
     if (!selectedId) return;
     const convId = selectedId;
-    // Live conversations: encrypt + send for real over the network. Requires a non-empty text body (live
-    // attachments aren't wired yet) and the sealing deps; otherwise no-op rather than a false send signal.
+    // Live conversations: encrypt + send for real over the network. Needs the sealing deps + a non-empty text
+    // OR at least one file; otherwise no-op rather than a false send signal.
     if (isLive(convId)) {
       const group = liveGroups.current.get(convId);
-      if (group && messagingDeps && content.trim()) sendLive(convId, group, messagingDeps, content);
+      const deps = messagingDeps;
+      if (!group || !deps) return;
+      const fileList = files ?? [];
+      if (!content.trim() && fileList.length === 0) return;
+      if (fileList.length === 0) {
+        sendLive(convId, group, deps, content);
+        return;
+      }
+      // Encrypt + upload each file FIRST (outside the conversation lock), then send the refs in the envelope.
+      // The local echo renders images immediately from the local bytes; the ref is kept for reload.
+      void (async () => {
+        try {
+          const refs = await Promise.all(fileList.map((f) => uploadAttachment(convId, f)));
+          const echo = await Promise.all(
+            fileList.map(async (f, i) => ({
+              ...refToUiAttachment(refs[i]!),
+              url: f.type.startsWith('image/') ? await fileToDataUrl(f) : undefined,
+            })),
+          );
+          sendLive(convId, group, deps, content, refs, echo);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            'attachment upload failed',
+            convId,
+            err instanceof Error ? err.message : err,
+          );
+        }
+      })();
       return;
     }
     const id = `msg-${crypto.randomUUID()}`; // CSPRNG id; the real client_message_id is minted the same way

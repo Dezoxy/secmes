@@ -273,6 +273,63 @@ export async function fetchMessages(
   return (await res.json()) as MessagePage;
 }
 
+// --- Encrypted attachments (A3) ---------------------------------------------------------------------------
+// The client encrypts the blob under a fresh content key, asks the server for a short-lived presigned SAS
+// grant, then PUTs/GETs the CIPHERTEXT directly to/from blob storage. The server brokers grants + metadata
+// only — it never sees the bytes or the content key. The SAS URLs are capabilities: never log or persist them.
+
+/** A minted upload capability: the opaque object key to reference, plus a short-lived presigned PUT URL. */
+export interface UploadGrant {
+  objectKey: string;
+  uploadUrl: string;
+}
+
+/** Mint an upload grant for an encrypted attachment in `conversationId` (caller must be a member). `byteSize`
+ *  is the ciphertext length and is policy-capped server-side. */
+export async function createUploadGrant(
+  conversationId: string,
+  byteSize: number,
+): Promise<UploadGrant> {
+  const res = await apiFetch('/attachments', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ conversationId, byteSize }),
+  });
+  if (!res.ok) throw new Error(`POST /attachments → ${res.status}`);
+  return (await res.json()) as UploadGrant;
+}
+
+/** Mint a download grant (short-lived presigned GET URL) for an attachment the caller may read. */
+export async function createDownloadGrant(objectKey: string): Promise<string> {
+  const res = await apiFetch('/attachments/download-url', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ objectKey }),
+  });
+  if (!res.ok) throw new Error(`POST /attachments/download-url → ${res.status}`);
+  return ((await res.json()) as { url: string }).url;
+}
+
+/** Upload the ciphertext directly to the presigned SAS URL. Azure block-blob create requires the
+ *  `x-ms-blob-type: BlockBlob` header. `uploadUrl` is a capability — never log it. */
+export async function putAttachmentBlob(uploadUrl: string, ciphertext: Uint8Array): Promise<void> {
+  const res = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: { 'x-ms-blob-type': 'BlockBlob', 'content-type': 'application/octet-stream' },
+    // Copy into a fresh ArrayBuffer-backed view: the crypto lib returns Uint8Array<ArrayBufferLike>, but a
+    // fetch body needs Uint8Array<ArrayBuffer> (BufferSource).
+    body: new Uint8Array(ciphertext),
+  });
+  if (!res.ok) throw new Error(`attachment PUT → ${res.status}`);
+}
+
+/** Download the ciphertext directly from the presigned SAS URL. `url` is a capability — never log it. */
+export async function getAttachmentBlob(url: string): Promise<Uint8Array> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`attachment GET → ${res.status}`);
+  return new Uint8Array(await res.arrayBuffer());
+}
+
 // NOTE: cross-conversation catch-up (`GET /sync`) lands with the WebSocket client in 5C (reconnect → /sync →
 // dedup), where its caller lives. 5B back-fills per-conversation on open (fetchMessages), so /sync would be
 // unused dead code here — added in 5C with its consumer + tests.

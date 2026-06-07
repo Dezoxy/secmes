@@ -1,4 +1,6 @@
 import { AlertCircle, Check, CheckCheck, FileText, Download, Lock } from 'lucide-react';
+import { saveAttachment } from '../../lib/attachments';
+import { AttachmentImage } from './AttachmentImage';
 import type { Message, User, MessageStatus } from './seed';
 import { formatFullTime } from './seed';
 
@@ -62,19 +64,29 @@ export function MessageBubble({
               <div className="mb-2 space-y-2">
                 {message.attachments!.map((attachment) =>
                   attachment.type === 'image' ? (
-                    <button
-                      key={attachment.id}
-                      type="button"
-                      onClick={() => onImageClick?.(attachment.url)}
-                      className="block relative rounded-lg overflow-hidden cursor-pointer group/img"
-                    >
-                      <img
-                        src={attachment.url}
-                        alt={attachment.name}
-                        className="max-w-[260px] max-h-64 w-full object-cover rounded-lg transition-transform duration-300 group-hover/img:scale-105"
+                    attachment.ref && !attachment.url ? (
+                      // Received E2E image — download + decrypt + render lazily on view.
+                      <AttachmentImage
+                        key={attachment.id}
+                        refData={attachment.ref}
+                        onClick={onImageClick}
                       />
-                      <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/20 transition-colors duration-300" />
-                    </button>
+                    ) : attachment.url ? (
+                      // Seed image, or own-send echo (local data URI).
+                      <button
+                        key={attachment.id}
+                        type="button"
+                        onClick={() => onImageClick?.(attachment.url!)}
+                        className="block relative rounded-lg overflow-hidden cursor-pointer group/img"
+                      >
+                        <img
+                          src={attachment.url}
+                          alt={attachment.name}
+                          className="max-w-[260px] max-h-64 w-full object-cover rounded-lg transition-transform duration-300 group-hover/img:scale-105"
+                        />
+                        <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/20 transition-colors duration-300" />
+                      </button>
+                    ) : null
                   ) : (
                     <div
                       key={attachment.id}
@@ -107,7 +119,10 @@ export function MessageBubble({
                       </div>
                       <button
                         type="button"
-                        className={`p-2 rounded-lg transition-colors ${
+                        onClick={() => attachment.ref && void saveAttachment(attachment.ref)}
+                        disabled={!attachment.ref}
+                        aria-label={`Download ${attachment.name}`}
+                        className={`p-2 rounded-lg transition-colors disabled:opacity-40 ${
                           isOwn
                             ? 'hover:bg-purple-700 text-white/80 hover:text-white'
                             : 'hover:bg-white/5 text-white/40 hover:text-white/60'
