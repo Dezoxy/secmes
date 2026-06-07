@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createMessageSocket, type IncomingMessage } from './ws';
+import { createMessageSocket, defaultWsUrl, type IncomingMessage } from './ws';
 
 // A minimal in-test WebSocket: records sends, lets the test drive open/message/close. jsdom/node have no
 // WebSocket, so the client takes an injectable impl. OPEN/CLOSED match the DOM numeric readyState.
@@ -160,6 +160,23 @@ describe('createMessageSocket', () => {
     expect(onReady).toHaveBeenCalledTimes(2); // connection signal fires on every (re)connect
     expect(parsed(last()).some((f) => f.event === 'subscribe')).toBe(true); // re-subscribed
     sock.close();
+  });
+
+  describe('defaultWsUrl', () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it('derives the WS origin from VITE_API_URL for a split deployment (ws(s) scheme + /ws)', () => {
+      vi.stubEnv('VITE_API_URL', 'https://api.example.com');
+      expect(defaultWsUrl()).toBe('wss://api.example.com/ws');
+      vi.stubEnv('VITE_API_URL', 'http://localhost:3000/'); // trailing slash trimmed; http → ws
+      expect(defaultWsUrl()).toBe('ws://localhost:3000/ws');
+    });
+
+    it('prefers an explicit VITE_WS_URL override', () => {
+      vi.stubEnv('VITE_WS_URL', 'wss://realtime.example.com/socket');
+      vi.stubEnv('VITE_API_URL', 'https://api.example.com');
+      expect(defaultWsUrl()).toBe('wss://realtime.example.com/socket');
+    });
   });
 
   it('close() stops reconnection', async () => {

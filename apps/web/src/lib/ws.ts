@@ -46,7 +46,21 @@ export interface MessageSocket {
 
 const OPEN = 1; // WebSocket.OPEN — avoid referencing the global (absent in some test envs)
 
-function defaultWsUrl(): string {
+/**
+ * The gateway URL. Precedence mirrors `lib/api.ts`'s REST base so a SPLIT deployment works:
+ * 1. `VITE_WS_URL` — explicit override.
+ * 2. `VITE_API_URL` (the REST API base, when absolute) — same host, ws(s) scheme, `/ws` path; otherwise the
+ *    socket would dial the static web origin while REST/sends go to the API host (live delivery never
+ *    connects).
+ * 3. Same origin `/ws` — dev (Vite proxy) or a PWA served from the API origin.
+ */
+export function defaultWsUrl(): string {
+  const explicit = import.meta.env.VITE_WS_URL as string | undefined;
+  if (explicit) return explicit;
+  const apiBase = import.meta.env.VITE_API_URL as string | undefined;
+  if (apiBase && /^https?:\/\//i.test(apiBase)) {
+    return `${apiBase.replace(/^http/i, 'ws').replace(/\/+$/, '')}/ws`;
+  }
   if (typeof window === 'undefined') return 'ws://localhost/ws';
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${proto}//${window.location.host}/ws`;
