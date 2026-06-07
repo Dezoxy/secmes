@@ -1,17 +1,23 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { MessageCircle } from 'lucide-react';
+import type { UserSummary } from '../../lib/api';
+import { ConversationManager, type ConversationSession } from '../../lib/conversations';
 import { getMlsSession } from '../../lib/mls';
+import { useAuth } from '../auth/AuthContext';
+import { useDevice } from '../device/DeviceContext';
 import { RecoveryPanel } from '../recovery/RecoveryPanel';
 import { ConversationList } from './ConversationList';
 import { ChatHeader } from './ChatHeader';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { ImagePreviewModal } from './ImagePreviewModal';
+import { StartConversation } from './StartConversation';
 import { VerifySecurity } from './VerifySecurity';
-import type { Attachment, Conversation, Message } from './seed';
+import type { Attachment, Conversation, Message, User } from './seed';
 import {
   conversations as initialConversations,
   currentUser,
+  generatedAvatar,
   getConversationDisplayName,
 } from './seed';
 
@@ -58,18 +64,52 @@ export default function ChatScreen() {
   // Per-conversation verification: conversationId → the safety number marked verified for it.
   const [verifiedByConv, setVerifiedByConv] = useState<Record<string, string>>({});
 
+  const { device } = useDevice();
+  const { profile } = useAuth();
+  // A live conversation manager exists only with an unlocked device (not demo mode). New conversations
+  // route through it (claim → #20 gate → create + deliver); demo mode keeps the seed/loopback path.
+  const manager = useMemo(() => (device ? new ConversationManager(device) : null), [device]);
+  const [startOpen, setStartOpen] = useState(false);
+
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Add a freshly-started LIVE conversation to the list: its safety number is the REAL one from the
+  // session (not a loopback), and the user just confirmed it out-of-band, so it lands pre-verified.
+  const handleStarted = (session: ConversationSession, peer: UserSummary): void => {
+    const name = peer.displayName || peer.email;
+    const peerUser: User = { id: peer.id, name, avatar: generatedAvatar(name), isOnline: false };
+    setConversations((prev) =>
+      prev.some((c) => c.id === session.conversationId)
+        ? prev
+        : [
+            {
+              id: session.conversationId,
+              type: 'direct',
+              participants: [currentUser, peerUser],
+              messages: [],
+              unreadCount: 0,
+            },
+            ...prev,
+          ],
+    );
+    setNumbersByConv((prev) => ({ ...prev, [session.conversationId]: session.safetyNumber }));
+    setVerifiedByConv((prev) => ({ ...prev, [session.conversationId]: session.safetyNumber }));
+    setSelectedId(session.conversationId);
+    setStartOpen(false);
+  };
 
   const selectedConversation = conversations.find((c) => c.id === selectedId);
   // Safety-number verification is 2-party only (group safety numbers are deferred —
   // fingerprint-verification.md §6) and per-conversation.
   const isDirect = selectedConversation?.type === 'direct';
 
-  // Compute the selected DIRECT conversation's own safety number (from its own session), once.
+  // Compute the selected DIRECT conversation's own safety number (from its own session), once. Live
+  // conversations already hold their REAL number (set when started), so skip them — never spin up a
+  // loopback session for a live conversation, which would compute the wrong (local) number.
   useEffect(() => {
-    if (!selectedId || !isDirect) return;
+    if (!selectedId || !isDirect || manager?.get(selectedId)) return;
     void getMlsSession(selectedId)
       .then((s) =>
         setNumbersByConv((prev) =>
@@ -77,7 +117,7 @@ export default function ChatScreen() {
         ),
       )
       .catch(() => {});
-  }, [selectedId, isDirect]);
+  }, [selectedId, isDirect, manager]);
 
   const currentNumber = selectedId ? (numbersByConv[selectedId] ?? null) : null;
   // Verified only while the number marked for THIS conversation still matches the current key.
@@ -167,6 +207,7 @@ export default function ChatScreen() {
             selectedId={selectedId}
             onSelect={handleSelect}
             onSettings={() => setRecoveryOpen(true)}
+            onNewConversation={manager ? () => setStartOpen(true) : undefined}
           />
         </div>
 
@@ -205,6 +246,14 @@ export default function ChatScreen() {
 
       <ImagePreviewModal imageUrl={previewImage} onClose={() => setPreviewImage(null)} />
       {recoveryOpen && <RecoveryPanel onClose={() => setRecoveryOpen(false)} />}
+      {startOpen && manager && (
+        <StartConversation
+          manager={manager}
+          selfUserId={profile?.userId}
+          onStarted={handleStarted}
+          onClose={() => setStartOpen(false)}
+        />
+      )}
       {verifyOpen && isDirect && (
         <VerifySecurity
           peerName={

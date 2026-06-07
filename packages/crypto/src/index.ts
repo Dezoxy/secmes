@@ -42,6 +42,9 @@ export {
   serializeKeyPackage,
   deserializeKeyPackage,
   deviceSignaturePublicKeyB64,
+  serializeInvite,
+  deserializeInvite,
+  type SerializedInvite,
 } from './device-codec.js';
 // A peer's PUBLIC key material (what the key directory publishes) — the input to `safetyNumber`.
 export type { KeyPackage } from 'ts-mls';

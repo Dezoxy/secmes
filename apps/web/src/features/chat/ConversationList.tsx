@@ -14,6 +14,8 @@ interface ConversationListProps {
   onSelect: (id: string) => void;
   /** Opens the account / key-recovery panel (the settings button in the profile row). */
   onSettings?: () => void;
+  /** Starts the claim → verify → create flow. Absent in demo mode (no unlocked device) → button hidden. */
+  onNewConversation?: () => void;
 }
 
 export function ConversationList({
@@ -21,6 +23,7 @@ export function ConversationList({
   selectedId,
   onSelect,
   onSettings,
+  onNewConversation,
 }: ConversationListProps) {
   return (
     <div className="flex flex-col h-full">
@@ -55,15 +58,18 @@ export function ConversationList({
       </div>
 
       {/* New Conversation */}
-      <div className="px-4 pt-4 pb-2">
-        <button
-          type="button"
-          className="w-full flex items-center justify-center gap-2 bg-purple-500 hover:bg-purple-400 text-white font-medium py-2.5 rounded-xl transition-all duration-300 text-sm shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 hover:-translate-y-0.5 active:translate-y-0"
-        >
-          <Plus className="w-4 h-4" />
-          New Conversation
-        </button>
-      </div>
+      {onNewConversation && (
+        <div className="px-4 pt-4 pb-2">
+          <button
+            type="button"
+            onClick={onNewConversation}
+            className="w-full flex items-center justify-center gap-2 bg-purple-500 hover:bg-purple-400 text-white font-medium py-2.5 rounded-xl transition-all duration-300 text-sm shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 hover:-translate-y-0.5 active:translate-y-0"
+          >
+            <Plus className="w-4 h-4" />
+            New Conversation
+          </button>
+        </div>
+      )}
 
       {/* Search */}
       <div className="p-4 pt-2">
