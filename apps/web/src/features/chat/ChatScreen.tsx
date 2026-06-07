@@ -1,12 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MessageCircle } from 'lucide-react';
 import type { Conversation as MlsGroup } from '@argus/crypto';
 import type { UserSummary } from '../../lib/api';
+import { accessToken } from '../../lib/auth';
 import { ConversationManager, type ConversationSession } from '../../lib/conversations';
 import { joinPendingConversations } from '../../lib/join';
 import { GroupStateConflict } from '../../lib/keystore';
-import { backfillConversation, sendLiveMessage, type MessagingDeps } from '../../lib/messaging';
+import {
+  backfillConversation,
+  receiveLiveMessage,
+  sendLiveMessage,
+  type DecryptedMessage,
+  type MessagingDeps,
+} from '../../lib/messaging';
 import { getMlsSession } from '../../lib/mls';
+import { createMessageSocket, type MessageSocket } from '../../lib/ws';
 import { useAuth } from '../auth/AuthContext';
 import { useDevice } from '../device/DeviceContext';
 import { RecoveryPanel } from '../recovery/RecoveryPanel';
@@ -118,14 +126,77 @@ export default function ChatScreen() {
   const liveGroups = useRef(new Map<string, MlsGroup>());
   const fetchCursors = useRef(new Map<string, string>());
   const backfilling = useRef(new Set<string>());
+  const socketRef = useRef<MessageSocket | null>(null);
   const joinRanRef = useRef(false);
   const rehydratedRef = useRef(false);
 
+  // Merge decrypted incoming messages into a conversation, deduped by SERVER id (across fetch + WS push) and
+  // kept in time order. Shared by fetch-on-open, the WS push, and reconnect catch-up.
+  const mergeIncoming = useCallback(
+    (conversationId: string, incoming: DecryptedMessage[]): void => {
+      if (incoming.length === 0) return;
+      setConversations((prev) =>
+        prev.map((c) => {
+          if (c.id !== conversationId) return c;
+          const existing = new Set(c.messages.map((m) => m.id));
+          const fresh: Message[] = incoming
+            .filter((m) => !existing.has(m.serverId))
+            .map((m) => ({
+              id: m.serverId,
+              senderId: m.senderUserId,
+              content: m.plaintext,
+              timestamp: new Date(m.createdAt),
+              status: 'read',
+              encrypted: true,
+            }));
+          if (fresh.length === 0) return c;
+          return {
+            ...c,
+            messages: [...c.messages, ...fresh].sort(
+              (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+            ),
+          };
+        }),
+      );
+    },
+    [],
+  );
+
+  // Back-fill ONE live conversation from its keyset cursor → decrypt → merge. Drives both fetch-on-open and
+  // reconnect catch-up (messages missed while the socket was down). In-flight guarded so a select + a
+  // reconnect can't double-fetch the same conversation.
+  const backfillInto = useCallback(
+    async (conversationId: string, group: MlsGroup, selfUserId: string): Promise<void> => {
+      if (!messagingDeps || backfilling.current.has(conversationId)) return;
+      backfilling.current.add(conversationId);
+      try {
+        const after = fetchCursors.current.get(conversationId);
+        const { messages, cursor } = await backfillConversation(
+          messagingDeps,
+          conversationId,
+          group,
+          selfUserId,
+          after,
+        );
+        if (cursor) fetchCursors.current.set(conversationId, cursor);
+        mergeIncoming(conversationId, messages);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('backfill failed', conversationId, err instanceof Error ? err.message : err);
+      } finally {
+        backfilling.current.delete(conversationId);
+      }
+    },
+    [messagingDeps, mergeIncoming],
+  );
+
   // Register a live conversation's MLS group and mark its id live (idempotent). The ref holds the group for
   // encrypt/decrypt; the id set is React state so the UI re-renders (enables the composer, drives `isLive`).
+  // Also subscribe it on the realtime socket so the gateway pushes its messages.
   const addLive = (conversationId: string, conversation: MlsGroup): void => {
     liveGroups.current.set(conversationId, conversation);
     setLiveIds((prev) => (prev.has(conversationId) ? prev : new Set(prev).add(conversationId)));
+    socketRef.current?.subscribe(conversationId);
   };
 
   // A conversation is "live" (real MLS over the network) iff it has a retained group. Demo/seed
@@ -237,56 +308,53 @@ export default function ChatScreen() {
 
   // Fetch-on-open (Slice 5): when a LIVE conversation is selected, back-fill new ciphertext from the server,
   // decrypt it against the retained group, and append the peer's messages. The keyset cursor advances so a
-  // re-open pulls only newer rows. Live PUSH (no re-open needed) is the WebSocket path (5C). The in-flight
-  // guard prevents overlapping backfills for the same conversation.
+  // re-open pulls only newer rows. Live PUSH (no re-open needed) is the WebSocket path below.
   useEffect(() => {
-    if (!selectedId || !isLive(selectedId) || !messagingDeps || !profile?.userId) return;
-    const convId = selectedId;
-    const group = liveGroups.current.get(convId);
-    if (!group || backfilling.current.has(convId)) return;
+    if (!selectedId || !isLive(selectedId) || !profile?.userId) return;
+    const group = liveGroups.current.get(selectedId);
+    if (!group) return;
+    void backfillInto(selectedId, group, profile.userId);
+  }, [selectedId, liveIds, profile, backfillInto]);
+
+  // Realtime push (Slice 5C): one reconnecting WebSocket to the `/ws` gateway, authenticated in the first
+  // frame (never a token in the URL). It pushes ciphertext for the conversations we subscribe (each live
+  // group, via addLive). On a message we decrypt + persist + merge (deduped by server id); on every
+  // (re)connect we run a per-conversation catch-up back-fill for anything missed while the socket was down.
+  useEffect(() => {
+    if (!messagingDeps || !profile?.userId) return;
+    const deps = messagingDeps;
     const selfUserId = profile.userId;
-    backfilling.current.add(convId);
-    void (async () => {
-      try {
-        const after = fetchCursors.current.get(convId);
-        const { messages, cursor } = await backfillConversation(
-          messagingDeps,
-          convId,
-          group,
-          selfUserId,
-          after,
-        );
-        if (cursor) fetchCursors.current.set(convId, cursor);
-        if (messages.length === 0) return;
-        setConversations((prev) =>
-          prev.map((c) => {
-            if (c.id !== convId) return c;
-            const existing = new Set(c.messages.map((m) => m.id));
-            const incoming: Message[] = messages
-              .filter((m) => !existing.has(m.serverId))
-              .map((m) => ({
-                id: m.serverId,
-                senderId: m.senderUserId,
-                content: m.plaintext,
-                timestamp: new Date(m.createdAt),
-                status: 'read',
-                encrypted: true,
-              }));
-            if (incoming.length === 0) return c;
-            const merged = [...c.messages, ...incoming].sort(
-              (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
+    const socket = createMessageSocket({
+      token: accessToken,
+      onMessage: ({ conversationId, message }) => {
+        const group = liveGroups.current.get(conversationId);
+        if (!group) return; // a conversation we hold no keys for — ignore (can't decrypt)
+        void receiveLiveMessage(deps, conversationId, group, message, selfUserId)
+          .then((decrypted) => {
+            if (decrypted) mergeIncoming(conversationId, [decrypted]);
+          })
+          .catch((err: unknown) => {
+            // eslint-disable-next-line no-console
+            console.warn(
+              'ws receive failed',
+              conversationId,
+              err instanceof Error ? err.message : err,
             );
-            return { ...c, messages: merged };
-          }),
-        );
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('backfill failed', convId, err instanceof Error ? err.message : err);
-      } finally {
-        backfilling.current.delete(convId);
-      }
-    })();
-  }, [selectedId, liveIds, messagingDeps, profile]);
+          });
+      },
+      onReady: () => {
+        for (const [conversationId, group] of liveGroups.current) {
+          void backfillInto(conversationId, group, selfUserId);
+        }
+      },
+    });
+    socketRef.current = socket;
+    for (const id of liveGroups.current.keys()) socket.subscribe(id); // subscribe any already-live convs
+    return () => {
+      socket.close();
+      socketRef.current = null;
+    };
+  }, [messagingDeps, profile, backfillInto, mergeIncoming]);
 
   const currentNumber = selectedId ? (numbersByConv[selectedId] ?? null) : null;
   // Verified only while the number marked for THIS conversation still matches the current key.

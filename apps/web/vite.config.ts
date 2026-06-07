@@ -14,6 +14,13 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
+      // The realtime gateway (Slice 5C). `ws: true` upgrades the connection; the path `/ws` is preserved
+      // (the gateway mounts at `/ws`). The token is sent in the first app frame, never the URL.
+      '/ws': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
   plugins: [

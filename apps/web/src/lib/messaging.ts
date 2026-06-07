@@ -9,7 +9,7 @@
 
 import type { Conversation, DeviceKeys } from '@argus/crypto';
 
-import { fetchMessages, sendMessage } from './api';
+import { fetchMessages, sendMessage, type FetchedMessage } from './api';
 import { fromBase64, toBase64 } from './base64';
 import type { DeviceKeystore } from './keystore';
 import { conversationLock, withLock } from './locks';
@@ -150,5 +150,49 @@ export async function backfillConversation(
       );
     }
     return { messages, cursor };
+  });
+}
+
+/**
+ * Decrypt + persist ONE pushed message (the WebSocket path, 5C), under the conversation's single-writer
+ * lock. Returns the decrypted message, or `null` if it's our own (already echoed locally), undecryptable
+ * (an already-consumed generation — e.g. it also arrived via a catch-up fetch — or a non-application frame),
+ * or carries no ciphertext. The caller dedups by `serverId` across push + fetch. Mirrors a single step of
+ * `backfillConversation`, but persists immediately since pushes arrive one at a time.
+ */
+export async function receiveLiveMessage(
+  deps: MessagingDeps,
+  conversationId: string,
+  conversation: Conversation,
+  message: FetchedMessage,
+  selfUserId: string,
+): Promise<DecryptedMessage | null> {
+  if (message.senderUserId === selfUserId) return null; // our own send — shown via local echo
+  return withLock(conversationLock(conversationId), async () => {
+    let plaintext: string;
+    try {
+      plaintext = await conversation.decrypt(fromBase64(message.ciphertext));
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        'receive: skipped undecryptable message',
+        message.id,
+        err instanceof Error ? err.message : err,
+      );
+      return null;
+    }
+    await deps.keystore.saveConversationState(
+      deps.device,
+      conversationId,
+      conversation,
+      deps.passphrase,
+    );
+    return {
+      serverId: message.id,
+      senderUserId: message.senderUserId,
+      clientMessageId: message.clientMessageId,
+      plaintext,
+      createdAt: message.createdAt,
+    };
   });
 }
