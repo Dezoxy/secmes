@@ -61,20 +61,50 @@ function initials(name: string): string {
   return (first + last).toUpperCase();
 }
 
+function escapeSvgText(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => {
+    switch (char) {
+      case '&':
+        return '&amp;';
+      case '<':
+        return '&lt;';
+      case '>':
+        return '&gt;';
+      case '"':
+        return '&quot;';
+      default:
+        return '&apos;';
+    }
+  });
+}
+
 /** A generated, fully-offline avatar (gradient + initials) as a data-URI SVG — no external request. */
 export function generatedAvatar(name: string): string {
   const hue = hueFromString(name);
   const c1 = `hsl(${hue} 45% 48%)`;
   const c2 = `hsl(${(hue + 40) % 360} 45% 34%)`;
+  const label = escapeSvgText(initials(name));
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96">` +
     `<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">` +
     `<stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient></defs>` +
     `<rect width="96" height="96" fill="url(#g)"/>` +
     `<text x="48" y="50" font-family="system-ui,-apple-system,sans-serif" font-size="38" font-weight="600" ` +
-    `fill="rgba(255,255,255,0.92)" text-anchor="middle" dominant-baseline="central">${initials(name)}</text>` +
+    `fill="rgba(255,255,255,0.92)" text-anchor="middle" dominant-baseline="central">${label}</text>` +
     `</svg>`;
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+const SAFE_RASTER_AVATAR_DATA_URI =
+  /^data:image\/(?:png|jpe?g|webp|gif);base64,[a-z0-9+/]+={0,2}$/i;
+export const MAX_AVATAR_DATA_URI_LENGTH = 120_000;
+
+export function safeAvatarSrc(src: string | undefined, fallbackName: string): string {
+  const fallback = generatedAvatar(fallbackName);
+  if (!src) return fallback;
+  if (src === fallback) return src;
+  if (src.length > MAX_AVATAR_DATA_URI_LENGTH) return fallback;
+  return SAFE_RASTER_AVATAR_DATA_URI.test(src) ? src : fallback;
 }
 
 export const currentUser: User = {

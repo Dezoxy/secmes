@@ -17,7 +17,6 @@ import { getMlsSession } from '../../lib/mls';
 import { createMessageSocket, type MessageSocket } from '../../lib/ws';
 import { useAuth } from '../auth/AuthContext';
 import { useDevice } from '../device/DeviceContext';
-import { RecoveryPanel } from '../recovery/RecoveryPanel';
 import { ConversationList } from './ConversationList';
 import { ChatHeader } from './ChatHeader';
 import { MessageList } from './MessageList';
@@ -25,13 +24,53 @@ import { ChatInput } from './ChatInput';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import { StartConversation } from './StartConversation';
 import { VerifySecurity } from './VerifySecurity';
+import { SettingsPanel, type AnonymousProfile } from '../settings/SettingsPanel';
 import type { Attachment, Conversation, Message, User } from './seed';
 import {
   conversations as initialConversations,
   currentUser,
   generatedAvatar,
   getConversationDisplayName,
+  safeAvatarSrc,
 } from './seed';
+
+const PROFILE_STORAGE_PREFIX = 'argus.anonymousProfile.v1';
+const LEGACY_PROFILE_STORAGE_KEY = PROFILE_STORAGE_PREFIX;
+
+function profileStorageKey(id: string): string {
+  return `${PROFILE_STORAGE_PREFIX}.${encodeURIComponent(id)}`;
+}
+
+function defaultAnonymousName(id: string): string {
+  const suffix = id.replace(/[^a-zA-Z0-9]/g, '').slice(-8) || 'local';
+  return `anon-${suffix}`;
+}
+
+function loadAnonymousProfile(id: string): AnonymousProfile {
+  const fallbackUsername = defaultAnonymousName(id);
+  const fallback = {
+    id,
+    username: fallbackUsername,
+    avatar: generatedAvatar(fallbackUsername),
+  };
+
+  const readProfile = (key: string): AnonymousProfile | null => {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<AnonymousProfile>;
+    if (parsed.id !== id) return null;
+    const username = parsed.username?.trim() || fallbackUsername;
+    return { id, username, avatar: safeAvatarSrc(parsed.avatar, username) };
+  };
+
+  try {
+    return (
+      readProfile(profileStorageKey(id)) ?? readProfile(LEGACY_PROFILE_STORAGE_KEY) ?? fallback
+    );
+  } catch {
+    return fallback;
+  }
+}
 
 /**
  * Chat experience, ported from the reworked design (`~/Downloads`) into the Vite PWA.
@@ -41,7 +80,7 @@ import {
  * message is through it; a failed round-trip marks it failed, never sent). The live loop swaps the
  * local peer for a remote member over the WS gateway and back-fills history by decrypting fetched
  * ciphertext; it needs the key directory + out-of-band fingerprint verification (#20). No plaintext
- * leaves the browser. The settings button opens key-recovery (back up / restore the device identity).
+ * leaves the browser. The settings button opens profile, privacy, and key-recovery controls.
  */
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -78,12 +117,37 @@ function storedToMessage(m: StoredMessage): Message {
 // The sidebar entry for a LIVE conversation surfaced without a known peer identity (joined on connect, or
 // rehydrated on unlock). The inviter's identity isn't in the welcome/persistence metadata (it would leak the
 // social graph to the server), so we show a neutral placeholder; verification (#20) names it out-of-band.
-function liveConversationShell(conversationId: string): Conversation {
+function currentUserFromProfile(profile: AnonymousProfile): User {
+  return {
+    ...currentUser,
+    name: profile.username,
+    avatar: profile.avatar,
+    isOnline: true,
+  };
+}
+
+function withCurrentUserProfile(conversation: Conversation, profile: User): Conversation {
+  return {
+    ...conversation,
+    participants: conversation.participants.map((participant) =>
+      participant.id === currentUser.id
+        ? {
+            ...participant,
+            name: profile.name,
+            avatar: profile.avatar,
+            isOnline: profile.isOnline,
+          }
+        : participant,
+    ),
+  };
+}
+
+function liveConversationShell(conversationId: string, selfUser: User): Conversation {
   return {
     id: conversationId,
     type: 'direct',
     participants: [
-      currentUser,
+      selfUser,
       {
         id: `peer-${conversationId}`,
         name: 'New contact',
@@ -102,7 +166,7 @@ export default function ChatScreen() {
   const [selectedId, setSelectedId] = useState<string | null>('conv-1');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
-  const [recoveryOpen, setRecoveryOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [verifyOpen, setVerifyOpen] = useState(false);
   // Each direct conversation has its own MLS session, so its own safety number (#20).
   const [numbersByConv, setNumbersByConv] = useState<Record<string, string>>({});
@@ -111,6 +175,14 @@ export default function ChatScreen() {
 
   const { device, pool, deviceId, keystore, passphrase, sessionKey } = useDevice();
   const { profile } = useAuth();
+  const anonymousId = profile?.userId ?? currentUser.id;
+  const [anonymousProfile, setAnonymousProfile] = useState<AnonymousProfile>(() =>
+    loadAnonymousProfile(anonymousId),
+  );
+  const currentUserProfile = useMemo(
+    () => currentUserFromProfile(anonymousProfile),
+    [anonymousProfile],
+  );
   // What every live send/receive needs to seal the advanced ratchet at rest (Slice 5). Null in demo mode.
   const messagingDeps = useMemo<MessagingDeps | null>(
     () => (device && keystore && passphrase ? { device, keystore, passphrase } : null),
@@ -262,6 +334,32 @@ export default function ChatScreen() {
     setMounted(true);
   }, []);
 
+  useEffect(() => {
+    setAnonymousProfile((prev) =>
+      prev.id === anonymousId ? prev : loadAnonymousProfile(anonymousId),
+    );
+  }, [anonymousId]);
+
+  useEffect(() => {
+    setConversations((prev) =>
+      prev.map((conversation) => withCurrentUserProfile(conversation, currentUserProfile)),
+    );
+  }, [currentUserProfile]);
+
+  const handleProfileChange = (next: AnonymousProfile): boolean => {
+    const safeNext = {
+      ...next,
+      avatar: safeAvatarSrc(next.avatar, next.username || next.id),
+    };
+    try {
+      window.localStorage.setItem(profileStorageKey(safeNext.id), JSON.stringify(safeNext));
+      setAnonymousProfile(safeNext);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   // Add a freshly-started LIVE conversation to the list: its safety number is the REAL one from the
   // session (not a loopback), and the user just confirmed it out-of-band, so it lands pre-verified.
   const handleStarted = (session: ConversationSession, peer: UserSummary): void => {
@@ -275,7 +373,7 @@ export default function ChatScreen() {
             {
               id: session.conversationId,
               type: 'direct',
-              participants: [currentUser, peerUser],
+              participants: [currentUserProfile, peerUser],
               messages: [],
               unreadCount: 0,
             },
@@ -306,7 +404,7 @@ export default function ChatScreen() {
         setConversations((prev) =>
           prev.some((c) => c.id === conversationId)
             ? prev
-            : [liveConversationShell(conversationId), ...prev],
+            : [liveConversationShell(conversationId, currentUserProfile), ...prev],
         );
       },
     }).catch((err: unknown) => {
@@ -315,7 +413,7 @@ export default function ChatScreen() {
       // eslint-disable-next-line no-console
       console.warn('join-on-connect drain failed', err instanceof Error ? err.message : err);
     });
-  }, [device, pool, deviceId, messagingDeps]);
+  }, [device, pool, deviceId, messagingDeps, currentUserProfile]);
 
   // Rehydrate on unlock (Slice 5 + history): load every persisted conversation's sealed group state into a
   // live MLS group, seed its decrypted history from the sealed message log, and surface it. The group state
@@ -336,7 +434,13 @@ export default function ChatScreen() {
           setConversations((prev) =>
             prev.some((c) => c.id === conversationId)
               ? prev
-              : [{ ...liveConversationShell(conversationId), messages: history }, ...prev],
+              : [
+                  {
+                    ...liveConversationShell(conversationId, currentUserProfile),
+                    messages: history,
+                  },
+                  ...prev,
+                ],
           );
         }
       } catch (err) {
@@ -344,7 +448,7 @@ export default function ChatScreen() {
         console.warn('rehydrate conversations failed', err instanceof Error ? err.message : err);
       }
     })();
-  }, [messagingDeps, sessionKey]);
+  }, [messagingDeps, sessionKey, currentUserProfile]);
 
   const selectedConversation = conversations.find((c) => c.id === selectedId);
   // Safety-number verification is 2-party only (group safety numbers are deferred —
@@ -541,8 +645,8 @@ export default function ChatScreen() {
             mounted ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-8'
           }`}
         >
-          <div className="p-4 border-b border-white/5">
-            <div className="flex items-center gap-2">
+          <div className="border-b border-white/5 p-4">
+            <div className="flex items-center justify-center gap-2">
               <div className="w-8 h-8 bg-purple-500 rounded-lg flex items-center justify-center">
                 <MessageCircle className="w-4 h-4 text-white" />
               </div>
@@ -558,7 +662,8 @@ export default function ChatScreen() {
             conversations={conversations}
             selectedId={selectedId}
             onSelect={handleSelect}
-            onSettings={() => setRecoveryOpen(true)}
+            currentUserProfile={currentUserProfile}
+            onSettings={() => setSettingsOpen(true)}
             onNewConversation={manager ? () => setStartOpen(true) : undefined}
           />
         </div>
@@ -597,7 +702,14 @@ export default function ChatScreen() {
       </div>
 
       <ImagePreviewModal imageUrl={previewImage} onClose={() => setPreviewImage(null)} />
-      {recoveryOpen && <RecoveryPanel onClose={() => setRecoveryOpen(false)} />}
+      {settingsOpen && (
+        <SettingsPanel
+          profile={anonymousProfile}
+          deviceId={deviceId}
+          onProfileChange={handleProfileChange}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
       {startOpen && manager && (
         <StartConversation
           manager={manager}

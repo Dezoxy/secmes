@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react';
-import { Send, Paperclip, Image as ImageIcon, Smile, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Send, Paperclip, Image as ImageIcon, Plus, Smile, X } from 'lucide-react';
 
 interface ChatInputProps {
   onSend: (content: string, attachments?: File[]) => void;
@@ -9,12 +9,38 @@ interface ChatInputProps {
   disabledNotice?: string;
 }
 
+const COMPOSER_CONTROL =
+  'h-11 min-h-11 rounded-xl border border-white/5 transition-all duration-300';
+
 export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
+  const [actionMenuOpen, setActionMenuOpen] = useState(false);
+  const actionsRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!actionMenuOpen) return;
+
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!actionsRef.current?.contains(event.target as Node)) {
+        setActionMenuOpen(false);
+      }
+    };
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setActionMenuOpen(false);
+    };
+
+    document.addEventListener('pointerdown', closeOnOutsidePointer);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [actionMenuOpen]);
 
   const handleSend = () => {
     if (message.trim() || attachments.length > 0) {
@@ -50,6 +76,21 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
     e.target.value = '';
   };
 
+  const openFilePicker = () => {
+    setActionMenuOpen(false);
+    fileInputRef.current?.click();
+  };
+
+  const openImagePicker = () => {
+    setActionMenuOpen(false);
+    imageInputRef.current?.click();
+  };
+
+  const insertEmoji = () => {
+    setMessage((prev) => `${prev}🙂`);
+    setActionMenuOpen(false);
+  };
+
   const removeAttachment = (index: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
     setPreviews((prev) => prev.filter((_, i) => i !== index));
@@ -66,7 +107,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
   }
 
   return (
-    <div className="border-t border-white/5 bg-[#0f0f16] p-4">
+    <div className="border-t border-white/5 bg-[#0f0f16] p-3">
       {/* Attachment previews */}
       {attachments.length > 0 && (
         <div className="flex gap-2 mb-3 overflow-x-auto pb-2">
@@ -100,8 +141,8 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
         </div>
       )}
 
-      <div className="flex items-end gap-3">
-        <div className="flex gap-1 shrink-0">
+      <div className="flex items-center gap-3">
+        <div ref={actionsRef} className="relative shrink-0">
           <input
             ref={fileInputRef}
             type="file"
@@ -119,24 +160,56 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
           />
           <button
             type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="p-2.5 rounded-xl text-white/40 hover:text-white/70 hover:bg-[#1a1a26] transition-all duration-300"
+            onClick={() => setActionMenuOpen((open) => !open)}
+            className={`${COMPOSER_CONTROL} flex w-11 items-center justify-center bg-[#1a1a26] text-white/45 hover:border-purple-500/30 hover:text-white/80`}
+            aria-label="Open message actions"
+            aria-expanded={actionMenuOpen}
+            aria-haspopup="menu"
           >
-            <Paperclip className="w-5 h-5" />
+            <Plus
+              className={`h-5 w-5 transition-transform duration-300 ${
+                actionMenuOpen ? 'rotate-45' : ''
+              }`}
+            />
           </button>
-          <button
-            type="button"
-            onClick={() => imageInputRef.current?.click()}
-            className="p-2.5 rounded-xl text-white/40 hover:text-white/70 hover:bg-[#1a1a26] transition-all duration-300"
+
+          <div
+            className={`absolute bottom-full left-0 z-20 mb-3 w-48 origin-bottom-left rounded-2xl border border-white/10 bg-[#151520] p-2 shadow-2xl shadow-black/40 transition-all duration-200 ease-out motion-reduce:transition-none ${
+              actionMenuOpen
+                ? 'translate-y-0 scale-100 opacity-100'
+                : 'pointer-events-none translate-y-2 scale-95 opacity-0'
+            }`}
+            role="menu"
+            aria-label="Message actions"
           >
-            <ImageIcon className="w-5 h-5" />
-          </button>
-          <button
-            type="button"
-            className="p-2.5 rounded-xl text-white/40 hover:text-white/70 hover:bg-[#1a1a26] transition-all duration-300"
-          >
-            <Smile className="w-5 h-5" />
-          </button>
+            <button
+              type="button"
+              onClick={openFilePicker}
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-white/65 transition-colors hover:bg-white/[0.05] hover:text-white"
+              role="menuitem"
+            >
+              <Paperclip className="h-4 w-4" />
+              Attach file
+            </button>
+            <button
+              type="button"
+              onClick={openImagePicker}
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-white/65 transition-colors hover:bg-white/[0.05] hover:text-white"
+              role="menuitem"
+            >
+              <ImageIcon className="h-4 w-4" />
+              Add image
+            </button>
+            <button
+              type="button"
+              onClick={insertEmoji}
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-white/65 transition-colors hover:bg-white/[0.05] hover:text-white"
+              role="menuitem"
+            >
+              <Smile className="h-4 w-4" />
+              Insert emoji
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 relative">
@@ -146,8 +219,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
             onKeyDown={handleKeyDown}
             placeholder="Type a message..."
             rows={1}
-            className="w-full bg-[#1a1a26] border border-white/5 rounded-xl px-4 py-3 text-sm text-white placeholder-white/30 focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/20 transition-all duration-300 resize-none max-h-32"
-            style={{ minHeight: '46px' }}
+            className={`${COMPOSER_CONTROL} block w-full resize-none overflow-hidden bg-[#1a1a26] px-3.5 py-2.5 text-sm leading-5 text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20`}
           />
         </div>
 
@@ -155,7 +227,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
           type="button"
           onClick={handleSend}
           disabled={!message.trim() && attachments.length === 0}
-          className="p-3 bg-purple-500 hover:bg-purple-400 disabled:bg-purple-500/50 disabled:cursor-not-allowed rounded-xl transition-all duration-300 shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 hover:-translate-y-0.5 active:translate-y-0 disabled:shadow-none disabled:translate-y-0"
+          className={`${COMPOSER_CONTROL} flex w-11 shrink-0 items-center justify-center bg-purple-500 shadow-lg shadow-purple-500/25 hover:-translate-y-0.5 hover:bg-purple-400 hover:shadow-purple-500/40 active:translate-y-0 disabled:cursor-not-allowed disabled:bg-purple-500/50 disabled:shadow-none disabled:translate-y-0`}
         >
           <Send className="w-5 h-5 text-white" />
         </button>

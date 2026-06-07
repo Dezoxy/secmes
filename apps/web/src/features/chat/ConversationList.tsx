@@ -1,18 +1,21 @@
-import { Search, Plus, Users, Settings, ChevronDown } from 'lucide-react';
-import type { Conversation } from './seed';
+import { useRef, useState } from 'react';
+import { Search, Plus, Users, Settings } from 'lucide-react';
+import type { Conversation, User } from './seed';
 import {
   currentUser,
   getConversationDisplayName,
   getConversationAvatar,
   getOtherParticipant,
   formatMessageTime,
+  safeAvatarSrc,
 } from './seed';
 
 interface ConversationListProps {
   conversations: Conversation[];
   selectedId: string | null;
   onSelect: (id: string) => void;
-  /** Opens the account / key-recovery panel (the settings button in the profile row). */
+  currentUserProfile?: User;
+  /** Opens account settings. */
   onSettings?: () => void;
   /** Starts the claim → verify → create flow. Absent in demo mode (no unlocked device) → button hidden. */
   onNewConversation?: () => void;
@@ -22,9 +25,52 @@ export function ConversationList({
   conversations,
   selectedId,
   onSelect,
+  currentUserProfile = currentUser,
   onSettings,
   onNewConversation,
 }: ConversationListProps) {
+  const [searchVisible, setSearchVisible] = useState(false);
+  const [searchFocused, setSearchFocused] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const touchStartY = useRef<number | null>(null);
+
+  const revealSearch = () => setSearchVisible(true);
+
+  const hideSearchIfIdle = () => {
+    if (!searchFocused) setSearchVisible(false);
+  };
+
+  const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    const scrollTop = listRef.current?.scrollTop ?? 0;
+    if (event.deltaY < -12 && scrollTop <= 2) revealSearch();
+    if (event.deltaY > 12 && scrollTop > 12) hideSearchIfIdle();
+  };
+
+  const handleTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    if ((listRef.current?.scrollTop ?? 0) <= 2) {
+      touchStartY.current = event.touches[0]?.clientY ?? null;
+    }
+  };
+
+  const handleTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    const startY = touchStartY.current;
+    const currentY = event.touches[0]?.clientY;
+    if (startY === null || currentY === undefined) return;
+    if (currentY - startY > 28 && (listRef.current?.scrollTop ?? 0) <= 2) {
+      revealSearch();
+    }
+  };
+
+  const handleTouchEnd = () => {
+    touchStartY.current = null;
+  };
+
+  const focusSearch = () => {
+    revealSearch();
+    window.requestAnimationFrame(() => searchInputRef.current?.focus());
+  };
+
   return (
     <div className="flex flex-col h-full">
       {/* User Profile Section */}
@@ -32,27 +78,27 @@ export function ConversationList({
         <button
           type="button"
           onClick={onSettings}
+          aria-label="Open settings"
           className="w-full flex items-center gap-3 p-2 rounded-xl hover:bg-[#1a1a26] transition-all duration-300 group"
         >
           <div className="relative shrink-0">
             <div className="w-10 h-10 rounded-full overflow-hidden ring-2 ring-purple-500/50">
               <img
-                src={currentUser.avatar}
-                alt={currentUser.name}
+                src={safeAvatarSrc(currentUserProfile.avatar, currentUserProfile.name)}
+                alt={currentUserProfile.name}
                 className="object-cover w-full h-full"
               />
             </div>
             <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full ring-2 ring-[#12121a]" />
           </div>
           <div className="flex-1 min-w-0 text-left">
-            <p className="text-white font-medium text-sm truncate">{currentUser.name}</p>
+            <p className="text-white font-medium text-sm truncate">{currentUserProfile.name}</p>
             <p className="text-white/40 text-xs truncate">Online</p>
           </div>
           <div className="flex items-center gap-1">
             <span className="p-1.5 rounded-lg text-white/40 group-hover:text-white/80 transition-all duration-300">
               <Settings className="w-4 h-4" />
             </span>
-            <ChevronDown className="w-4 h-4 text-white/40 group-hover:text-white/60 transition-colors duration-300" />
           </div>
         </button>
       </div>
@@ -71,20 +117,56 @@ export function ConversationList({
         </div>
       )}
 
-      {/* Search */}
-      <div className="p-4 pt-2">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
-          <input
-            type="text"
-            placeholder="Search conversations..."
-            className="w-full bg-[#1a1a26] border border-white/5 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-purple-500/50 focus:ring-1 focus:ring-purple-500/20 transition-all duration-300"
-          />
+      {/* Pull-down Search */}
+      <div
+        className={`overflow-hidden transition-all duration-300 ease-out ${
+          searchVisible
+            ? 'max-h-20 translate-y-0 opacity-100'
+            : 'pointer-events-none max-h-0 -translate-y-2 opacity-0'
+        }`}
+        aria-hidden={!searchVisible}
+      >
+        <div className="px-4 pb-3 pt-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="Search conversations..."
+              onFocus={() => {
+                setSearchFocused(true);
+                revealSearch();
+              }}
+              onBlur={() => setSearchFocused(false)}
+              className="w-full rounded-xl border border-white/5 bg-[#1a1a26] py-2.5 pl-10 pr-4 text-sm text-white placeholder-white/30 transition-all duration-300 focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20"
+            />
+          </div>
         </div>
       </div>
 
+      <div
+        className={`overflow-hidden px-4 transition-all duration-300 ${
+          searchVisible ? 'max-h-0 py-0 opacity-0' : 'max-h-5 py-2 opacity-100'
+        }`}
+      >
+        <button
+          type="button"
+          onClick={focusSearch}
+          className="mx-auto block h-1 w-10 rounded-full bg-white/10 transition-all duration-300 hover:bg-white/20"
+          aria-label="Reveal conversation search"
+        />
+      </div>
+
       {/* List */}
-      <div className="flex-1 overflow-y-auto px-2 space-y-1">
+      <div
+        ref={listRef}
+        onWheel={handleWheel}
+        onScroll={hideSearchIfIdle}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        className="flex-1 overflow-y-auto px-2 space-y-1"
+      >
         {conversations.map((conversation) => {
           const displayName = getConversationDisplayName(conversation, currentUser.id);
           const avatar = getConversationAvatar(conversation, currentUser.id);

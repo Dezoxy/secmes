@@ -46,6 +46,12 @@ zcurl() {
   fi
 }
 
+zconnect() {
+  _p="$1"; _b="$2"
+  curl -s -X POST -H "Authorization: Bearer $PAT" -H 'Connect-Protocol-Version: 1' \
+    -H 'Content-Type: application/json' "$BASE$_p" -d "$_b"
+}
+
 log "waiting for Zitadel Management API..."
 i=0
 until zcurl POST /management/v1/projects/_search '{"queries":[]}' | jq -e '.details' >/dev/null 2>&1; do
@@ -66,7 +72,57 @@ else
 fi
 [ -n "$PROJECT_ID" ] && [ "$PROJECT_ID" != "null" ] || { log "FATAL: no project id"; exit 1; }
 
-# 3) SPA OIDC app (User-Agent + PKCE + JWT access tokens; devMode allows the http localhost redirect).
+# 3) Simple Hosted Login branding: keep Zitadel's Login V2 app, but make it use Argus colors.
+LABEL_POLICY_BODY="$(jq -n \
+  --arg primary '#9333ea' \
+  --arg warn '#f43f5e' \
+  --arg background '#f8fafc' \
+  --arg font '#111827' \
+  --arg primaryDark '#a855f7' \
+  --arg warnDark '#fb7185' \
+  --arg backgroundDark '#12121a' \
+  --arg fontDark '#f8fafc' \
+  '{
+    primaryColor: $primary,
+    warnColor: $warn,
+    backgroundColor: $background,
+    fontColor: $font,
+    primaryColorDark: $primaryDark,
+    warnColorDark: $warnDark,
+    backgroundColorDark: $backgroundDark,
+    fontColorDark: $fontDark,
+    disableWatermark: true,
+    themeMode: "THEME_MODE_DARK"
+  }')"
+LABEL_IS_DEFAULT="$(zcurl GET /management/v1/policies/label | jq -r '.isDefault // .policy.isDefault // false')"
+if [ "$LABEL_IS_DEFAULT" = "true" ]; then
+  zcurl POST /management/v1/policies/label "$LABEL_POLICY_BODY" >/dev/null
+else
+  zcurl PUT /management/v1/policies/label "$LABEL_POLICY_BODY" >/dev/null
+fi
+zcurl POST /management/v1/policies/label/_activate '{}' >/dev/null
+zconnect /zitadel.project.v2.ProjectService/UpdateProject "$(jq -n --arg id "$PROJECT_ID" \
+  '{projectId: $id, privateLabelingSetting: "PRIVATE_LABELING_SETTING_ENFORCE_PROJECT_RESOURCE_OWNER_POLICY"}')" >/dev/null
+log "configured Argus branding for Login V2"
+
+# 4) Hosted Login V2 text overrides. Settings V2 merges these keys with the default locale file.
+LOGIN_TRANSLATION_BODY="$(jq -n \
+  --arg title 'Welcome to Argus' \
+  --arg description 'Use your device passkey to open secure messaging.' \
+  '{
+    instance: true,
+    locale: "en",
+    translations: {
+      loginname: {
+        title: $title,
+        description: $description
+      }
+    }
+  }')"
+zcurl PUT /v2/settings/hosted_login_translation "$LOGIN_TRANSLATION_BODY" >/dev/null
+log "configured Argus hosted login copy"
+
+# 5) SPA OIDC app (User-Agent + PKCE + JWT access tokens; devMode allows the http localhost redirect).
 APP_JSON="$(zcurl POST "/management/v1/projects/$PROJECT_ID/apps/_search" \
   "{\"queries\":[{\"nameQuery\":{\"name\":\"$APP_NAME\",\"method\":\"TEXT_QUERY_METHOD_EQUALS\"}}]}")"
 CLIENT_ID="$(echo "$APP_JSON" | jq -r '.result[0].oidcConfig.clientId // empty')"
@@ -94,7 +150,7 @@ else
 fi
 [ -n "$CLIENT_ID" ] && [ "$CLIENT_ID" != "null" ] || { log "FATAL: no client id"; exit 1; }
 
-# 4) Token Action: assert flat tenant_id (+ email/name from the user) onto the access token.
+# 6) Token Action: assert flat tenant_id (+ email/name from the user) onto the access token.
 #    The function name MUST equal the action name. setClaim only sets if the key is absent.
 ACTION_SCRIPT="function $ACTION_NAME(ctx, api) { api.v1.claims.setClaim('tenant_id', '$DEV_TENANT_ID'); var u = ctx.v1.getUser(); if (u && u.human) { if (u.human.isEmailVerified && u.human.email) { api.v1.claims.setClaim('email', u.human.email); } if (u.human.displayName) { api.v1.claims.setClaim('name', u.human.displayName); } } }"
 ACTION_BODY="$(jq -n --arg n "$ACTION_NAME" --arg s "$ACTION_SCRIPT" \
@@ -110,18 +166,18 @@ else
 fi
 [ -n "$ACTION_ID" ] && [ "$ACTION_ID" != "null" ] || { log "FATAL: no action id"; exit 1; }
 
-# 5) Bind the action to Complement-Token → Pre-Access-Token-Creation (replaces the set, so idempotent).
+# 7) Bind the action to Complement-Token → Pre-Access-Token-Creation (replaces the set, so idempotent).
 zcurl POST "/management/v1/flows/$FLOW_COMPLEMENT_TOKEN/trigger/$TRIGGER_PRE_ACCESS_TOKEN" \
   "{\"actionIds\":[\"$ACTION_ID\"]}" >/dev/null
 log "bound action to Complement-Token / Pre-Access-Token-Creation"
 
-# 6) Zitadel v4 hosts Login V2 as a separate app. Point browser login redirects at the local
+# 8) Zitadel v4 hosts Login V2 as a separate app. Point browser login redirects at the local
 #    `zitadel-login` container instead of the missing in-binary `/ui/v2/login` path.
 zcurl PUT /v2/features/instance \
   "{\"loginV2\":{\"required\":true,\"baseUri\":\"$LOGIN_UI_BASE_URI\"}}" >/dev/null
 log "configured Login V2 base URI $LOGIN_UI_BASE_URI"
 
-# 7) Emit env fragments for the Makefile to place on the host. ISSUER + audience(project id) for the
+# 9) Emit env fragments for the Makefile to place on the host. ISSUER + audience(project id) for the
 #    API; issuer + client id for the SPA. JWKS defaults to <issuer>/oauth/v2/keys (compose-reachable).
 cat > /bootstrap/api.env.local <<ENV
 # generated by infra/local/zitadel/provision.sh — gitignored, local dev only
