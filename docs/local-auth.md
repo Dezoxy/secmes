@@ -28,7 +28,8 @@ pnpm --filter @argus/web dev                   # http://localhost:5173  (separat
 
 `make up` provisions Zitadel idempotently (project, SPA app, tenant-claim Action, and Login V2 base
 URI) and writes the generated OIDC config to `.env.local` (API) and `apps/web/.env.local` (SPA) —
-both gitignored. Re-run `make auth-provision` alone to re-sync after editing the provisioner.
+both gitignored. The Login UI reads a dedicated local `IAM_LOGIN_CLIENT` PAT generated during first
+instance init. Re-run `make auth-provision` alone to re-sync after editing the provisioner.
 
 > The API runs on the **host** (`make api-dev`), not the compose image: the self-contained API
 > Dockerfile currently can't build (it `npm install`s without a lockfile, so drizzle-orm drifts to a
@@ -61,6 +62,8 @@ both gitignored. Re-run `make auth-provision` alone to re-sync after editing the
 
 - **`make reset`** wipes all volumes (incl. Zitadel) and the generated `.env.local` files. Next `make up`
   re-initialises and re-provisions from scratch.
+- **`zitadel-login` waits forever for `/bootstrap/login-client.pat`** → this stack was created before
+  the Login V2 client PAT existed; run `make reset && make up` to regenerate local-only Zitadel state.
 - **Login can't reach `zitadel:8080` or `zitadel:3001`** → the `/etc/hosts` line is missing, or
   `zitadel-login` is not running (`make ps`).
 - **Login redirects to `/ui/v2/login` on port 8080 and returns 404** → rerun `make auth-provision`;
