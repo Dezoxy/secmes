@@ -39,6 +39,9 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin # local-only, not a secret
       MINIO_ROOT_PASSWORD: minioadmin # local-only, not a secret
+      # The browser PUTs/GETs ciphertext directly to MinIO (cross-origin from the Vite dev server), so allow
+      # CORS for local dev. Prod B2 needs an equivalent bucket CORS rule (see encrypted-attachments.md §5(f)).
+      MINIO_API_CORS_ALLOW_ORIGIN: '*' # local dev only
     ports: ['9000:9000', '9001:9001'] # S3 API + web console
     volumes: ['miniodata:/data']
 
