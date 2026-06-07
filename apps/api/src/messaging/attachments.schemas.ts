@@ -5,6 +5,10 @@ import { z } from 'zod';
 // download (an S3 presigned PUT can't bind Content-Length, so the declared value alone is only advisory).
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
+/** Retention: an attachment's blob + metadata row are reaped this many days after upload by the standalone
+ *  cleanup worker (checkpoint 37). No content-type limit — only this size cap + this lifetime. */
+export const ATTACHMENT_RETENTION_DAYS = 7;
+
 /** Upload-grant request: the conversation (membership-gated) + the declared encrypted-blob size. */
 export const CreateUploadGrantSchema = z
   .object({

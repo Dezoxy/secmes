@@ -1,12 +1,16 @@
 import { randomUUID } from 'node:crypto';
 
 import { Injectable, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { BlobStore } from '../blob/blob-store.js';
 import { schema, withTenant } from '../db/index.js';
-import { MAX_ATTACHMENT_BYTES, type CreateUploadGrant } from './attachments.schemas.js';
+import {
+  ATTACHMENT_RETENTION_DAYS,
+  MAX_ATTACHMENT_BYTES,
+  type CreateUploadGrant,
+} from './attachments.schemas.js';
 import { requireMembership, requireUser } from './membership.js';
 
 /** A minted upload capability — the presigned URL is short-lived and MUST never be logged or persisted. */
@@ -42,6 +46,9 @@ export class AttachmentsService {
         objectKey,
         byteSize: body.byteSize,
         uploadedBy: user, // VERIFIED caller — never client input
+        // Lifecycle (checkpoint 37): the standalone cleanup worker reaps the blob + row after this instant.
+        // Computed with the DB clock (now()), not the API host's, so retention is consistent.
+        expiresAt: sql`now() + make_interval(days => ${ATTACHMENT_RETENTION_DAYS})`,
       });
       // Presign INSIDE the tx: if it throws (store unconfigured / temporarily broken) the row insert is
       // rolled back, so a failed grant leaves NO orphan metadata for an object that can't be uploaded

@@ -35,17 +35,31 @@ describe.skipIf(!DB_URL)('attachments schema RLS + lifecycle (checkpoint 35)', (
     }) as Promise<string>;
   }
 
-  // Insert an attachment under `tenant`, bound to `conv`, uploaded by `user`; returns the new id.
+  // The standalone cleanup worker's posture (checkpoint 37): the dedicated argus_cleanup role, with NO
+  // app.tenant_id set — it sweeps ACROSS tenants, and its RLS policy exposes ONLY rows whose retention lapsed.
+  function asCleanup(fn: (tx: typeof sql) => unknown): Promise<unknown> {
+    return sql.begin(async (tx) => {
+      await tx`set local role argus_cleanup`;
+      return fn(tx as unknown as typeof sql);
+    }) as Promise<unknown>;
+  }
+
+  // Insert an attachment under `tenant`, bound to `conv`, uploaded by `user`; returns the new id. Pass
+  // `expiresInDays` to exercise the lifecycle/cleanup path: negative = already expired, positive = live,
+  // null = never expires. Computed in SQL (now() + make_interval) — the same way the service sets it.
   function makeAttachment(
     tenant: string,
     conv: string,
     user: string,
     key: string,
+    expiresInDays: number | null = null,
   ): Promise<string> {
     return asTenant(tenant, async (tx) => {
+      const expiry =
+        expiresInDays === null ? tx`null` : tx`now() + make_interval(days => ${expiresInDays})`;
       const [row] =
-        await tx`insert into attachments (tenant_id, conversation_id, object_key, byte_size, uploaded_by)
-                             values (${tenant}, ${conv}, ${key}, 2048, ${user}) returning id`;
+        await tx`insert into attachments (tenant_id, conversation_id, object_key, byte_size, uploaded_by, expires_at)
+                             values (${tenant}, ${conv}, ${key}, 2048, ${user}, ${expiry}) returning id`;
       return (row as { id: string }).id;
     }) as Promise<string>;
   }
@@ -189,6 +203,45 @@ describe.skipIf(!DB_URL)('attachments schema RLS + lifecycle (checkpoint 35)', (
     await sql`delete from tenants where id = ${tid}`; // must not throw — cascades everything
     const [row] = await sql`select count(*)::int as n from attachments where tenant_id = ${tid}`;
     expect((row as { n: number }).n).toBe(0);
+  });
+
+  it('argus_cleanup sees EXPIRED rows across tenants, never live ones (checkpoint 37)', async () => {
+    await makeAttachment(tenantA, convA, userA, `${tenantA}/cl-live`, 1); // live (expires in 1 day)
+    await makeAttachment(tenantA, convA, userA, `${tenantA}/cl-exp-a`, -1); // expired 1 day ago
+    await makeAttachment(tenantB, convB, userB, `${tenantB}/cl-exp-b`, -1); // expired, other tenant
+    const seen = (await asCleanup((tx) => tx`select object_key from attachments`)) as Array<{
+      object_key: string;
+    }>;
+    const keys = seen.map((r) => r.object_key);
+    expect(keys).toContain(`${tenantA}/cl-exp-a`);
+    expect(keys).toContain(`${tenantB}/cl-exp-b`); // cross-tenant reap — no app.tenant_id set
+    expect(keys).not.toContain(`${tenantA}/cl-live`); // a live row is invisible to the cleanup role
+  });
+
+  it('argus_cleanup deletes an expired row but cannot touch a live one', async () => {
+    const expId = await makeAttachment(tenantA, convA, userA, `${tenantA}/cl-del-exp`, -1);
+    const liveId = await makeAttachment(tenantA, convA, userA, `${tenantA}/cl-del-live`, 1);
+    await asCleanup((tx) => tx`delete from attachments where id = ${expId}`); // reaped
+    await asCleanup((tx) => tx`delete from attachments where id = ${liveId}`); // RLS hides it → 0 rows
+    const [g] = await sql`select count(*)::int as n from attachments where id = ${expId}`;
+    const [l] = await sql`select count(*)::int as n from attachments where id = ${liveId}`;
+    expect((g as { n: number }).n).toBe(0); // expired row gone
+    expect((l as { n: number }).n).toBe(1); // live row survived — cleanup could not see it
+  });
+
+  it('argus_cleanup is reap-only: it cannot INSERT or UPDATE attachments', async () => {
+    const id = await makeAttachment(tenantA, convA, userA, `${tenantA}/cl-noupd`, -1);
+    await expect(
+      asCleanup((tx) => tx`update attachments set byte_size = 1 where id = ${id}`),
+    ).rejects.toThrow();
+    await expect(
+      asCleanup(
+        (
+          tx,
+        ) => tx`insert into attachments (tenant_id, conversation_id, object_key, byte_size, uploaded_by)
+                   values (${tenantA}, ${convA}, ${`${tenantA}/cl-ins`}, 1, ${userA})`,
+      ),
+    ).rejects.toThrow();
   });
 
   it('no tenant context => fail closed on attachments', async () => {
