@@ -99,8 +99,16 @@ ciphertext** — never plaintext, never keys. All MLS work is client-side.
   through these and drops the demo loopback for live conversations. Reviewer: **`security-boundary-auditor`**
   (ciphertext-only client, no secret logging). Perf: still one Argon2 seal per user action (send / backfill
   batch) — acceptable; the per-unlock session key remains the optimization.
-- **PR-5C (WebSocket):** a reconnecting `ws` client (first-frame auth, never token-in-URL) + subscribe +
-  decrypt-on-message + reconnect→`/sync`→dedup. Reviewer: **`security-boundary-auditor`** (WS auth).
+- **PR-5C (WebSocket) — DONE:** `lib/ws.ts` `createMessageSocket` — a reconnecting client that authenticates
+  in the **first app frame** (`{event:'auth',data:{token}}`, never a token in the URL/query), subscribes each
+  live conversation, and surfaces pushed envelopes. `lib/messaging.ts` `receiveLiveMessage` decrypts +
+  persists one push under the conversation lock (skips self/undecryptable). On every (re)connect the socket
+  re-auths + re-subscribes; the per-conversation **catch-up back-fill** then runs on each `subscribed` ACK —
+  i.e. only after the gateway has actually joined the socket to the room, so no message can slip between the
+  catch-up's fetch and the live subscription (it reuses 5B's `backfillConversation` from each keyset cursor —
+  no `/sync` needed). Dedup across push + fetch is by the server message id. Exponential reconnect backoff.
+  `ChatScreen` owns one socket; `addLive` subscribes new conversations. Dev: a Vite `/ws` proxy. Reviewer:
+  **`security-boundary-auditor`** (WS auth, token-not-in-URL, no secret logging).
 - **Tests:** the persistence round-trip — `encrypt → serialize → seal → reload → deserialize → decrypt
   continues` against a real second-device ciphertext; keystore seal/unseal/CAS; (5B) a 2-device end-to-end
   through the real envelope; (5C) the WS handshake + reconnect-dedup.
@@ -119,9 +127,11 @@ ciphertext** — never plaintext, never keys. All MLS work is client-side.
   messages are never re-derivable from MLS state at all (the sending secret is consumed on `encrypt`), so
   back-fill skips self; they appear via local echo only for the session that sent them. A local **sealed
   message log** (plaintext at rest under the device passphrase) is the follow-up that makes history durable.
-- **Receive is fetch-on-open (5B):** a peer's message appears when the conversation is (re)opened, not pushed
-  live. Live delivery without re-opening is the WebSocket path (5C). Attachments are not transmitted on live
-  conversations yet (only the text body is encrypted + sent); blob storage is a later feature.
+- **Reconnect catch-up cost (5C):** live messages now arrive over the WebSocket push; on (re)connect the
+  client catches up with a **per-conversation** back-fill (one keyset fetch per live conversation). A device
+  in many conversations makes N calls; the server's cross-conversation `GET /sync` (single paginated stream)
+  is the future optimization, deferred until N is large enough to matter. Attachments are still not
+  transmitted on live conversations (only the text body is encrypted + sent); blob storage is a later feature.
 - **Multi-tab concurrent send:** the per-conversation single-writer lock (5B) serializes ratchet ops across
   tabs, and the version/CAS keeps the *durable* state monotonic (a stale write is refused, never a rollback).
   What remains is the in-memory window where two tabs each `encrypt` from the same loaded state before either

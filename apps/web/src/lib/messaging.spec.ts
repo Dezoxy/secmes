@@ -7,7 +7,12 @@ vi.mock('./api', () => ({ sendMessage: vi.fn(), fetchMessages: vi.fn() }));
 import { fetchMessages, sendMessage, type FetchedMessage } from './api';
 import { fromBase64, toBase64 } from './base64';
 import { DeviceKeystore, GroupStateConflict } from './keystore';
-import { backfillConversation, sendLiveMessage, type MessagingDeps } from './messaging';
+import {
+  backfillConversation,
+  receiveLiveMessage,
+  sendLiveMessage,
+  type MessagingDeps,
+} from './messaging';
 
 const send = vi.mocked(sendMessage);
 const fetch = vi.mocked(fetchMessages);
@@ -167,5 +172,74 @@ describe('backfillConversation', () => {
     expect(result.messages).toHaveLength(0);
     expect(result.cursor).toBe('m1'); // cursor still advances past the skipped own message
     expect(saveSpy).not.toHaveBeenCalled(); // nothing advanced → no seal
+  });
+});
+
+describe('receiveLiveMessage', () => {
+  beforeEach(() => {
+    globalThis.indexedDB = new IDBFactory();
+    send.mockReset();
+    fetch.mockReset();
+  });
+
+  it('decrypts a peer push, persists, and returns it', async () => {
+    const engine = await MlsEngine.create();
+    const { alice, aliceConv, bobConv } = await pair(engine);
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const deps: MessagingDeps = { keystore: ks, device: alice, passphrase: 'pw' };
+
+    const ct = toBase64(await bobConv.encrypt('live!'));
+    const got = await receiveLiveMessage(
+      deps,
+      'c1',
+      aliceConv,
+      fetched('m1', 'bob-user', ct),
+      'alice-user',
+    );
+
+    expect(got?.plaintext).toBe('live!');
+    expect(got?.serverId).toBe('m1');
+    // Persisted: a reload continues the SAME ratchet (decrypts bob's next message).
+    const reloaded = (await ks.loadConversations(alice, 'pw')).get('c1');
+    expect(await reloaded!.decrypt(await bobConv.encrypt('next'))).toBe('next');
+  });
+
+  it('returns null for our OWN message (already echoed locally) — no decrypt, no persist', async () => {
+    const engine = await MlsEngine.create();
+    const { alice, aliceConv } = await pair(engine);
+    const own = toBase64(await aliceConv.encrypt('mine'));
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const saveSpy = vi.spyOn(ks, 'saveConversationState');
+    const deps: MessagingDeps = { keystore: ks, device: alice, passphrase: 'pw' };
+
+    const got = await receiveLiveMessage(
+      deps,
+      'c1',
+      aliceConv,
+      fetched('m1', 'alice-user', own),
+      'alice-user',
+    );
+
+    expect(got).toBeNull();
+    expect(saveSpy).not.toHaveBeenCalled();
+  });
+
+  it('returns null for an undecryptable push without persisting (no throw)', async () => {
+    const engine = await MlsEngine.create();
+    const { alice, aliceConv } = await pair(engine);
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const saveSpy = vi.spyOn(ks, 'saveConversationState');
+    const deps: MessagingDeps = { keystore: ks, device: alice, passphrase: 'pw' };
+
+    const got = await receiveLiveMessage(
+      deps,
+      'c1',
+      aliceConv,
+      fetched('m1', 'bob-user', toBase64(new Uint8Array([9, 9, 9, 9]))),
+      'alice-user',
+    );
+
+    expect(got).toBeNull();
+    expect(saveSpy).not.toHaveBeenCalled();
   });
 });
