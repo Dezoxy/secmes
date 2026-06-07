@@ -90,6 +90,17 @@ export function deviceSignaturePublicKeyB64(device: DeviceKeys): string {
 }
 
 /**
+ * The raw 32-byte Ed25519 signing SEED for device proofs (`@argus/crypto/device-proof`). ts-mls stores the
+ * Ed25519 private key PKCS8-wrapped (48 bytes = a 16-byte ASN.1 header + the 32-byte seed); `@noble`'s
+ * `ed25519.sign` wants the bare seed, which is the trailing 32 bytes. Signing with it produces a signature
+ * that verifies against the published `signaturePublicKey`. ⚠️ SECRET — sign in memory only; never log,
+ * persist, or transmit it.
+ */
+export function deviceSignatureSeed(device: DeviceKeys): Uint8Array {
+  return device.privatePackage.signaturePrivateKey.slice(-32);
+}
+
+/**
  * The deliverable wire form of a {@link ConversationInvite} (Welcome + RatchetTree). Each field is the
  * tagged-JSON base64 of the corresponding ts-mls object (the same codec as KeyPackage, faithfully
  * preserving Uint8Array/bigint), so a round-tripped invite reconstructs an identical object for

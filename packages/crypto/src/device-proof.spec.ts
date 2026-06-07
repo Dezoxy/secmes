@@ -7,6 +7,7 @@ import {
   verifyWelcomeConsume,
   verifyWelcomeFetch,
 } from './device-proof.js';
+import { MlsEngine, deviceSignatureSeed } from './index.js';
 
 const deviceId = '11111111-1111-1111-1111-111111111111';
 const welcomeId = '22222222-2222-2222-2222-222222222222';
@@ -72,5 +73,18 @@ describe('device-proof (welcome consume)', () => {
     const fetchSig = signWelcomeFetch(privateKey, deviceId, welcomeId);
     expect(verifyWelcomeFetch(publicKey, deviceId, welcomeId, consumeSig)).toBe(false); // can't reuse to fetch
     expect(verifyWelcomeConsume(publicKey, deviceId, welcomeId, fetchSig)).toBe(false); // can't reuse to delete
+  });
+
+  it('signs a verifiable proof from a REAL ts-mls device key (48-byte PKCS8 → 32-byte seed)', async () => {
+    const engine = await MlsEngine.create();
+    const device = await engine.generateDeviceKeys('dev');
+    const seed = deviceSignatureSeed(device);
+    const pub = device.publicPackage.leafNode.signaturePublicKey;
+    // The seed extracted from ts-mls' 48-byte PKCS8 private signs a proof that verifies against the device's
+    // PUBLISHED public key — exactly what the crypto-blind server checks. (The cases above use synthetic
+    // 32-byte keys; this guards the real-device path the client actually uses.)
+    const sig = signWelcomeFetch(seed, deviceId, welcomeId);
+    expect(verifyWelcomeFetch(pub, deviceId, welcomeId, sig)).toBe(true);
+    expect(verifyWelcomeConsume(pub, deviceId, welcomeId, sig)).toBe(false); // domain separation holds
   });
 });

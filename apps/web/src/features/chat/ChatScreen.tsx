@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { MessageCircle } from 'lucide-react';
+import type { Conversation as MlsGroup } from '@argus/crypto';
 import type { UserSummary } from '../../lib/api';
 import { ConversationManager, type ConversationSession } from '../../lib/conversations';
+import { joinPendingConversations } from '../../lib/join';
 import { getMlsSession } from '../../lib/mls';
 import { useAuth } from '../auth/AuthContext';
 import { useDevice } from '../device/DeviceContext';
@@ -64,7 +66,7 @@ export default function ChatScreen() {
   // Per-conversation verification: conversationId → the safety number marked verified for it.
   const [verifiedByConv, setVerifiedByConv] = useState<Record<string, string>>({});
 
-  const { device } = useDevice();
+  const { device, pool, deviceId, prunePoolMember } = useDevice();
   const { profile } = useAuth();
   // A live conversation manager exists only with an unlocked device (not demo mode). New conversations
   // route through it (claim → #20 gate → create + deliver); demo mode keeps the seed/loopback path.
@@ -73,6 +75,15 @@ export default function ChatScreen() {
     [device, profile],
   );
   const [startOpen, setStartOpen] = useState(false);
+  // Conversations JOINED on connect (Slice 4): their ids drive the live-conversation checks below, and
+  // their in-memory MLS groups are retained (ref) for Slice 5's send/fetch.
+  const [joinedIds, setJoinedIds] = useState<Set<string>>(() => new Set());
+  const joinedGroups = useRef(new Map<string, MlsGroup>());
+  const joinRanRef = useRef(false);
+
+  // A conversation is "live" (real MLS, no send path until Slice 5) if it was started via the manager OR
+  // joined on connect. Demo/seed conversations are not live and keep the loopback path.
+  const isLive = (id: string | null): boolean => !!id && (!!manager?.get(id) || joinedIds.has(id));
 
   useEffect(() => {
     setMounted(true);
@@ -103,16 +114,63 @@ export default function ChatScreen() {
     setStartOpen(false);
   };
 
+  // Join on connect (Slice 4): once unlocked + provisioned, drain pending Welcomes into live conversations.
+  // Runs once per session. onJoined surfaces each joined conversation (placeholder peer — the inviter's
+  // identity isn't in the welcome list yet; join-conversation.md §6) and retains its MLS group for Slice 5.
+  useEffect(() => {
+    if (!device || !pool || !deviceId || joinRanRef.current) return;
+    joinRanRef.current = true;
+    joinPendingConversations({
+      device,
+      pool,
+      deviceId,
+      prunePoolMember,
+      onJoined: ({ conversationId, conversation }) => {
+        joinedGroups.current.set(conversationId, conversation);
+        setJoinedIds((prev) =>
+          prev.has(conversationId) ? prev : new Set(prev).add(conversationId),
+        );
+        setConversations((prev) =>
+          prev.some((c) => c.id === conversationId)
+            ? prev
+            : [
+                {
+                  id: conversationId,
+                  type: 'direct',
+                  participants: [
+                    currentUser,
+                    {
+                      id: `peer-${conversationId}`,
+                      name: 'New contact',
+                      avatar: generatedAvatar(conversationId),
+                      isOnline: false,
+                    },
+                  ],
+                  messages: [],
+                  unreadCount: 0,
+                },
+                ...prev,
+              ],
+        );
+      },
+    }).catch((err: unknown) => {
+      // A whole-drain failure (e.g. listWelcomes errored) is not retried this session; it rides the next
+      // unlock and Slice 5's reconnect-sync. Per-Welcome failures are already isolated inside the drain.
+      // eslint-disable-next-line no-console
+      console.warn('join-on-connect drain failed', err instanceof Error ? err.message : err);
+    });
+  }, [device, pool, deviceId, prunePoolMember]);
+
   const selectedConversation = conversations.find((c) => c.id === selectedId);
   // Safety-number verification is 2-party only (group safety numbers are deferred —
   // fingerprint-verification.md §6) and per-conversation.
   const isDirect = selectedConversation?.type === 'direct';
 
-  // Compute the selected DIRECT conversation's own safety number (from its own session), once. Live
-  // conversations already hold their REAL number (set when started), so skip them — never spin up a
-  // loopback session for a live conversation, which would compute the wrong (local) number.
+  // Compute the selected DIRECT conversation's own safety number (from its own loopback session), once.
+  // LIVE conversations (started or joined) are skipped — a started one already holds its REAL number, and
+  // neither should spin up a loopback session (which would compute the wrong, local number).
   useEffect(() => {
-    if (!selectedId || !isDirect || manager?.get(selectedId)) return;
+    if (!selectedId || !isDirect || !!manager?.get(selectedId) || joinedIds.has(selectedId)) return;
     void getMlsSession(selectedId)
       .then((s) =>
         setNumbersByConv((prev) =>
@@ -120,7 +178,7 @@ export default function ChatScreen() {
         ),
       )
       .catch(() => {});
-  }, [selectedId, isDirect, manager]);
+  }, [selectedId, isDirect, manager, joinedIds]);
 
   const currentNumber = selectedId ? (numbersByConv[selectedId] ?? null) : null;
   // Verified only while the number marked for THIS conversation still matches the current key.
@@ -148,11 +206,11 @@ export default function ChatScreen() {
   const handleSend = (content: string, files?: File[]): void => {
     if (!selectedId) return;
     const convId = selectedId;
-    // Live conversations have no send path yet (Slice 5). Never route them through the demo loopback
-    // (`getMlsSession`) — that would mark a message "encrypted/delivered/read" after a LOCAL round-trip
-    // even though nothing was sent to the peer, who could never receive it. The composer is disabled for
-    // live conversations; this is the defensive guard. Demo/seed conversations keep the loopback path.
-    if (manager?.get(convId)) return;
+    // Live conversations (started OR joined) have no send path yet (Slice 5). Never route them through the
+    // demo loopback (`getMlsSession`) — that would mark a message "encrypted/delivered/read" after a LOCAL
+    // round-trip even though nothing was sent to the peer, who could never receive it. The composer is
+    // disabled for live conversations; this is the defensive guard. Demo/seed conversations keep loopback.
+    if (isLive(convId)) return;
     const id = `msg-${crypto.randomUUID()}`; // CSPRNG id; the real client_message_id is minted the same way
     void (async () => {
       const attachments = files?.length ? await Promise.all(files.map(toAttachment)) : undefined;
@@ -233,13 +291,13 @@ export default function ChatScreen() {
                 conversation={selectedConversation}
                 onBack={() => setShowSidebar(true)}
                 verified={verified}
-                onVerify={isDirect ? () => setVerifyOpen(true) : undefined}
+                onVerify={isDirect && currentNumber ? () => setVerifyOpen(true) : undefined}
               />
               <MessageList conversation={selectedConversation} onImageClick={setPreviewImage} />
               <ChatInput
                 onSend={handleSend}
-                disabled={!!manager?.get(selectedConversation.id)}
-                disabledNotice="This conversation is created and its safety number verified — live messaging arrives in the next update."
+                disabled={isLive(selectedConversation.id)}
+                disabledNotice="This conversation is encrypted and ready — live messaging arrives in the next update."
               />
             </>
           ) : (
