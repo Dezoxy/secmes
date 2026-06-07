@@ -67,6 +67,9 @@ interface StoredGroupState {
   signaturePublicKey: string;
   conversationId: string;
   sealed: SealedBackup;
+  // Monotonic per-conversation version for the cross-instance CAS (see saveConversationState). Bumped on
+  // every successful save; a write is only committed if the store still holds the version the writer last saw.
+  version: number;
 }
 
 /** Shape-check a server-provided sealed blob before storing it (it's still GCM-authenticated on unseal). */
@@ -99,8 +102,26 @@ export class DeviceExistsError extends Error {
   }
 }
 
+/**
+ * Thrown by saveConversationState when the persisted group state moved on under this instance — another tab
+ * or a second unlock rehydrated its own Conversation and saved a newer state. A typed sentinel so the (5B)
+ * send path can react (treat this instance as stale: stop sending, rehydrate) instead of letting a stale
+ * write roll the durable ratchet back. The persisted state is NOT overwritten when this is thrown.
+ */
+export class GroupStateConflict extends Error {
+  constructor(public readonly conversationId: string) {
+    super('group state changed under this instance (another tab or unlock); reload to continue');
+    this.name = 'GroupStateConflict';
+  }
+}
+
 /** Client-side store for this device's MLS key material — sealed at rest under the user's passphrase. */
 export class DeviceKeystore {
+  // Per-conversation version this instance last persisted — the CAS base for cross-instance save ordering.
+  // Diverges from the store the moment another tab / unlock saves, so a stale write is caught (see
+  // saveConversationState). Map ref is fixed; contents mutate.
+  private readonly groupStateVersions = new Map<string, number>();
+
   private constructor(
     private readonly db: IDBPDatabase,
     private readonly engine: MlsEngine,
@@ -273,10 +294,20 @@ export class DeviceKeystore {
   /**
    * Persist a conversation's MLS group state, SEALED (the ratchet carries live secret key material, so it is
    * sealed exactly like the device + pool). Call after any op that advanced the ratchet so a reload can
-   * rehydrate the LIVE state. A stale/rolled-back save would desync the group or risk AEAD nonce reuse, so
-   * the snapshot AND its seal + DB write run INSIDE the conversation's op mutex via `persistVia` — two close
-   * saves can't reorder and clobber a newer state with an older one. Bound to the device identity + signature
-   * key.
+   * rehydrate the LIVE state. Two layers keep a stale state from overwriting a newer one (which would desync
+   * the group or risk AEAD nonce reuse):
+   *
+   * 1. **Within one instance:** the snapshot AND its seal + write run INSIDE the conversation's op mutex via
+   *    `persistVia`, so concurrent saves on the same `Conversation` can't reorder.
+   * 2. **Across instances** (two tabs / a double-unlock — each rehydrates its OWN `Conversation` with an
+   *    independent op queue, so layer 1 can't order them): a monotonic `version` + compare-and-swap. The
+   *    write commits only if the store still holds the version THIS instance last saw; otherwise a newer
+   *    instance got there first and we throw `GroupStateConflict` instead of rolling the durable ratchet
+   *    back. The single readwrite tx makes get→check→put atomic (IndexedDB serializes it against the other
+   *    tab's tx); the slow Argon2 seal runs BEFORE the tx so nothing non-IDB is awaited mid-transaction.
+   *
+   * Bound to the device identity + signature key. (CAS keeps the *durable* state monotonic; it does not gate
+   * two tabs *sending* concurrently — that needs single-writer send coordination, wired with the send path.)
    */
   async saveConversationState(
     device: DeviceKeys,
@@ -287,16 +318,27 @@ export class DeviceKeystore {
     await conversation.persistVia(async (snapshot) => {
       const sealed = await sealBackup(snapshot, passphrase, this.argon);
       snapshot.fill(0); // wipe the transient unsealed group-state bytes after sealing
-      await this.db.put(
-        GROUP_STORE,
-        {
-          identity: deviceIdentity(device),
-          signaturePublicKey: deviceSignaturePublicKeyB64(device),
+
+      const base = this.groupStateVersions.get(conversationId) ?? -1;
+      const tx = this.db.transaction(GROUP_STORE, 'readwrite');
+      const current = (await tx.store.get(conversationId)) as StoredGroupState | undefined;
+      const conflict = (current?.version ?? -1) !== base;
+      const version = base + 1;
+      if (!conflict) {
+        await tx.store.put(
+          {
+            identity: deviceIdentity(device),
+            signaturePublicKey: deviceSignaturePublicKeyB64(device),
+            conversationId,
+            sealed,
+            version,
+          } satisfies StoredGroupState,
           conversationId,
-          sealed,
-        } satisfies StoredGroupState,
-        conversationId,
-      );
+        );
+      }
+      await tx.done;
+      if (conflict) throw new GroupStateConflict(conversationId);
+      this.groupStateVersions.set(conversationId, version);
     });
   }
 
@@ -317,6 +359,9 @@ export class DeviceKeystore {
       // the conversation is open), not a transient copy.
       const opened = await openBackup(rec.sealed, passphrase);
       out.set(rec.conversationId, this.engine.deserializeConversation(opened));
+      // Record the loaded version as this instance's CAS base; a later save by another tab bumps the store
+      // past it and is caught (see saveConversationState).
+      this.groupStateVersions.set(rec.conversationId, rec.version ?? -1);
     }
     return out;
   }
@@ -324,6 +369,7 @@ export class DeviceKeystore {
   /** Remove a conversation's persisted group state (e.g. on leave / cleanup). */
   async deleteConversationState(conversationId: string): Promise<void> {
     await this.db.delete(GROUP_STORE, conversationId);
+    this.groupStateVersions.delete(conversationId);
   }
 
   /**
@@ -397,6 +443,7 @@ export class DeviceKeystore {
     await this.db.delete(STORE, SELF);
     await this.db.delete(POOL_STORE, SELF);
     await this.db.clear(GROUP_STORE); // drop this profile's persisted conversations too (Slice 5)
+    this.groupStateVersions.clear();
   }
 
   /** Whether a sealed device is stored for this profile. Metadata only — no passphrase, no unseal. */

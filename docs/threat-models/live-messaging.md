@@ -39,16 +39,26 @@ ciphertext** — never plaintext, never keys. All MLS work is client-side.
   `decodeGroupState` returns views over them, so they ARE the live in-memory group state (as resident as the
   device keys), not a transient copy.
 - **Rollback / nonce reuse (the headline correctness risk):** persisting a STALE group state behind a
-  ratchet advance would break decryption or, worse, let a future `encrypt` reuse an AEAD nonce. The race is
-  concrete: if the snapshot is taken in the op mutex but the **seal + DB write run outside it**, two close
-  saves can reorder (a slow Argon2 seal lets an older snapshot's write land after a newer one's) and roll the
-  stored state back. **Mitigation:** `Conversation.persistVia(persister)` runs the snapshot AND the
-  persister's seal + write **inside** the per-conversation op mutex (`opQueue`), so saves are totally ordered
-  with ratchet ops and with each other — a later op's state can never be overwritten by an earlier one.
-  `keystore.saveConversationState` is built on `persistVia`; a concurrency test fires interleaved
-  encrypt+save and asserts the reload is the newest generation (a rollback would replay a consumed generation
-  and fail the peer's decrypt). PR-5A lands the codec, the ordered sealed store, and `persistVia`; 5B wires it
-  as the in-mutex hook on the ops that ratchet (send/decrypt).
+  ratchet advance would break decryption or, worse, let a future `encrypt` reuse an AEAD nonce. Two distinct
+  races, two guards:
+  - **Same instance** (snapshot in the op mutex but seal + write outside it → two close saves reorder when a
+    slow Argon2 seal lets an older write land last): `Conversation.persistVia(persister)` runs the snapshot
+    AND the persister's seal + write **inside** the per-conversation op mutex (`opQueue`), so saves are
+    totally ordered with ratchet ops and with each other. A concurrency test fires interleaved encrypt+save
+    and asserts the reload is the newest generation.
+  - **Across instances** (two tabs / a double-unlock each rehydrate their OWN `Conversation` with an
+    independent `opQueue`, so the mutex can't order them): the `group-state` store carries a monotonic
+    `version`; `saveConversationState` commits only via a single readwrite-tx **compare-and-swap** (the seal
+    runs before the tx; IndexedDB serializes the tx against the other tab's), so a stale instance's write is
+    rejected with `GroupStateConflict` rather than rolling the durable ratchet back. A cross-instance test
+    proves the stale save is refused and the persisted state stays the newest. **Bound:** CAS keeps the
+    *durable* state monotonic; it does NOT stop two tabs *sending* concurrently (each advances its own
+    in-memory ratchet and could emit the same generation). Eliminating that needs **single-writer send
+    coordination** (a `navigator.locks` writer lock gating `encrypt`), which lands with the send path (5B)
+    — `GroupStateConflict` is the typed signal a follower uses to stop sending + rehydrate. Until then v1 is
+    single-active-tab; concurrent multi-tab sending is the documented residual below.
+  PR-5A lands the codec, the ordered + CAS-guarded sealed store, and `persistVia`; 5B wires the persist as the
+  in-mutex hook on the ops that ratchet (send/decrypt) and adds the writer lock.
 - **Crypto-blind violation:** only opaque ciphertext + ids + metadata cross the wire (send/fetch/sync/WS).
   The server stores ciphertext only (append-only `messages` table, RLS) and never decrypts.
 - **WS auth (5C):** the token authenticates the socket in the **first app frame**, never in the URL or a
@@ -95,4 +105,10 @@ ciphertext** — never plaintext, never keys. All MLS work is client-side.
   re-processing (dedup by `id`). Documented, not eliminated in v1.
 - **Group-state migration:** Slice 4 left joined conversations in memory only; the first run after Slice 5
   persists them on next join (the still-pending Welcome re-joins, then persists). No data loss.
+- **Multi-tab concurrent send:** the version/CAS keeps the *durable* group state monotonic (a stale tab's
+  write is refused, never a rollback), but it does not stop two simultaneously-active tabs from each calling
+  `encrypt` and emitting the same MLS generation before either persists — an in-memory nonce reuse the
+  persistence layer can't see. For v1 we treat the app as single-active-tab and accept this; the complete fix
+  (a `navigator.locks` single-writer lock gating `encrypt`, with `GroupStateConflict` demoting a follower
+  tab) is wired with the send path (5B). Documented, not eliminated in PR-5A.
 - **Group chat / PCS rekey:** v1 is 1:1, single-epoch; multi-member commits + PCS fan-out are deferred (B1).

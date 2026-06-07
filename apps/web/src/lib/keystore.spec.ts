@@ -9,7 +9,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { openDB } from 'idb';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { DeviceExistsError, DeviceKeystore } from './keystore';
+import { DeviceExistsError, DeviceKeystore, GroupStateConflict } from './keystore';
 
 // Clears the key-backup Argon2 floor while keeping the seal/unseal fast in tests.
 const FAST: Argon2Params = { m: 8192, t: 2, p: 1 };
@@ -408,6 +408,45 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     const restored = (await reopened.loadConversations(dev2, 'pw')).get('conv-1');
     if (!restored) throw new Error('expected a restored conversation');
     expect(await peerConv.decrypt(await restored.encrypt('after'))).toBe('after');
+  });
+
+  it('saveConversationState rejects a stale cross-instance write (no durable rollback)', async () => {
+    const engine = await MlsEngine.create();
+    const ksA = await DeviceKeystore.open(engine, FAST);
+    const device = await ksA.getOrCreateDevice('alice', 'pw');
+    const peer = await engine.generateDeviceKeys('peer');
+    const conv = await engine.createConversation('conv-1', device);
+    const peerConv = await engine.joinConversation(peer, await conv.addMember(peer.publicPackage));
+    expect(await peerConv.decrypt(await conv.encrypt('hello'))).toBe('hello');
+    await ksA.saveConversationState(device, 'conv-1', conv, 'pw'); // store version 0
+
+    // A SECOND keystore over the same IndexedDB rehydrates its OWN instance (a second tab / double unlock):
+    // independent op queue, so persistVia can't order it against instance A. It loads at version 0.
+    const ksB = await DeviceKeystore.open(engine, FAST);
+    const devB = await ksB.loadDevice('alice', 'pw');
+    if (!devB) throw new Error('expected a persisted device');
+    const convB = (await ksB.loadConversations(devB, 'pw')).get('conv-1');
+    if (!convB) throw new Error('expected a restored conversation');
+
+    // Instance A advances + saves again → store version 1. B's CAS base (0) is now stale.
+    await peerConv.decrypt(await conv.encrypt('from A'));
+    await ksA.saveConversationState(device, 'conv-1', conv, 'pw'); // store version 1
+
+    // B advances its OWN (divergent) state and tries to save on the stale base → rejected, NOT applied.
+    await convB.encrypt('from B');
+    await expect(ksB.saveConversationState(devB, 'conv-1', convB, 'pw')).rejects.toBeInstanceOf(
+      GroupStateConflict,
+    );
+
+    // The durable state is still A's newest (no rollback): a fresh reload continues A's ratchet — its next
+    // send is a generation the peer has not consumed. Had B's stale write landed, this would replay a used
+    // generation and the peer's decrypt would throw.
+    const ksC = await DeviceKeystore.open(engine, FAST);
+    const devC = await ksC.loadDevice('alice', 'pw');
+    if (!devC) throw new Error('expected a persisted device');
+    const convC = (await ksC.loadConversations(devC, 'pw')).get('conv-1');
+    if (!convC) throw new Error('expected a restored conversation');
+    expect(await peerConv.decrypt(await convC.encrypt('after'))).toBe('after');
   });
 
   it('loadConversations skips a group bound to a different device signature key', async () => {
