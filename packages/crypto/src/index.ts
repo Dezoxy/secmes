@@ -37,8 +37,12 @@ import { defaultClientConfig } from 'ts-mls/clientConfig.js';
 export {
   sealBackup,
   openBackup,
+  deriveSessionKey,
+  sealWithKey,
+  openWithKey,
   DEFAULT_ARGON2,
   type SealedBackup,
+  type SealedBlob,
   type Argon2Params,
 } from './key-backup.js';
 export {

@@ -45,6 +45,12 @@ interface DeviceState {
    * device keys in `device`; a per-unlock derived session key (to avoid per-message Argon2) is the follow-up.
    */
   passphrase: string | null;
+  /**
+   * The per-unlock AES-256-GCM session key for the local message-history log (derived once from the
+   * passphrase + a stored salt). In memory only — never persisted; cleared on reset. Lets per-message
+   * history persistence be cheap AES-GCM instead of a per-message Argon2.
+   */
+  sessionKey: CryptoKey | null;
   status: DeviceStatus;
   error: string | null;
   /** Unlock (or create on first run) the device, then provision + publish its KeyPackage pool. */
@@ -72,6 +78,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
   const [pool, setPool] = useState<DeviceKeys[] | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
   const [passphrase, setPassphrase] = useState<string | null>(null);
+  const [sessionKey, setSessionKey] = useState<CryptoKey | null>(null);
   // Demo mode has no real device — render the chat (seed-driven) without a gate.
   const [status, setStatus] = useState<DeviceStatus>(configured ? 'loading' : 'ready');
   const [error, setError] = useState<string | null>(null);
@@ -126,6 +133,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         setPool(provisioned);
         setDeviceId(result.deviceId);
         setPassphrase(passphrase); // retained in memory to seal advanced group state on send/receive (Slice 5)
+        setSessionKey(await keystore.deriveSessionKey(passphrase)); // message-history seal key (memory only)
         setStatus('ready');
       } catch (err) {
         // openBackup fails closed on a wrong passphrase (GCM auth) — surface that distinctly.
@@ -156,6 +164,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         setPool(provisioned);
         setDeviceId(result.deviceId);
         setPassphrase(passphrase); // see unlock — sealing key for advanced group state (Slice 5)
+        setSessionKey(await keystore.deriveSessionKey(passphrase)); // message-history seal key (memory only)
         setStatus('ready');
       } catch (err) {
         // restore fails closed on a wrong passphrase / file / identity mismatch — keep the existing device.
@@ -173,6 +182,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
     if (!keystore) return;
     await keystore.clearDevice(); // wipes the other account's device + pool from this browser's single slot
     setPassphrase(null);
+    setSessionKey(null);
     setError(null);
     setStatus('needs-create');
   }, [keystore]);
@@ -183,6 +193,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
     deviceId,
     keystore,
     passphrase,
+    sessionKey,
     status,
     error,
     unlock,

@@ -9,7 +9,20 @@ import { IDBFactory } from 'fake-indexeddb';
 import { openDB } from 'idb';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { DeviceExistsError, DeviceKeystore, GroupStateConflict } from './keystore';
+import {
+  DeviceExistsError,
+  DeviceKeystore,
+  GroupStateConflict,
+  type StoredMessage,
+} from './keystore';
+
+const msg = (
+  id: string,
+  content: string,
+  ts: string,
+  senderId = 'peer',
+  status = 'read',
+): StoredMessage => ({ id, senderId, content, timestamp: ts, status });
 
 // Clears the key-backup Argon2 floor while keeping the seal/unseal fast in tests.
 const FAST: Argon2Params = { m: 8192, t: 2, p: 1 };
@@ -481,5 +494,65 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     await ks.clearDevice();
     const device2 = await ks.getOrCreateDevice('alice', 'pw');
     expect((await ks.loadConversations(device2, 'pw')).size).toBe(0);
+  });
+
+  it('message log: append → reload → re-derive the session key → history round-trips', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const key = await ks.deriveSessionKey('pw');
+    await ks.appendMessages(device, 'c1', key, [
+      msg('m2', 'there', '2026-01-01T00:00:02.000Z'),
+      msg('m1', 'hi', '2026-01-01T00:00:01.000Z'), // out of order — load sorts by timestamp
+    ]);
+
+    const reopened = await DeviceKeystore.open(engine, FAST);
+    const dev2 = await reopened.loadDevice('alice', 'pw');
+    if (!dev2) throw new Error('expected a persisted device');
+    const key2 = await reopened.deriveSessionKey('pw'); // same passphrase + stored salt → same key
+    const log = await reopened.loadMessageLog(dev2, 'c1', key2);
+    expect(log.map((m) => m.content)).toEqual(['hi', 'there']);
+  });
+
+  it('message log: upserts by id (a later status update replaces the entry)', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const key = await ks.deriveSessionKey('pw');
+    await ks.appendMessages(device, 'c1', key, [msg('m1', 'hello', 't', 'me', 'sending')]);
+    await ks.appendMessages(device, 'c1', key, [msg('m1', 'hello', 't', 'me', 'read')]);
+    const log = await ks.loadMessageLog(device, 'c1', key);
+    expect(log).toHaveLength(1);
+    expect(log[0]!.status).toBe('read');
+  });
+
+  it('message log: fails closed on a wrong passphrase (empty history, no throw)', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('alice', 'pw');
+    await ks.appendMessages(device, 'c1', await ks.deriveSessionKey('pw'), [
+      msg('m1', 'secret', 't'),
+    ]);
+    // A wrong passphrase derives a different key (same stored salt) → GCM auth fails → treated as no history.
+    const wrongKey = await ks.deriveSessionKey('not-the-passphrase');
+    expect(await ks.loadMessageLog(device, 'c1', wrongKey)).toEqual([]);
+  });
+
+  it('message log: skips a log bound to a different device; loadAll + clearDevice', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const key = await ks.deriveSessionKey('pw');
+    await ks.appendMessages(device, 'a', key, [msg('m1', 'in a', 't')]);
+    await ks.appendMessages(device, 'b', key, [msg('m2', 'in b', 't')]);
+    expect([...(await ks.loadAllMessageLogs(device, key)).keys()].sort()).toEqual(['a', 'b']);
+
+    // A different device (same identity string, different signature key) sees nothing.
+    const other = await engine.generateDeviceKeys('alice');
+    expect((await ks.loadAllMessageLogs(other, key)).size).toBe(0);
+
+    await ks.clearDevice();
+    const device2 = await ks.getOrCreateDevice('alice', 'pw');
+    expect((await ks.loadAllMessageLogs(device2, await ks.deriveSessionKey('pw'))).size).toBe(0);
   });
 });
