@@ -126,6 +126,7 @@ export default function ChatScreen() {
   const liveGroups = useRef(new Map<string, MlsGroup>());
   const fetchCursors = useRef(new Map<string, string>());
   const backfilling = useRef(new Set<string>());
+  const backfillPending = useRef(new Set<string>());
   const socketRef = useRef<MessageSocket | null>(null);
   const joinRanRef = useRef(false);
   const rehydratedRef = useRef(false);
@@ -163,28 +164,39 @@ export default function ChatScreen() {
   );
 
   // Back-fill ONE live conversation from its keyset cursor → decrypt → merge. Drives both fetch-on-open and
-  // reconnect catch-up (messages missed while the socket was down). In-flight guarded so a select + a
-  // reconnect can't double-fetch the same conversation.
+  // the on-`subscribed` catch-up. A call that arrives while one is in flight does NOT drop — it COALESCES a
+  // trailing rerun, so the ack-triggered catch-up still runs (with a fresh snapshot past the room-join) after
+  // an in-flight fetch-on-open finishes; otherwise a message committed between that earlier fetch and the
+  // gateway joining the room would be neither fetched nor pushed.
   const backfillInto = useCallback(
     async (conversationId: string, group: MlsGroup, selfUserId: string): Promise<void> => {
-      if (!messagingDeps || backfilling.current.has(conversationId)) return;
+      if (!messagingDeps) return;
+      if (backfilling.current.has(conversationId)) {
+        backfillPending.current.add(conversationId); // one more pass after the in-flight one completes
+        return;
+      }
       backfilling.current.add(conversationId);
       try {
-        const after = fetchCursors.current.get(conversationId);
-        const { messages, cursor } = await backfillConversation(
-          messagingDeps,
-          conversationId,
-          group,
-          selfUserId,
-          after,
-        );
-        if (cursor) fetchCursors.current.set(conversationId, cursor);
-        mergeIncoming(conversationId, messages);
+        do {
+          backfillPending.current.delete(conversationId);
+          const after = fetchCursors.current.get(conversationId);
+          const { messages, cursor } = await backfillConversation(
+            messagingDeps,
+            conversationId,
+            group,
+            selfUserId,
+            after,
+          );
+          if (cursor) fetchCursors.current.set(conversationId, cursor);
+          mergeIncoming(conversationId, messages);
+          // Loop once more iff a call arrived DURING this pass (its snapshot may post-date ours).
+        } while (backfillPending.current.has(conversationId));
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('backfill failed', conversationId, err instanceof Error ? err.message : err);
       } finally {
         backfilling.current.delete(conversationId);
+        backfillPending.current.delete(conversationId);
       }
     },
     [messagingDeps, mergeIncoming],
