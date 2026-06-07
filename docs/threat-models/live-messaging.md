@@ -1,0 +1,114 @@
+# Threat model: live messaging (Slice 5)
+
+> One page. Written before code. The last slice of the live message loop: persist MLS group state durably so
+> conversations survive a reload, then send (encrypt → POST ciphertext), back-fill history (GET → decrypt),
+> and receive live over the WebSocket gateway. Split: **PR-5A group-state persistence** (this note's focus) →
+> 5B send + fetch → 5C WebSocket + reconnect/sync. The server half (send/fetch/sync/WS) already exists.
+
+## 1. Feature & data flow
+
+- **Persist (PR-5A):** MLS group state ratchets on every `encrypt`/`decrypt`/`addMember`, so it must be
+  saved durably or a reload desyncs the group. The client serializes the ts-mls `GroupState`
+  (`encodeGroupState`) and stores it **sealed** (Argon2id + AES-256-GCM, the same passphrase as the device)
+  per conversation in IndexedDB. On unlock it rehydrates conversations from the store; once a join's group
+  is persisted, **consuming the Welcome + pruning the spent private** (deferred from Slice 4) become safe.
+- **Send (5B):** `conversation.encrypt(text)` → opaque wire bytes → `POST /conversations/:id/messages`
+  (`{ clientMessageId, ciphertext: base64, alg, epoch }`). Idempotent on `clientMessageId`.
+- **Fetch / sync (5B/5C):** `GET …/messages?after=` (keyset) and `GET /sync?after=` → opaque ciphertext the
+  client `decrypt`s in order. **Live (5C):** the `/ws` gateway pushes `{ event:'message', … }` frames.
+
+The server only ever sees ids, metadata (`alg`, `epoch`, `clientMessageId`), and **opaque base64
+ciphertext** — never plaintext, never keys. All MLS work is client-side.
+
+## 2. Assets & trust boundaries
+
+- **Assets:** the persisted **MLS group state** — it carries `signaturePrivateKey`, `privatePath` HPKE path
+  secrets, the `keySchedule`/`secretTree` ratchet secrets — **as sensitive as the device keys**; message
+  plaintext (only ever in memory); the WS auth token.
+- **Boundaries:** at-rest (the sealed group-state blob ↔ unsealed in-memory state — the passphrase is the
+  gate); client↔server (crypto-blind — opaque ciphertext only); WS handshake (token authenticates the
+  socket); tenant↔tenant (RLS, server-enforced).
+
+## 3. Threats (STRIDE-lite)
+
+- **Information disclosure (persisted ratchet state):** the group-state blob holds live secret key material,
+  so it is **sealed at rest** exactly like the device + pool (Argon2id 64 MiB + AES-256-GCM, identity- and
+  signature-key-bound). A leaked at-rest blob (no passphrase) reveals nothing; a wrong passphrase fails the
+  GCM auth. Never logged or transmitted. The **save-side** serialized plaintext (a fresh copy from
+  `encodeGroupState`) is wiped after sealing; the **load-side** unsealed bytes are deliberately retained —
+  `decodeGroupState` returns views over them, so they ARE the live in-memory group state (as resident as the
+  device keys), not a transient copy.
+- **Rollback / nonce reuse (the headline correctness risk):** persisting a STALE group state behind a
+  ratchet advance would break decryption or, worse, let a future `encrypt` reuse an AEAD nonce. Two distinct
+  races, two guards:
+  - **Same instance** (snapshot in the op mutex but seal + write outside it → two close saves reorder when a
+    slow Argon2 seal lets an older write land last): `Conversation.persistVia(persister)` runs the snapshot
+    AND the persister's seal + write **inside** the per-conversation op mutex (`opQueue`), so saves are
+    totally ordered with ratchet ops and with each other. A concurrency test fires interleaved encrypt+save
+    and asserts the reload is the newest generation.
+  - **Across instances** (two tabs / a double-unlock each rehydrate their OWN `Conversation` with an
+    independent `opQueue`, so the mutex can't order them): the `group-state` store carries a monotonic
+    `version`; `saveConversationState` commits only via a single readwrite-tx **compare-and-swap** (the seal
+    runs before the tx; IndexedDB serializes the tx against the other tab's), so a stale instance's write is
+    rejected with `GroupStateConflict` rather than rolling the durable ratchet back. A cross-instance test
+    proves the stale save is refused and the persisted state stays the newest. **Bound:** CAS keeps the
+    *durable* state monotonic; it does NOT stop two tabs *sending* concurrently (each advances its own
+    in-memory ratchet and could emit the same generation). Eliminating that needs **single-writer send
+    coordination** (a `navigator.locks` writer lock gating `encrypt`), which lands with the send path (5B)
+    — `GroupStateConflict` is the typed signal a follower uses to stop sending + rehydrate. Until then v1 is
+    single-active-tab; concurrent multi-tab sending is the documented residual below.
+  PR-5A lands the codec, the ordered + CAS-guarded sealed store, and `persistVia`; 5B wires the persist as the
+  in-mutex hook on the ops that ratchet (send/decrypt) and adds the writer lock.
+- **Crypto-blind violation:** only opaque ciphertext + ids + metadata cross the wire (send/fetch/sync/WS).
+  The server stores ciphertext only (append-only `messages` table, RLS) and never decrypts.
+- **WS auth (5C):** the token authenticates the socket in the **first app frame**, never in the URL or a
+  query string (so it can't land in a proxy/access log); tenant + membership scoping is server-enforced.
+- **Ordering / replay:** dedup by the **server** `message.id` across fetch + WS + sync; `clientMessageId`
+  gives send-side idempotency (a retry returns the existing row, no double fan-out).
+
+## 4. Invariant check
+
+- **#1 crypto-blind server:** upheld — ciphertext + metadata only; the server never sees plaintext or keys.
+- **#2 no secret logging:** upheld — group state / keys / passphrase / plaintext never logged or sent; the
+  sealed blob is the only at-rest form; transient plaintext wiped.
+- **#3 RLS:** upheld — the messages/sync/WS paths are tenant- + member-scoped server-side; **no new server
+  table** (the messaging schema exists). The new client `group-state` store is local IndexedDB only.
+- **#4 no hand-rolled crypto:** upheld — persistence uses ts-mls `encodeGroupState`/`decodeGroupState`; the
+  seal reuses `@argus/crypto` `sealBackup`/`openBackup` (Argon2id + AES-GCM); encrypt/decrypt stay in
+  `@argus/crypto`. CSPRNG only.
+- **#5 secrets via Key Vault / #6 no admin content path:** untouched.
+
+## 5. Decision & mitigations
+
+- **PR-5A (`@argus/crypto` + keystore):** `Conversation.serialize()` (= `encodeGroupState(state)`) +
+  `Conversation.persistVia(persister)` (snapshot + persister run in the op mutex, so saves are ordered with
+  ratchet ops — see Rollback above) + `MlsEngine.deserializeConversation(bytes)` (`decodeGroupState` →
+  re-attach `defaultClientConfig` → `new Conversation`). Keystore: a sealed, identity+signature-bound
+  **`group-state`** store (IndexedDB v4, additive) keyed by conversationId, written through `persistVia`;
+  wipe transients. Reviewer: **`crypto-reviewer`** (FS of persisted state, the codec, atomicity). Perf note:
+  PR-5A seals per explicit save (one-shot Argon2 is fine); 5B's per-message persistence should derive a
+  session key once at unlock rather than re-running Argon2 on every message.
+- **PR-5B (send + fetch):** `api.ts` `sendMessage`/`fetchMessages`/`fetchSync`; wire the join flow to
+  persist → consume → prune; the in-mutex persist hook on `encrypt`/`decrypt`; rehydrate on unlock.
+  Reviewer: **`security-boundary-auditor`** (ciphertext-only client, no secret logging).
+- **PR-5C (WebSocket):** a reconnecting `ws` client (first-frame auth, never token-in-URL) + subscribe +
+  decrypt-on-message + reconnect→`/sync`→dedup. Reviewer: **`security-boundary-auditor`** (WS auth).
+- **Tests:** the persistence round-trip — `encrypt → serialize → seal → reload → deserialize → decrypt
+  continues` against a real second-device ciphertext; keystore seal/unseal/CAS; (5B) a 2-device end-to-end
+  through the real envelope; (5C) the WS handshake + reconnect-dedup.
+
+## 6. Residual risk
+
+- **Decrypt-then-crash re-processing:** `decrypt` advances state + returns plaintext; if the tab dies before
+  the seal, a reload re-fetches + re-decrypts the same ciphertext against the older state. For v1 single-epoch
+  1:1 this is a benign re-derive; the durable `messages` table is the source of truth and the client tolerates
+  re-processing (dedup by `id`). Documented, not eliminated in v1.
+- **Group-state migration:** Slice 4 left joined conversations in memory only; the first run after Slice 5
+  persists them on next join (the still-pending Welcome re-joins, then persists). No data loss.
+- **Multi-tab concurrent send:** the version/CAS keeps the *durable* group state monotonic (a stale tab's
+  write is refused, never a rollback), but it does not stop two simultaneously-active tabs from each calling
+  `encrypt` and emitting the same MLS generation before either persists — an in-memory nonce reuse the
+  persistence layer can't see. For v1 we treat the app as single-active-tab and accept this; the complete fix
+  (a `navigator.locks` single-writer lock gating `encrypt`, with `GroupStateConflict` demoting a follower
+  tab) is wired with the send path (5B). Documented, not eliminated in PR-5A.
+- **Group chat / PCS rekey:** v1 is 1:1, single-epoch; multi-member commits + PCS fan-out are deferred (B1).

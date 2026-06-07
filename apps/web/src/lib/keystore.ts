@@ -13,6 +13,7 @@ import {
   serializeDeviceKeysArray,
   serializeKeyPackage,
   type Argon2Params,
+  type Conversation,
   type DeviceKeys,
   type SealedBackup,
 } from '@argus/crypto';
@@ -30,12 +31,14 @@ import { openDB, type IDBPDatabase } from 'idb';
 // into this one, delete the old) BEFORE getOrCreateDevice mints a fresh device. See device-keystore.md.
 const DB_NAME = 'argus-keystore';
 // v1 stored an UNSEALED `{ identity, keys }` record at the same DB/store/key. v2 stores only the sealed
-// blob. v3 adds the one-time KeyPackage POOL store (device provisioning, Slice 2). Shapes are
-// incompatible across v1→v2: a stale v1 record would be misread as a sealed device and fail to unlock,
-// so the upgrade drops the legacy store; v2→v3 only ADDS the pool store.
-const DB_VERSION = 3;
+// blob. v3 adds the one-time KeyPackage POOL store (device provisioning, Slice 2). v4 adds the sealed MLS
+// GROUP-STATE store (live messaging, Slice 5). Shapes are incompatible across v1→v2: a stale v1 record
+// would be misread as a sealed device and fail to unlock, so the upgrade drops the legacy store;
+// v2→v3 and v3→v4 only ADD a store.
+const DB_VERSION = 4;
 const STORE = 'device';
 const POOL_STORE = 'key-package-pool'; // sealed one-time KeyPackage pool (privates retained for join)
+const GROUP_STORE = 'group-state'; // sealed MLS group state per conversation (ratchet secrets — Slice 5)
 const SELF = 'self'; // single device per user in v1 (multi-device is deferred, B2)
 // One-time KeyPackages kept AVAILABLE (unclaimed) in the directory so peers can claim one to add this
 // device. Provisioning replenishes back to this after others claim some (see provisioning.ts).
@@ -53,6 +56,20 @@ interface StoredPool {
   identity: string;
   signaturePublicKey: string;
   sealed: SealedBackup;
+}
+
+// A conversation's sealed MLS group state (Slice 5). The ratchet carries live secret key material, so it's
+// sealed exactly like the device/pool, and bound to the device identity + signature key so a re-created /
+// recovered device (same identity string, different key) can't load a group it can't drive. Keyed by
+// conversationId in the store.
+interface StoredGroupState {
+  identity: string;
+  signaturePublicKey: string;
+  conversationId: string;
+  sealed: SealedBackup;
+  // Monotonic per-conversation version for the cross-instance CAS (see saveConversationState). Bumped on
+  // every successful save; a write is only committed if the store still holds the version the writer last saw.
+  version: number;
 }
 
 /** Shape-check a server-provided sealed blob before storing it (it's still GCM-authenticated on unseal). */
@@ -85,8 +102,26 @@ export class DeviceExistsError extends Error {
   }
 }
 
+/**
+ * Thrown by saveConversationState when the persisted group state moved on under this instance — another tab
+ * or a second unlock rehydrated its own Conversation and saved a newer state. A typed sentinel so the (5B)
+ * send path can react (treat this instance as stale: stop sending, rehydrate) instead of letting a stale
+ * write roll the durable ratchet back. The persisted state is NOT overwritten when this is thrown.
+ */
+export class GroupStateConflict extends Error {
+  constructor(public readonly conversationId: string) {
+    super('group state changed under this instance (another tab or unlock); reload to continue');
+    this.name = 'GroupStateConflict';
+  }
+}
+
 /** Client-side store for this device's MLS key material — sealed at rest under the user's passphrase. */
 export class DeviceKeystore {
+  // Per-conversation version this instance last persisted — the CAS base for cross-instance save ordering.
+  // Diverges from the store the moment another tab / unlock saves, so a stale write is caught (see
+  // saveConversationState). Map ref is fixed; contents mutate.
+  private readonly groupStateVersions = new Map<string, number>();
+
   private constructor(
     private readonly db: IDBPDatabase,
     private readonly engine: MlsEngine,
@@ -109,6 +144,9 @@ export class DeviceKeystore {
         if (!database.objectStoreNames.contains(STORE)) database.createObjectStore(STORE);
         // v3: the sealed one-time KeyPackage pool (device provisioning). Additive — keeps the device store.
         if (!database.objectStoreNames.contains(POOL_STORE)) database.createObjectStore(POOL_STORE);
+        // v4: the sealed MLS group-state store (live messaging). Additive — keyed by conversationId.
+        if (!database.objectStoreNames.contains(GROUP_STORE))
+          database.createObjectStore(GROUP_STORE);
       },
     });
     return new DeviceKeystore(db, engine ?? (await MlsEngine.create()), argon);
@@ -254,6 +292,87 @@ export class DeviceKeystore {
   }
 
   /**
+   * Persist a conversation's MLS group state, SEALED (the ratchet carries live secret key material, so it is
+   * sealed exactly like the device + pool). Call after any op that advanced the ratchet so a reload can
+   * rehydrate the LIVE state. Two layers keep a stale state from overwriting a newer one (which would desync
+   * the group or risk AEAD nonce reuse):
+   *
+   * 1. **Within one instance:** the snapshot AND its seal + write run INSIDE the conversation's op mutex via
+   *    `persistVia`, so concurrent saves on the same `Conversation` can't reorder.
+   * 2. **Across instances** (two tabs / a double-unlock — each rehydrates its OWN `Conversation` with an
+   *    independent op queue, so layer 1 can't order them): a monotonic `version` + compare-and-swap. The
+   *    write commits only if the store still holds the version THIS instance last saw; otherwise a newer
+   *    instance got there first and we throw `GroupStateConflict` instead of rolling the durable ratchet
+   *    back. The single readwrite tx makes get→check→put atomic (IndexedDB serializes it against the other
+   *    tab's tx); the slow Argon2 seal runs BEFORE the tx so nothing non-IDB is awaited mid-transaction.
+   *
+   * Bound to the device identity + signature key. (CAS keeps the *durable* state monotonic; it does not gate
+   * two tabs *sending* concurrently — that needs single-writer send coordination, wired with the send path.)
+   */
+  async saveConversationState(
+    device: DeviceKeys,
+    conversationId: string,
+    conversation: Conversation,
+    passphrase: string,
+  ): Promise<void> {
+    await conversation.persistVia(async (snapshot) => {
+      const sealed = await sealBackup(snapshot, passphrase, this.argon);
+      snapshot.fill(0); // wipe the transient unsealed group-state bytes after sealing
+
+      const base = this.groupStateVersions.get(conversationId) ?? -1;
+      const tx = this.db.transaction(GROUP_STORE, 'readwrite');
+      const current = (await tx.store.get(conversationId)) as StoredGroupState | undefined;
+      const conflict = (current?.version ?? -1) !== base;
+      const version = base + 1;
+      if (!conflict) {
+        await tx.store.put(
+          {
+            identity: deviceIdentity(device),
+            signaturePublicKey: deviceSignaturePublicKeyB64(device),
+            conversationId,
+            sealed,
+            version,
+          } satisfies StoredGroupState,
+          conversationId,
+        );
+      }
+      await tx.done;
+      if (conflict) throw new GroupStateConflict(conversationId);
+      this.groupStateVersions.set(conversationId, version);
+    });
+  }
+
+  /** Rehydrate ALL of THIS device's persisted conversations (on unlock) → conversationId → Conversation. */
+  async loadConversations(
+    device: DeviceKeys,
+    passphrase: string,
+  ): Promise<Map<string, Conversation>> {
+    const identity = deviceIdentity(device);
+    const signaturePublicKey = deviceSignaturePublicKeyB64(device);
+    const recs = (await this.db.getAll(GROUP_STORE)) as StoredGroupState[];
+    const out = new Map<string, Conversation>();
+    for (const rec of recs) {
+      // Skip a stale group from a re-created/recovered device (same identity string, different key).
+      if (rec.identity !== identity || rec.signaturePublicKey !== signaturePublicKey) continue;
+      // The decoded group state holds VIEWS into the unsealed bytes, so they must NOT be wiped — those bytes
+      // ARE the live in-memory group state (as sensitive as the device keys, and unavoidably resident while
+      // the conversation is open), not a transient copy.
+      const opened = await openBackup(rec.sealed, passphrase);
+      out.set(rec.conversationId, this.engine.deserializeConversation(opened));
+      // Record the loaded version as this instance's CAS base; a later save by another tab bumps the store
+      // past it and is caught (see saveConversationState).
+      this.groupStateVersions.set(rec.conversationId, rec.version ?? -1);
+    }
+    return out;
+  }
+
+  /** Remove a conversation's persisted group state (e.g. on leave / cleanup). */
+  async deleteConversationState(conversationId: string): Promise<void> {
+    await this.db.delete(GROUP_STORE, conversationId);
+    this.groupStateVersions.delete(conversationId);
+  }
+
+  /**
    * The identity-only sealed artifact to upload for cross-device recovery (key-backup.md §4). Unseals the
    * local device with `passphrase`, strips it to identity material (no one-time KeyPackage HPKE private
    * keys), and re-seals that under the same passphrase. Forward-secret: a leak of this artifact can't
@@ -323,6 +442,8 @@ export class DeviceKeystore {
   async clearDevice(): Promise<void> {
     await this.db.delete(STORE, SELF);
     await this.db.delete(POOL_STORE, SELF);
+    await this.db.clear(GROUP_STORE); // drop this profile's persisted conversations too (Slice 5)
+    this.groupStateVersions.clear();
   }
 
   /** Whether a sealed device is stored for this profile. Metadata only — no passphrase, no unseal. */

@@ -9,7 +9,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { openDB } from 'idb';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { DeviceExistsError, DeviceKeystore } from './keystore';
+import { DeviceExistsError, DeviceKeystore, GroupStateConflict } from './keystore';
 
 // Clears the key-backup Argon2 floor while keeping the seal/unseal fast in tests.
 const FAST: Argon2Params = { m: 8192, t: 2, p: 1 };
@@ -352,5 +352,134 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     await ks.clearDevice();
     const recovered = await ks.importRecoveryArtifact('alice', blob, 'pw'); // now allowed
     expect(await worksForMls(engine, recovered)).toBe('msg');
+  });
+
+  it('saveConversationState + loadConversations round-trips a usable group across reopen', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const peer = await engine.generateDeviceKeys('peer');
+    const conv = await engine.createConversation('conv-1', device);
+    const peerConv = await engine.joinConversation(peer, await conv.addMember(peer.publicPackage));
+    expect(await peerConv.decrypt(await conv.encrypt('hello'))).toBe('hello'); // advance the ratchet
+
+    await ks.saveConversationState(device, 'conv-1', conv, 'pw');
+
+    // Reopen the keystore (as on a reload), reload the device, rehydrate the conversations.
+    const reopened = await DeviceKeystore.open(engine, FAST);
+    const dev2 = await reopened.loadDevice('alice', 'pw');
+    if (!dev2) throw new Error('expected a persisted device');
+    const restored = (await reopened.loadConversations(dev2, 'pw')).get('conv-1');
+    if (!restored) throw new Error('expected a restored conversation');
+    // The restored group continues the SAME ratchet (the peer decrypts its next message in order).
+    expect(await peerConv.decrypt(await restored.encrypt('after reload'))).toBe('after reload');
+  });
+
+  it('saveConversationState is ordered with the ratchet under concurrency (no rollback)', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const peer = await engine.generateDeviceKeys('peer');
+    const conv = await engine.createConversation('conv-1', device);
+    const peerConv = await engine.joinConversation(peer, await conv.addMember(peer.publicPackage));
+
+    // Fire several ratchet-advancing encrypts, each followed by a save, WITHOUT awaiting between them — so
+    // the saves race. persistVia runs seal+put INSIDE the op mutex, so each save's snapshot is taken in op
+    // order and the newest one is written last. If seal/put ran outside the mutex an older snapshot (a slow
+    // Argon2 seal) could land after a newer one and overwrite it — an MLS rollback.
+    const ciphertexts = await Promise.all(
+      Array.from({ length: 5 }, (_, i) =>
+        (async () => {
+          const ct = await conv.encrypt(`m${i}`);
+          await ks.saveConversationState(device, 'conv-1', conv, 'pw');
+          return ct;
+        })(),
+      ),
+    );
+
+    // The peer consumes every message in send order (the mutex serialized the encrypts in call order).
+    for (const ct of ciphertexts) await peerConv.decrypt(ct);
+
+    // Reload: the restored state must be the NEWEST, so its next send is a generation the peer has not seen.
+    // A rolled-back save would replay an already-consumed generation and the peer's decrypt would throw.
+    const reopened = await DeviceKeystore.open(engine, FAST);
+    const dev2 = await reopened.loadDevice('alice', 'pw');
+    if (!dev2) throw new Error('expected a persisted device');
+    const restored = (await reopened.loadConversations(dev2, 'pw')).get('conv-1');
+    if (!restored) throw new Error('expected a restored conversation');
+    expect(await peerConv.decrypt(await restored.encrypt('after'))).toBe('after');
+  });
+
+  it('saveConversationState rejects a stale cross-instance write (no durable rollback)', async () => {
+    const engine = await MlsEngine.create();
+    const ksA = await DeviceKeystore.open(engine, FAST);
+    const device = await ksA.getOrCreateDevice('alice', 'pw');
+    const peer = await engine.generateDeviceKeys('peer');
+    const conv = await engine.createConversation('conv-1', device);
+    const peerConv = await engine.joinConversation(peer, await conv.addMember(peer.publicPackage));
+    expect(await peerConv.decrypt(await conv.encrypt('hello'))).toBe('hello');
+    await ksA.saveConversationState(device, 'conv-1', conv, 'pw'); // store version 0
+
+    // A SECOND keystore over the same IndexedDB rehydrates its OWN instance (a second tab / double unlock):
+    // independent op queue, so persistVia can't order it against instance A. It loads at version 0.
+    const ksB = await DeviceKeystore.open(engine, FAST);
+    const devB = await ksB.loadDevice('alice', 'pw');
+    if (!devB) throw new Error('expected a persisted device');
+    const convB = (await ksB.loadConversations(devB, 'pw')).get('conv-1');
+    if (!convB) throw new Error('expected a restored conversation');
+
+    // Instance A advances + saves again → store version 1. B's CAS base (0) is now stale.
+    await peerConv.decrypt(await conv.encrypt('from A'));
+    await ksA.saveConversationState(device, 'conv-1', conv, 'pw'); // store version 1
+
+    // B advances its OWN (divergent) state and tries to save on the stale base → rejected, NOT applied.
+    await convB.encrypt('from B');
+    await expect(ksB.saveConversationState(devB, 'conv-1', convB, 'pw')).rejects.toBeInstanceOf(
+      GroupStateConflict,
+    );
+
+    // The durable state is still A's newest (no rollback): a fresh reload continues A's ratchet — its next
+    // send is a generation the peer has not consumed. Had B's stale write landed, this would replay a used
+    // generation and the peer's decrypt would throw.
+    const ksC = await DeviceKeystore.open(engine, FAST);
+    const devC = await ksC.loadDevice('alice', 'pw');
+    if (!devC) throw new Error('expected a persisted device');
+    const convC = (await ksC.loadConversations(devC, 'pw')).get('conv-1');
+    if (!convC) throw new Error('expected a restored conversation');
+    expect(await peerConv.decrypt(await convC.encrypt('after'))).toBe('after');
+  });
+
+  it('loadConversations skips a group bound to a different device signature key', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const peer = await engine.generateDeviceKeys('peer');
+    const conv = await engine.createConversation('conv-1', device);
+    await engine.joinConversation(peer, await conv.addMember(peer.publicPackage));
+    await ks.saveConversationState(device, 'conv-1', conv, 'pw');
+
+    // A different device (same identity string, different signature key) must NOT load it.
+    const other = await engine.generateDeviceKeys('alice');
+    expect((await ks.loadConversations(other, 'pw')).size).toBe(0);
+  });
+
+  it('deleteConversationState removes a persisted conversation; clearDevice clears them all', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const peer = await engine.generateDeviceKeys('peer');
+    const a = await engine.createConversation('a', device);
+    const b = await engine.createConversation('b', device);
+    await a.addMember(peer.publicPackage);
+    await b.addMember(peer.publicPackage);
+    await ks.saveConversationState(device, 'a', a, 'pw');
+    await ks.saveConversationState(device, 'b', b, 'pw');
+
+    await ks.deleteConversationState('a');
+    expect([...(await ks.loadConversations(device, 'pw')).keys()]).toEqual(['b']);
+
+    await ks.clearDevice();
+    const device2 = await ks.getOrCreateDevice('alice', 'pw');
+    expect((await ks.loadConversations(device2, 'pw')).size).toBe(0);
   });
 });
