@@ -42,14 +42,14 @@ describe('S3BlobStore — SigV4 presign (offline)', () => {
     expect(url).toMatch(/[?&]X-Amz-Expires=/); // has an expiry
     // The credential scope carries the ACCESS KEY ID (not secret), never the secret access key.
     expect(url).toContain('X-Amz-Credential=');
-    expect(url).not.toContain(MINIO.secretAccessKey); // the signing secret never appears in the URL
+    expect(url).not.toContain(OFFLINE.secretAccessKey); // the signing secret never appears in the URL
   });
 
   it('presignGet mints a signed URL to the same object (verb is bound into the signature, not the query)', async () => {
     const url = await store.presignGet('11111111-1111-1111-1111-111111111111/obj');
     expect(url).toContain('/argus-attachments-test/11111111-1111-1111-1111-111111111111/obj');
     expect(url).toMatch(/[?&]X-Amz-Signature=/);
-    expect(url).not.toContain(MINIO.secretAccessKey);
+    expect(url).not.toContain(OFFLINE.secretAccessKey);
   });
 });
 
