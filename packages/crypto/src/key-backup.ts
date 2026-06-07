@@ -223,3 +223,53 @@ export async function openWithKey(
     throw new Error('sealed blob decryption failed (wrong key or tampered data)');
   }
 }
+
+// --- Attachment content-key encryption (E2EE blobs) -------------------------------------------------
+// Each attachment gets a FRESH random AES-256-GCM content key. The blob CIPHERTEXT goes to the (untrusted)
+// blob store; the raw key + IV ride inside the E2E MLS message envelope, so the server never sees them. The
+// recipient unwraps the key from the decrypted message and decrypts the downloaded ciphertext. GCM auth +
+// the per-attachment random key mean a server that swaps the blob can't produce a forgery the recipient
+// accepts (decryption fails closed).
+
+export interface EncryptedAttachment {
+  /** base64 raw 32-byte content key — wrap in the MLS message envelope ONLY; never send it to the server. */
+  key: string;
+  /** base64 12-byte AES-GCM IV. */
+  iv: string;
+  /** the encrypted blob bytes — upload these to the blob store. */
+  ciphertext: Uint8Array;
+}
+
+/** Encrypt blob bytes under a FRESH random content key (CSPRNG). Returns the key (for the envelope) + IV + ciphertext. */
+export async function encryptAttachment(plaintext: Uint8Array): Promise<EncryptedAttachment> {
+  const raw = crypto.getRandomValues(new Uint8Array(32));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await crypto.subtle.importKey('raw', bytes(raw), 'AES-GCM', false, ['encrypt']);
+  const ct = new Uint8Array(
+    await crypto.subtle.encrypt({ name: 'AES-GCM', iv: bytes(iv) }, key, bytes(plaintext)),
+  );
+  const out: EncryptedAttachment = { key: toB64(raw), iv: toB64(iv), ciphertext: ct };
+  raw.fill(0); // best-effort wipe of the raw key buffer (the caller holds + drops the base64 copy)
+  return out;
+}
+
+/** Decrypt blob ciphertext with the content key + IV unwrapped from the MLS envelope. Throws on a wrong key or tampering. */
+export async function decryptAttachment(
+  keyB64: string,
+  ivB64: string,
+  ciphertext: Uint8Array,
+): Promise<Uint8Array> {
+  const raw = fromB64(keyB64);
+  const iv = fromB64(ivB64);
+  if (raw.length !== 32) throw new Error('attachment content key must be 32 bytes');
+  if (iv.length !== 12) throw new Error('attachment IV must be 12 bytes');
+  const key = await crypto.subtle.importKey('raw', bytes(raw), 'AES-GCM', false, ['decrypt']);
+  raw.fill(0);
+  try {
+    return new Uint8Array(
+      await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes(iv) }, key, bytes(ciphertext)),
+    );
+  } catch {
+    throw new Error('attachment decryption failed (wrong key or tampered data)');
+  }
+}
