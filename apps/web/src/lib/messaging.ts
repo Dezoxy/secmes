@@ -13,6 +13,7 @@ import { fetchMessages, sendMessage, type FetchedMessage } from './api';
 import { fromBase64, toBase64 } from './base64';
 import type { DeviceKeystore } from './keystore';
 import { conversationLock, withLock } from './locks';
+import { decodeEnvelope, encodeEnvelope, type AttachmentRef } from './message-envelope';
 
 // Non-secret AEAD/version tag stored alongside the ciphertext (server metadata only; it stays crypto-blind).
 const WIRE_ALG = 'MLS_1.0';
@@ -47,8 +48,14 @@ export async function sendLiveMessage(
   deps: MessagingDeps,
   conversationId: string,
   conversation: Conversation,
-  plaintext: string,
+  text: string,
+  attachments: AttachmentRef[] = [],
 ): Promise<SentLiveMessage> {
+  // ALWAYS wrap in the versioned envelope — including text-only — so a user message that itself looks like
+  // envelope JSON (e.g. `{"v":1,"text":"x","attachments":[]}`) is unambiguous on the wire: it becomes the
+  // `text` field, never re-parsed as an envelope. `decodeEnvelope` still reads pre-A3 bare-string messages as
+  // plain text (back-compat for already-sent history).
+  const plaintext = encodeEnvelope({ text, attachments });
   return withLock(conversationLock(conversationId), async () => {
     const wire = await conversation.encrypt(plaintext);
     // Persist the advanced ratchet BEFORE the ciphertext leaves the device (rollback/nonce-reuse guard).
@@ -79,7 +86,10 @@ export interface DecryptedMessage {
   serverId: string;
   senderUserId: string;
   clientMessageId: string;
-  plaintext: string;
+  /** The decoded message text — an old bare-string message decodes to itself. */
+  text: string;
+  /** Attachment refs carried E2E in the envelope (empty for text-only / pre-A3 messages). */
+  attachments: AttachmentRef[];
   createdAt: string;
 }
 
@@ -121,11 +131,13 @@ export async function backfillConversation(
         try {
           const plaintext = await conversation.decrypt(fromBase64(m.ciphertext));
           advanced = true;
+          const env = decodeEnvelope(plaintext);
           messages.push({
             serverId: m.id,
             senderUserId: m.senderUserId,
             clientMessageId: m.clientMessageId,
-            plaintext,
+            text: env.text,
+            attachments: env.attachments,
             createdAt: m.createdAt,
           });
         } catch (err) {
@@ -187,11 +199,13 @@ export async function receiveLiveMessage(
       conversation,
       deps.passphrase,
     );
+    const env = decodeEnvelope(plaintext);
     return {
       serverId: message.id,
       senderUserId: message.senderUserId,
       clientMessageId: message.clientMessageId,
-      plaintext,
+      text: env.text,
+      attachments: env.attachments,
       createdAt: message.createdAt,
     };
   });
