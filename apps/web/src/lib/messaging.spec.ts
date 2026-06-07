@@ -65,15 +65,18 @@ describe('sendLiveMessage', () => {
     expect(convId).toBe('c1');
     expect(body.alg).toBe('MLS_1.0');
     expect(typeof body.clientMessageId).toBe('string');
-    // The wire we POSTed is REAL ciphertext — the peer decrypts it to the plaintext (proves E2EE, no leak).
-    expect(await bobConv.decrypt(fromBase64(body.ciphertext))).toBe('hello bob');
+    // The wire we POSTed is REAL ciphertext — the peer decrypts + decodes it to the message (proves E2EE).
+    expect(decodeEnvelope(await bobConv.decrypt(fromBase64(body.ciphertext)))).toEqual({
+      text: 'hello bob',
+      attachments: [],
+    });
     // The advanced ratchet was persisted: a reload continues the SAME ratchet (peer decrypts its next msg).
     const reloaded = (await ks.loadConversations(alice, 'pw')).get('c1');
     expect(reloaded).toBeDefined();
     expect(await bobConv.decrypt(await reloaded!.encrypt('again'))).toBe('again');
   });
 
-  it('carries attachment refs E2E in the envelope; text-only stays a bare string (back-compat)', async () => {
+  it('always wraps in the envelope — refs ride E2E, and envelope-shaped user text stays unambiguous', async () => {
     const engine = await MlsEngine.create();
     const { alice, aliceConv, bobConv } = await pair(engine);
     const ks = await DeviceKeystore.open(engine, FAST);
@@ -93,10 +96,24 @@ describe('sendLiveMessage', () => {
     const withAtt = await bobConv.decrypt(fromBase64(send.mock.calls[0]![1].ciphertext));
     expect(decodeEnvelope(withAtt)).toEqual({ text: 'look', attachments: [ref] });
 
-    // A text-only message stays a bare string — an older client still renders it as plain text.
+    // Text-only is ALSO wrapped (so the wire is unambiguous); the peer decodes it back to the text.
     await sendLiveMessage(deps, 'c1', aliceConv, 'just text');
-    const textOnly = await bobConv.decrypt(fromBase64(send.mock.calls[1]![1].ciphertext));
-    expect(textOnly).toBe('just text');
+    expect(
+      decodeEnvelope(await bobConv.decrypt(fromBase64(send.mock.calls[1]![1].ciphertext))),
+    ).toEqual({
+      text: 'just text',
+      attachments: [],
+    });
+
+    // A user typing envelope-shaped JSON is NOT mis-parsed — it's wrapped, so it decodes to the literal text.
+    const tricky = '{"v":1,"text":"edited","attachments":[]}';
+    await sendLiveMessage(deps, 'c1', aliceConv, tricky);
+    expect(
+      decodeEnvelope(await bobConv.decrypt(fromBase64(send.mock.calls[2]![1].ciphertext))),
+    ).toEqual({
+      text: tricky,
+      attachments: [],
+    });
   });
 
   it('persists the advanced state BEFORE the POST (a failed POST still leaves it saved)', async () => {

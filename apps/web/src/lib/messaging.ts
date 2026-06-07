@@ -51,9 +51,11 @@ export async function sendLiveMessage(
   text: string,
   attachments: AttachmentRef[] = [],
 ): Promise<SentLiveMessage> {
-  // Text-only messages stay a bare string (back-compat); a message WITH attachments uses the JSON envelope so
-  // the per-attachment content keys ride E2E inside the ciphertext. `decodeEnvelope` on the peer handles both.
-  const plaintext = attachments.length > 0 ? encodeEnvelope({ text, attachments }) : text;
+  // ALWAYS wrap in the versioned envelope — including text-only — so a user message that itself looks like
+  // envelope JSON (e.g. `{"v":1,"text":"x","attachments":[]}`) is unambiguous on the wire: it becomes the
+  // `text` field, never re-parsed as an envelope. `decodeEnvelope` still reads pre-A3 bare-string messages as
+  // plain text (back-compat for already-sent history).
+  const plaintext = encodeEnvelope({ text, attachments });
   return withLock(conversationLock(conversationId), async () => {
     const wire = await conversation.encrypt(plaintext);
     // Persist the advanced ratchet BEFORE the ciphertext leaves the device (rollback/nonce-reuse guard).
