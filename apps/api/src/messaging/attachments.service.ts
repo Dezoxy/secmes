@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { BlobStore } from '../blob/blob-store.js';
 import { schema, withTenant } from '../db/index.js';
-import type { CreateUploadGrant } from './attachments.schemas.js';
+import { MAX_ATTACHMENT_BYTES, type CreateUploadGrant } from './attachments.schemas.js';
 import { requireMembership, requireUser } from './membership.js';
 
 /** A minted upload capability — the presigned URL is short-lived and MUST never be logged or persisted. */
@@ -67,6 +67,13 @@ export class AttachmentsService {
       if (!att) throw new NotFoundException('attachment not found');
       await requireMembership(tx, att.conversationId, user);
     });
+    // Hard size-cap enforcement: a SAS PUT can't bind Content-Length, so verify the ACTUAL stored size and
+    // refuse to serve a blob over the cap (an oversized upload is reclaimed by the lifecycle worker, #37).
+    // Size is metadata — the server never reads the ciphertext.
+    const size = await this.blobStore.blobSize(objectKey);
+    if (size !== null && size > MAX_ATTACHMENT_BYTES) {
+      throw new PayloadTooLargeException('attachment exceeds the size limit');
+    }
     const url = await this.blobStore.presignGet(objectKey);
     return { url };
   }

@@ -1,19 +1,21 @@
-import { NotFoundException } from '@nestjs/common';
+import { NotFoundException, PayloadTooLargeException } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { BlobStore } from '../blob/blob-store.js';
 import { getDb } from '../db/index.js';
+import { MAX_ATTACHMENT_BYTES } from './attachments.schemas.js';
 import { AttachmentsService } from './attachments.service.js';
 
 // Integration — needs a live Postgres with migrations applied. Auto-skips without DATABASE_URL. The blob
 // store is faked (the presigned URL is a capability the URL provider mints; here we assert the AUTHZ + the
-// metadata row, not the S3 signing).
+// metadata row + the size guard, not the SAS signing).
 const DB_URL = process.env.DATABASE_URL;
 
 class FakeBlobStore extends BlobStore {
   presignPut = vi.fn((objectKey: string) => Promise.resolve(`https://blob.test/put/${objectKey}`));
   presignGet = vi.fn((objectKey: string) => Promise.resolve(`https://blob.test/get/${objectKey}`));
+  blobSize = vi.fn((): Promise<number | null> => Promise.resolve(1024)); // within cap by default
 }
 
 describe.skipIf(!DB_URL)('AttachmentsService — membership-gated grants', () => {
@@ -113,5 +115,16 @@ describe.skipIf(!DB_URL)('AttachmentsService — membership-gated grants', () =>
     await expect(
       svc.createDownloadGrant(aliceAuth, `${tenantA}/00000000-0000-0000-0000-000000000000`),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('download grant: refuses to serve a blob whose ACTUAL size exceeds the cap (413, hard limit)', async () => {
+    const { objectKey } = await svc.createUploadGrant(aliceAuth, {
+      conversationId: convId,
+      byteSize: 8, // declared small…
+    });
+    blob.blobSize.mockResolvedValueOnce(MAX_ATTACHMENT_BYTES + 1); // …but the client PUT more than declared
+    await expect(svc.createDownloadGrant(aliceAuth, objectKey)).rejects.toBeInstanceOf(
+      PayloadTooLargeException,
+    );
   });
 });

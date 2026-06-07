@@ -56,6 +56,20 @@ export class AzureBlobStore extends BlobStore {
     await this.service.getContainerClient(this.container).createIfNotExists();
   }
 
+  /** Actual stored size via blob properties (metadata only — never reads the ciphertext); null if absent. */
+  async blobSize(objectKey: string): Promise<number | null> {
+    try {
+      const props = await this.service
+        .getContainerClient(this.container)
+        .getBlockBlobClient(objectKey)
+        .getProperties();
+      return props.contentLength ?? null;
+    } catch (err) {
+      if ((err as { statusCode?: number }).statusCode === 404) return null; // not uploaded yet
+      throw err;
+    }
+  }
+
   presignPut(objectKey: string): Promise<string> {
     return this.sign(objectKey, BlobSASPermissions.parse('cw')); // create + write
   }
@@ -97,6 +111,9 @@ export class UnconfiguredBlobStore extends BlobStore {
     return this.fail();
   }
   presignGet(): Promise<string> {
+    return this.fail();
+  }
+  blobSize(): Promise<number | null> {
     return this.fail();
   }
 }

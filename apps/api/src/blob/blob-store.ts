@@ -9,6 +9,11 @@ export abstract class BlobStore {
   abstract presignPut(objectKey: string): Promise<string>;
   /** A short-lived presigned GET URL to download the encrypted blob at `objectKey`. NEVER log/persist it. */
   abstract presignGet(objectKey: string): Promise<string>;
+  /**
+   * The stored blob's ACTUAL byte size (metadata only — NEVER reads content), or `null` if it doesn't exist
+   * yet. Used to hard-enforce the size cap at download, since a SAS PUT can't bind `Content-Length`.
+   */
+  abstract blobSize(objectKey: string): Promise<number | null>;
 }
 
 /** How long a minted presigned URL stays valid — short, since the client uses it immediately. */

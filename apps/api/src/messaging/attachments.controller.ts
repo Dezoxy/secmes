@@ -8,6 +8,7 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiProperty,
+  ApiResponse,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -108,6 +109,7 @@ export class AttachmentsController {
   @ApiNotFoundResponse({
     description: 'attachment not found or caller is not a member of its conversation',
   })
+  @ApiResponse({ status: 413, description: 'the stored blob exceeds the size limit' })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async download(
     @CurrentAuth() auth: VerifiedAuth,

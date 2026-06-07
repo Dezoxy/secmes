@@ -75,4 +75,16 @@ describe.skipIf(!process.env.RUN_AZURITE_E2E)('AzureBlobStore — live Azurite r
     });
     expect(res.status).toBeGreaterThanOrEqual(400); // the read SAS is rejected for a write
   });
+
+  it('blobSize returns the stored byte length (metadata only); null for an absent blob', async () => {
+    const key = `33333333-3333-3333-3333-333333333333/${randomUUID()}`;
+    const putUrl = await store.presignPut(key);
+    await fetch(putUrl, {
+      method: 'PUT',
+      headers: { 'x-ms-blob-type': 'BlockBlob' },
+      body: new Uint8Array(1234),
+    });
+    expect(await store.blobSize(key)).toBe(1234); // actual size, for the hard download cap
+    expect(await store.blobSize(`33333333-3333-3333-3333-333333333333/${randomUUID()}`)).toBeNull();
+  });
 });
