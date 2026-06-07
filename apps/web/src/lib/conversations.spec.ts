@@ -43,7 +43,7 @@ describe('ConversationManager', () => {
   });
 
   it('prepare() claims + derives the safety number but creates NOTHING server-side (the #20 gate)', async () => {
-    const mgr = new ConversationManager(me);
+    const mgr = new ConversationManager(me, 'me-user');
     const pending = await mgr.prepare('peer-user');
 
     expect(claim).toHaveBeenCalledWith('peer-user');
@@ -59,11 +59,12 @@ describe('ConversationManager', () => {
   });
 
   it('confirm() creates the conversation and delivers a Welcome the peer can actually join', async () => {
-    const mgr = new ConversationManager(me);
+    const mgr = new ConversationManager(me, 'me-user');
     const pending = await mgr.prepare('peer-user');
     const session = await mgr.confirm(pending);
 
-    expect(create).toHaveBeenCalledWith(['peer-user']);
+    // Creates a SOLO conversation (just the caller); the peer is added atomically by deliverWelcome.
+    expect(create).toHaveBeenCalledWith(['me-user']);
     expect(session.conversationId).toBe('conv-1');
     expect(mgr.get('conv-1')).toBe(session);
 

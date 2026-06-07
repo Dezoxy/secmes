@@ -68,7 +68,10 @@ export default function ChatScreen() {
   const { profile } = useAuth();
   // A live conversation manager exists only with an unlocked device (not demo mode). New conversations
   // route through it (claim → #20 gate → create + deliver); demo mode keeps the seed/loopback path.
-  const manager = useMemo(() => (device ? new ConversationManager(device) : null), [device]);
+  const manager = useMemo(
+    () => (device && profile?.userId ? new ConversationManager(device, profile.userId) : null),
+    [device, profile],
+  );
   const [startOpen, setStartOpen] = useState(false);
 
   useEffect(() => {

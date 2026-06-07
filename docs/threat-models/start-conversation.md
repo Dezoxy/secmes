@@ -91,6 +91,12 @@ state stay **in memory** (this slice does not persist group state — Slice 5).
   local group (the server still holds the conversation + delivered Welcome). Sealed persistence
   (`encodeGroupState`, sealed like the keystore pool) + send/fetch land with the messaging loop in Slice 5.
   Accepted for this slice.
+- **Create-then-deliver is not one transaction** — `confirm()` creates the conversation, then delivers the
+  Welcome. To keep a delivery failure from stranding the **peer** in a conversation with no Welcome (an
+  undecryptable thread once listing lands), the conversation is created **solo** (creator only); the peer is
+  added by `deliverWelcome` in the **same transaction** that stores the Welcome. So a failed delivery leaves
+  only a benign empty self-conversation (never peer-visible, never a duplicate for the peer). Collapsing the
+  two calls into one atomic create-with-Welcome endpoint is a follow-up for the conversation lifecycle work.
 - **Safety-number UX depends on the user actually comparing it out-of-band** — the standard E2EE
   assumption; v1 shows the number with an explicit confirm. Re-verification prompts on key change are a
   follow-up (the verified flag already resets when the number changes).

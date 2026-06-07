@@ -53,7 +53,11 @@ export class ConversationManager {
   private readonly sessions = new Map<string, ConversationSession>();
   private enginePromise: Promise<MlsEngine> | null = null;
 
-  constructor(private readonly device: DeviceKeys) {}
+  constructor(
+    private readonly device: DeviceKeys,
+    /** The signed-in user's id — used to create a SOLO conversation (see `confirm`). */
+    private readonly selfUserId: string,
+  ) {}
 
   private engine(): Promise<MlsEngine> {
     this.enginePromise ??= MlsEngine.create();
@@ -88,7 +92,11 @@ export class ConversationManager {
     // the group + Welcome locally before touching the server so a bad package can't orphan a conversation.
     const conversation = await engine.createConversation(crypto.randomUUID(), this.device);
     const invite = await conversation.addMember(pending.peerKeyPackage); // trust granted by the #20 gate
-    const { conversationId } = await createConversation([pending.peer.userId]);
+    // Create a SOLO conversation (just me — my own id dedups to the creator server-side), then let
+    // deliverWelcome add the peer in the SAME transaction that stores the Welcome. So if delivery fails,
+    // the peer is never left a member of a conversation with no Welcome — no peer-visible / undecryptable
+    // orphan and no duplicate-on-retry for the peer; only a benign empty self-conversation remains.
+    const { conversationId } = await createConversation([this.selfUserId]);
     await deliverWelcome(conversationId, {
       recipientUserId: pending.peer.userId,
       recipientDeviceId: pending.peer.deviceId,
