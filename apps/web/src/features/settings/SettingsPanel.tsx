@@ -18,7 +18,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { generatedAvatar } from '../chat/seed';
+import { generatedAvatar, safeAvatarSrc } from '../chat/seed';
 import { RecoveryPanel } from '../recovery/RecoveryPanel';
 
 export interface AnonymousProfile {
@@ -83,6 +83,7 @@ const SUBTLE_BUTTON =
   'inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-medium text-white/70 transition-colors hover:border-purple-500/40 hover:text-white';
 const PRIMARY_BUTTON =
   'inline-flex items-center justify-center gap-2 rounded-xl bg-purple-500 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-purple-500/20 transition-colors hover:bg-purple-400';
+const ALLOWED_AVATAR_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
 function readStoredAccent(): AccentId {
   if (typeof window === 'undefined') return 'purple';
@@ -240,7 +241,9 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
 
   const saveProfile = () => {
     const clean = username.trim() || profile.id.slice(0, 12);
-    onProfileChange({ ...profile, username: clean, avatar });
+    const safeAvatar = safeAvatarSrc(avatar, clean);
+    setAvatar(safeAvatar);
+    onProfileChange({ ...profile, username: clean, avatar: safeAvatar });
   };
 
   const copyId = async () => {
@@ -256,6 +259,10 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
   const uploadAvatar = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    if (!ALLOWED_AVATAR_TYPES.has(file.type)) {
+      event.target.value = '';
+      return;
+    }
     setAvatar(await readFileAsDataUrl(file));
     event.target.value = '';
   };
@@ -263,6 +270,7 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
   const activeSection = sections.find((section) => section.id === active) ?? sections[0]!;
   const ActiveIcon = activeSection.icon;
   const accent = accentOptions.find((option) => option.id === accentId) ?? accentOptions[0]!;
+  const displayAvatar = safeAvatarSrc(avatar, username || profile.id);
   const primaryButtonStyle = {
     backgroundColor: accent.hex,
     boxShadow: `0 18px 34px ${accent.soft}`,
@@ -359,7 +367,7 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
             <div className="space-y-5">
               <div className="flex items-center gap-4">
                 <div className="h-20 w-20 overflow-hidden rounded-2xl ring-2 ring-purple-500/40">
-                  <img src={avatar} alt={username} className="h-full w-full object-cover" />
+                  <img src={displayAvatar} alt={username} className="h-full w-full object-cover" />
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <label className={SUBTLE_BUTTON}>

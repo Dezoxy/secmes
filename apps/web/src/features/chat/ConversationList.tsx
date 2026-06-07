@@ -7,6 +7,7 @@ import {
   getConversationAvatar,
   getOtherParticipant,
   formatMessageTime,
+  safeAvatarSrc,
 } from './seed';
 
 interface ConversationListProps {
@@ -83,7 +84,7 @@ export function ConversationList({
           <div className="relative shrink-0">
             <div className="w-10 h-10 rounded-full overflow-hidden ring-2 ring-purple-500/50">
               <img
-                src={currentUserProfile.avatar}
+                src={safeAvatarSrc(currentUserProfile.avatar, currentUserProfile.name)}
                 alt={currentUserProfile.name}
                 className="object-cover w-full h-full"
               />

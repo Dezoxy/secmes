@@ -31,9 +31,15 @@ import {
   currentUser,
   generatedAvatar,
   getConversationDisplayName,
+  safeAvatarSrc,
 } from './seed';
 
-const PROFILE_STORAGE_KEY = 'argus.anonymousProfile.v1';
+const PROFILE_STORAGE_PREFIX = 'argus.anonymousProfile.v1';
+const LEGACY_PROFILE_STORAGE_KEY = PROFILE_STORAGE_PREFIX;
+
+function profileStorageKey(id: string): string {
+  return `${PROFILE_STORAGE_PREFIX}.${encodeURIComponent(id)}`;
+}
 
 function defaultAnonymousName(id: string): string {
   const suffix = id.replace(/[^a-zA-Z0-9]/g, '').slice(-8) || 'local';
@@ -41,15 +47,28 @@ function defaultAnonymousName(id: string): string {
 }
 
 function loadAnonymousProfile(id: string): AnonymousProfile {
+  const fallbackUsername = defaultAnonymousName(id);
+  const fallback = {
+    id,
+    username: fallbackUsername,
+    avatar: generatedAvatar(fallbackUsername),
+  };
+
+  const readProfile = (key: string): AnonymousProfile | null => {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<AnonymousProfile>;
+    if (parsed.id !== id) return null;
+    const username = parsed.username?.trim() || fallbackUsername;
+    return { id, username, avatar: safeAvatarSrc(parsed.avatar, username) };
+  };
+
   try {
-    const raw = window.localStorage.getItem(PROFILE_STORAGE_KEY);
-    const parsed = raw ? (JSON.parse(raw) as Partial<AnonymousProfile>) : null;
-    const username = parsed?.username?.trim() || defaultAnonymousName(id);
-    const avatar = parsed?.avatar || generatedAvatar(username);
-    return { id, username, avatar };
+    return (
+      readProfile(profileStorageKey(id)) ?? readProfile(LEGACY_PROFILE_STORAGE_KEY) ?? fallback
+    );
   } catch {
-    const username = defaultAnonymousName(id);
-    return { id, username, avatar: generatedAvatar(username) };
+    return fallback;
   }
 }
 
@@ -287,7 +306,9 @@ export default function ChatScreen() {
   }, []);
 
   useEffect(() => {
-    setAnonymousProfile((prev) => (prev.id === anonymousId ? prev : { ...prev, id: anonymousId }));
+    setAnonymousProfile((prev) =>
+      prev.id === anonymousId ? prev : loadAnonymousProfile(anonymousId),
+    );
   }, [anonymousId]);
 
   useEffect(() => {
@@ -308,8 +329,12 @@ export default function ChatScreen() {
   }, [anonymousProfile]);
 
   const handleProfileChange = (next: AnonymousProfile): void => {
-    setAnonymousProfile(next);
-    window.localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(next));
+    const safeNext = {
+      ...next,
+      avatar: safeAvatarSrc(next.avatar, next.username || next.id),
+    };
+    setAnonymousProfile(safeNext);
+    window.localStorage.setItem(profileStorageKey(safeNext.id), JSON.stringify(safeNext));
   };
 
   // Add a freshly-started LIVE conversation to the list: its safety number is the REAL one from the
