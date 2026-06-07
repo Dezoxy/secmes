@@ -11,6 +11,7 @@ import {
   serializeDeviceIdentity,
   serializeDeviceKeys,
   serializeDeviceKeysArray,
+  serializeKeyPackage,
   type Argon2Params,
   type DeviceKeys,
   type SealedBackup,
@@ -141,6 +142,29 @@ export class DeviceKeystore {
   }
 
   /**
+   * Read + unseal THIS device's sealed pool record (a stale pool from a re-created/recovered device — same
+   * identity string, different signature key — is discarded; its retained privates are orphaned). Returns
+   * the record (to detect a concurrent write for the CAS) + the unsealed pool. The transient unsealed
+   * plaintext (which holds retained HPKE privates) is wiped before returning.
+   */
+  private async readPool(
+    identity: string,
+    signaturePublicKey: string,
+    passphrase: string,
+  ): Promise<{ rec: StoredPool | undefined; pool: DeviceKeys[] }> {
+    const rec = (await this.db.get(POOL_STORE, SELF)) as StoredPool | undefined;
+    if (rec && rec.identity === identity && rec.signaturePublicKey === signaturePublicKey) {
+      const opened = await openBackup(rec.sealed, passphrase);
+      try {
+        return { rec, pool: deserializeDeviceKeysArray(opened) };
+      } finally {
+        opened.fill(0); // wipe the transient unsealed plaintext (it holds retained HPKE privates)
+      }
+    }
+    return { rec, pool: [] };
+  }
+
+  /**
    * Ensure the device's sealed one-time KeyPackage POOL holds at least `target` members, minting fresh
    * KeyPackages under the device's STABLE signature identity as needed, and return the full pool. Each
    * member's PRIVATE is retained (sealed) so the Welcome later sealed to its public KeyPackage can be
@@ -156,23 +180,7 @@ export class DeviceKeystore {
     const identity = deviceIdentity(device);
     const signaturePublicKey = deviceSignaturePublicKeyB64(device);
 
-    // Read + unseal THIS device's pool record (a stale pool from a re-created/recovered device — same
-    // identity string, different key — is discarded; its retained privates are orphaned). Returns the
-    // record (to detect a concurrent write) + the unsealed pool.
-    const read = async (): Promise<{ rec: StoredPool | undefined; pool: DeviceKeys[] }> => {
-      const rec = (await this.db.get(POOL_STORE, SELF)) as StoredPool | undefined;
-      if (rec && rec.identity === identity && rec.signaturePublicKey === signaturePublicKey) {
-        const opened = await openBackup(rec.sealed, passphrase);
-        try {
-          return { rec, pool: deserializeDeviceKeysArray(opened) };
-        } finally {
-          opened.fill(0); // wipe the transient unsealed plaintext (it holds retained HPKE privates)
-        }
-      }
-      return { rec, pool: [] };
-    };
-
-    const { rec, pool } = await read();
+    const { rec, pool } = await this.readPool(identity, signaturePublicKey, passphrase);
     if (pool.length >= target) return pool;
 
     while (pool.length < target) pool.push(await this.engine.mintKeyPackage(device));
@@ -194,8 +202,55 @@ export class DeviceKeystore {
     await tx.done;
     if (won) return pool;
 
-    const winner = await read(); // a concurrent unlock persisted first — publish ITS retained pool
+    const winner = await this.readPool(identity, signaturePublicKey, passphrase); // a concurrent unlock persisted first — publish ITS retained pool
     return winner.pool.length > 0 ? winner.pool : pool;
+  }
+
+  /**
+   * Remove ONE consumed member from the sealed pool — the one-time KeyPackage whose Welcome was just
+   * joined. Forward secrecy: its HPKE private must never be reused or re-published, so it is dropped from
+   * the pool immediately after the join is consumed. Matches on the serialized PUBLIC KeyPackage (stable
+   * even though the matched member is a different object instance after any reseal/reload). Idempotent: a
+   * no-op if the member is already gone. CAS-guarded like `ensurePool`, retrying on a racing writer so a
+   * concurrent replenish can't resurrect the removed member.
+   */
+  async removePoolMember(
+    device: DeviceKeys,
+    passphrase: string,
+    publicKeyPackageB64: string,
+  ): Promise<void> {
+    const identity = deviceIdentity(device);
+    const signaturePublicKey = deviceSignaturePublicKeyB64(device);
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const { rec, pool } = await this.readPool(identity, signaturePublicKey, passphrase);
+      const filtered = pool.filter(
+        (m) => serializeKeyPackage(m.publicPackage) !== publicKeyPackageB64,
+      );
+      if (filtered.length === pool.length) return; // not present (or already pruned) — nothing to do
+
+      const plaintext = serializeDeviceKeysArray(filtered);
+      const sealed = await sealBackup(plaintext, passphrase, this.argon);
+      plaintext.fill(0); // best-effort wipe of the transient pool plaintext after sealing
+
+      // Compare-and-swap: commit only if the store still holds exactly what we read. On a lost CAS a racer
+      // wrote (e.g. a replenish) — re-read its pool and RE-APPLY the removal, so the consumed member can
+      // never survive the race (forward secrecy).
+      const tx = this.db.transaction(POOL_STORE, 'readwrite');
+      const current = (await tx.store.get(SELF)) as StoredPool | undefined;
+      let won = false;
+      if (current?.sealed.ciphertext === rec?.sealed.ciphertext) {
+        await tx.store.put({ identity, signaturePublicKey, sealed } satisfies StoredPool, SELF);
+        won = true;
+      }
+      await tx.done;
+      if (won) return;
+    }
+    // Exhausted the CAS retries (a sustained concurrent-write storm — extraordinarily unlikely for one user
+    // / a few tabs). Fail loudly so the caller surfaces a non-secret warning (id/count only, never key
+    // bytes); the consumed member lingers but stays unjoinable (its Welcome is consumed) until the
+    // server-side revoke (#20) + a startup reconciliation close it.
+    throw new Error('could not prune the consumed KeyPackage from the pool (write contention)');
   }
 
   /**
