@@ -12,6 +12,10 @@ interface VerifySecurityProps {
   verified: boolean;
   onVerifiedChange: (verified: boolean) => void;
   onClose: () => void;
+  /** 'live' = a real remote peer (gates a new conversation); 'demo' = the local loopback peer. */
+  mode?: 'demo' | 'live';
+  /** Optional inline error (e.g. a failed conversation create) shown above the action. */
+  error?: string | null;
 }
 
 export function VerifySecurity({
@@ -20,6 +24,8 @@ export function VerifySecurity({
   verified,
   onVerifiedChange,
   onClose,
+  mode = 'demo',
+  error,
 }: VerifySecurityProps) {
   const groups = safetyNumber ? safetyNumber.split(' ') : [];
 
@@ -73,6 +79,8 @@ export function VerifySecurity({
           </div>
         )}
 
+        {error && <p className="mb-3 text-center text-xs text-red-400/80">{error}</p>}
+
         {verified ? (
           <div className="space-y-3">
             <div className="flex items-center justify-center gap-2 rounded-xl bg-green-500/10 py-2.5 text-sm font-medium text-green-400">
@@ -100,9 +108,9 @@ export function VerifySecurity({
         )}
 
         <p className="mt-4 text-xs leading-relaxed text-white/30">
-          Demo: this number is computed for a local peer in your browser (the real out-of-band check
-          with a remote contact lands with the live message loop). Verification resets if the device
-          key changes.
+          {mode === 'live'
+            ? 'Compare every digit out-of-band — in person or on a call you both recognise. If it does not match, stop: a key may have been swapped in transit. Verification resets if the device key changes.'
+            : 'Demo: this number is computed for a local peer in your browser (the real out-of-band check with a remote contact lands with the live message loop). Verification resets if the device key changes.'}
         </p>
       </div>
     </div>

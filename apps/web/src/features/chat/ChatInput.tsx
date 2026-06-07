@@ -3,9 +3,13 @@ import { Send, Paperclip, Image as ImageIcon, Smile, X } from 'lucide-react';
 
 interface ChatInputProps {
   onSend: (content: string, attachments?: File[]) => void;
+  /** Disable the composer (e.g. a live conversation whose send path lands in a later slice). */
+  disabled?: boolean;
+  /** Shown in place of the composer when `disabled`. */
+  disabledNotice?: string;
 }
 
-export function ChatInput({ onSend }: ChatInputProps) {
+export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
@@ -50,6 +54,16 @@ export function ChatInput({ onSend }: ChatInputProps) {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
     setPreviews((prev) => prev.filter((_, i) => i !== index));
   };
+
+  if (disabled) {
+    return (
+      <div className="border-t border-white/5 bg-[#0f0f16] p-4">
+        <p className="text-center text-xs leading-relaxed text-white/40">
+          {disabledNotice ?? 'Messaging is not available here yet.'}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="border-t border-white/5 bg-[#0f0f16] p-4">

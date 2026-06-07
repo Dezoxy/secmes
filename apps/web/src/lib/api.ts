@@ -68,3 +68,77 @@ export async function publishKeyPackages(
   if (!res.ok) throw new Error(`POST /devices/me/key-packages → ${res.status}`);
   return (await res.json()) as PublishResult;
 }
+
+/** A tenant member as the directory exposes it — metadata only (no keys, no content). */
+export interface UserSummary {
+  id: string;
+  email: string;
+  displayName: string;
+}
+
+/** List active members of the caller's tenant (RLS-scoped, metadata only) — the contact picker source. */
+export async function listUsers(limit = 50): Promise<UserSummary[]> {
+  const res = await apiFetch(`/users?limit=${encodeURIComponent(limit)}`);
+  if (!res.ok) throw new Error(`GET /users → ${res.status}`);
+  return (await res.json()) as UserSummary[];
+}
+
+/** One of a peer's one-time KeyPackages, claimed from the directory to add them to a group. */
+export interface ClaimedKeyPackage {
+  /** The peer device the package belongs to — pins where the Welcome must be delivered. */
+  deviceId: string;
+  /** The peer device's stable signature key — the safety-number input (#20). */
+  signaturePublicKey: string;
+  /** The opaque base64 KeyPackage to deserialize + `addMember`. */
+  keyPackage: string;
+}
+
+/**
+ * Claim ONE unclaimed one-time KeyPackage for `userId` (a peer in this tenant). One-time-use: the server
+ * marks it claimed so no two conversations seal to the same package. The returned package is UNTRUSTED
+ * until its safety number (#20) is verified out-of-band — a malicious server could substitute keys.
+ * Throws a distinct error when the peer has no packages (404) so the UI can prompt to retry later.
+ */
+export async function claimKeyPackage(userId: string): Promise<ClaimedKeyPackage> {
+  const res = await apiFetch(`/users/${encodeURIComponent(userId)}/key-package/claim`, {
+    method: 'POST',
+  });
+  if (res.status === 404) throw new Error('this contact has no key packages available yet');
+  if (!res.ok) throw new Error(`POST /users/${userId}/key-package/claim → ${res.status}`);
+  return (await res.json()) as ClaimedKeyPackage;
+}
+
+/** Create a conversation with the given other members (the caller is added server-side). */
+export async function createConversation(
+  memberUserIds: string[],
+): Promise<{ conversationId: string }> {
+  const res = await apiFetch('/conversations', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ memberUserIds }),
+  });
+  if (!res.ok) throw new Error(`POST /conversations → ${res.status}`);
+  return (await res.json()) as { conversationId: string };
+}
+
+/** The Welcome (+ ratchet tree) to deliver — opaque base64; the server stores and forwards it blind. */
+export interface DeliverWelcomeBody {
+  recipientUserId: string;
+  recipientDeviceId: string;
+  welcome: string;
+  ratchetTree: string;
+}
+
+/** Deliver an MLS Welcome sealing `conversationId` to the recipient's claimed device. Opaque to the server. */
+export async function deliverWelcome(
+  conversationId: string,
+  body: DeliverWelcomeBody,
+): Promise<{ welcomeId: string }> {
+  const res = await apiFetch(`/conversations/${encodeURIComponent(conversationId)}/welcomes`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`POST /conversations/${conversationId}/welcomes → ${res.status}`);
+  return (await res.json()) as { welcomeId: string };
+}

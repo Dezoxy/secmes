@@ -1,4 +1,6 @@
-import type { DeviceIdentity, DeviceKeys, KeyPackage } from './index.js';
+import type { RatchetTree, Welcome } from 'ts-mls';
+
+import type { ConversationInvite, DeviceIdentity, DeviceKeys, KeyPackage } from './index.js';
 
 // Fidelity-preserving codec for DeviceKeys → bytes (sealBackup needs a Uint8Array; IndexedDB's native
 // structured clone can't produce bytes). ts-mls key objects contain Uint8Array AND bigint, so JSON
@@ -85,6 +87,48 @@ export function deserializeKeyPackage(b64: string): KeyPackage {
  */
 export function deviceSignaturePublicKeyB64(device: DeviceKeys): string {
   return toB64(device.publicPackage.leafNode.signaturePublicKey);
+}
+
+/**
+ * The deliverable wire form of a {@link ConversationInvite} (Welcome + RatchetTree). Each field is the
+ * tagged-JSON base64 of the corresponding ts-mls object (the same codec as KeyPackage, faithfully
+ * preserving Uint8Array/bigint), so a round-tripped invite reconstructs an identical object for
+ * `joinConversation`. The two fields map 1:1 onto the welcomes endpoint body (`welcome` + `ratchetTree`,
+ * each base64). Opaque to the crypto-blind server — the Welcome is HPKE-sealed to the recipient's claimed
+ * KeyPackage; only the recipient's retained private can open it.
+ */
+export interface SerializedInvite {
+  welcome: string;
+  ratchetTree: string;
+}
+
+/** Serialize a {@link ConversationInvite} to the base64 wire form delivered to the directory. */
+export function serializeInvite(invite: ConversationInvite): SerializedInvite {
+  // A RatchetTree is `(Node | undefined)[]`: its BLANK nodes are `undefined`, which JSON.stringify would
+  // silently turn into `null` and corrupt — ts-mls then fails parent-hash validation on join. Map blanks
+  // to `null` explicitly here and back to `undefined` in `deserializeInvite`; Node internals (Uint8Array /
+  // bigint) ride the shared tagged codec. (ts-mls' own TLS encoders are reachable only via a deep subpath,
+  // not the barrel — so this mirrors the existing KeyPackage codec for consistency.)
+  return {
+    welcome: toB64(te.encode(JSON.stringify(invite.welcome, taggedReplacer))),
+    ratchetTree: toB64(
+      te.encode(
+        JSON.stringify(
+          invite.ratchetTree.map((n) => n ?? null),
+          taggedReplacer,
+        ),
+      ),
+    ),
+  };
+}
+
+/** Reconstruct a {@link ConversationInvite} from its base64 wire form (the fetched Welcome material). */
+export function deserializeInvite(s: SerializedInvite): ConversationInvite {
+  const tree = JSON.parse(td.decode(fromB64(s.ratchetTree)), taggedReviver) as unknown[];
+  return {
+    welcome: JSON.parse(td.decode(fromB64(s.welcome)), taggedReviver) as Welcome,
+    ratchetTree: tree.map((n) => (n == null ? undefined : n)) as RatchetTree,
+  };
 }
 
 /**
