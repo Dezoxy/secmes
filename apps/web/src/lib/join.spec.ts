@@ -129,4 +129,88 @@ describe('joinPendingConversations', () => {
     expect(joined).toHaveLength(0);
     expect(prune).not.toHaveBeenCalled();
   });
+
+  it('drains across multiple pages, re-listing until the welcome queue is empty', async () => {
+    const engine = await MlsEngine.create();
+    const alice = await engine.generateDeviceKeys('alice');
+    const bob = await engine.generateDeviceKeys('bob');
+    const pool = [bob, await engine.mintKeyPackage(bob), await engine.mintKeyPackage(bob)];
+    const seal = async (
+      m: (typeof pool)[number],
+      g: string,
+    ): Promise<{ welcome: string; ratchetTree: string }> =>
+      serializeInvite(await (await engine.createConversation(g, alice)).addMember(m.publicPackage));
+    const mat: Record<string, { welcome: string; ratchetTree: string }> = {
+      w1: await seal(pool[0]!, 'g1'),
+      w2: await seal(pool[1]!, 'g2'),
+      w3: await seal(pool[2]!, 'g3'),
+    };
+
+    // Page 1 (full-ish) → page 2 → empty. Consumed welcomes drop off, so re-listing yields the next page.
+    list
+      .mockResolvedValueOnce([
+        { id: 'w1', conversationId: 'c1', createdAt: 't' },
+        { id: 'w2', conversationId: 'c2', createdAt: 't' },
+      ])
+      .mockResolvedValueOnce([{ id: 'w3', conversationId: 'c3', createdAt: 't' }])
+      .mockResolvedValue([]);
+    fetchMaterial.mockImplementation((id) => Promise.resolve(mat[id]!));
+    consume.mockResolvedValue(undefined);
+    const prune = vi.fn().mockResolvedValue(undefined);
+    const joined: JoinedConversation[] = [];
+
+    await joinPendingConversations({
+      device: bob,
+      pool,
+      deviceId: 'dev',
+      prunePoolMember: prune,
+      onJoined: (j) => joined.push(j),
+    });
+
+    // All three pages drained (not just the first), and we re-listed beyond the first page.
+    expect(joined.map((j) => j.conversationId)).toEqual(['c1', 'c2', 'c3']);
+    expect(consume).toHaveBeenCalledTimes(3);
+    expect(list.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('never reuses a spent one-time private: two welcomes sealed to the same package → second skipped (FS)', async () => {
+    const engine = await MlsEngine.create();
+    const alice = await engine.generateDeviceKeys('alice');
+    const bob = await engine.generateDeviceKeys('bob');
+    const pool = [bob, await engine.mintKeyPackage(bob)];
+    const target = pool[1]!;
+    // TWO welcomes both sealed to the SAME pool member (a deliver duplicate / replay / reused claim).
+    const w1mat = serializeInvite(
+      await (await engine.createConversation('g1', alice)).addMember(target.publicPackage),
+    );
+    const w2mat = serializeInvite(
+      await (await engine.createConversation('g2', alice)).addMember(target.publicPackage),
+    );
+
+    list
+      .mockResolvedValueOnce([
+        { id: 'w1', conversationId: 'c1', createdAt: 't' },
+        { id: 'w2', conversationId: 'c2', createdAt: 't' },
+      ])
+      .mockResolvedValue([]);
+    fetchMaterial.mockImplementation((id) => Promise.resolve(id === 'w1' ? w1mat : w2mat));
+    consume.mockResolvedValue(undefined);
+    const prune = vi.fn().mockResolvedValue(undefined);
+    const joined: JoinedConversation[] = [];
+
+    await joinPendingConversations({
+      device: bob,
+      pool,
+      deviceId: 'dev',
+      prunePoolMember: prune,
+      onJoined: (j) => joined.push(j),
+    });
+
+    // Only the FIRST is joined+consumed+pruned; the second can't reuse the now-spent private → skipped.
+    expect(joined.map((j) => j.conversationId)).toEqual(['c1']);
+    expect(consume).toHaveBeenCalledTimes(1);
+    expect(consume).toHaveBeenCalledWith('w1', 'dev', expect.any(String));
+    expect(prune).toHaveBeenCalledTimes(1);
+    expect(prune).toHaveBeenCalledWith(serializeKeyPackage(target.publicPackage));
+  });
 });

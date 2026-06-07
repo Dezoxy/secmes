@@ -44,7 +44,12 @@ plaintext, never private keys. All MLS work is client-side. Joined group state l
 - **Forward secrecy / one-time-key reuse (the headline invariant):** the HPKE private that opens this
   Welcome must **never** be reused — reusing it across two joins breaks FS. **Closed by pruning** the
   matched member from the sealed pool immediately after consume, so provisioning/replenishment never
-  re-publishes it and no later Welcome can be opened with it.
+  re-publishes it and no later Welcome can be opened with it. **Within a single drain** the matched member
+  is also dropped from the in-memory working pool the moment it opens a Welcome, so two Welcomes sealed to
+  the **same** package (a deliver duplicate, or a replayed/reused claimed KeyPackage) can't reuse the spent
+  private — the second finds no match and is skipped. The drain **re-lists until the queue is empty**
+  (consumed Welcomes drop off; a `seen` set stops re-processing skips), so a device with more than one
+  bounded page of pending Welcomes joins them all on connect.
 - **Tampering:** welcome/ratchetTree are MLS-authenticated — a tampered Welcome fails `joinGroup`
   validation (e.g. parent-hash). Matching is over the byte-exact `key_package_ref`: a forged/foreign Welcome
   either matches **no** pool member (`NoMatchingPoolMember`, skipped) or fails the join. No state is
