@@ -45,6 +45,7 @@ export {
   serializeKeyPackage,
   deserializeKeyPackage,
   deviceSignaturePublicKeyB64,
+  deviceSignatureSeed,
   serializeInvite,
   deserializeInvite,
   type SerializedInvite,

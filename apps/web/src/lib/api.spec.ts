@@ -6,10 +6,13 @@ import { accessToken } from './auth';
 import {
   apiFetch,
   claimKeyPackage,
+  consumeWelcome,
   createConversation,
   deliverWelcome,
   establishSession,
+  fetchWelcomeMaterial,
   listUsers,
+  listWelcomes,
   publishKeyPackages,
 } from './api';
 
@@ -132,5 +135,41 @@ describe('api client', () => {
     await expect(deliverWelcome('c1', body)).resolves.toEqual({ welcomeId: 'wel1' });
     expect(fetchSpy.mock.calls[0]?.[0]).toBe('/api/conversations/c1/welcomes');
     expect(JSON.parse(fetchSpy.mock.calls[0]?.[1]?.body as string)).toEqual(body);
+  });
+
+  it('listWelcomes GETs this device pending welcomes with deviceId + limit', async () => {
+    token.mockResolvedValue('tok');
+    const welcomes = [{ id: 'w1', conversationId: 'c1', createdAt: '2026-01-01T00:00:00Z' }];
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify(welcomes), { status: 200 }));
+    await expect(listWelcomes('dev-1', 20)).resolves.toEqual(welcomes);
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe('/api/welcomes?deviceId=dev-1&limit=20');
+  });
+
+  it('fetchWelcomeMaterial GETs the sealed material with the base64url proof', async () => {
+    token.mockResolvedValue('tok');
+    const material = { welcome: 'w', ratchetTree: 'r' };
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify(material), { status: 200 }));
+    await expect(fetchWelcomeMaterial('w1', 'dev-1', 'pf-_')).resolves.toEqual(material);
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe('/api/welcomes/w1/material?deviceId=dev-1&proof=pf-_');
+  });
+
+  it('consumeWelcome DELETEs the welcome with the proof (204 ok)', async () => {
+    token.mockResolvedValue('tok');
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    await expect(consumeWelcome('w1', 'dev-1', 'pf')).resolves.toBeUndefined();
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe('/api/welcomes/w1?deviceId=dev-1&proof=pf');
+    expect(fetchSpy.mock.calls[0]?.[1]?.method).toBe('DELETE');
+  });
+
+  it('consumeWelcome throws on a non-ok response', async () => {
+    token.mockResolvedValue('tok');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('nope', { status: 404 }));
+    await expect(consumeWelcome('w1', 'dev-1', 'pf')).rejects.toThrow('DELETE /welcomes/w1 → 404');
   });
 });

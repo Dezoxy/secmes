@@ -36,6 +36,8 @@ interface DeviceState {
   device: DeviceKeys | null;
   /** The one-time KeyPackage pool (privates retained for join). */
   pool: DeviceKeys[] | null;
+  /** This device's server id (from provisioning) — needed to list/fetch/consume Welcomes (Slice 4). */
+  deviceId: string | null;
   keystore: DeviceKeystore | null;
   status: DeviceStatus;
   error: string | null;
@@ -62,6 +64,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
   const [keystore, setKeystore] = useState<DeviceKeystore | null>(null);
   const [device, setDevice] = useState<DeviceKeys | null>(null);
   const [pool, setPool] = useState<DeviceKeys[] | null>(null);
+  const [deviceId, setDeviceId] = useState<string | null>(null);
   // Demo mode has no real device — render the chat (seed-driven) without a gate.
   const [status, setStatus] = useState<DeviceStatus>(configured ? 'loading' : 'ready');
   const [error, setError] = useState<string | null>(null);
@@ -111,9 +114,10 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
           ? await keystore.getOrCreateDevice(identity, passphrase)
           : await keystore.loadDevice(identity, passphrase);
         if (!dev) throw new Error('no device found to unlock');
-        const { pool: provisioned } = await provisionDevice(keystore, dev, passphrase);
+        const { pool: provisioned, result } = await provisionDevice(keystore, dev, passphrase);
         setDevice(dev);
         setPool(provisioned);
+        setDeviceId(result.deviceId);
         setStatus('ready');
       } catch (err) {
         // openBackup fails closed on a wrong passphrase (GCM auth) — surface that distinctly.
@@ -139,9 +143,10 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         await restoreFromArtifact(identity, artifactJson, passphrase);
         const dev = await keystore.loadDevice(identity, passphrase);
         if (!dev) throw new Error('restore did not produce a device');
-        const { pool: provisioned } = await provisionDevice(keystore, dev, passphrase);
+        const { pool: provisioned, result } = await provisionDevice(keystore, dev, passphrase);
         setDevice(dev);
         setPool(provisioned);
+        setDeviceId(result.deviceId);
         setStatus('ready');
       } catch (err) {
         // restore fails closed on a wrong passphrase / file / identity mismatch — keep the existing device.
@@ -165,6 +170,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
   const value: DeviceState = {
     device,
     pool,
+    deviceId,
     keystore,
     status,
     error,

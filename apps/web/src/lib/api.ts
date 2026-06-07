@@ -142,3 +142,57 @@ export async function deliverWelcome(
   if (!res.ok) throw new Error(`POST /conversations/${conversationId}/welcomes → ${res.status}`);
   return (await res.json()) as { welcomeId: string };
 }
+
+/** A pending Welcome addressed to this device — metadata only (the sealed blobs are fetched separately). */
+export interface PendingWelcome {
+  id: string;
+  conversationId: string;
+  createdAt: string;
+}
+
+/** List this device's pending Welcomes (metadata only; RLS- + device-scoped on the server). */
+export async function listWelcomes(deviceId: string, limit = 50): Promise<PendingWelcome[]> {
+  const res = await apiFetch(
+    `/welcomes?deviceId=${encodeURIComponent(deviceId)}&limit=${encodeURIComponent(limit)}`,
+  );
+  if (!res.ok) throw new Error(`GET /welcomes → ${res.status}`);
+  return (await res.json()) as PendingWelcome[];
+}
+
+/** The opaque sealed join material for a Welcome (base64; the client deserializes + joins it). */
+export interface WelcomeMaterial {
+  welcome: string;
+  ratchetTree: string;
+}
+
+/**
+ * Fetch a Welcome's sealed material. `proof` is the base64url Ed25519 FETCH proof-of-possession for this
+ * device over (deviceId, welcomeId), so only the owning device can retrieve its join material. Opaque base64.
+ */
+export async function fetchWelcomeMaterial(
+  welcomeId: string,
+  deviceId: string,
+  proof: string,
+): Promise<WelcomeMaterial> {
+  const res = await apiFetch(
+    `/welcomes/${encodeURIComponent(welcomeId)}/material?deviceId=${encodeURIComponent(deviceId)}&proof=${encodeURIComponent(proof)}`,
+  );
+  if (!res.ok) throw new Error(`GET /welcomes/${welcomeId}/material → ${res.status}`);
+  return (await res.json()) as WelcomeMaterial;
+}
+
+/**
+ * Consume (delete) a Welcome after joining. `proof` is the base64url Ed25519 CONSUME proof (a distinct
+ * domain from fetch), so only the owning device can destroy its join material. Expects 204.
+ */
+export async function consumeWelcome(
+  welcomeId: string,
+  deviceId: string,
+  proof: string,
+): Promise<void> {
+  const res = await apiFetch(
+    `/welcomes/${encodeURIComponent(welcomeId)}?deviceId=${encodeURIComponent(deviceId)}&proof=${encodeURIComponent(proof)}`,
+    { method: 'DELETE' },
+  );
+  if (!res.ok) throw new Error(`DELETE /welcomes/${welcomeId} → ${res.status}`);
+}

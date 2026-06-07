@@ -2,8 +2,9 @@
 
 > One page. Written before code. The recipient half of the live message loop: on connect, the device joins
 > any conversations it was added to — list pending Welcomes, fetch each (with a proof-of-possession), join
-> the MLS group with the one retained private the Welcome was sealed to, then consume (delete) the Welcome
-> and prune the used private. Live send/fetch is Slice 5.
+> the MLS group with the one retained private the Welcome was sealed to, and surface it. **Consuming** the
+> Welcome and **pruning** the spent private are deferred to Slice 5 — deleting a Welcome before the joined
+> group is durably persisted would lose the conversation on reload. Live send/fetch is Slice 5.
 
 ## 1. Feature & data flow
 
@@ -17,19 +18,22 @@ When the device is unlocked + provisioned (`status === 'ready'`), the client:
 3. **Joins** — `deserializeInvite` → `joinConversationFromPool(pool, invite)` selects the ONE retained
    one-time KeyPackage the Welcome was HPKE-sealed to (by matching each member's `key_package_ref` against
    the Welcome's `secrets[].newMember`) and joins the MLS group with it.
-4. **Consumes** — signs a **consume** proof and calls `DELETE /welcomes/:id?deviceId=&proof=` (204).
-5. **Prunes** — removes the now-used private from the sealed pool (`removePoolMember`) so it is never
-   reused or re-published.
+4. **Surfaces** — adds the conversation to the UI. The Welcome is LEFT **pending** (not consumed) and its
+   private **retained** — with no durable group-state store until Slice 5, the pending Welcome is the only
+   way to recover the conversation on reload, so the device re-joins from it each connect.
+5. **Clears stranded Welcomes** — a Welcome matching no retained private (`NoMatchingPoolMember`) is
+   permanently unjoinable, so it IS consumed (signs a **consume** proof → `DELETE /welcomes/:id`) to drop it
+   from the bounded, cursorless list — otherwise a head of stranded Welcomes would hide valid newer ones.
 
 The server sees ids, the device's **public-key signatures** (proofs), and **opaque base64** blobs — never
-plaintext, never private keys. All MLS work is client-side. Joined group state lives **in memory** (Slice
-5 persists it).
+plaintext, never private keys. All MLS work is client-side. Joined group state lives **in memory** (Slice 5
+persists it; until then a reload re-joins from the still-pending Welcomes).
 
 ## 2. Assets & trust boundaries
 
 - **Assets:** the retained one-time **HPKE private keys** (the sealed pool — exactly one opens this
   Welcome); the device's **Ed25519 signature private** (signs the proofs); the **joined MLS group state**
-  (in-memory). The passphrase (needed only to re-seal the pool on prune).
+  (in-memory; persisted in Slice 5).
 - **Boundaries:** client↔server (crypto-blind — opaque blobs + ids; proofs prove device possession);
   **device↔sibling-device** (a second session/device of the same user must not fetch or destroy another
   device's Welcome — per-device proof-of-possession); tenant↔tenant (RLS); at-rest (the sealed pool).
@@ -42,9 +46,15 @@ plaintext, never private keys. All MLS work is client-side. Joined group state l
   against the published public key; fetch and consume use **separate domains**, so a fetch proof can't be
   replayed to consume. The list returns ids only, so an unproven `deviceId` leaks nothing.
 - **Forward secrecy / one-time-key reuse (the headline invariant):** the HPKE private that opens this
-  Welcome must **never** be reused — reusing it across two joins breaks FS. **Closed by pruning** the
-  matched member from the sealed pool immediately after consume, so provisioning/replenishment never
-  re-publishes it and no later Welcome can be opened with it.
+  Welcome must **never** open a *different* Welcome — reuse across two distinct joins breaks FS. In a drain,
+  the matched member is dropped from the in-memory **working pool** the moment it opens a Welcome, so two
+  Welcomes sealed to the **same** package (a deliver duplicate, or a replayed/reused claimed KeyPackage)
+  can't reuse the spent private — the second finds no match and is cleared. (Re-joining the **same** pending
+  Welcome on a later connect re-derives the **same** group from the **same** secrets — not reuse across
+  *distinct* joins — so it is FS-safe.) The durable **sealed-pool prune** of the spent private lands with the
+  consume in **Slice 5** (it needs the group persisted first); until then the private stays retained so a
+  reload can re-join. The drain **re-lists** to drain pages beyond the first (a `seen` set stops
+  re-processing); stranded Welcomes are consumed-to-clear so they don't hold the cursorless page.
 - **Tampering:** welcome/ratchetTree are MLS-authenticated — a tampered Welcome fails `joinGroup`
   validation (e.g. parent-hash). Matching is over the byte-exact `key_package_ref`: a forged/foreign Welcome
   either matches **no** pool member (`NoMatchingPoolMember`, skipped) or fails the join. No state is
@@ -76,28 +86,35 @@ plaintext, never private keys. All MLS work is client-side. Joined group state l
 - **Keystore:** `removePoolMember(device, passphrase, publicKeyPackageB64)` — CAS-guarded reseal (mirrors
   `ensurePool`), match on the serialized **public** KeyPackage, wipe transients. The FS prune.
 - **Client (PR-4B):** `api.ts` `listWelcomes`/`fetchWelcomeMaterial`/`consumeWelcome` (base64url proofs);
-  `DeviceProvider` captures + exposes the server `deviceId` and a `prunePoolMember` action (passphrase
-  stays in the provider); a `join.ts` orchestrator (list → fetch → join → consume → prune; per-Welcome
-  failures skip, not abort); a `ChatScreen` effect surfaces joined conversations (deduped by id).
-- **Reviewers:** `crypto-reviewer` (FS prune, ref-match, proof signing) + `security-boundary-auditor` (api
-  client — public/opaque only, no secret logging). **Tests:** end-to-end deliver→list→fetch→join→consume
-  through base64 + proofs; `removePoolMember` (correct, persistent, race-safe, no resurrection);
-  ordering (consume only after join, prune only after consume; a no-match doesn't abort the batch).
+  `DeviceProvider` captures + exposes the server `deviceId`; a `join.ts` orchestrator (list → fetch → join →
+  surface; stranded → consume-to-clear; per-Welcome failures isolated; re-list to drain pages); a
+  `ChatScreen` effect surfaces joined conversations (deduped by id). Consume/prune of JOINED Welcomes +
+  the `removePoolMember`/`prunePoolMember` + passphrase wiring land in Slice 5 with group-state persistence.
+- **Reviewers:** `crypto-reviewer` (ref-match, within-drain FS, proof signing) + `security-boundary-auditor`
+  (api client — public/opaque only, no secret logging). **Tests:** end-to-end deliver→list→fetch→join
+  through base64 + proofs; the spent-member FS (a duplicate sealed to the same package is cleared, not
+  reused); the cursorless-page drain (a stranded head is cleared so a valid Welcome behind it is reached);
+  per-Welcome failures don't abort the batch.
 
 ## 6. Residual risk
 
 - **Stranded Welcome (no matching private):** a Welcome sealed to a KeyPackage whose private was discarded
-  (device reset/recovery — `device-provisioning.md` §6) matches no pool member → `NoMatchingPoolMember`,
-  skipped. Availability degradation only; FS preserved (the private is gone, so no one can open it).
-- **Consume succeeds but prune fails (FS-relevant):** the used private lingers in the sealed pool and could
-  later be re-published; if a peer then claims it and seals a new Welcome, this browser could open it with
-  an already-used private — an FS regression. **Mitigation:** order **consume → prune**; a failed consume
-  leaves both Welcome and member for an idempotent retry next connect; a failed prune is logged loudly
-  (non-secret) and the member stays (so it won't be re-joined, only re-publishable). Bounded; the
-  server-side device-scoped **revoke** (task #20) + a startup reconciliation are the follow-ups that close
-  it fully.
-- **In-memory group state (Slice 5):** joined `Conversation`s are in-memory; a reload re-joins from any
-  still-pending Welcome, but a consumed-and-pruned one is gone until Slice 5 persists group state.
+  (device reset/recovery — `device-provisioning.md` §6) matches no pool member → `NoMatchingPoolMember`. It
+  is permanently unjoinable, so the drain **consumes it to clear it** (the consume proof needs only the
+  device signature key, not a join) — otherwise, because the welcome list is bounded and **cursorless**
+  (oldest-first), a head of stranded Welcomes would hide valid newer ones behind it. Availability
+  degradation only; FS preserved (the private is gone, so no one — including this device — can ever open it,
+  so deleting it loses nothing recoverable).
+- **Consume + prune of joined Welcomes deferred to Slice 5:** consuming a Welcome before the joined group is
+  durably persisted would lose the conversation on a reload (the Welcome is deleted, the in-memory group
+  with it). So Slice 4 leaves joined Welcomes **pending** and their privates **retained** — the Welcome is
+  the reload anchor; the device re-joins from it each connect (re-deriving the same group — FS-safe). Slice 5
+  adds sealed group-state persistence, after which consume + the sealed-pool prune (`removePoolMember`)
+  become safe, and the spent private is dropped + the server-side **revoke** (task #20) cleans up.
+- **Bounded by the cursorless list until Slice 5:** joined-but-unconsumed Welcomes hold their slots in the
+  oldest-first, cursorless list, so a device in **more than one page** (>100) of conversations joins only
+  the oldest page per connect until Slice 5 lets consumption (and drop-off) happen. Strictly better than the
+  permanent loss that consuming-before-persistence would cause; resolved in Slice 5.
 - **Weak inviter identity in the UI:** the list returns only `conversationId` (no `senderUserId`), so a
   joined conversation renders a directory-resolved or placeholder peer name. The Welcome carries the
   inviter's leaf credential; mapping it to a display name is a follow-up.
