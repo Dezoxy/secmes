@@ -6,10 +6,12 @@ import {
   createApplicationMessage,
   createCommit,
   createGroup,
+  decodeGroupState,
   decodeMlsMessage,
   defaultCapabilities,
   defaultLifetime,
   emptyPskIndex,
+  encodeGroupState,
   encodeMlsMessage,
   generateKeyPackage,
   generateKeyPackageWithKey,
@@ -27,6 +29,10 @@ import {
 // `makeKeyPackageRef` isn't on the ts-mls barrel (types only) — reach it via the package subpath, the same
 // pattern as `@argus/crypto/device-proof`. Used to match a Welcome to the retained private it was sealed to.
 import { makeKeyPackageRef } from 'ts-mls/keyPackage.js';
+// `defaultClientConfig` is a value (not on the barrel — only `type ClientConfig` is). `encodeGroupState`
+// drops `clientConfig` (behaviour/functions, no key material); we re-attach the default on deserialize, the
+// same config `createGroup`/`joinGroup` use.
+import { defaultClientConfig } from 'ts-mls/clientConfig.js';
 
 export {
   sealBackup,
@@ -327,6 +333,19 @@ export class MlsEngine {
     }
     throw new NoMatchingPoolMember();
   }
+
+  /**
+   * Reconstruct a Conversation from `Conversation.serialize()` bytes (after `openBackup` unseals them) — the
+   * rehydrate path so a group survives a reload. `encodeGroupState` drops the behaviour-only `clientConfig`
+   * (no key material), so re-attach the default — the config `createGroup`/`joinGroup` use. Throws on
+   * malformed bytes.
+   */
+  deserializeConversation(bytes: Uint8Array): Conversation {
+    const decoded = decodeGroupState(bytes, 0);
+    if (!decoded) throw new Error('malformed group state');
+    const state: ClientState = { ...decoded[0], clientConfig: defaultClientConfig };
+    return new Conversation(this.cs, state);
+  }
 }
 
 /** One device's view of one conversation. State evolves with each op; it is never logged or sent. */
@@ -348,6 +367,17 @@ export class Conversation {
       () => undefined,
     ); // a failed op must not poison the chain
     return result;
+  }
+
+  /**
+   * Serialize this conversation's MLS group state to bytes — for SEALED durable storage. The ratchet
+   * advances on every encrypt/decrypt, so the state must survive a reload or the group desyncs. Runs in the
+   * op queue so it observes a consistent post-op snapshot. ⚠️ The bytes carry live SECRET key material
+   * (signature private + path/ratchet secrets) — seal them immediately (`sealBackup`); never persist or
+   * transmit them raw. Inverse: `MlsEngine.deserializeConversation`.
+   */
+  async serialize(): Promise<Uint8Array> {
+    return this.run(async () => encodeGroupState(this.state));
   }
 
   /**

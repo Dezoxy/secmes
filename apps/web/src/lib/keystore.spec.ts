@@ -353,4 +353,59 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     const recovered = await ks.importRecoveryArtifact('alice', blob, 'pw'); // now allowed
     expect(await worksForMls(engine, recovered)).toBe('msg');
   });
+
+  it('saveConversationState + loadConversations round-trips a usable group across reopen', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const peer = await engine.generateDeviceKeys('peer');
+    const conv = await engine.createConversation('conv-1', device);
+    const peerConv = await engine.joinConversation(peer, await conv.addMember(peer.publicPackage));
+    expect(await peerConv.decrypt(await conv.encrypt('hello'))).toBe('hello'); // advance the ratchet
+
+    await ks.saveConversationState(device, 'conv-1', conv, 'pw');
+
+    // Reopen the keystore (as on a reload), reload the device, rehydrate the conversations.
+    const reopened = await DeviceKeystore.open(engine, FAST);
+    const dev2 = await reopened.loadDevice('alice', 'pw');
+    if (!dev2) throw new Error('expected a persisted device');
+    const restored = (await reopened.loadConversations(dev2, 'pw')).get('conv-1');
+    if (!restored) throw new Error('expected a restored conversation');
+    // The restored group continues the SAME ratchet (the peer decrypts its next message in order).
+    expect(await peerConv.decrypt(await restored.encrypt('after reload'))).toBe('after reload');
+  });
+
+  it('loadConversations skips a group bound to a different device signature key', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const peer = await engine.generateDeviceKeys('peer');
+    const conv = await engine.createConversation('conv-1', device);
+    await engine.joinConversation(peer, await conv.addMember(peer.publicPackage));
+    await ks.saveConversationState(device, 'conv-1', conv, 'pw');
+
+    // A different device (same identity string, different signature key) must NOT load it.
+    const other = await engine.generateDeviceKeys('alice');
+    expect((await ks.loadConversations(other, 'pw')).size).toBe(0);
+  });
+
+  it('deleteConversationState removes a persisted conversation; clearDevice clears them all', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine, FAST);
+    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const peer = await engine.generateDeviceKeys('peer');
+    const a = await engine.createConversation('a', device);
+    const b = await engine.createConversation('b', device);
+    await a.addMember(peer.publicPackage);
+    await b.addMember(peer.publicPackage);
+    await ks.saveConversationState(device, 'a', a, 'pw');
+    await ks.saveConversationState(device, 'b', b, 'pw');
+
+    await ks.deleteConversationState('a');
+    expect([...(await ks.loadConversations(device, 'pw')).keys()]).toEqual(['b']);
+
+    await ks.clearDevice();
+    const device2 = await ks.getOrCreateDevice('alice', 'pw');
+    expect((await ks.loadConversations(device2, 'pw')).size).toBe(0);
+  });
 });
