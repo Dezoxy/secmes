@@ -22,6 +22,8 @@
     "@nestjs/platform-ws": "^11",
     "@nestjs/swagger": "^11.4.4",
     "@nestjs/websockets": "^11",
+    "@azure/identity": "^4.5.0",
+    "@azure/storage-blob": "^12.26.0",
     "drizzle-orm": "^0.45.2",
     "ioredis": "^5.11.1",
     "jose": "^6.2.3",

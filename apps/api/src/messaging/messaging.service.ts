@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant, type Tx } from '../db/index.js';
+import { requireMembership, requireUser } from './membership.js';
 import { RealtimeBus, type MessageCreatedEvent } from '../realtime/realtime-bus.js';
 import type {
   DeliverWelcome,
@@ -125,7 +126,7 @@ export class MessagingService {
   /** Is the verified caller a member of `conversationId`? Used by the realtime gateway's subscribe authz. */
   async isMember(auth: VerifiedAuth, conversationId: string): Promise<boolean> {
     return withTenant(auth.tenantId, async (tx) => {
-      const user = await this.requireUser(tx, auth.sub);
+      const user = await requireUser(tx, auth.sub);
       const [member] = await tx
         .select({ id: schema.conversationMembers.id })
         .from(schema.conversationMembers)
@@ -141,40 +142,6 @@ export class MessagingService {
   }
 
   /**
-   * Resolve the VERIFIED caller (OIDC sub) to a tenant user id. Never trusts a client-supplied id, and
-   * only resolves an **active** user — a soft-deleted/suspended member (offboarding sets `users.status`)
-   * with a still-valid bearer token cannot create conversations or send, matching the directory filter.
-   */
-  private async requireUser(tx: Tx, sub: string): Promise<string> {
-    const [user] = await tx
-      .select({ id: schema.users.id })
-      .from(schema.users)
-      .where(and(eq(schema.users.externalIdentityId, sub), eq(schema.users.status, 'active')))
-      .limit(1);
-    if (!user) throw new BadRequestException('user not provisioned or not active');
-    return user.id;
-  }
-
-  /**
-   * Throw 404 unless `userId` is a member of `conversationId`. The SAME 404 covers a non-member and a
-   * non-existent / RLS-hidden (wrong-tenant) conversation, so the API never reveals which conversations
-   * exist to a non-member. This is the intra-tenant authz the schema/RLS deferred to the app layer.
-   */
-  private async requireMembership(tx: Tx, conversationId: string, userId: string): Promise<void> {
-    const [member] = await tx
-      .select({ id: schema.conversationMembers.id })
-      .from(schema.conversationMembers)
-      .where(
-        and(
-          eq(schema.conversationMembers.conversationId, conversationId),
-          eq(schema.conversationMembers.userId, userId),
-        ),
-      )
-      .limit(1);
-    if (!member) throw new NotFoundException('conversation not found');
-  }
-
-  /**
    * Create a conversation owned by the caller; add the caller + `memberUserIds` as members. Member ids
    * must be users IN THE CALLER'S TENANT — the composite FK `(tenant_id, user_id) → users(tenant_id, id)`
    * rejects a non-existent or cross-tenant id (surfaced as 400). No message content is involved.
@@ -184,7 +151,7 @@ export class MessagingService {
     memberUserIds: string[],
   ): Promise<CreatedConversation> {
     return withTenant(auth.tenantId, async (tx) => {
-      const creator = await this.requireUser(tx, auth.sub);
+      const creator = await requireUser(tx, auth.sub);
 
       const [conv] = await tx
         .insert(schema.conversations)
@@ -224,8 +191,8 @@ export class MessagingService {
     body: DeliverWelcome,
   ): Promise<{ welcomeId: string }> {
     return withTenant(auth.tenantId, async (tx) => {
-      const sender = await this.requireUser(tx, auth.sub);
-      await this.requireMembership(tx, conversationId, sender);
+      const sender = await requireUser(tx, auth.sub);
+      await requireMembership(tx, conversationId, sender);
 
       // Add the recipient as a member (idempotent — re-delivering to an existing member is a no-op add).
       // The composite FK (tenant_id, user_id) → users(tenant_id, id) rejects an unknown / cross-tenant
@@ -281,7 +248,7 @@ export class MessagingService {
     limit = 50,
   ): Promise<PendingWelcome[]> {
     return withTenant(auth.tenantId, async (tx) => {
-      const me = await this.requireUser(tx, auth.sub);
+      const me = await requireUser(tx, auth.sub);
       // Oldest-first + bounded `limit`: the response can't grow without limit if a member spams an offline
       // device. The client fetches each welcome's material (with a proof), joins, consumes, then re-fetches.
       const rows = await tx
@@ -351,7 +318,7 @@ export class MessagingService {
     proof: string,
   ): Promise<WelcomeMaterial> {
     return withTenant(auth.tenantId, async (tx) => {
-      const me = await this.requireUser(tx, auth.sub);
+      const me = await requireUser(tx, auth.sub);
       await this.requireDeviceProof(tx, me, deviceId, welcomeId, proof, verifyWelcomeFetch);
 
       const [row] = await tx
@@ -390,7 +357,7 @@ export class MessagingService {
     proof: string,
   ): Promise<void> {
     await withTenant(auth.tenantId, async (tx) => {
-      const me = await this.requireUser(tx, auth.sub);
+      const me = await requireUser(tx, auth.sub);
       await this.requireDeviceProof(tx, me, deviceId, welcomeId, proof, verifyWelcomeConsume);
 
       const deleted = await tx
@@ -422,8 +389,8 @@ export class MessagingService {
     // gateway could push a 'message' frame before the row is durable (phantom delivery if the commit
     // fails) and a recipient that reacts by fetching could race the uncommitted write.
     const { result, event } = await withTenant(auth.tenantId, async (tx) => {
-      const sender = await this.requireUser(tx, auth.sub);
-      await this.requireMembership(tx, conversationId, sender);
+      const sender = await requireUser(tx, auth.sub);
+      await requireMembership(tx, conversationId, sender);
 
       const inserted = await tx
         .insert(schema.messages)
@@ -504,8 +471,8 @@ export class MessagingService {
     query: ListMessagesQuery,
   ): Promise<MessagePage> {
     return withTenant(auth.tenantId, async (tx) => {
-      const user = await this.requireUser(tx, auth.sub);
-      await this.requireMembership(tx, conversationId, user);
+      const user = await requireUser(tx, auth.sub);
+      await requireMembership(tx, conversationId, user);
 
       // Exclusive keyset cursor: rows strictly after the cursor row in (created_at, id) order. The cursor
       // row is looked up under RLS AND scoped to this conversation, so a foreign/invalid `after` resolves
@@ -565,7 +532,7 @@ export class MessagingService {
     // the caller still being a member of the cursor message's conversation. Bound params, no injection.
     const cursorPos = query.after ? decodeSyncCursor(query.after) : null;
     return withTenant(auth.tenantId, async (tx) => {
-      const user = await this.requireUser(tx, auth.sub);
+      const user = await requireUser(tx, auth.sub);
 
       const cursor = cursorPos
         ? sql`and (m.created_at, m.id) > (${cursorPos.createdAt}::timestamptz, ${cursorPos.id}::uuid)`
@@ -624,8 +591,8 @@ export class MessagingService {
     body: RecordReceipt,
   ): Promise<void> {
     await withTenant(auth.tenantId, async (tx) => {
-      const user = await this.requireUser(tx, auth.sub);
-      await this.requireMembership(tx, conversationId, user);
+      const user = await requireUser(tx, auth.sub);
+      await requireMembership(tx, conversationId, user);
 
       // Fetch the watermark message's created_at as FULL microsecond text (the driver's JS Date is only
       // ms — too lossy: two same-ms messages would then order by random uuid, mis-advancing the watermark).
@@ -666,8 +633,8 @@ export class MessagingService {
   /** Per-member delivery/read watermarks in a conversation (metadata). AUTHZ: member-only. */
   async getReceipts(auth: VerifiedAuth, conversationId: string): Promise<ConversationReceipt[]> {
     return withTenant(auth.tenantId, async (tx) => {
-      const user = await this.requireUser(tx, auth.sub);
-      await this.requireMembership(tx, conversationId, user);
+      const user = await requireUser(tx, auth.sub);
+      await requireMembership(tx, conversationId, user);
 
       // Drive from MEMBERS (left join receipts) so EVERY member is returned — a member who hasn't acked
       // yet appears with null watermarks (i.e. "not delivered/read"), not omitted. RLS scopes both tables.

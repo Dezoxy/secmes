@@ -13,6 +13,9 @@ VENV := .venv
 COMPOSE_PROJECT := argus-local
 # Owner connection to the local Postgres (migrations/seed/host API). LOCAL throwaway creds.
 LOCAL_DATABASE_URL := postgres://argus:argus_local_dev@localhost:5432/argus
+# Azurite's PUBLIC, well-known dev account key (https://github.com/Azure/Azurite#well-known-storage-account-and-key).
+# NOT a secret — it is the same fixed value on every machine; used only to sign SAS against the local emulator.
+AZURITE_DEV_KEY := Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==
 
 help: ## List targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-12s %s\n", $$1, $$2}'
@@ -30,8 +33,8 @@ scan-py: ## Run the Python security scanners locally (semgrep + checkov)
 clean-tools: ## Remove the Python venv
 	rm -rf $(VENV)
 
-up: ## Start the local stack (postgres, redis, minio, zitadel) + provision OIDC
-	docker compose up -d --build postgres redis minio createbuckets zitadel-db zitadel-bootstrap-perms zitadel zitadel-login
+up: ## Start the local stack (postgres, redis, azurite, zitadel) + provision OIDC
+	docker compose up -d --build postgres redis azurite zitadel-db zitadel-bootstrap-perms zitadel zitadel-login
 	$(MAKE) auth-provision
 	@echo ""
 	@echo "Stack up. One-time: add '127.0.0.1 zitadel' to /etc/hosts (see docs/local-auth.md)."
@@ -56,6 +59,9 @@ api-dev: ## Run the API on the host (loads generated OIDC env; needs the stack u
 	set -a; . ./.env.local; set +a; \
 	DATABASE_URL="$(LOCAL_DATABASE_URL)" \
 	REDIS_URL="redis://localhost:6379" \
+	BLOB_ACCOUNT_NAME="devstoreaccount1" BLOB_CONTAINER="argus-attachments" BLOB_CREATE_CONTAINER="true" \
+	BLOB_ENDPOINT="http://127.0.0.1:10000/devstoreaccount1" \
+	BLOB_ACCOUNT_KEY="$(AZURITE_DEV_KEY)" \
 	pnpm --filter @argus/api dev
 
 down: ## Stop the local stack (keeps data)
