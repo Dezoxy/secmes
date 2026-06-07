@@ -328,13 +328,18 @@ export default function ChatScreen() {
     );
   }, [anonymousProfile]);
 
-  const handleProfileChange = (next: AnonymousProfile): void => {
+  const handleProfileChange = (next: AnonymousProfile): boolean => {
     const safeNext = {
       ...next,
       avatar: safeAvatarSrc(next.avatar, next.username || next.id),
     };
-    setAnonymousProfile(safeNext);
-    window.localStorage.setItem(profileStorageKey(safeNext.id), JSON.stringify(safeNext));
+    try {
+      window.localStorage.setItem(profileStorageKey(safeNext.id), JSON.stringify(safeNext));
+      setAnonymousProfile(safeNext);
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   // Add a freshly-started LIVE conversation to the list: its safety number is the REAL one from the

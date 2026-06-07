@@ -97,11 +97,13 @@ export function generatedAvatar(name: string): string {
 
 const SAFE_RASTER_AVATAR_DATA_URI =
   /^data:image\/(?:png|jpe?g|webp|gif);base64,[a-z0-9+/]+={0,2}$/i;
+export const MAX_AVATAR_DATA_URI_LENGTH = 120_000;
 
 export function safeAvatarSrc(src: string | undefined, fallbackName: string): string {
   const fallback = generatedAvatar(fallbackName);
   if (!src) return fallback;
   if (src === fallback) return src;
+  if (src.length > MAX_AVATAR_DATA_URI_LENGTH) return fallback;
   return SAFE_RASTER_AVATAR_DATA_URI.test(src) ? src : fallback;
 }
 

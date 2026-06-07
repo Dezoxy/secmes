@@ -18,7 +18,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { generatedAvatar, safeAvatarSrc } from '../chat/seed';
+import { generatedAvatar, MAX_AVATAR_DATA_URI_LENGTH, safeAvatarSrc } from '../chat/seed';
 import { RecoveryPanel } from '../recovery/RecoveryPanel';
 
 export interface AnonymousProfile {
@@ -30,7 +30,7 @@ export interface AnonymousProfile {
 interface SettingsPanelProps {
   profile: AnonymousProfile;
   deviceId: string | null;
-  onProfileChange: (profile: AnonymousProfile) => void;
+  onProfileChange: (profile: AnonymousProfile) => boolean;
   onClose: () => void;
 }
 
@@ -84,6 +84,7 @@ const SUBTLE_BUTTON =
 const PRIMARY_BUTTON =
   'inline-flex items-center justify-center gap-2 rounded-xl bg-purple-500 px-4 py-2 text-sm font-medium text-white shadow-lg shadow-purple-500/20 transition-colors hover:bg-purple-400';
 const ALLOWED_AVATAR_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+const AVATAR_CANVAS_SIZE = 192;
 
 function readStoredAccent(): AccentId {
   if (typeof window === 'undefined') return 'purple';
@@ -97,13 +98,54 @@ function readStoredFontSize(): number {
   return fontSizeLevels.includes(stored) ? stored : 5;
 }
 
-function readFileAsDataUrl(file: File): Promise<string> {
+function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error('failed to read avatar'));
-    reader.readAsDataURL(file);
+    const image = new window.Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('failed to load avatar'));
+    image.src = url;
   });
+}
+
+async function compressAvatar(file: File): Promise<string> {
+  const objectUrl = window.URL.createObjectURL(file);
+  try {
+    const image = await loadImage(objectUrl);
+    const canvas = document.createElement('canvas');
+    canvas.width = AVATAR_CANVAS_SIZE;
+    canvas.height = AVATAR_CANVAS_SIZE;
+
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('failed to prepare avatar');
+
+    const sourceWidth = image.naturalWidth || image.width;
+    const sourceHeight = image.naturalHeight || image.height;
+    const sourceSize = Math.min(sourceWidth, sourceHeight);
+    const sourceX = Math.max(0, (sourceWidth - sourceSize) / 2);
+    const sourceY = Math.max(0, (sourceHeight - sourceSize) / 2);
+
+    context.fillStyle = '#111827';
+    context.fillRect(0, 0, AVATAR_CANVAS_SIZE, AVATAR_CANVAS_SIZE);
+    context.drawImage(
+      image,
+      sourceX,
+      sourceY,
+      sourceSize,
+      sourceSize,
+      0,
+      0,
+      AVATAR_CANVAS_SIZE,
+      AVATAR_CANVAS_SIZE,
+    );
+
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+    if (dataUrl.length > MAX_AVATAR_DATA_URI_LENGTH) {
+      throw new Error('avatar is too large');
+    }
+    return dataUrl;
+  } finally {
+    window.URL.revokeObjectURL(objectUrl);
+  }
 }
 
 function SettingRow({
@@ -225,10 +267,12 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
   const [mobileSectionOpen, setMobileSectionOpen] = useState(false);
   const [accentId, setAccentId] = useState<AccentId>(() => readStoredAccent());
   const [fontSizeLevel, setFontSizeLevel] = useState(() => readStoredFontSize());
+  const [profileError, setProfileError] = useState<string | null>(null);
 
   useEffect(() => {
     setUsername(profile.username);
     setAvatar(profile.avatar);
+    setProfileError(null);
   }, [profile]);
 
   useEffect(() => {
@@ -242,8 +286,12 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
   const saveProfile = () => {
     const clean = username.trim() || profile.id.slice(0, 12);
     const safeAvatar = safeAvatarSrc(avatar, clean);
-    setAvatar(safeAvatar);
-    onProfileChange({ ...profile, username: clean, avatar: safeAvatar });
+    if (onProfileChange({ ...profile, username: clean, avatar: safeAvatar })) {
+      setAvatar(safeAvatar);
+      setProfileError(null);
+      return;
+    }
+    setProfileError('Profile could not be saved on this device. Use a smaller avatar.');
   };
 
   const copyId = async () => {
@@ -260,11 +308,18 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
     const file = event.target.files?.[0];
     if (!file) return;
     if (!ALLOWED_AVATAR_TYPES.has(file.type)) {
+      setProfileError('Use PNG, JPG, WebP, or GIF.');
       event.target.value = '';
       return;
     }
-    setAvatar(await readFileAsDataUrl(file));
-    event.target.value = '';
+    try {
+      setAvatar(await compressAvatar(file));
+      setProfileError(null);
+    } catch {
+      setProfileError('Avatar could not be processed. Use a smaller image.');
+    } finally {
+      event.target.value = '';
+    }
   };
 
   const activeSection = sections.find((section) => section.id === active) ?? sections[0]!;
@@ -420,6 +475,7 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
               >
                 Save profile
               </button>
+              {profileError && <p className="text-sm text-rose-300">{profileError}</p>}
             </div>
           )}
 
