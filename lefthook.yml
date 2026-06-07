@@ -20,4 +20,7 @@ pre-push:
     typecheck:
       run: pnpm -r typecheck
     test:
-      run: pnpm -r test
+      # Serialize the workspace suites: crypto + web both run heavy Argon2id, and running all four suites'
+      # worker pools at once oversubscribes the CPU → web's keystore tests flake on the default timeout.
+      # Sequential is as fast here (no thrashing) and deterministic.
+      run: pnpm -r --workspace-concurrency=1 test

@@ -38,6 +38,15 @@ class FakeWebSocket {
 
 const Impl = FakeWebSocket as unknown as typeof WebSocket;
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+// Wait for a condition instead of a fixed real-time sleep: a 1–5 ms reconnect backoff slips past a 10 ms
+// window under CPU contention, so poll for the actual effect up to a generous cap (load-robust).
+const waitFor = async (cond: () => boolean, timeoutMs = 2000): Promise<void> => {
+  const start = Date.now();
+  while (!cond()) {
+    if (Date.now() - start > timeoutMs) throw new Error('waitFor: condition not met in time');
+    await new Promise((r) => setTimeout(r, 1));
+  }
+};
 const last = (): FakeWebSocket => FakeWebSocket.instances[FakeWebSocket.instances.length - 1]!;
 const parsed = (ws: FakeWebSocket): { event: string; data: unknown }[] =>
   ws.sent.map((s) => JSON.parse(s) as { event: string; data: unknown });
@@ -150,7 +159,7 @@ describe('createMessageSocket', () => {
     expect(FakeWebSocket.instances).toHaveLength(1);
 
     last().close(); // drop
-    await new Promise((r) => setTimeout(r, 10)); // let the backoff fire
+    await waitFor(() => FakeWebSocket.instances.length >= 2); // wait for the backoff to reconnect (load-robust)
     expect(FakeWebSocket.instances.length).toBeGreaterThanOrEqual(2);
 
     last().open();
