@@ -1,7 +1,8 @@
-// Live 1:1 conversations (Slice 3, initiator side). Replaces the loopback `mls.ts` demo for real peers:
-// claim a peer's KeyPackage from the directory → verify the safety number out-of-band (#20) → MLS
-// `addMember` → create the conversation + deliver the sealed Welcome. The recipient's join is Slice 4;
-// live send/fetch + group-state persistence are Slice 5 (sessions are in-memory here).
+// Live 1:1 conversations (Slice 3, initiator side; persistence wired in Slice 5). Replaces the loopback
+// `mls.ts` demo for real peers: claim a peer's KeyPackage from the directory → verify the safety number
+// out-of-band (#20) → MLS `addMember` → create the conversation → PERSIST the group state → deliver the
+// sealed Welcome. The persist precedes delivery so a reload before the first send can't lose a conversation
+// the peer has already joined. The recipient's join is Slice 4; live send/fetch is Slice 5 (lib/messaging).
 
 import {
   MlsEngine,
@@ -14,6 +15,7 @@ import {
 } from '@argus/crypto';
 
 import { claimKeyPackage, createConversation, deliverWelcome } from './api';
+import type { DeviceKeystore } from './keystore';
 
 /** The peer device a conversation is being started with — ids + the signature key (no private material). */
 export interface PeerRef {
@@ -57,6 +59,10 @@ export class ConversationManager {
     private readonly device: DeviceKeys,
     /** The signed-in user's id — used to create a SOLO conversation (see `confirm`). */
     private readonly selfUserId: string,
+    /** The sealed keystore — persists the new group state before the peer can join (see `confirm`). */
+    private readonly keystore: DeviceKeystore,
+    /** The session passphrase — seals the persisted group state. In memory only; never logged/transmitted. */
+    private readonly passphrase: string,
   ) {}
 
   private engine(): Promise<MlsEngine> {
@@ -97,6 +103,15 @@ export class ConversationManager {
     // the peer is never left a member of a conversation with no Welcome — no peer-visible / undecryptable
     // orphan and no duplicate-on-retry for the peer; only a benign empty self-conversation remains.
     const { conversationId } = await createConversation([this.selfUserId]);
+    // Persist the group state BEFORE delivering the Welcome: once the peer can join, the initiator's state
+    // must already be durable, or a reload after delivery but before the first send would lose the
+    // conversation (and its ratchet) while the peer has already joined it.
+    await this.keystore.saveConversationState(
+      this.device,
+      conversationId,
+      conversation,
+      this.passphrase,
+    );
     await deliverWelcome(conversationId, {
       recipientUserId: pending.peer.userId,
       recipientDeviceId: pending.peer.deviceId,
@@ -112,7 +127,8 @@ export class ConversationManager {
     return session;
   }
 
-  /** The live session for a conversation, if one was started this page load (in-memory; Slice 5 persists). */
+  /** The live session for a conversation started this page load (in-memory cache; the durable copy is sealed
+   * on `confirm` and reloaded on unlock via the keystore). */
   get(conversationId: string): ConversationSession | undefined {
     return this.sessions.get(conversationId);
   }

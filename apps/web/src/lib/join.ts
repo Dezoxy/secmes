@@ -100,16 +100,24 @@ export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
         // it — it gets NoMatchingPoolMember and is cleared.
         const spent = workingPool.indexOf(joined.member);
         if (spent !== -1) workingPool.splice(spent, 1);
-        // Persist the joined group FIRST (5A) so a reload recovers it; only then surface + release the
-        // Welcome/private. If the save throws (e.g. a cross-tab GroupStateConflict — another tab already
-        // joined + persisted this conversation), skip consume/prune and leave the Welcome to the owner.
-        await keystore.saveConversationState(
-          device,
-          w.conversationId,
-          joined.conversation,
-          passphrase,
-        );
-        onJoined({ conversationId: w.conversationId, conversation: joined.conversation });
+        // If this device ALREADY has durable state for this conversation, a prior join persisted it (and
+        // advanced it) but its cleanup failed, so the Welcome is being replayed. Re-saving this Welcome's
+        // FRESH post-join state would overwrite the advanced ratchet — a rollback the CAS can't catch
+        // (same instance, matching version, after rehydrate set the base). So SKIP the save + surface (the
+        // conversation is already recovered via rehydrate-on-unlock) and fall through to clear the redundant
+        // Welcome + prune the private.
+        if (!(await keystore.hasConversationState(device, w.conversationId))) {
+          // Persist FIRST (5A) so a reload recovers it; only then surface. If the save throws (e.g. a
+          // cross-tab GroupStateConflict — another tab joined + persisted this conversation), skip
+          // consume/prune and leave the Welcome to the owner.
+          await keystore.saveConversationState(
+            device,
+            w.conversationId,
+            joined.conversation,
+            passphrase,
+          );
+          onJoined({ conversationId: w.conversationId, conversation: joined.conversation });
+        }
         // Best-effort cleanup AFTER the durable save. Consume the Welcome (forward secrecy — the sealed join
         // material is no longer needed) then prune the spent one-time private from the sealed pool so it can
         // never reopen a (replayed) Welcome. Either failing is non-fatal: the persisted group already

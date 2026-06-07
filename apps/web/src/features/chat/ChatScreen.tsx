@@ -91,16 +91,24 @@ export default function ChatScreen() {
 
   const { device, pool, deviceId, keystore, passphrase } = useDevice();
   const { profile } = useAuth();
-  // A live conversation manager exists only with an unlocked device (not demo mode). New conversations
-  // route through it (claim → #20 gate → create + deliver); demo mode keeps the seed/loopback path.
-  const manager = useMemo(
-    () => (device && profile?.userId ? new ConversationManager(device, profile.userId) : null),
-    [device, profile],
-  );
   // What every live send/receive needs to seal the advanced ratchet at rest (Slice 5). Null in demo mode.
   const messagingDeps = useMemo<MessagingDeps | null>(
     () => (device && keystore && passphrase ? { device, keystore, passphrase } : null),
     [device, keystore, passphrase],
+  );
+  // A live conversation manager exists only with an unlocked device (not demo mode). New conversations
+  // route through it (claim → #20 gate → create + persist + deliver); demo mode keeps the seed/loopback path.
+  const manager = useMemo(
+    () =>
+      messagingDeps && profile?.userId
+        ? new ConversationManager(
+            messagingDeps.device,
+            profile.userId,
+            messagingDeps.keystore,
+            messagingDeps.passphrase,
+          )
+        : null,
+    [messagingDeps, profile],
   );
   const [startOpen, setStartOpen] = useState(false);
   // LIVE conversations (real MLS over the network): started via the manager, joined on connect, or rehydrated

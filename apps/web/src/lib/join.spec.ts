@@ -1,4 +1,4 @@
-import { MlsEngine, serializeInvite, type Argon2Params } from '@argus/crypto';
+import { MlsEngine, deserializeInvite, serializeInvite, type Argon2Params } from '@argus/crypto';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -231,6 +231,49 @@ describe('joinPendingConversations', () => {
     expect(consume).toHaveBeenCalledWith('w1', 'dev', expect.any(String));
     expect(consume).toHaveBeenCalledWith('w2', 'dev', expect.any(String));
     expect(consume).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not overwrite an already-persisted (advanced) conversation when its Welcome is replayed (no rollback)', async () => {
+    const engine = await MlsEngine.create();
+    const alice = await engine.generateDeviceKeys('alice');
+    const bob = await engine.generateDeviceKeys('bob');
+    const bobPool = [bob, await engine.mintKeyPackage(bob)];
+    const target = bobPool[1]!;
+    const { keystore, passphrase } = await persistenceDeps(engine);
+
+    const aliceConv = await engine.createConversation('grp', alice);
+    const material = serializeInvite(await aliceConv.addMember(target.publicPackage));
+
+    // Simulate a PRIOR join whose consume+prune FAILED: join, ADVANCE the ratchet (receive a message),
+    // persist the advanced state, and seed the keystore CAS base (as rehydrate-on-unlock would).
+    const pre = await engine.joinConversationFromPool([...bobPool], deserializeInvite(material));
+    const m1wire = await aliceConv.encrypt('m1');
+    await pre.conversation.decrypt(m1wire); // advance bob's receive ratchet past alice's generation 0
+    await keystore.saveConversationState(bob, 'c1', pre.conversation, passphrase);
+    await keystore.loadConversations(bob, passphrase); // sets the CAS base to the persisted version
+
+    // The SAME Welcome is still pending (consume failed before); the drain replays it.
+    list.mockResolvedValue([{ id: 'w1', conversationId: 'c1', createdAt: 't' }]);
+    fetchMaterial.mockResolvedValue(material);
+    const joined: JoinedConversation[] = [];
+
+    await joinPendingConversations({
+      device: bob,
+      pool: bobPool,
+      deviceId: 'dev',
+      keystore,
+      passphrase,
+      onJoined: (j) => joined.push(j),
+    });
+
+    // It must NOT surface a duplicate and must NOT overwrite the advanced state...
+    expect(joined).toHaveLength(0);
+    // ...the persisted state is still the ADVANCED one — it already consumed alice's generation 0, so
+    // re-decrypting m1 throws (a rolled-back fresh-join state would instead decrypt it). The rollback proof.
+    const restored = (await keystore.loadConversations(bob, passphrase)).get('c1')!;
+    await expect(restored.decrypt(m1wire)).rejects.toThrow();
+    // ...and the redundant Welcome was cleared.
+    expect(consume).toHaveBeenCalledWith('w1', 'dev', expect.any(String));
   });
 
   it('clears a stranded welcome blocking the cursorless page so a valid welcome behind it is reached', async () => {
