@@ -117,12 +117,37 @@ function storedToMessage(m: StoredMessage): Message {
 // The sidebar entry for a LIVE conversation surfaced without a known peer identity (joined on connect, or
 // rehydrated on unlock). The inviter's identity isn't in the welcome/persistence metadata (it would leak the
 // social graph to the server), so we show a neutral placeholder; verification (#20) names it out-of-band.
-function liveConversationShell(conversationId: string): Conversation {
+function currentUserFromProfile(profile: AnonymousProfile): User {
+  return {
+    ...currentUser,
+    name: profile.username,
+    avatar: profile.avatar,
+    isOnline: true,
+  };
+}
+
+function withCurrentUserProfile(conversation: Conversation, profile: User): Conversation {
+  return {
+    ...conversation,
+    participants: conversation.participants.map((participant) =>
+      participant.id === currentUser.id
+        ? {
+            ...participant,
+            name: profile.name,
+            avatar: profile.avatar,
+            isOnline: profile.isOnline,
+          }
+        : participant,
+    ),
+  };
+}
+
+function liveConversationShell(conversationId: string, selfUser: User): Conversation {
   return {
     id: conversationId,
     type: 'direct',
     participants: [
-      currentUser,
+      selfUser,
       {
         id: `peer-${conversationId}`,
         name: 'New contact',
@@ -153,6 +178,10 @@ export default function ChatScreen() {
   const anonymousId = profile?.userId ?? currentUser.id;
   const [anonymousProfile, setAnonymousProfile] = useState<AnonymousProfile>(() =>
     loadAnonymousProfile(anonymousId),
+  );
+  const currentUserProfile = useMemo(
+    () => currentUserFromProfile(anonymousProfile),
+    [anonymousProfile],
   );
   // What every live send/receive needs to seal the advanced ratchet at rest (Slice 5). Null in demo mode.
   const messagingDeps = useMemo<MessagingDeps | null>(
@@ -313,20 +342,9 @@ export default function ChatScreen() {
 
   useEffect(() => {
     setConversations((prev) =>
-      prev.map((conversation) => ({
-        ...conversation,
-        participants: conversation.participants.map((participant) =>
-          participant.id === currentUser.id
-            ? {
-                ...participant,
-                name: anonymousProfile.username,
-                avatar: anonymousProfile.avatar,
-              }
-            : participant,
-        ),
-      })),
+      prev.map((conversation) => withCurrentUserProfile(conversation, currentUserProfile)),
     );
-  }, [anonymousProfile]);
+  }, [currentUserProfile]);
 
   const handleProfileChange = (next: AnonymousProfile): boolean => {
     const safeNext = {
@@ -355,7 +373,7 @@ export default function ChatScreen() {
             {
               id: session.conversationId,
               type: 'direct',
-              participants: [currentUser, peerUser],
+              participants: [currentUserProfile, peerUser],
               messages: [],
               unreadCount: 0,
             },
@@ -386,7 +404,7 @@ export default function ChatScreen() {
         setConversations((prev) =>
           prev.some((c) => c.id === conversationId)
             ? prev
-            : [liveConversationShell(conversationId), ...prev],
+            : [liveConversationShell(conversationId, currentUserProfile), ...prev],
         );
       },
     }).catch((err: unknown) => {
@@ -395,7 +413,7 @@ export default function ChatScreen() {
       // eslint-disable-next-line no-console
       console.warn('join-on-connect drain failed', err instanceof Error ? err.message : err);
     });
-  }, [device, pool, deviceId, messagingDeps]);
+  }, [device, pool, deviceId, messagingDeps, currentUserProfile]);
 
   // Rehydrate on unlock (Slice 5 + history): load every persisted conversation's sealed group state into a
   // live MLS group, seed its decrypted history from the sealed message log, and surface it. The group state
@@ -416,7 +434,13 @@ export default function ChatScreen() {
           setConversations((prev) =>
             prev.some((c) => c.id === conversationId)
               ? prev
-              : [{ ...liveConversationShell(conversationId), messages: history }, ...prev],
+              : [
+                  {
+                    ...liveConversationShell(conversationId, currentUserProfile),
+                    messages: history,
+                  },
+                  ...prev,
+                ],
           );
         }
       } catch (err) {
@@ -424,7 +448,7 @@ export default function ChatScreen() {
         console.warn('rehydrate conversations failed', err instanceof Error ? err.message : err);
       }
     })();
-  }, [messagingDeps, sessionKey]);
+  }, [messagingDeps, sessionKey, currentUserProfile]);
 
   const selectedConversation = conversations.find((c) => c.id === selectedId);
   // Safety-number verification is 2-party only (group safety numbers are deferred —
@@ -638,12 +662,7 @@ export default function ChatScreen() {
             conversations={conversations}
             selectedId={selectedId}
             onSelect={handleSelect}
-            currentUserProfile={{
-              id: currentUser.id,
-              name: anonymousProfile.username,
-              avatar: anonymousProfile.avatar,
-              isOnline: true,
-            }}
+            currentUserProfile={currentUserProfile}
             onSettings={() => setSettingsOpen(true)}
             onNewConversation={manager ? () => setStartOpen(true) : undefined}
           />
