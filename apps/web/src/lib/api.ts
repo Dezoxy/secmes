@@ -310,12 +310,12 @@ export async function createDownloadGrant(objectKey: string): Promise<string> {
   return ((await res.json()) as { url: string }).url;
 }
 
-/** Upload the ciphertext directly to the presigned SAS URL. Azure block-blob create requires the
- *  `x-ms-blob-type: BlockBlob` header. `uploadUrl` is a capability — never log it. */
+/** Upload the ciphertext directly to the presigned S3 PUT URL. No provider-specific headers — the S3
+ *  presigned URL binds the verb + object into its SigV4 signature. `uploadUrl` is a capability — never log it. */
 export async function putAttachmentBlob(uploadUrl: string, ciphertext: Uint8Array): Promise<void> {
   const res = await fetch(uploadUrl, {
     method: 'PUT',
-    headers: { 'x-ms-blob-type': 'BlockBlob', 'content-type': 'application/octet-stream' },
+    headers: { 'content-type': 'application/octet-stream' },
     // Copy into a fresh ArrayBuffer-backed view: the crypto lib returns Uint8Array<ArrayBufferLike>, but a
     // fetch body needs Uint8Array<ArrayBuffer> (BufferSource).
     body: new Uint8Array(ciphertext),
@@ -323,7 +323,7 @@ export async function putAttachmentBlob(uploadUrl: string, ciphertext: Uint8Arra
   if (!res.ok) throw new Error(`attachment PUT → ${res.status}`);
 }
 
-/** Download the ciphertext directly from the presigned SAS URL. `url` is a capability — never log it. */
+/** Download the ciphertext directly from the presigned S3 GET URL. `url` is a capability — never log it. */
 export async function getAttachmentBlob(url: string): Promise<Uint8Array> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`attachment GET → ${res.status}`);

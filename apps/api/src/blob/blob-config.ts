@@ -1,42 +1,43 @@
-// Config for the Azure Blob Storage attachment store (encrypted-attachment ciphertext). Two modes:
+// Config for the S3-compatible attachment store (encrypted-attachment ciphertext). One mode, two
+// deployments — same code path, only the env values differ:
 //
-//   - LOCAL (Azurite): account name + KEY + blob endpoint → presign with an account-key SAS. The Azurite key
-//     is the public well-known dev key (NOT a secret); injected via `make api-dev`.
-//   - PROD (Azure): account URL only → presign with a USER-DELEGATION SAS signed via Workload Identity
-//     (`DefaultAzureCredential`). No account key ever lives in the pod (invariant #5).
+//   - LOCAL (MinIO): endpoint http://127.0.0.1:9000, path-style addressing, throwaway root creds.
+//   - PROD (Backblaze B2, EU): endpoint https://s3.eu-central-003.backblazeb2.com, virtual-host style, a
+//     BUCKET-SCOPED application key (read/write/delete on ONE bucket — least privilege). The key is a
+//     long-lived static credential (B2 has no workload-identity equivalent); it lives in Key Vault and is
+//     fetched at boot via the VM's Managed Identity — never committed, never logged. Acceptable as
+//     long-lived only because the stored blobs are E2EE ciphertext the provider cannot read (invariant #1).
 //
-// When unconfigured, the attachment endpoints fail closed (see blob-store.module.ts).
+// The secret access key is NEVER logged (invariant #2). When unconfigured, the attachment endpoints fail
+// closed (see blob-store.module.ts).
 
 export const BLOB_CONFIG = Symbol('BLOB_CONFIG');
 
 export interface BlobConfig {
-  /** Storage account name (e.g. `devstoreaccount1` for Azurite, or the real account in prod). */
-  accountName: string;
-  /** Account key — present ONLY in the local Azurite path (account-key SAS); absent in prod (→ user-delegation). */
-  accountKey?: string;
-  /** Explicit blob-service URL for the account-key path (Azurite, e.g. `http://127.0.0.1:10000/devstoreaccount1`). */
-  endpoint?: string;
-  /** Account URL for the prod user-delegation path (e.g. `https://<account>.blob.core.windows.net`). */
-  accountUrl?: string;
-  /** Container that holds the (opaque, encrypted) attachment blobs. */
-  container: string;
-  /**
-   * Local-only convenience: create the container at startup if missing. NEVER set in prod — prod credentials
-   * get blob read/write only (least privilege); the container is provisioned by Terraform.
-   */
-  createContainer: boolean;
+  /** S3-compatible endpoint (B2: `https://s3.eu-central-003.backblazeb2.com`; MinIO: `http://127.0.0.1:9000`). */
+  endpoint: string;
+  /** Region — must match the bucket's region for B2 SigV4 (`eu-central-003`); any value for MinIO (`us-east-1`). */
+  region: string;
+  /** Bucket that holds the (opaque, encrypted) attachment blobs. */
+  bucket: string;
+  /** Access key id (B2 `keyID` / MinIO root user). Not secret on its own, but pair-with-secret → treat as cred. */
+  accessKeyId: string;
+  /** Secret access key (B2 `applicationKey` / MinIO root password). NEVER logged or persisted (invariant #2). */
+  secretAccessKey: string;
+  /** Path-style addressing: `true` for MinIO (no virtual-host DNS), `false` for B2 (virtual-hosted-style). */
+  forcePathStyle: boolean;
   configured: boolean;
 }
 
 export function loadBlobConfig(): BlobConfig {
-  const accountName = process.env.BLOB_ACCOUNT_NAME ?? '';
-  const accountKey = process.env.BLOB_ACCOUNT_KEY || undefined;
-  const endpoint = process.env.BLOB_ENDPOINT || undefined;
-  const accountUrl = process.env.BLOB_ACCOUNT_URL || undefined;
-  const container = process.env.BLOB_CONTAINER ?? 'argus-attachments';
-  const createContainer = process.env.BLOB_CREATE_CONTAINER === 'true';
-  // Configured when EITHER the local account-key path (name + key + endpoint) OR the prod path (account URL)
-  // is fully present, and a container is named.
-  const configured = Boolean(container && ((accountName && accountKey && endpoint) || accountUrl));
-  return { accountName, accountKey, endpoint, accountUrl, container, createContainer, configured };
+  const endpoint = process.env.S3_ENDPOINT ?? '';
+  // SigV4 needs SOME region; default to the AWS/MinIO convention. B2 deployments override with their region.
+  const region = process.env.S3_REGION || 'us-east-1';
+  const bucket = process.env.S3_BUCKET ?? 'argus-attachments';
+  const accessKeyId = process.env.S3_ACCESS_KEY_ID ?? '';
+  const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY ?? '';
+  const forcePathStyle = process.env.S3_FORCE_PATH_STYLE === 'true';
+  // Configured only when the endpoint, bucket, and BOTH credential halves are present.
+  const configured = Boolean(endpoint && bucket && accessKeyId && secretAccessKey);
+  return { endpoint, region, bucket, accessKeyId, secretAccessKey, forcePathStyle, configured };
 }
