@@ -101,6 +101,9 @@ interface StoredMessageLog {
   signaturePublicKey: string;
   conversationId: string;
   sealed: SealedBlob;
+  // Monotonic version for the cross-tab compare-and-swap (see appendMessagesUnlocked). A lost CAS means
+  // another tab appended concurrently — re-read + re-merge + retry, so neither tab's entries are dropped.
+  version: number;
 }
 
 /** Shape-check a server-provided sealed blob before storing it (it's still GCM-authenticated on unseal). */
@@ -536,26 +539,46 @@ export class DeviceKeystore {
     sessionKey: CryptoKey,
     entries: StoredMessage[],
   ): Promise<void> {
-    const existing = await this.loadMessageLog(device, conversationId, sessionKey);
-    const byId = new Map(existing.map((m) => [m.id, m]));
-    for (const e of entries) byId.set(e.id, e); // upsert: latest status/content for an id wins
-    const merged = [...byId.values()].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-    // Bind the conversationId into the AAD so this blob is pinned to its slot (see openLog).
-    const sealed = await sealWithKey(
-      sessionKey,
-      te.encode(JSON.stringify(merged)),
-      te.encode(conversationId),
-    );
-    await this.db.put(
-      MSGLOG_STORE,
-      {
-        identity: deviceIdentity(device),
-        signaturePublicKey: deviceSignaturePublicKeyB64(device),
-        conversationId,
-        sealed,
-      } satisfies StoredMessageLog,
-      conversationId,
-    );
+    // Cross-tab safe via a version CAS: the in-memory `appendChains` only orders appends within THIS tab, so
+    // two tabs could each read the same log, merge different entries, and the later put would clobber the
+    // earlier (a history entry lost). Instead: read the current (version, log), merge OUR entries, then
+    // commit only if the stored version is unchanged. On a lost CAS another tab appended — re-read its newer
+    // log, RE-MERGE our entries into it, and retry, so neither tab's entries are dropped.
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const rec = (await this.db.get(MSGLOG_STORE, conversationId)) as StoredMessageLog | undefined;
+      const base = rec?.version ?? -1;
+      const existing = await this.openLog(rec, device, sessionKey); // [] if none / not this device
+      const byId = new Map(existing.map((m) => [m.id, m]));
+      for (const e of entries) byId.set(e.id, e); // upsert: latest status/content for an id wins
+      const merged = [...byId.values()].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+      // Bind the conversationId into the AAD so this blob is pinned to its slot (see openLog).
+      const sealed = await sealWithKey(
+        sessionKey,
+        te.encode(JSON.stringify(merged)),
+        te.encode(conversationId),
+      );
+
+      // The seal (async, non-IDB) ran OUTSIDE the tx; the get→check→put below is the atomic CAS.
+      const tx = this.db.transaction(MSGLOG_STORE, 'readwrite');
+      const current = (await tx.store.get(conversationId)) as StoredMessageLog | undefined;
+      if ((current?.version ?? -1) === base) {
+        await tx.store.put(
+          {
+            identity: deviceIdentity(device),
+            signaturePublicKey: deviceSignaturePublicKeyB64(device),
+            conversationId,
+            sealed,
+            version: base + 1,
+          } satisfies StoredMessageLog,
+          conversationId,
+        );
+        await tx.done;
+        return;
+      }
+      await tx.done; // lost the CAS — another tab appended; re-read + re-merge + retry
+    }
+    // eslint-disable-next-line no-console
+    console.warn('persist history: gave up after write contention', conversationId);
   }
 
   /** Remove a conversation's persisted history (e.g. on leave / clear-history). */

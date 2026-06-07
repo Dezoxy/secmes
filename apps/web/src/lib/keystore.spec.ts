@@ -555,4 +555,32 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     const device2 = await ks.getOrCreateDevice('alice', 'pw');
     expect((await ks.loadAllMessageLogs(device2, await ks.deriveSessionKey('pw'))).size).toBe(0);
   });
+
+  it('message log: concurrent cross-tab appends BOTH survive (CAS retry, no clobber)', async () => {
+    const engine = await MlsEngine.create();
+    const ksA = await DeviceKeystore.open(engine, FAST);
+    const device = await ksA.getOrCreateDevice('alice', 'pw');
+    const keyA = await ksA.deriveSessionKey('pw');
+
+    // A second keystore over the SAME IndexedDB = a second tab (its own in-memory appendChains).
+    const ksB = await DeviceKeystore.open(engine, FAST);
+    const devB = await ksB.loadDevice('alice', 'pw');
+    if (!devB) throw new Error('expected a persisted device');
+    const keyB = await ksB.deriveSessionKey('pw'); // same passphrase + stored salt/params → same key
+
+    // Both tabs append to the same conversation concurrently (e.g. A sends an echo while B persists a push).
+    await Promise.all([
+      ksA.appendMessages(device, 'c1', keyA, [
+        msg('a1', 'from A', '2026-01-01T00:00:01.000Z', 'me'),
+      ]),
+      ksB.appendMessages(devB, 'c1', keyB, [msg('b1', 'from B', '2026-01-01T00:00:02.000Z')]),
+    ]);
+
+    // Neither entry is clobbered — a fresh reader sees both.
+    const ksC = await DeviceKeystore.open(engine, FAST);
+    const devC = await ksC.loadDevice('alice', 'pw');
+    if (!devC) throw new Error('expected a persisted device');
+    const log = await ksC.loadMessageLog(devC, 'c1', await ksC.deriveSessionKey('pw'));
+    expect(log.map((m) => m.id).sort()).toEqual(['a1', 'b1']);
+  });
 });

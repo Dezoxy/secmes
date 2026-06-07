@@ -68,7 +68,9 @@
 - **Keystore (IndexedDB v5, additive):** a `message-log` store keyed by conversationId, identity- +
   signature-key-bound, value = the sealed `{iv, ct}` over the entries; a stored per-profile session-key salt.
   Methods: `appendMessages` / `loadMessageLog` / cleared by `clearDevice`. Re-seal the whole per-conversation
-  log on append (small for v1 1:1).
+  log on append (small for v1 1:1), under a **monotonic version + readwrite-tx CAS** so concurrent cross-tab
+  appends don't clobber: a lost CAS means another tab appended — re-read its newer log, re-merge our entries,
+  retry (so neither tab's plaintext history is dropped; the in-memory serializer only orders within a tab).
 - **DeviceContext:** derive + hold the session key at unlock; clear on reset. **ChatScreen:** seed history
   from `loadMessageLog` on rehydrate; append on send / fetch-backfill / WS receive (dedup by serverId).
 - **Tests:** round-trip (append → reload → decrypt renders history); wrong passphrase fails closed; two seals
