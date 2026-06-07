@@ -1,8 +1,9 @@
 // Live 1:1 conversations (Slice 3, initiator side; persistence wired in Slice 5). Replaces the loopback
 // `mls.ts` demo for real peers: claim a peer's KeyPackage from the directory → verify the safety number
-// out-of-band (#20) → MLS `addMember` → create the conversation → PERSIST the group state → deliver the
-// sealed Welcome. The persist precedes delivery so a reload before the first send can't lose a conversation
-// the peer has already joined. The recipient's join is Slice 4; live send/fetch is Slice 5 (lib/messaging).
+// out-of-band (#20) → MLS `addMember` → create the conversation → deliver the sealed Welcome → PERSIST the
+// group state. The persist runs only AFTER delivery succeeds, so a reload before the first send recovers the
+// conversation, yet a delivery failure leaves no durable phantom. Recipient join is Slice 4; live send/fetch
+// is Slice 5 (lib/messaging).
 
 import {
   MlsEngine,
@@ -103,20 +104,22 @@ export class ConversationManager {
     // the peer is never left a member of a conversation with no Welcome — no peer-visible / undecryptable
     // orphan and no duplicate-on-retry for the peer; only a benign empty self-conversation remains.
     const { conversationId } = await createConversation([this.selfUserId]);
-    // Persist the group state BEFORE delivering the Welcome: once the peer can join, the initiator's state
-    // must already be durable, or a reload after delivery but before the first send would lose the
-    // conversation (and its ratchet) while the peer has already joined it.
+    await deliverWelcome(conversationId, {
+      recipientUserId: pending.peer.userId,
+      recipientDeviceId: pending.peer.deviceId,
+      ...serializeInvite(invite),
+    });
+    // Persist the group state only AFTER delivery SUCCEEDS — the durable state must exist before `confirm()`
+    // returns (so a reload before the first send recovers it), but NOT on a delivery failure: persisting
+    // first would leave a phantom conversation (rehydrated on next unlock) whose peer was never added
+    // server-side, so its sends would go nowhere. `deliverWelcome` doesn't touch the local MLS state
+    // (`addMember` already advanced it), so this persists the same post-add state, just gated on delivery.
     await this.keystore.saveConversationState(
       this.device,
       conversationId,
       conversation,
       this.passphrase,
     );
-    await deliverWelcome(conversationId, {
-      recipientUserId: pending.peer.userId,
-      recipientDeviceId: pending.peer.deviceId,
-      ...serializeInvite(invite),
-    });
     const session: ConversationSession = {
       conversationId,
       conversation,

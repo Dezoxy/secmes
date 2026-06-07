@@ -91,14 +91,19 @@ describe('ConversationManager', () => {
     expect(await peerConversation.decrypt(await session.conversation.encrypt(SECRET))).toBe(SECRET);
   });
 
-  it('confirm() persists the group state BEFORE delivering the Welcome (no loss on reload-before-send)', async () => {
-    // At the moment the peer is told (deliverWelcome), the initiator's state must already be durable.
+  it('confirm() persists only AFTER the Welcome is delivered, and durably (recover on reload-before-send)', async () => {
+    // Not yet persisted while delivery is in flight (so a delivery failure leaves no phantom)…
+    let persistedDuringDeliver: boolean | null = null;
     deliver.mockImplementation(async () => {
-      expect(await keystore.hasConversationState(me, 'conv-1')).toBe(true);
+      persistedDuringDeliver = await keystore.hasConversationState(me, 'conv-1');
       return { welcomeId: 'welcome-1' };
     });
     const mgr = new ConversationManager(me, 'me-user', keystore, 'pw');
     await mgr.confirm(await mgr.prepare('peer-user'));
+
+    expect(persistedDuringDeliver).toBe(false);
+    // …but durable by the time confirm() resolves, before any send.
+    expect(await keystore.hasConversationState(me, 'conv-1')).toBe(true);
 
     // A reopened keystore rehydrates the started conversation; it continues the SAME ratchet the peer joined
     // — proving the initiator could recover it on reload even though it never sent a message.
@@ -113,5 +118,16 @@ describe('ConversationManager', () => {
     expect(await peerConversation.decrypt(await restored.encrypt('after reload'))).toBe(
       'after reload',
     );
+  });
+
+  it('confirm() persists NOTHING when Welcome delivery fails (no rehydrated phantom conversation)', async () => {
+    deliver.mockRejectedValue(new Error('delivery 500'));
+    const mgr = new ConversationManager(me, 'me-user', keystore, 'pw');
+
+    await expect(mgr.confirm(await mgr.prepare('peer-user'))).rejects.toThrow();
+
+    // No durable state → the next unlock won't rehydrate a phantom "New contact" whose peer was never added.
+    expect(await keystore.hasConversationState(me, 'conv-1')).toBe(false);
+    expect((await keystore.loadConversations(me, 'pw')).size).toBe(0);
   });
 });
