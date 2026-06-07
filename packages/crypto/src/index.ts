@@ -40,9 +40,12 @@ export {
   deriveSessionKey,
   sealWithKey,
   openWithKey,
+  encryptAttachment,
+  decryptAttachment,
   DEFAULT_ARGON2,
   type SealedBackup,
   type SealedBlob,
+  type EncryptedAttachment,
   type Argon2Params,
 } from './key-backup.js';
 export {
