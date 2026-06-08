@@ -47,11 +47,10 @@ log() { printf 'argus-secrets: %s\n' "$*" >&2; } # names/status only — NEVER a
 cleanup() { rm -f "${SECRETS_DIR}"/.tmp.* 2>/dev/null || true; }
 trap cleanup EXIT
 
-# Ensure the tmpfs target exists, recreating it after a post-first-boot reboot (/run is wiped and cloud-init's
-# runcmd doesn't re-run). Create it root:root 0700 with NO chgrp: this unit runs with an empty
-# CapabilityBoundingSet, and a chgrp to the `argus` group needs CAP_CHOWN (root isn't a member) — it would
-# EPERM and the fetch would abort. root:root is correct anyway: the secret files are 0400 and every consumer
-# (the Docker daemon, systemd LoadCredential) is root.
+# Under the systemd unit, `RuntimeDirectory=argus/secrets` already created this dir (root:root 0700) before
+# ExecStart — surviving a reboot that wipes /run. This install -d is just a fallback for a MANUAL run outside
+# systemd; root:root 0700 with NO chgrp (the unit's empty CapabilityBoundingSet drops CAP_CHOWN, and the
+# secret files are 0400 read by root consumers anyway, so the `argus` group was never needed).
 install -d -m 0700 "$SECRETS_DIR"
 umask 0077
 
