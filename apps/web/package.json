@@ -17,7 +17,7 @@
     "@argus/contracts": "workspace:^",
     "@argus/crypto": "workspace:^",
     "idb": "^8.0.3",
-    "lucide-react": "^0.564.0",
+    "lucide-react": "^1.17.0",
     "oidc-client-ts": "^3.5.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
