@@ -27,6 +27,7 @@ import { ImagePreviewModal } from './ImagePreviewModal';
 import { StartConversation } from './StartConversation';
 import { contactDisplayName } from './user-label';
 import { VerifySecurity } from './VerifySecurity';
+import { useChatState } from './useChatState';
 import { loadArgusProfile, saveArgusProfile } from '../settings/argus-profile';
 import { SettingsPanel, type AnonymousProfile } from '../settings/SettingsPanel';
 import type { Attachment, Conversation, Message, User } from './seed';
@@ -195,6 +196,15 @@ export default function ChatScreen() {
   const socketRef = useRef<MessageSocket | null>(null);
   const joinRanRef = useRef(false);
   const rehydratedRef = useRef(false);
+  // Read-only selected chat state is derived in a hook; mutation/live handlers stay local.
+  const { selectedConversation, isDirect, selectedIsLive, currentNumber, verified, isLive } =
+    useChatState({
+      conversations,
+      selectedId,
+      liveIds,
+      numbersByConv,
+      verifiedByConv,
+    });
 
   // Persist messages to the local SEALED history log (fire-and-forget; upsert by id). Plaintext in →
   // sealed at rest under the session key. Only LIVE conversations call this (seed/demo convs aren't logged).
@@ -308,10 +318,6 @@ export default function ChatScreen() {
     setLiveIds((prev) => (prev.has(conversationId) ? prev : new Set(prev).add(conversationId)));
     socketRef.current?.subscribe(conversationId);
   };
-
-  // A conversation is "live" (real MLS over the network) iff it has a retained group. Demo/seed
-  // conversations are not live and keep the local loopback round-trip.
-  const isLive = (id: string | null): boolean => !!id && liveIds.has(id);
 
   useEffect(() => {
     setMounted(true);
@@ -434,16 +440,11 @@ export default function ChatScreen() {
     })();
   }, [messagingDeps, sessionKey, currentUserProfile]);
 
-  const selectedConversation = conversations.find((c) => c.id === selectedId);
-  // Safety-number verification is 2-party only (group safety numbers are deferred —
-  // fingerprint-verification.md §6) and per-conversation.
-  const isDirect = selectedConversation?.type === 'direct';
-
   // Compute the selected DIRECT conversation's own safety number (from its own loopback session), once.
   // LIVE conversations are skipped — a started one already holds its REAL number, and none should spin up a
   // loopback session (which would compute the wrong, local number).
   useEffect(() => {
-    if (!selectedId || !isDirect || isLive(selectedId)) return;
+    if (!selectedId || !isDirect || selectedIsLive) return;
     void getMlsSession(selectedId)
       .then((s) =>
         setNumbersByConv((prev) =>
@@ -451,17 +452,18 @@ export default function ChatScreen() {
         ),
       )
       .catch(() => {});
-  }, [selectedId, isDirect, liveIds]);
+  }, [selectedId, isDirect, selectedIsLive]);
 
   // Fetch-on-open (Slice 5): when a LIVE conversation is selected, back-fill new ciphertext from the server,
   // decrypt it against the retained group, and append the peer's messages. The keyset cursor advances so a
   // re-open pulls only newer rows. Live PUSH (no re-open needed) is the WebSocket path below.
   useEffect(() => {
-    if (!selectedId || !isLive(selectedId) || !profile?.userId) return;
+    const selfUserId = profile?.userId;
+    if (!selectedId || !selectedIsLive || !selfUserId) return;
     const group = liveGroups.current.get(selectedId);
     if (!group) return;
-    void backfillInto(selectedId, group, profile.userId);
-  }, [selectedId, liveIds, profile, backfillInto]);
+    void backfillInto(selectedId, group, selfUserId);
+  }, [selectedId, selectedIsLive, profile?.userId, backfillInto]);
 
   // Realtime push (Slice 5C): one reconnecting WebSocket to the `/ws` gateway, authenticated in the first
   // frame (never a token in the URL). It pushes ciphertext for the conversations we subscribe (each live
@@ -502,14 +504,6 @@ export default function ChatScreen() {
       socketRef.current = null;
     };
   }, [messagingDeps, profile, backfillInto, mergeIncoming]);
-
-  const currentNumber = selectedId ? (numbersByConv[selectedId] ?? null) : null;
-  // Verified only while the number marked for THIS conversation still matches the current key.
-  const verified =
-    !!isDirect &&
-    selectedId !== null &&
-    currentNumber !== null &&
-    verifiedByConv[selectedId] === currentNumber;
 
   const handleSelect = (id: string) => {
     setSelectedId(id);
