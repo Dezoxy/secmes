@@ -98,11 +98,11 @@ jobs:
     if: ${{ vars.ENABLE_DEPLOY == 'true' }}
     runs-on: ubuntu-latest
     # TWO-LAYER GATE: `vars.ENABLE_DEPLOY` is the master kill-switch (off until the Azure sub + secrets exist),
-    # and the `production` GitHub Environment is the PER-RELEASE approval gate ("your allowance"): configure it
+    # and the `prod` GitHub Environment is the PER-RELEASE approval gate ("your allowance"): configure it
     # with required reviewers, so each tagged release PAUSES here for your manual approval before the root
-    # run-command runs. Also set the OIDC federated subject to `repo:OWNER/REPO:environment:production`
+    # run-command runs. Also set the OIDC federated subject to `repo:OWNER/REPO:environment:prod`
     # (var.github_deploy_subject in infra/vm/terraform) so the credential binds to the environment, not a branch.
-    environment: production
+    environment: prod
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 

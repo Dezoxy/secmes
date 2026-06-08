@@ -76,7 +76,7 @@ variable "github_repo" {
 variable "github_deploy_subject" {
   type        = string
   default     = null
-  description = "Override the federated-credential subject. Defaults to the `main` branch ref. Use e.g. 'repo:OWNER/REPO:environment:production' to bind deploys to a protected GitHub Environment instead."
+  description = "Override the federated-credential subject. Defaults to the `main` branch ref. Set 'repo:OWNER/REPO:environment:prod' to bind deploys to the `prod` GitHub Environment (REQUIRED for the release-on-tag deploy job)."
 }
 
 variable "admin_object_id" {

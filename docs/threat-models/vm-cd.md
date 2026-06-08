@@ -33,9 +33,9 @@ every secret is fetched **on the VM** via the Managed Identity. No message conte
 ## 3. Threats (STRIDE-lite)
 
 - **Spoofing the deployer.** A forged OIDC token, or an unwanted tag, could roll out arbitrary code (root) to
-  the VM. → Releases are **tag-triggered**, and the deploy job runs in the **`production` GitHub Environment**
+  the VM. → Releases are **tag-triggered**, and the deploy job runs in the **`prod` GitHub Environment**
   with **required-reviewer approval** — a per-release human gate before any run-command runs. The federated
-  credential is bound to that environment (`repo:OWNER/REPO:environment:production`, not a branch), and the SP
+  credential is bound to that environment (`repo:OWNER/REPO:environment:prod`, not a branch), and the SP
   holds only a custom `run-command` role on the one VM (not Contributor). `vars.ENABLE_DEPLOY` is the master
   kill-switch. See `vm-deploy.md`.
 - **Tampering — a malicious/compromised image.** → Images are built in CI, **Trivy**-scanned (fail on

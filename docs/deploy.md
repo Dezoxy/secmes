@@ -65,7 +65,7 @@ That triggers `cd.yml`:
    read the repo). The control plane runs `deploy.sh` as root on the VM (no SSH, no open port).
 
 **Two-layer gate.** `vars.ENABLE_DEPLOY` is the master kill-switch (off until the Azure subscription +
-secrets exist). The deploy job runs in the **`production` GitHub Environment** — configure it with **required
+secrets exist). The deploy job runs in the **`prod` GitHub Environment** — configure it with **required
 reviewers (you)**, so every tagged release **pauses for your manual approval** before the root run-command
 runs. The OIDC federated subject is bound to that environment (`var.github_deploy_subject`), not a branch.
 
