@@ -75,16 +75,18 @@ docker pull "$API_IMAGE" >/dev/null
 docker pull "$INGRESS_IMAGE" >/dev/null
 
 # VERIFY the keyless cosign signature before running anything: resolve each tag to its immutable digest and
-# check it was signed by THIS repo's cd.yml via GitHub OIDC. A bad/missing signature exits non-zero (set -e)
-# → the tampered image never runs. Rolling out by DIGEST also closes the tag-swap TOCTOU window.
+# check it was signed by THIS repo's cd.yml run for THIS EXACT release tag (IMAGE_TAG) via GitHub OIDC. Exact
+# identity (not a `refs/tags/` prefix) so a tag overwritten to a different-but-legitimately-signed older digest
+# (a downgrade/rollback) fails. A bad/missing/wrong-tag signature exits non-zero (set -e) → the tampered image
+# never runs. Rolling out by DIGEST also closes the tag-swap TOCTOU window.
 log "verifying image signatures (cosign)"
 api_digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$API_IMAGE")"
 ingress_digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$INGRESS_IMAGE")"
-cosign_id="^https://github.com/${GH_REPO}/\.github/workflows/cd\.yml@refs/tags/"
+cosign_id="https://github.com/${GH_REPO}/.github/workflows/cd.yml@refs/tags/${IMAGE_TAG}"
 cosign verify --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-  --certificate-identity-regexp "$cosign_id" "$api_digest" >/dev/null
+  --certificate-identity "$cosign_id" "$api_digest" >/dev/null
 cosign verify --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
-  --certificate-identity-regexp "$cosign_id" "$ingress_digest" >/dev/null
+  --certificate-identity "$cosign_id" "$ingress_digest" >/dev/null
 
 export ARGUS_API_IMAGE="$api_digest"
 export ARGUS_INGRESS_IMAGE="$ingress_digest"

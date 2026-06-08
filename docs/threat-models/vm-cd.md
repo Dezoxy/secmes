@@ -41,9 +41,11 @@ every secret is fetched **on the VM** via the Managed Identity. No message conte
 - **Tampering — a malicious/compromised image.** → Images are built in CI, **Trivy**-scanned (fail on
   HIGH/CRITICAL), SBOM'd (syft), and **cosign**-signed keyless via OIDC. Before rollout the VM resolves each
   tag to its immutable **digest** and **`cosign verify`s** the signature against this repo's `cd.yml` OIDC
-  identity; a bad/missing signature fails the deploy closed (the tampered image never runs), and the stack
-  runs **by digest** (closing the tag-swap TOCTOU). So a compromised registry or an overwritten tag can't
-  ship an unsigned image.
+  identity **for the exact release tag** (`--certificate-identity …@refs/tags/<this-version>`, not a tag
+  prefix — so a tag overwritten to a different-but-legitimately-signed older digest, i.e. a downgrade, also
+  fails). A bad/missing/wrong-tag signature fails the deploy closed (the tampered image never runs), and the
+  stack runs **by digest** (closing the tag-swap TOCTOU). So a compromised registry or an overwritten tag
+  can't ship an unsigned — or stale — image.
 - **Info-disclosure — secrets in the deploy.** → The run-command payload carries **no secrets** (only
   non-secret config at the SHA). The GHCR token + owner DSN are fetched on-VM via the Managed Identity, used,
   and dropped: the GHCR token goes to `docker login --password-stdin` (never argv) and the owner DSN is
