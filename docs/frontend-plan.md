@@ -438,13 +438,13 @@ git commit -m "refactor(web): split settings sections"
 - Modify: `apps/web/src/features/settings/ProfileSettings.tsx`
 - Modify: `apps/web/src/features/chat/ChatScreen.tsx`
 
-- [ ] Keep app UI free of username/password login controls.
-- [ ] Treat Zitadel as the registration/passkey authority.
-- [ ] Keep Argus profile fields local: generated Argus ID, optional display name, bounded avatar.
-- [ ] Keep profile storage scoped by authenticated subject id.
-- [ ] Keep mismatched legacy profile records discarded.
-- [ ] Do not infer display identity from email.
-- [ ] Do not display the Zitadel subject id as the user's app identity.
+- [x] Keep app UI free of username/password login controls.
+- [x] Treat Zitadel as the registration/passkey authority.
+- [x] Keep Argus profile fields local: generated Argus ID, optional display name, bounded avatar.
+- [x] Keep profile storage scoped by authenticated subject id.
+- [x] Keep mismatched legacy profile records discarded.
+- [x] Do not infer display identity from email.
+- [x] Do not display the Zitadel subject id as the user's app identity.
 
 **Verification:**
 
