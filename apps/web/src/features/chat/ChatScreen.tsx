@@ -304,7 +304,7 @@ export default function ChatScreen() {
       avatar: safeAvatarSrc(next.avatar, next.username || next.id),
     };
     if (saveArgusProfile({ subjectId: profileSubjectId, profile: safeNext })) {
-      setAnonymousProfile(safeNext);
+      setAnonymousProfile(loadArgusProfile({ subjectId: profileSubjectId }));
       return true;
     }
     return false;

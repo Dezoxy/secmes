@@ -161,12 +161,7 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
 
   useEffect(() => {
     const clean = username.trim();
-    if (!clean) {
-      setProfileError(null);
-      return;
-    }
-
-    const safeAvatar = safeAvatarSrc(avatar, clean);
+    const safeAvatar = safeAvatarSrc(avatar, clean || profile.id);
     if (profile.username === clean && profile.avatar === safeAvatar) {
       setProfileError(null);
       return;

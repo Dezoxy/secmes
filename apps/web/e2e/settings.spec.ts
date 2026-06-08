@@ -53,6 +53,25 @@ test('profile draft survives settings section changes', async ({ page }) => {
   await expect(dialog.getByLabel('Username')).toHaveValue('draft-user');
 });
 
+test('profile autosave resets a blank username to the anonymous default', async ({ page }) => {
+  await page.goto('/chat');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+
+  const username = page.getByLabel('Username');
+  const defaultName = await username.inputValue();
+
+  await username.fill('reset-user');
+  await page.waitForFunction(() =>
+    Object.values(localStorage).some((value) => value.includes('reset-user')),
+  );
+
+  await username.fill('');
+
+  await expect(username).toHaveValue(defaultName);
+  await page.getByRole('button', { name: 'Close settings' }).click();
+  await expect(page.getByText(defaultName)).toBeVisible();
+});
+
 test('settings sections preserve defaults after component split', async ({ page }) => {
   await page.goto('/chat');
   await page.getByRole('button', { name: 'Open settings' }).click();
