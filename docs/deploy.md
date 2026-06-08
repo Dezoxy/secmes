@@ -77,10 +77,12 @@ digest** → brings up Postgres/Redis → runs **DB migrations as the owner** (f
 Threat model: [`docs/threat-models/vm-cd.md`](threat-models/vm-cd.md).
 
 **Repo vars/secrets** (from the Terraform outputs): secrets `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/
-`AZURE_SUBSCRIPTION_ID`; vars `AZURE_RESOURCE_GROUP`/`AZURE_VM_NAME`/`KEY_VAULT_NAME` + build-time
-`VITE_OIDC_*`; and `ENABLE_DEPLOY=true` to arm it. GHCR **push** uses the built-in `GITHUB_TOKEN`; the VM's
-GHCR **pull** uses the `argus-ghcr-token` PAT from Key Vault — set `vars.GHCR_USER` to the account that owns
-that PAT if it isn't the repo owner (the default).
+`AZURE_SUBSCRIPTION_ID`; vars `AZURE_RESOURCE_GROUP`/`AZURE_VM_NAME`/`KEY_VAULT_NAME`; the api's non-secret
+runtime config `S3_ENDPOINT`/`S3_REGION`/`S3_BUCKET`/`S3_ACCESS_KEY_ID` (the B2 key **id**) +
+`OIDC_ISSUER`/`OIDC_AUDIENCE` (CD passes these into `compose up`); the PWA's build-time `VITE_OIDC_*`; and
+`ENABLE_DEPLOY=true` to arm it. GHCR **push** uses the built-in `GITHUB_TOKEN`; the VM's GHCR **pull** uses
+the `argus-ghcr-token` PAT from Key Vault — set `vars.GHCR_USER` to the account that owns that PAT if it isn't
+the repo owner (the default).
 
 ## Cloudflare tunnel ingress (dashboard-managed)
 

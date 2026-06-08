@@ -122,12 +122,22 @@ jobs:
           # workflow actor (github.actor changes per tag-pusher and would mismatch the token owner). Defaults
           # to the repo owner; override with vars.GHCR_USER if the PAT belongs to a different/bot account.
           GHCR_USER: ${{ vars.GHCR_USER || github.repository_owner }}
+          # Non-secret runtime config the api needs (invariant #5 allows these in env). compose.prod.yaml has
+          # defaults for endpoint/region/bucket; the B2 access-key-ID + OIDC issuer/audience have none, so the
+          # deploy MUST pass them or attachments/auth break. (The matching B2 SECRET key is a Key Vault file.)
+          S3_ENDPOINT: ${{ vars.S3_ENDPOINT }}
+          S3_REGION: ${{ vars.S3_REGION }}
+          S3_BUCKET: ${{ vars.S3_BUCKET }}
+          S3_ACCESS_KEY_ID: ${{ vars.S3_ACCESS_KEY_ID }}
+          OIDC_ISSUER: ${{ vars.OIDC_ISSUER }}
+          OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
         run: |
           set -euo pipefail
           tar czf deploy-bundle.tgz compose.prod.yaml infra/vm/secrets infra/vm/deploy
           B64="$(base64 -w0 deploy-bundle.tgz)"
           GHCR_REGISTRY="ghcr.io/$(echo "$GHCR_OWNER" | tr '[:upper:]' '[:lower:]')"
           # The script runs as root on the VM: unpack the bundle, then run deploy.sh with non-secret params.
+          # `docker compose up` (a child of deploy.sh) inherits the exported S3_*/OIDC_* and interpolates them.
           # The single-quoted echos below write LITERAL shell to runcmd.sh ($WORK expands on the VM, not here).
           # shellcheck disable=SC2016
           {
@@ -136,6 +146,8 @@ jobs:
             printf "printf '%%s' '%s' | base64 -d | tar xz -C \"\$WORK\"\n" "$B64"
             printf 'export ARGUS_KEY_VAULT=%q IMAGE_TAG=%q GHCR_REGISTRY=%q GHCR_USER=%q GH_REPO=%q\n' \
               "$KEY_VAULT" "$IMAGE_TAG" "$GHCR_REGISTRY" "$GHCR_USER" "$GH_REPO"
+            printf 'export S3_ENDPOINT=%q S3_REGION=%q S3_BUCKET=%q S3_ACCESS_KEY_ID=%q OIDC_ISSUER=%q OIDC_AUDIENCE=%q\n' \
+              "$S3_ENDPOINT" "$S3_REGION" "$S3_BUCKET" "$S3_ACCESS_KEY_ID" "$OIDC_ISSUER" "$OIDC_AUDIENCE"
             echo 'bash "$WORK/infra/vm/deploy/deploy.sh"'
             echo 'rm -rf "$WORK"'
           } >runcmd.sh
