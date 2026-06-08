@@ -33,3 +33,5 @@ skip-check:
   - CKV_AZURE_164 # ACR signed/trusted images — cosign wired in CD; enforce at GA
   - CKV_AZURE_166 # ACR image quarantine/scan — Phase 6
   - CKV_AZURE_167 # ACR untagged-manifest retention — Phase 6 ops
+  # NOTE: the single-VM (infra/vm) suppressions are RESOURCE-SCOPED via inline `# checkov:skip=` comments on
+  # the specific resources — NOT global here — so they can't silently hide the same finding elsewhere.

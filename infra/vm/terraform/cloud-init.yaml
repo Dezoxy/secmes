@@ -1,0 +1,103 @@
+#cloud-config
+# First-boot provisioning for the argus VM. Installs the host-level tooling the stack + the native systemd
+# workers need (Docker for the Compose stack; age/awscli/pg-client for the db-backup + attachment-cleanup
+# units; az CLI so the deploy can fetch secrets from Key Vault via the VM's Managed Identity). The app
+# itself is brought up by the CD deploy (`az vm run-command`) — this only lays the foundation.
+package_update: true
+package_upgrade: true
+
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - git
+  - jq
+  - unzip
+  - age
+  - postgresql-client-16
+
+groups:
+  - argus
+
+users:
+  - default
+  - name: argus
+    system: true
+    primary_group: argus
+    shell: /usr/sbin/nologin
+
+write_files:
+  # Mount the data disk (LUN 0) by stable path; Postgres + Docker volumes live here so a VM rebuild keeps data.
+  - path: /usr/local/sbin/argus-mount-data.sh
+    permissions: "0750"
+    owner: root:root
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      DEV="/dev/disk/azure/scsi1/lun0"   # the attached data disk (LUN 0)
+      MNT="/mnt/argus-data"
+      # The data-disk attachment happens AFTER the VM boots (it depends on the VM id), so on a first apply
+      # cloud-init can run before LUN 0 exists. Wait for the block device (up to ~5 min) before touching it,
+      # so we never format/mount a missing disk and skip the data dirs.
+      for _ in $(seq 1 60); do [ -b "$DEV" ] && break; sleep 5; done
+      if [ ! -b "$DEV" ]; then
+        echo "argus-mount-data: data disk $DEV did not attach within 5min" >&2
+        exit 1
+      fi
+      # First run: format if the disk has no filesystem yet (NEVER reformat an existing one).
+      if ! blkid "$DEV" >/dev/null 2>&1; then
+        mkfs.ext4 -L argus-data "$DEV"
+      fi
+      mkdir -p "$MNT"
+      grep -q "LABEL=argus-data" /etc/fstab || echo "LABEL=argus-data $MNT ext4 defaults,nofail 0 2" >>/etc/fstab
+      mount -a
+      install -d -o argus -g argus -m 0750 "$MNT/postgres" "$MNT/zitadel-postgres" "$MNT/redis"
+
+  # Run the mount as a boot-time systemd unit, NOT a one-shot cloud-init runcmd: it re-runs on EVERY boot, so
+  # a reboot recovers if the disk ever attaches after the script's wait window; and it's ordered BEFORE
+  # Docker so the compose stack's bind-mounts always see the mounted data disk.
+  - path: /etc/systemd/system/argus-data-disk.service
+    permissions: "0644"
+    owner: root:root
+    content: |
+      [Unit]
+      Description=argus — format + mount the data disk (LUN 0) for Postgres/Redis/Zitadel
+      After=local-fs.target
+      Before=docker.service
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/local/sbin/argus-mount-data.sh
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  # Docker CE + Compose plugin (official repo — the apt `docker.io` lacks the v2 compose plugin).
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" >/etc/apt/sources.list.d/docker.list
+  - apt-get update
+  - DEBIAN_FRONTEND=noninteractive apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  - usermod -aG docker argus
+  # AWS CLI v2 (the apt `awscli` is v1; the backup/cleanup workers require v2). Official installer over TLS.
+  # FOLLOW-UP (P2): pin the version + GPG-verify against AWS's signing key (AWS publishes a .sig file).
+  - curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/awscliv2.zip
+  - unzip -q /tmp/awscliv2.zip -d /tmp
+  - /tmp/aws/install
+  - rm -rf /tmp/aws /tmp/awscliv2.zip
+  # Azure CLI from the Microsoft apt repo (signed-by keyring — not curl|bash). The deploy uses
+  # `az login --identity` + `az keyvault secret show` to materialise secrets via the VM Managed Identity.
+  - curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg
+  - chmod a+r /etc/apt/keyrings/microsoft.gpg
+  - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/azure-cli/ $(. /etc/os-release && echo "$VERSION_CODENAME") main" >/etc/apt/sources.list.d/azure-cli.list
+  - apt-get update
+  - DEBIAN_FRONTEND=noninteractive apt-get install -y azure-cli
+  # Layout + data disk. Enable the mount unit (runs now + on every boot, before Docker).
+  - install -d -o argus -g argus -m 0750 /opt/argus
+  - install -d -o root -g argus -m 0750 /run/argus/secrets
+  - systemctl daemon-reload
+  - systemctl enable --now argus-data-disk.service
+
+# The CD pipeline (az vm run-command) takes it from here: deliver the compose/Caddyfile, fetch secrets from
+# Key Vault, run migrations, `docker compose up -d`, enable the backup/cleanup timers.
