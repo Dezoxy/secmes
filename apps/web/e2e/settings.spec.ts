@@ -107,6 +107,18 @@ test('privacy switches persist across section changes', async ({ page }) => {
   await expect(reopened.getByRole('switch', { name: 'Read receipts' })).not.toBeChecked();
 });
 
+test('security recovery keeps the recovery-file import path available', async ({ page }) => {
+  await page.goto('/chat');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Security & Recovery' }).click();
+  await dialog.getByRole('button', { name: 'Import recovery file' }).click();
+
+  await expect(dialog.getByText('Choose your recovery file')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Replace this device' })).toBeVisible();
+});
+
 test('settings sections preserve defaults after component split', async ({ page }) => {
   await page.goto('/chat');
   await page.getByRole('button', { name: 'Open settings' }).click();

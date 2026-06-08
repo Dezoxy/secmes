@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Check, Download, KeyRound, Loader2, X } from 'lucide-react';
+import { AlertTriangle, Check, Download, KeyRound, Loader2, Upload, X } from 'lucide-react';
+import { RestoreCommittedError, restoreAndProvision } from '../../lib/device-restore';
 import {
   RECOVERY_IDENTITY,
   exportRecovery,
   recoveryIsSetUp,
+  restoreFromArtifact,
   setUpRecovery,
 } from '../../lib/recovery';
 import { useAuth } from '../auth/AuthContext';
+import { useDevice } from '../device/DeviceContext';
 
 const INPUT =
   'w-full rounded-xl border border-white/5 bg-[#1a1a26] px-4 py-2.5 text-sm text-white placeholder-white/30 transition-all focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20';
@@ -31,12 +34,16 @@ interface RecoveryPanelProps {
 
 export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps) {
   const { profile } = useAuth();
+  const device = useDevice();
   // Back up the SIGNED-IN account's device under the same identity the unlock gate sealed it with.
   // RECOVERY_IDENTITY is only the demo fallback when there is no real account.
   const identity = profile?.userId ?? RECOVERY_IDENTITY;
   const [setUp, setSetUp] = useState<boolean | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
   const [passphrase, setPassphrase] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [importPassphrase, setImportPassphrase] = useState('');
+  const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -73,6 +80,41 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
       setConfirm('');
     } catch {
       setError('Could not create the recovery file — wrong passphrase for an existing device?');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const importRecoveryFile = async () => {
+    setError(null);
+    setDone(null);
+    if (!file) {
+      setError('Choose your recovery file.');
+      return;
+    }
+    if (importPassphrase.length < 8) {
+      setError('Use a passphrase of at least 8 characters.');
+      return;
+    }
+    setBusy(true);
+    try {
+      if (device.keystore) {
+        await restoreAndProvision(device.keystore, identity, await file.text(), importPassphrase);
+        setDone('Device restored — reloading…');
+        window.location.reload();
+      } else {
+        await restoreFromArtifact(identity, await file.text(), importPassphrase);
+        setSetUp(true);
+        setDone('This device was restored from your recovery file.');
+        setFile(null);
+        setImportPassphrase('');
+      }
+    } catch (e) {
+      if (e instanceof RestoreCommittedError) {
+        window.location.reload();
+        return;
+      }
+      setError('Could not restore — check the file and passphrase.');
     } finally {
       setBusy(false);
     }
@@ -139,6 +181,61 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
           {setUp === true ? 'Download recovery file' : 'Create & download recovery file'}
         </button>
+      </div>
+
+      <div className="mt-3 rounded-xl border border-white/5 bg-white/[0.025] p-3">
+        <button
+          type="button"
+          onClick={() => {
+            setImportOpen((open) => !open);
+            setError(null);
+            setDone(null);
+          }}
+          className="flex w-full items-center justify-between gap-3 text-left text-sm font-medium text-white/75 transition-colors hover:text-white"
+          aria-expanded={importOpen}
+        >
+          <span className="inline-flex items-center gap-2">
+            <Upload className="h-4 w-4 text-white/45" />
+            Import recovery file
+          </span>
+          <span className="text-xs text-white/35">{importOpen ? 'Hide' : 'Advanced'}</span>
+        </button>
+
+        {importOpen && (
+          <div className="mt-3 space-y-3">
+            <p className="text-xs leading-relaxed text-white/40">
+              Use this to replace this browser&apos;s encrypted device state with a recovery file.
+              Zitadel restores account access; this restores local message keys for future use.
+            </p>
+            <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-white/10 bg-[#1a1a26] px-4 py-3 text-sm text-white/60 transition-colors hover:border-purple-500/40">
+              <Upload className="h-4 w-4 shrink-0 text-white/40" />
+              <span className="truncate">{file ? file.name : 'Choose your recovery file'}</span>
+              <input
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              />
+            </label>
+            <input
+              type="password"
+              value={importPassphrase}
+              onChange={(e) => setImportPassphrase(e.target.value)}
+              placeholder="Recovery passphrase"
+              autoComplete="off"
+              className={INPUT}
+            />
+            <button
+              type="button"
+              onClick={() => void importRecoveryFile()}
+              disabled={busy || !file || importPassphrase.length < 8}
+              className={PRIMARY}
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              Replace this device
+            </button>
+          </div>
+        )}
       </div>
 
       {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
