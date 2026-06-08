@@ -120,6 +120,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@argus/contracts':
+        specifier: workspace:^
+        version: link:../../packages/contracts
       '@argus/crypto':
         specifier: workspace:^
         version: link:../../packages/crypto

@@ -14,6 +14,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@argus/contracts": "workspace:^",
     "@argus/crypto": "workspace:^",
     "idb": "^8.0.3",
     "lucide-react": "^0.564.0",
