@@ -99,10 +99,11 @@ docker compose -f /opt/argus/compose.prod.yaml up -d
 ## Verify / rotate
 
 ```bash
-systemctl start argus-secrets            # re-fetch on demand (e.g. after rotating a value in Key Vault)
+systemctl restart argus-secrets          # re-fetch on demand — RESTART, not start: the oneshot is
+                                         # RemainAfterExit=yes, so `start` is a no-op once it's active
 journalctl -u argus-secrets --no-pager   # names + status only — never a value
 ls -l /run/argus/secrets                 # 0400 root:root, on tmpfs
 ```
 
-Rotation: update the value in Key Vault, `systemctl start argus-secrets` (atomic overwrite), then restart the
-consuming service. Automated rotate-on-change is a later enhancement.
+Rotation: update the value in Key Vault, `systemctl restart argus-secrets` (re-runs the fetch, atomic
+overwrite), then restart the consuming service. Automated rotate-on-change is a later enhancement.
