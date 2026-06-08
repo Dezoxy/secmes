@@ -22,8 +22,8 @@ shopt -s nocasematch
   decide deny "terraform destroy is destructive — run manually after confirming workspace/target."
 [[ "$cmd" =~ git[[:space:]]+push[[:space:]].*(--force([[:space:]]|=|$)|-f([[:space:]]|$)) ]] && \
   decide deny "Force-push can rewrite shared history. Run manually with --force-with-lease if you must."
-[[ "$cmd" =~ (cat|less|bat|more|head|tail|echo|printf|xxd|base64|strings)[[:space:]].*(\.env($|[^.a-zA-Z])|\.tfvars($|[^.])|\.pem($|[^a-zA-Z])|id_rsa|id_ed25519) ]] && \
-  decide deny "That would print secret material to the transcript (.env/tfvars/keys)."
+[[ "$cmd" =~ (cat|less|bat|more|head|tail|echo|printf|xxd|base64|strings)[[:space:]].*(\.env($|[^.a-zA-Z])|\.tfvars($|[^.])|\.pem($|[^a-zA-Z])|id_rsa|id_ed25519|kubeconfig|\.kube/config) ]] && \
+  decide deny "That would print secret material to the transcript (.env/tfvars/keys/kubeconfig)."
 [[ "$cmd" =~ az[[:space:]].*(group|keyvault|postgres|vm)[[:space:]].*delete ]] && \
   decide deny "Azure resource delete is destructive — run manually after confirming subscription/resource."
 
