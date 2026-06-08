@@ -9,7 +9,7 @@ vi.mock('./provisioning', () => ({ provisionDevice: vi.fn() }));
 vi.mock('@argus/crypto', () => ({ deviceSignaturePublicKeyB64: vi.fn(() => 'SIGPUB') }));
 
 import { revokeKeyPackages } from './api';
-import { restoreAndProvision } from './device-restore';
+import { RestoreCommittedError, restoreAndProvision } from './device-restore';
 import type { DeviceKeystore } from './keystore';
 import { provisionDevice } from './provisioning';
 import { restoreFromArtifact } from './recovery';
@@ -66,12 +66,27 @@ describe('restoreAndProvision', () => {
     warn.mockRestore();
   });
 
-  it('throws when restore produced no device, without revoking or provisioning', async () => {
+  it('a PRE-clear failure (bad artifact) propagates raw, so the caller preserves the session', async () => {
+    // restoreFromArtifact throws BEFORE any destructive clear — must NOT be wrapped as RestoreCommittedError.
+    const bad = new Error('wrong passphrase');
+    vi.mocked(restoreFromArtifact).mockRejectedValueOnce(bad);
+    await expect(restoreAndProvision(fakeKeystore, 'me', 'ARTIFACT', 'pass')).rejects.toBe(bad);
+    expect(loadDevice).not.toHaveBeenCalled();
+    expect(vi.mocked(provisionDevice)).not.toHaveBeenCalled();
+  });
+
+  it('a POST-clear publish failure surfaces as RestoreCommittedError (caller must reload)', async () => {
+    vi.mocked(provisionDevice).mockRejectedValueOnce(new Error('api down'));
+    await expect(
+      restoreAndProvision(fakeKeystore, 'me', 'ARTIFACT', 'pass'),
+    ).rejects.toBeInstanceOf(RestoreCommittedError);
+  });
+
+  it('a no-device-after-restore is a committed error (stores already replaced)', async () => {
     loadDevice.mockResolvedValueOnce(null);
-    await expect(restoreAndProvision(fakeKeystore, 'me', 'ARTIFACT', 'pass')).rejects.toThrow(
-      'did not produce a device',
-    );
-    expect(vi.mocked(revokeKeyPackages)).not.toHaveBeenCalled();
+    await expect(
+      restoreAndProvision(fakeKeystore, 'me', 'ARTIFACT', 'pass'),
+    ).rejects.toBeInstanceOf(RestoreCommittedError);
     expect(vi.mocked(provisionDevice)).not.toHaveBeenCalled();
   });
 });

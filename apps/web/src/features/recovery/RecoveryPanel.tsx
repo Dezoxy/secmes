@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, Download, KeyRound, Loader2, Upload, X } from 'lucide-react';
-import { restoreAndProvision } from '../../lib/device-restore';
+import { RestoreCommittedError, restoreAndProvision } from '../../lib/device-restore';
 import {
   RECOVERY_IDENTITY,
   exportRecovery,
@@ -115,7 +115,14 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
         setFile(null);
         setPassphrase('');
       }
-    } catch {
+    } catch (e) {
+      if (e instanceof RestoreCommittedError) {
+        // The artifact WAS applied (the active stores are already replaced) — the live session is now stale.
+        // Reload to re-initialize rather than show a "preserved" session whose stores were cleared (the
+        // failed publish self-heals on the next login). Only a PRE-clear failure (below) keeps the session.
+        window.location.reload();
+        return;
+      }
       setError('Could not restore — check the file and passphrase.');
     } finally {
       setBusy(false);
