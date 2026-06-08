@@ -311,7 +311,7 @@ apps/
   packages/
     crypto/             # MLS wrapper, shared client/server
     contracts/          # shared TS types + Zod schemas (the E2EE envelope)
-compose.yaml            # the running stack (Postgres, Redis, Zitadel, api, web, Caddy, cloudflared)
+compose.yaml            # dev stack today (Postgres, Redis, MinIO, Zitadel, api); prod overlay adds web, Caddy, cloudflared
 .github/workflows/      # CI + CD (build/sign image → az vm run-command deploy)
 ```
 

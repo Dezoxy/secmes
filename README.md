@@ -24,7 +24,7 @@ packages/
 infra/
   vm/                  # Terraform: the Azure VM, NSG (deny inbound), Key Vault, Managed Identity
 .github/workflows/     # CI (build/test); CD (gated: build/scan/sign the image — VM rollout is WIP)
-compose.yaml           # the running stack (Postgres, Redis, Zitadel, api, web, Caddy, cloudflared)
+compose.yaml           # dev stack today (Postgres, Redis, MinIO, Zitadel, api); prod overlay adds web, Caddy, cloudflared
 ```
 
 ## Status: Phase 0 — stand up the VM
