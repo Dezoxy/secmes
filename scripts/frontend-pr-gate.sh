@@ -62,6 +62,19 @@ head_short="${head_oid:0:12}"
 echo "Frontend PR gate for PR #${pr_number}: ${pr_url}"
 echo "Head commit: ${head_short}"
 
+current_head_oid() {
+  gh pr view "$pr_number" --json headRefOid --jq '.headRefOid'
+}
+
+assert_head_unchanged() {
+  local current_head
+  current_head="$(current_head_oid)"
+  if [[ "$current_head" != "$head_oid" ]]; then
+    echo "PR head changed from ${head_oid:0:12} to ${current_head:0:12}; rerun the gate for the new head." >&2
+    exit 1
+  fi
+}
+
 echo
 echo "Running frontend verification..."
 pnpm frontend:verify
@@ -69,6 +82,7 @@ pnpm frontend:verify
 echo
 echo "Waiting for CI checks..."
 gh pr checks "$pr_number" --watch
+assert_head_unchanged
 
 not_green_count() {
   gh pr checks "$pr_number" --json bucket,name --jq \
@@ -175,12 +189,14 @@ PY
 echo "Waiting for Codex to respond..."
 deadline=$((SECONDS + TIMEOUT_SECONDS))
 until codex_seen; do
+  assert_head_unchanged
   if ((SECONDS >= deadline)); then
     echo "Timed out waiting for Codex review after ${TIMEOUT_SECONDS}s." >&2
     exit 1
   fi
   sleep "$POLL_SECONDS"
 done
+assert_head_unchanged
 
 echo
 echo "Checking unresolved actionable Codex review threads..."
@@ -194,6 +210,7 @@ echo
 echo "Frontend PR gate passed for PR #${pr_number}."
 
 if "$merge_after_clean"; then
+  assert_head_unchanged
   if [[ "$(not_green_count)" != "0" ]]; then
     echo "--merge requested, but CI is no longer fully green." >&2
     exit 1
