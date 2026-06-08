@@ -47,7 +47,7 @@ Enforce the invariants generic scanners miss: no `Math.random()` for security, n
 
 ## Cloud + runtime (Azure)
 
-- **Defender for Cloud** — `enable_defender_cspm` (free CSPM), default-off in the VM Terraform (`infra/vm/`). (Defender for Containers was AKS-only — N/A now that the deploy is a single VM running Docker Compose.)
+- **Defender for Cloud** — **not yet wired** in `infra/vm/` (the AKS-era `enable_defender_cspm` toggle was removed with the legacy Terraform). Enable free CSPM in the Azure portal, or add it to the VM Terraform as a follow-up. (Defender for Containers was AKS-only — N/A for a single VM running Docker Compose.)
 
 ## External milestones (not tools — schedule before GA)
 
