@@ -9,8 +9,9 @@ resource "azuread_service_principal" "github_deploy" {
   client_id = azuread_application.github_deploy.client_id
 }
 
-# Trust GitHub Actions runs of this repo. Default subject = the `main` branch; override with
-# var.github_deploy_subject to bind to a protected GitHub Environment instead (recommended for prod).
+# Trust GitHub Actions runs of this repo. Default subject = the `main` branch; the release-on-tag deploy runs
+# in the `production` GitHub Environment, so set var.github_deploy_subject to bind to that environment (its
+# OIDC token's subject is `...:environment:production`, which the `main`-ref default would reject).
 resource "azuread_application_federated_identity_credential" "github_deploy" {
   application_id = azuread_application.github_deploy.id
   display_name   = "github-actions-deploy"

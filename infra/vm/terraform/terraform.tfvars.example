@@ -20,5 +20,7 @@ admin_ssh_public_key = "ssh-ed25519 AAAA... you@host"
 # data_disk_size_gb          = 64
 # encryption_at_host_enabled = true              # needs the EncryptionAtHost subscription feature (see README)
 
-# --- CD binding: default trusts the `main` branch. For prod, bind to a protected GitHub Environment: ---
+# --- CD binding. REQUIRED for the release-on-tag deploy: the deploy job runs in the `production` GitHub
+#     Environment, so the federated subject MUST bind to that environment (the `main`-branch default won't
+#     authenticate the deploy's OIDC token). Uncomment + match your repo: ---
 # github_deploy_subject = "repo:Dezoxy/secmes:environment:production"
