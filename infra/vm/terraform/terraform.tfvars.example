@@ -1,0 +1,24 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored — NEVER commit it.
+
+subscription_id = "00000000-0000-0000-0000-000000000000"
+
+# EU region (Frankfurt) — pairs with the B2 eu-central-003 buckets.
+location = "germanywestcentral"
+domain   = "4rgus.com"
+
+# Break-glass SSH PUBLIC key (not a secret; inbound 22 is denied by the NSG). Your `~/.ssh/id_ed25519.pub`.
+admin_ssh_public_key = "ssh-ed25519 AAAA... you@host"
+
+# --- Optional, but recommended so you can manage secrets in Key Vault yourself ---
+# Your AAD object id:    az ad signed-in-user show --query id -o tsv
+# admin_object_id = "11111111-1111-1111-1111-111111111111"
+# Your laptop's public IP/CIDR (Key Vault firewall allows it for secret management):
+# admin_source_ip = "203.0.113.4/32"
+
+# --- Sizing / cost knobs (defaults are beta-cheap) ---
+# vm_size                    = "Standard_B2ms"   # → Standard_B4ms (16 GiB) if memory-tight
+# data_disk_size_gb          = 64
+# key_vault_purge_protection = true              # set true for production
+
+# --- CD binding: default trusts the `main` branch. For prod, bind to a protected GitHub Environment: ---
+# github_deploy_subject = "repo:Dezoxy/secmes:environment:production"

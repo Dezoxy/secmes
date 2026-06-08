@@ -33,3 +33,6 @@ skip-check:
   - CKV_AZURE_164 # ACR signed/trusted images — cosign wired in CD; enforce at GA
   - CKV_AZURE_166 # ACR image quarantine/scan — Phase 6
   - CKV_AZURE_167 # ACR untagged-manifest retention — Phase 6 ops
+  # --- single-VM deploy (infra/vm) deliberate beta choices ---
+  - CKV_AZURE_119 # public IP on the VM NIC — EGRESS only; the NSG denies ALL inbound. NAT Gateway (no public IP) is the cost upgrade.
+  - CKV_AZURE_110 # Key Vault purge protection — toggled via var.key_vault_purge_protection (beta=false for easy teardown; prod sets true).
