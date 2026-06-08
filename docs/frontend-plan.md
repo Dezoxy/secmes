@@ -73,7 +73,7 @@ Alternate Vite fallback ports are temporary browser-inspection URLs only; do not
 | Plaintext messages | Not allowed | Not allowed unless encrypted | Temporary only | Never persist plaintext |
 | Private keys | Not allowed | Only if wrapped/encrypted | Temporary preferred | Never log |
 | Passphrases | Not allowed | Not allowed | Temporary only | Never persist |
-| Auth tokens | Avoid | Not allowed | Preferred | Never log |
+| Auth tokens | Not allowed | Not allowed | Required | OIDC user/token store is memory-only; never persist bearer or refresh tokens |
 | Presigned URLs | Not allowed | Not allowed | Temporary only | Never log or cache |
 | Decrypted attachments | Not allowed | Not allowed unless explicitly encrypted | Temporary only | Avoid persistence |
 
@@ -83,6 +83,7 @@ Storage key rules:
 - Scope account-specific records by authenticated subject id.
 - Prefer keys like `argus:v1:profile:<subjectId>`, `argus:v1:settings:<subjectId>`, `argus:v1:device`, and `argus:v1:theme`.
 - Avoid generic keys like `profile`, `settings`, `user`, `token`, and `messages`.
+- Keep bearer and refresh tokens in the memory-only OIDC user/token store; do not persist them in `localStorage`, `sessionStorage`, or IndexedDB.
 - Define fallback behavior for corrupted, unmigratable, or quota-limited state. Fallback may wipe only the affected Argus namespace, never unrelated browser storage.
 
 ## Current Screen Map
