@@ -212,12 +212,12 @@ git commit -m "chore: automate frontend pr gate"
 - Create: `apps/web/e2e/settings.spec.ts`
 - Create: `apps/web/e2e/auth.spec.ts`
 
-- [ ] Add a Playwright smoke test command.
-- [ ] Test `/chat` renders successfully.
-- [ ] Test settings can be opened.
-- [ ] Test mobile settings section navigation works.
-- [ ] Test profile save works with generated avatar.
-- [ ] Test the auth/passkey entry route does not show app-owned username/password login fields.
+- [x] Add a Playwright smoke test command.
+- [x] Test `/chat` renders successfully.
+- [x] Test settings can be opened.
+- [x] Test mobile settings section navigation works.
+- [x] Test profile save works with generated avatar.
+- [x] Test the auth/passkey entry route does not show app-owned username/password login fields.
 
 **Verification:**
 

@@ -55,6 +55,8 @@ override.tf.json
 *.log
 .DS_Store
 coverage/
+apps/web/playwright-report/
+apps/web/test-results/
 .vscode/
 .idea/
 
