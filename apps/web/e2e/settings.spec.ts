@@ -36,3 +36,48 @@ test('profile save accepts a generated avatar and user-chosen username', async (
 
   await expect(page.getByText('smoke-user')).toBeVisible();
 });
+
+test('profile draft survives settings section changes', async ({ page }) => {
+  await page.goto('/chat');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+
+  await dialog.getByLabel('Username').fill('draft-user');
+  await dialog.getByRole('button', { name: 'Appearance' }).click();
+  await expect(dialog.getByRole('heading', { name: 'Appearance' })).toBeVisible();
+
+  await dialog.getByRole('button', { name: 'Profile' }).click();
+  await expect(dialog.getByLabel('Username')).toHaveValue('draft-user');
+});
+
+test('settings sections preserve defaults after component split', async ({ page }) => {
+  await page.goto('/chat');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+
+  await dialog.getByRole('button', { name: 'Privacy' }).click();
+  await expect(dialog.getByRole('heading', { name: 'Privacy' })).toBeVisible();
+  await expect(dialog.getByText('Read receipts')).toBeVisible();
+  await expect(dialog.getByText('Uses the product default')).toHaveCount(3);
+
+  await dialog.getByRole('button', { name: 'Notifications' }).click();
+  await expect(dialog.getByRole('heading', { name: 'Notifications' })).toBeVisible();
+  await expect(dialog.getByText('Push notifications')).toBeVisible();
+  await expect(dialog.getByText('Automatically follows device permission')).toBeVisible();
+
+  await dialog.getByRole('button', { name: 'Appearance' }).click();
+  await expect(dialog.getByRole('heading', { name: 'Appearance' })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Font size 1', exact: true })).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Font size 10', exact: true })).toBeVisible();
+  await expect(dialog.getByText('Accent colour')).toBeVisible();
+
+  await dialog.getByRole('button', { name: 'Data & Storage' }).click();
+  await expect(dialog.getByRole('heading', { name: 'Data & Storage' })).toBeVisible();
+  await expect(dialog.getByText('Encrypted local message cache')).toBeVisible();
+
+  await dialog.getByRole('button', { name: 'Devices' }).click();
+  await expect(dialog.getByRole('heading', { name: 'Devices' })).toBeVisible();
+  await expect(dialog.getByText('Current device')).toBeVisible();
+});
