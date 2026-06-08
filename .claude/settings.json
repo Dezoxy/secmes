@@ -20,11 +20,6 @@
       "Bash(terraform plan*)",
       "Bash(terraform -chdir=* plan*)",
       "Bash(terraform init*)",
-      "Bash(helm lint*)",
-      "Bash(helm template*)",
-      "Bash(kubectl get*)",
-      "Bash(kubectl describe*)",
-      "Bash(kubectl logs*)",
       "Bash(git status*)",
       "Bash(git diff*)",
       "Bash(git log*)",
@@ -36,23 +31,18 @@
     "ask": [
       "Bash(terraform apply*)",
       "Bash(terraform -chdir=* apply*)",
-      "Bash(helm upgrade*)",
-      "Bash(helm install*)",
-      "Bash(kubectl apply*)",
       "Bash(docker push*)",
       "Bash(git push*)"
     ],
     "deny": [
       "Bash(terraform destroy*)",
       "Bash(terraform -chdir=* destroy*)",
-      "Bash(kubectl delete*)",
       "Bash(rm -rf*)",
       "Bash(git push --force*)",
       "Bash(git push -f*)",
       "Read(./.env)",
       "Read(./**/.env)",
-      "Read(./**/*.tfvars)",
-      "Read(./**/kubeconfig)"
+      "Read(./**/*.tfvars)"
     ]
   },
   "hooks": {

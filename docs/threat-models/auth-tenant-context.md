@@ -46,7 +46,7 @@ The server still only ever sees ciphertext + metadata — JWT validation touches
 ## 6. Residual risk
 
 - **In-window token replay / no pre-expiry revocation** — accepted for beta; mitigated by short access-token TTL. Revisit with sender-constrained tokens (DPoP/mTLS) and a revocation/introspection path later.
-- **Live end-to-end OIDC login** (real Authorization-Code+PKCE against a running Zitadel) is now wired **locally** — see §8 (SPA flow) and §9 (local Zitadel bootstrap). Production Zitadel-on-AKS + Key Vault remains checkpoint 9 proper; the local stack uses throwaway creds and is not a prod posture.
+- **Live end-to-end OIDC login** (real Authorization-Code+PKCE against a running Zitadel) is now wired **locally** — see §8 (SPA flow) and §9 (local Zitadel bootstrap). In production Zitadel runs in Docker Compose on the VM, with its secrets delivered from Key Vault via the VM's Managed Identity (checkpoint 9 proper); the local stack uses throwaway creds and is not a prod posture.
 
 ## 7. JIT provisioning (checkpoint 15)
 
@@ -70,7 +70,7 @@ The PWA runs **Authorization Code + PKCE (S256)** against Zitadel via **`oidc-cl
 
 ## 9. Local Zitadel bootstrap (dev only — checkpoint 9 stand-in)
 
-Zitadel + its own PostgreSQL run in `compose.yaml` with **local-only throwaway credentials** (never real secrets; invariant #5 is about cloud creds via Key Vault, which this does not touch). Production Zitadel-on-AKS behind Key Vault + Workload ID is checkpoint 9 proper. Bootstrap is **scripted** (a one-shot init container, like `createbuckets`) so `make up` yields a ready IdP and surfaces the issuer + SPA client id for `.env`.
+Zitadel + its own PostgreSQL run in `compose.yaml` with **local-only throwaway credentials** (never real secrets; invariant #5 is about cloud creds via Key Vault, which this does not touch). In production Zitadel runs in the same Docker Compose stack on the VM, with its secrets delivered from Key Vault via the VM's Managed Identity (checkpoint 9 proper). Bootstrap is **scripted** (a one-shot init container, like `createbuckets`) so `make up` yields a ready IdP and surfaces the issuer + SPA client id for `.env`.
 
 - **JWT access tokens:** the OIDC app is configured to mint **JWT** (not opaque) access tokens so the API validates via JWKS with no introspection round-trip.
 - **Tenant claim is IdP-asserted, not user-editable (closes §3 threat #4):** the API requires the tenant claim to be a **UUID** (it casts to `tenants.id`). Zitadel org ids are numeric snowflakes, so a **fixed dev tenant UUID** is seeded into `tenants`, and an **org-scoped Action** asserts `tenant_id=<that UUID>` into the access token. The end user cannot edit it. The exact Action/claim mechanism is pinned in the bootstrap script and **verified against current Zitadel (v4) docs** at implementation time, not assumed. Multi-org→tenant onboarding is Phase 7 (G1).

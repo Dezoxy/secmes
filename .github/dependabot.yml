@@ -35,7 +35,7 @@ updates:
 
   # Terraform providers/modules (azurerm)
   - package-ecosystem: 'terraform'
-    directory: '/infra/terraform'
+    directory: '/infra/vm/terraform'
     schedule:
       interval: 'weekly'
       day: 'monday'
