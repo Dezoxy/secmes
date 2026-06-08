@@ -20,6 +20,14 @@ import {
 } from 'lucide-react';
 import { generatedAvatar, MAX_AVATAR_DATA_URI_LENGTH, safeAvatarSrc } from '../chat/seed';
 import { RecoveryPanel } from '../recovery/RecoveryPanel';
+import {
+  accentOptions,
+  defaultAccentId,
+  getAccentById,
+  isAccentId,
+  type AccentId,
+  type AccentOption,
+} from '../ui/theme';
 
 export interface AnonymousProfile {
   id: string;
@@ -58,23 +66,6 @@ const sections: Array<{ id: SectionId; label: string; icon: LucideIcon }> = [
 const ACCENT_STORAGE_KEY = 'argus.accentColor.v1';
 const FONT_SIZE_STORAGE_KEY = 'argus.fontSizeLevel.v1';
 
-const accentOptions = [
-  { id: 'purple', label: 'Argus Purple', hex: '#a855f7', soft: 'rgba(168,85,247,0.2)' },
-  { id: 'blue', label: 'Signal Blue', hex: '#3b82f6', soft: 'rgba(59,130,246,0.2)' },
-  { id: 'cyan', label: 'Cipher Cyan', hex: '#06b6d4', soft: 'rgba(6,182,212,0.2)' },
-  { id: 'teal', label: 'Secure Teal', hex: '#14b8a6', soft: 'rgba(20,184,166,0.2)' },
-  { id: 'emerald', label: 'Vault Green', hex: '#22c55e', soft: 'rgba(34,197,94,0.2)' },
-  { id: 'lime', label: 'Key Lime', hex: '#84cc16', soft: 'rgba(132,204,22,0.2)' },
-  { id: 'amber', label: 'Amber Lock', hex: '#f59e0b', soft: 'rgba(245,158,11,0.2)' },
-  { id: 'orange', label: 'Burnt Orange', hex: '#f97316', soft: 'rgba(249,115,22,0.2)' },
-  { id: 'rose', label: 'Rose Red', hex: '#f43f5e', soft: 'rgba(244,63,94,0.2)' },
-  { id: 'pink', label: 'Quiet Pink', hex: '#ec4899', soft: 'rgba(236,72,153,0.2)' },
-  { id: 'indigo', label: 'Deep Indigo', hex: '#6366f1', soft: 'rgba(99,102,241,0.2)' },
-] as const;
-
-type AccentId = (typeof accentOptions)[number]['id'];
-type AccentOption = (typeof accentOptions)[number];
-
 const fontSizeLevels = Array.from({ length: 10 }, (_, index) => index + 1);
 
 const INPUT =
@@ -87,9 +78,9 @@ const ALLOWED_AVATAR_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', '
 const AVATAR_CANVAS_SIZE = 192;
 
 function readStoredAccent(): AccentId {
-  if (typeof window === 'undefined') return 'purple';
+  if (typeof window === 'undefined') return defaultAccentId;
   const stored = window.localStorage.getItem(ACCENT_STORAGE_KEY);
-  return accentOptions.some((option) => option.id === stored) ? (stored as AccentId) : 'purple';
+  return isAccentId(stored) ? stored : defaultAccentId;
 }
 
 function readStoredFontSize(): number {
@@ -324,7 +315,7 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
 
   const activeSection = sections.find((section) => section.id === active) ?? sections[0]!;
   const ActiveIcon = activeSection.icon;
-  const accent = accentOptions.find((option) => option.id === accentId) ?? accentOptions[0]!;
+  const accent = getAccentById(accentId);
   const displayAvatar = safeAvatarSrc(avatar, username || profile.id);
   const primaryButtonStyle = {
     backgroundColor: accent.hex,
