@@ -3,7 +3,7 @@ import { saveAttachment } from '../../lib/attachments';
 import { AttachmentImage } from './AttachmentImage';
 import type { Message, User, MessageStatus } from './seed';
 import { formatFullTime } from './seed';
-import { Avatar, IconButton } from '../ui';
+import { Avatar, IconButton, sentMessageEnterMotion } from '../ui';
 
 function StatusIcon({ status }: { status: MessageStatus }) {
   switch (status) {
@@ -25,6 +25,7 @@ interface MessageBubbleProps {
   isOwn: boolean;
   sender?: User;
   showSender?: boolean;
+  animateIn?: boolean;
   onImageClick?: (url: string) => void;
 }
 
@@ -33,12 +34,17 @@ export function MessageBubble({
   isOwn,
   sender,
   showSender,
+  animateIn = false,
   onImageClick,
 }: MessageBubbleProps) {
   const hasAttachments = message.attachments && message.attachments.length > 0;
 
   return (
-    <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'} group`}>
+    <div
+      className={`flex ${isOwn ? 'justify-end' : 'justify-start'} group ${
+        animateIn ? sentMessageEnterMotion : ''
+      }`}
+    >
       <div className={`flex gap-2 max-w-[75%] ${isOwn ? 'flex-row-reverse' : ''}`}>
         {/* Avatar for received messages in a group */}
         {!isOwn && showSender && sender && (

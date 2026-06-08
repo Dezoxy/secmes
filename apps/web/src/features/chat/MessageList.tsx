@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MessageBubble } from './MessageBubble';
 import type { Conversation } from './seed';
 import { currentUser, users } from './seed';
@@ -10,10 +10,47 @@ interface MessageListProps {
 
 export function MessageList({ conversation, onImageClick }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const previousMessageCount = useRef(conversation.messages.length);
+  const seenMessageIds = useRef(new Set(conversation.messages.map((message) => message.id)));
+  const removalTimers = useRef<number[]>([]);
+  const [enteringMessageIds, setEnteringMessageIds] = useState<Set<string>>(() => new Set());
   const isGroup = conversation.type === 'group';
 
+  useEffect(
+    () => () => {
+      removalTimers.current.forEach((timer) => window.clearTimeout(timer));
+    },
+    [],
+  );
+
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const node = scrollRef.current;
+    if (node) {
+      node.scrollTo({
+        top: node.scrollHeight,
+        behavior: conversation.messages.length > previousMessageCount.current ? 'smooth' : 'auto',
+      });
+    }
+
+    const newOwnMessageIds = conversation.messages
+      .filter(
+        (message) => message.senderId === currentUser.id && !seenMessageIds.current.has(message.id),
+      )
+      .map((message) => message.id);
+    if (newOwnMessageIds.length > 0) {
+      setEnteringMessageIds((current) => new Set([...current, ...newOwnMessageIds]));
+      const timer = window.setTimeout(() => {
+        setEnteringMessageIds((current) => {
+          const next = new Set(current);
+          newOwnMessageIds.forEach((id) => next.delete(id));
+          return next;
+        });
+      }, 320);
+      removalTimers.current.push(timer);
+    }
+
+    previousMessageCount.current = conversation.messages.length;
+    seenMessageIds.current = new Set(conversation.messages.map((message) => message.id));
   }, [conversation.messages]);
 
   const getSender = (senderId: string) =>
@@ -35,6 +72,10 @@ export function MessageList({ conversation, onImageClick }: MessageListProps) {
             isOwn={isOwn}
             sender={sender}
             showSender={showSender}
+            animateIn={
+              isOwn &&
+              (!seenMessageIds.current.has(message.id) || enteringMessageIds.has(message.id))
+            }
             onImageClick={onImageClick}
           />
         );

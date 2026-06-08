@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Send, Paperclip, Image as ImageIcon, Plus, Smile, X } from 'lucide-react';
-import { IconButton } from '../ui';
+import { IconButton, floatingMenuMotion } from '../ui';
 
 interface ChatInputProps {
   onSend: (content: string, attachments?: File[]) => void;
@@ -176,11 +176,10 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
           </IconButton>
 
           <div
-            className={`absolute bottom-full left-0 z-20 mb-3 w-48 origin-bottom-left rounded-2xl border border-white/10 bg-[#151520] p-2 shadow-2xl shadow-black/40 transition-all duration-200 ease-out motion-reduce:transition-none ${
-              actionMenuOpen
-                ? 'translate-y-0 scale-100 opacity-100'
-                : 'pointer-events-none translate-y-2 scale-95 opacity-0'
-            }`}
+            className={`absolute bottom-full left-0 z-20 mb-3 w-48 origin-bottom-left rounded-2xl border border-white/10 bg-[#151520] p-2 shadow-2xl shadow-black/40 ${floatingMenuMotion(
+              actionMenuOpen,
+              'bottom',
+            )}`}
             role="menu"
             aria-label="Message actions"
           >

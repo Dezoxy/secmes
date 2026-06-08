@@ -16,7 +16,10 @@ import {
 import {
   IconButton,
   Modal,
+  modalBackdropEnterMotion,
+  modalPanelEnterMotion,
   defaultAccentId,
+  surfaceEnterMotion,
   getAccentById,
   isAccentId,
   type AccentId,
@@ -142,7 +145,7 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
     setUsername(profile.username);
     setAvatar(profile.avatar);
     setProfileError(null);
-  }, [profile]);
+  }, [profile.avatar, profile.id, profile.username]);
 
   useEffect(() => {
     writeStoredDeviceSettings({ accentId, fontSizeLevel });
@@ -151,33 +154,42 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
   const activeSection = sections.find((section) => section.id === active) ?? sections[0]!;
   const ActiveIcon = activeSection.icon;
   const accent = getAccentById(accentId);
-  const primaryButtonStyle = {
-    backgroundColor: accent.hex,
-    boxShadow: `0 18px 34px ${accent.soft}`,
-  };
   const accentVariables = {
     '--settings-accent': accent.hex,
     '--settings-accent-soft': accent.soft,
   } as CSSProperties;
 
-  const saveProfile = () => {
-    const clean = username.trim() || profile.id.slice(0, 12);
-    const safeAvatar = safeAvatarSrc(avatar, clean);
-    if (onProfileChange({ ...profile, username: clean, avatar: safeAvatar })) {
-      setUsername(clean);
-      setAvatar(safeAvatar);
+  useEffect(() => {
+    const clean = username.trim();
+    if (!clean) {
       setProfileError(null);
       return;
     }
-    setProfileError('Profile could not be saved on this device. Use a smaller avatar.');
-  };
+
+    const safeAvatar = safeAvatarSrc(avatar, clean);
+    if (profile.username === clean && profile.avatar === safeAvatar) {
+      setProfileError(null);
+      return;
+    }
+
+    const handle = window.setTimeout(() => {
+      if (onProfileChange({ id: profile.id, username: clean, avatar: safeAvatar })) {
+        setProfileError(null);
+        if (safeAvatar !== avatar) setAvatar(safeAvatar);
+        return;
+      }
+      setProfileError('Profile could not be saved on this device. Use a smaller avatar.');
+    }, 300);
+
+    return () => window.clearTimeout(handle);
+  }, [avatar, onProfileChange, profile.avatar, profile.id, profile.username, username]);
 
   return (
     <Modal
       ariaLabel="Settings"
       onClose={onClose}
-      className="items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
-      contentClassName="flex h-[90vh] w-full max-w-4xl overflow-hidden rounded-2xl border border-white/5 bg-[#12121a] shadow-2xl shadow-black/50 sm:h-[82vh]"
+      className={`items-center justify-center bg-black/80 p-4 backdrop-blur-sm ${modalBackdropEnterMotion}`}
+      contentClassName={`flex h-[90vh] w-full max-w-4xl overflow-hidden rounded-2xl border border-white/5 bg-[#12121a] shadow-2xl shadow-black/50 sm:h-[82vh] ${modalPanelEnterMotion}`}
       style={accentVariables}
     >
       <aside
@@ -220,63 +232,63 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
           mobileSectionOpen ? 'block' : 'hidden'
         } flex-1 overflow-y-auto p-4 sm:block sm:p-6`}
       >
-        <div className="mb-6 flex items-center gap-3">
-          <IconButton
-            onClick={() => setMobileSectionOpen(false)}
-            className="sm:hidden"
-            aria-label="Back to settings menu"
-          >
-            <ChevronLeft className="h-5 w-5" />
-          </IconButton>
-          <div
-            className="flex h-10 w-10 items-center justify-center rounded-xl"
-            style={{ backgroundColor: accent.soft }}
-          >
-            <ActiveIcon className="h-5 w-5" style={{ color: accent.hex }} />
+        <div key={active} className={surfaceEnterMotion}>
+          <div className="mb-6 flex items-center gap-3">
+            <IconButton
+              onClick={() => setMobileSectionOpen(false)}
+              className="sm:hidden"
+              aria-label="Back to settings menu"
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </IconButton>
+            <div
+              className="flex h-10 w-10 items-center justify-center rounded-xl"
+              style={{ backgroundColor: accent.soft }}
+            >
+              <ActiveIcon className="h-5 w-5" style={{ color: accent.hex }} />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-xl font-semibold text-white">{activeSection.label}</h3>
+              <p className="text-sm text-white/40">Anonymous account settings</p>
+            </div>
+            <IconButton onClick={onClose} className="ml-auto sm:hidden" aria-label="Close settings">
+              <X className="h-5 w-5" />
+            </IconButton>
           </div>
-          <div className="min-w-0">
-            <h3 className="text-xl font-semibold text-white">{activeSection.label}</h3>
-            <p className="text-sm text-white/40">Anonymous account settings</p>
-          </div>
-          <IconButton onClick={onClose} className="ml-auto sm:hidden" aria-label="Close settings">
-            <X className="h-5 w-5" />
-          </IconButton>
+
+          {active === 'profile' && (
+            <ProfileSettings
+              profile={profile}
+              username={username}
+              avatar={avatar}
+              profileError={profileError}
+              onUsernameChange={setUsername}
+              onAvatarChange={setAvatar}
+              onProfileErrorChange={setProfileError}
+            />
+          )}
+
+          {active === 'security' && <SecuritySettings />}
+
+          {active === 'privacy' && <PrivacySettings />}
+
+          {active === 'notifications' && <NotificationSettings />}
+
+          {active === 'appearance' && (
+            <AppearanceSettings
+              accentId={accentId}
+              fontSizeLevel={fontSizeLevel}
+              onAccentIdChange={setAccentId}
+              onFontSizeLevelChange={setFontSizeLevel}
+            />
+          )}
+
+          {active === 'storage' && <DataStorageSettings />}
+
+          {active === 'devices' && <DeviceSettings deviceId={deviceId} />}
+
+          {active === 'about' && <AboutSettings />}
         </div>
-
-        {active === 'profile' && (
-          <ProfileSettings
-            profile={profile}
-            username={username}
-            avatar={avatar}
-            profileError={profileError}
-            primaryButtonStyle={primaryButtonStyle}
-            onUsernameChange={setUsername}
-            onAvatarChange={setAvatar}
-            onProfileErrorChange={setProfileError}
-            onProfileSave={saveProfile}
-          />
-        )}
-
-        {active === 'security' && <SecuritySettings />}
-
-        {active === 'privacy' && <PrivacySettings />}
-
-        {active === 'notifications' && <NotificationSettings />}
-
-        {active === 'appearance' && (
-          <AppearanceSettings
-            accentId={accentId}
-            fontSizeLevel={fontSizeLevel}
-            onAccentIdChange={setAccentId}
-            onFontSizeLevelChange={setFontSizeLevel}
-          />
-        )}
-
-        {active === 'storage' && <DataStorageSettings />}
-
-        {active === 'devices' && <DeviceSettings deviceId={deviceId} />}
-
-        {active === 'about' && <AboutSettings />}
       </main>
     </Modal>
   );

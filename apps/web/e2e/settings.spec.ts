@@ -25,13 +25,15 @@ test('mobile settings opens sections from the menu', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Appearance' })).toBeVisible();
 });
 
-test('profile save accepts a generated avatar and user-chosen username', async ({ page }) => {
+test('profile autosave accepts a generated avatar and user-chosen username', async ({ page }) => {
   await page.goto('/chat');
   await page.getByRole('button', { name: 'Open settings' }).click();
 
   await page.getByLabel('Username').fill('smoke-user');
   await page.getByRole('button', { name: 'Generate' }).click();
-  await page.getByRole('button', { name: 'Save profile' }).click();
+  await page.waitForFunction(() =>
+    Object.values(localStorage).some((value) => value.includes('smoke-user')),
+  );
   await page.getByRole('button', { name: 'Close settings' }).click();
 
   await expect(page.getByText('smoke-user')).toBeVisible();
@@ -60,7 +62,10 @@ test('settings sections preserve defaults after component split', async ({ page 
   await dialog.getByRole('button', { name: 'Privacy' }).click();
   await expect(dialog.getByRole('heading', { name: 'Privacy' })).toBeVisible();
   await expect(dialog.getByText('Read receipts')).toBeVisible();
-  await expect(dialog.getByText('Uses the product default')).toHaveCount(3);
+  await expect(dialog.getByRole('switch')).toHaveCount(3);
+  for (const name of ['Read receipts', 'Typing indicators', 'Link previews']) {
+    await expect(dialog.getByRole('switch', { name })).toBeChecked();
+  }
 
   await dialog.getByRole('button', { name: 'Notifications' }).click();
   await expect(dialog.getByRole('heading', { name: 'Notifications' })).toBeVisible();
@@ -69,13 +74,13 @@ test('settings sections preserve defaults after component split', async ({ page 
 
   await dialog.getByRole('button', { name: 'Appearance' }).click();
   await expect(dialog.getByRole('heading', { name: 'Appearance' })).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Font size 1', exact: true })).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Font size 10', exact: true })).toBeVisible();
+  await expect(dialog.getByRole('slider', { name: 'Font size' })).toBeVisible();
   await expect(dialog.getByText('Accent colour')).toBeVisible();
 
   await dialog.getByRole('button', { name: 'Data & Storage' }).click();
   await expect(dialog.getByRole('heading', { name: 'Data & Storage' })).toBeVisible();
   await expect(dialog.getByText('Encrypted local message cache')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Reset' })).toBeVisible();
 
   await dialog.getByRole('button', { name: 'Devices' }).click();
   await expect(dialog.getByRole('heading', { name: 'Devices' })).toBeVisible();

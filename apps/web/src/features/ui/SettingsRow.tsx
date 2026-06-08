@@ -54,9 +54,13 @@ export function SettingsRow(props: SettingsRowProps) {
   );
 
   if (props.onClick) {
+    const isSwitch = props.enabled !== undefined && !props.badge && !props.trailing;
+
     return (
       <button
         type="button"
+        role={isSwitch ? 'switch' : undefined}
+        aria-checked={isSwitch ? props.enabled : undefined}
         onClick={props.onClick}
         className={joinClasses(rowClass, interactiveClass)}
       >

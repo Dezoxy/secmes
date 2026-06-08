@@ -26,6 +26,7 @@ import { liveConversationShell, useLiveConversations } from './useLiveConversati
 import { useMessageSending } from './useMessageSending';
 import { loadArgusProfile, saveArgusProfile } from '../settings/argus-profile';
 import { SettingsPanel, type AnonymousProfile } from '../settings/SettingsPanel';
+import { conversationEnterMotion } from '../ui';
 import type { Attachment, Conversation, Message, User } from './seed';
 import {
   conversations as initialConversations,
@@ -422,8 +423,8 @@ export default function ChatScreen() {
         >
           <div className="border-b border-white/5 p-4">
             <div className="flex items-center justify-center gap-2">
-              <div className="w-8 h-8 bg-purple-500 rounded-lg flex items-center justify-center">
-                <MessageCircle className="w-4 h-4 text-white" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-500">
+                <MessageCircle className="h-4 w-4 text-white" />
               </div>
               <span className="text-xl font-bold tracking-wider">
                 <span className="bg-gradient-to-r from-purple-400 to-purple-600 bg-clip-text text-transparent">
@@ -452,7 +453,10 @@ export default function ChatScreen() {
           }`}
         >
           {selectedConversation ? (
-            <>
+            <div
+              key={selectedConversation.id}
+              className={`flex min-h-0 flex-1 flex-col ${conversationEnterMotion}`}
+            >
               <ChatHeader
                 conversation={selectedConversation}
                 onBack={() => setShowSidebar(true)}
@@ -461,9 +465,12 @@ export default function ChatScreen() {
               />
               <MessageList conversation={selectedConversation} onImageClick={setPreviewImage} />
               <ChatInput onSend={handleSend} />
-            </>
+            </div>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
+            <div
+              key="empty-conversation"
+              className={`flex flex-1 flex-col items-center justify-center p-8 text-center ${conversationEnterMotion}`}
+            >
               <div className="w-20 h-20 bg-purple-500/20 rounded-full flex items-center justify-center mb-4">
                 <MessageCircle className="w-10 h-10 text-purple-400" />
               </div>
