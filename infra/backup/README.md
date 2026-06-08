@@ -13,9 +13,14 @@ window. Runs natively on the VM via a **systemd timer** — no Node, no containe
 1. Connects to Postgres as the least-privilege **`argus_backup`** role (migration `0015_db_backup_role.sql`):
    read-only across all tenants (`pg_read_all_data` + `BYPASSRLS`, so the FORCE-RLS tenant tables dump in
    full), never able to write or DROP.
-2. Streams `pg_dump --format=custom | age -r <public key> | aws s3 cp -` — the dump is **encrypted before it
-   leaves the box**, so no plaintext ever touches disk or B2. The object key is `argus-db-<UTC>.dump.age`.
-3. Verifies the upload, then **prunes** any backup older than `RETENTION_DAYS` (default 30).
+2. Writes **two** encrypted objects, each streamed `… | age -r <public key> | aws s3 cp -` (encrypted before
+   it leaves the box — no plaintext on disk or in B2):
+   - `argus-globals-<UTC>.sql.age` — `pg_dumpall --roles-only --no-role-passwords`: the cluster **roles**
+     (definitions + memberships, **no password hashes**), so a restore onto a fresh cluster has the roles the
+     schema's RLS policies/grants reference.
+   - `argus-db-<UTC>.dump.age` — `pg_dump --format=custom`: the database (compact, selective/parallel restore).
+3. Verifies each upload (PIPESTATUS + size floor), then **prunes** any backup older than `RETENTION_DAYS`
+   (default 30) — one list under the shared `argus-` prefix covers both families.
 4. Logs object keys / sizes / counts only — never a secret.
 
 ## Why client-side encryption (not just B2 SSE)
@@ -85,23 +90,38 @@ journalctl -u argus-db-backup.service
 
 ## Restore runbook (test this — an untested backup is not a backup)
 
+Each nightly run writes **two** encrypted objects: `argus-globals-<ts>.sql.age` (cluster ROLES — definitions
++ memberships, **no passwords**) and `argus-db-<ts>.dump.age` (the database, custom format). A restore onto a
+**fresh cluster** must recreate the roles **first** (the schema's RLS policies + grants reference
+`argus_app`/`argus_cleanup`/`argus_backup`), then restore the DB, then re-apply role passwords from Key Vault.
+
 On a trusted host (NOT the backup VM — it must NOT hold the age private key):
 
 ```bash
-# 1. Fetch the age private key from Key Vault into a temp file (mode 0400), and the latest backup from B2.
+EP=https://s3.eu-central-003.backblazeb2.com ; BUCKET=db-q7m2z9x4v6n8p3k1
+
+# 1. Fetch the age private key from Key Vault (mode 0400), and the latest globals + db objects from B2.
 az keyvault secret show --vault-name <vault> --name argus-backup-age-key --query value -o tsv > age.key
 chmod 0400 age.key
-LATEST=$(aws s3api list-objects-v2 --endpoint-url https://s3.eu-central-003.backblazeb2.com \
-  --bucket db-q7m2z9x4v6n8p3k1 --prefix argus-db --query 'sort_by(Contents,&LastModified)[-1].Key' --output text)
-aws s3 cp "s3://db-q7m2z9x4v6n8p3k1/${LATEST}" ./backup.dump.age \
-  --endpoint-url https://s3.eu-central-003.backblazeb2.com
+pick() { aws s3api list-objects-v2 --endpoint-url "$EP" --bucket "$BUCKET" --prefix "$1" \
+  --query 'sort_by(Contents,&LastModified)[-1].Key' --output text; }
+aws s3 cp "s3://$BUCKET/$(pick argus-globals-)" ./globals.sql.age --endpoint-url "$EP"
+aws s3 cp "s3://$BUCKET/$(pick argus-db-)"      ./backup.dump.age --endpoint-url "$EP"
 
-# 2. Decrypt → restore into a FRESH database (verify before pointing prod at it).
+# 2. Roles FIRST (no passwords — re-applied from Key Vault in step 4). Connect to the maintenance DB.
+age -d -i age.key globals.sql.age | psql -d postgres
+
+# 3. Restore the DB into a FRESH database — faithfully (keep owners/grants/policies; the roles now exist).
 age -d -i age.key backup.dump.age > backup.dump
 createdb argus_restore
-pg_restore --no-owner --no-privileges --dbname argus_restore backup.dump
+pg_restore --dbname argus_restore backup.dump   # NOT --no-owner/--no-privileges — roles exist, so keep them
 
-# 3. Sanity-check, then cut over. Securely remove age.key + the plaintext dump afterwards.
+# 4. Re-apply role login passwords from Key Vault (the backup deliberately omits them), e.g.:
+#    ALTER ROLE argus_app   LOGIN PASSWORD '<from-key-vault>';
+#    ALTER ROLE argus_cleanup LOGIN PASSWORD '<from-key-vault>';
+#    ALTER ROLE argus_backup  LOGIN PASSWORD '<from-key-vault>';
+
+# 5. Sanity-check, then cut over. Securely remove the key + plaintext dump.
 shred -u age.key backup.dump
 ```
 

@@ -8,17 +8,20 @@
 
 ```
 systemd timer (daily 02:30 UTC)
-  → backup-db.sh  (User=argus, hardened oneshot)
-      pg_dump --format=custom   (as argus_backup: read-only, BYPASSRLS, all tenants)
-        | age -r <PUBLIC key>    (encrypt BEFORE leaving the box)
-        | aws s3 cp -            (→ private B2 bucket, key argus-db-<UTC>.dump.age)
-      → verify head-object size → prune backups older than RETENTION_DAYS
+  → backup-db.sh  (User=argus, hardened oneshot; as argus_backup: read-only, BYPASSRLS, all tenants)
+      pg_dumpall --roles-only --no-role-passwords | age -r <PUBLIC key> | aws s3 cp -   → argus-globals-<UTC>.sql.age
+      pg_dump --format=custom                      | age -r <PUBLIC key> | aws s3 cp -   → argus-db-<UTC>.dump.age
+      → verify each (PIPESTATUS + size floor) → prune backups older than RETENTION_DAYS (one list, shared prefix)
 ```
 
-The dump contains the **whole DB**: message bodies (already MLS ciphertext — the server is crypto-blind) plus
-**cleartext metadata** (emails, display names, conversation membership, audit log, public device keys). The
-metadata is GDPR-relevant PII. It is encrypted with **age to a public recipient key** before upload, so B2
-only ever holds ciphertext. The age **private** key is **not on the VM** — Key Vault only, used at restore.
+Each run writes **two** encrypted objects: the cluster **roles** (definitions + memberships, **no password
+hashes** — `--no-role-passwords`) and the **database**. A restore onto a fresh cluster needs the roles first,
+because the schema's RLS policies + grants reference `argus_app`/`argus_cleanup`/`argus_backup`. The DB dump
+contains message bodies (already MLS ciphertext — the server is crypto-blind) plus **cleartext metadata**
+(emails, display names, conversation membership, audit log, public device keys) — GDPR-relevant PII. Both
+objects are encrypted with **age to a public recipient key** before upload, so B2 only ever holds ciphertext;
+the age **private** key is **not on the VM** — Key Vault only, used at restore. Role **passwords** are never
+in the backup — they are re-applied from Key Vault at restore.
 
 ## 2. Assets & trust boundaries
 
@@ -57,8 +60,10 @@ only ever holds ciphertext. The age **private** key is **not on the VM** — Key
 
 - **#1 crypto-blind** — upheld: the worker never decrypts message content; bodies remain MLS ciphertext in
   the dump. It does read cleartext *metadata* — unavoidable for a DB backup — which is then encrypted at rest.
-- **#2 never persist plaintext/secrets off-box** — upheld: the dump is encrypted **before** it leaves the VM;
-  B2 holds ciphertext only. No secret is logged; no plaintext dump is written to disk (streamed).
+- **#2 never persist plaintext/secrets off-box** — upheld: both objects are encrypted **before** they leave
+  the VM; B2 holds ciphertext only. No secret is logged; no plaintext dump is written to disk (streamed). The
+  roles object uses `--no-role-passwords`, so even decrypted it contains **no credential material** — role
+  passwords are re-applied from Key Vault at restore, never copied into a backup.
 - **#3 RLS** — N/A for new tables (none). The backup role deliberately **bypasses** RLS to dump all tenants —
   scoped to read-only and justified in the migration; it does not weaken any tenant-facing path.
 - **#4 no hand-rolled crypto** — upheld: encryption is **age** (a standard, audited tool), not a primitive we
