@@ -20,7 +20,8 @@ Reasoning:
 - More than 15 steps would create too much planning overhead for a solo project.
 - 14 steps keeps the PR automation and Playwright safety net early, then splits UI primitives into creation and adoption, which makes diffs easier to review.
 
-Each step should leave the app runnable at `http://127.0.0.1:5174/chat`.
+Each step should leave the app runnable at the canonical local SPA URL, `http://localhost:5173/chat`.
+If Vite prints a different fallback port because `5173` is already occupied, use that printed URL only for browser inspection and do not change OIDC redirect assumptions.
 
 ## Non-Negotiables
 
@@ -56,6 +57,11 @@ Rules:
 - Keep **passkey-first** as the preferred user-facing login direction.
 - Keep **Tailwind v4**, but move shared visual decisions into Argus tokens and reusable components.
 - Do not add React Router or TanStack Router unless route complexity clearly requires it. Prefer the current lightweight route switch until it becomes a real constraint.
+
+## Local Dev URL Rule
+
+The canonical local SPA origin is `http://localhost:5173` because Vite defaults to port `5173`, and the local Zitadel redirect URI, `.env.example`, Makefile, and auth docs are configured around that origin.
+Alternate Vite fallback ports are temporary browser-inspection URLs only; do not bake them into docs, tests, OIDC settings, or screenshots.
 
 ## Browser Storage Classification
 
@@ -686,7 +692,7 @@ pnpm --filter @argus/web test:e2e
 
 Manual checks:
 
-- Desktop chat at `http://127.0.0.1:5174/chat`
+- Desktop chat at `http://localhost:5173/chat`, or the actual Vite fallback URL printed by `pnpm --filter @argus/web dev` when port `5173` is occupied
 - Mobile chat width
 - Settings open/close
 - Settings section navigation
