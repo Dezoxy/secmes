@@ -54,12 +54,20 @@ hostnames are configured in the Cloudflare Zero Trust dashboard, not in this rep
 
 ## Secrets (placeholder today → Key Vault in Slice 3)
 
-No secret values live in the repo. `compose.prod.yaml` reads them from gitignored files:
+No secret values live in the repo. Data-plane secrets are delivered as **mounted credential files** (Docker
+secrets at `/run/secrets/*`), which the app reads via `*_FILE` env vars (invariant #5 — never the value in
+env):
 
-- `secrets/postgres_password` — single line; Postgres reads it via `POSTGRES_PASSWORD_FILE`.
-- `secrets/argus.prod.env` — `DATABASE_URL` (incl. password), `S3_SECRET_ACCESS_KEY`, `TUNNEL_TOKEN`.
+- `secrets/postgres_password` → Postgres reads it via `POSTGRES_PASSWORD_FILE`.
+- `secrets/database_url` → the api reads it via `DATABASE_URL_FILE` (full URL incl. the DB password).
+- `secrets/s3_secret_access_key` → the api reads it via `S3_SECRET_ACCESS_KEY_FILE` (the B2 key secret).
 
-Non-secret config (B2 endpoint/region/bucket + access-key-**id**, OIDC issuer/audience, image tags) is in
-`.env.prod.example` — copy it into the deploy environment. In production, **Slice 3** generates these files
-from Azure Key Vault via the VM's Managed Identity at deploy time (systemd credential files) and they are
-never committed nor baked into an image (invariant #5).
+The **`TUNNEL_TOKEN`** is the one secret that can't be a mounted file — the cloudflared image has no shell and
+no `--token-file` flag. Invariant #5 also permits a **runtime-fetched value**, so it's injected from the
+deploy environment (`environment: TUNNEL_TOKEN`), never an on-disk env file.
+
+Non-secret config (B2 endpoint/region/bucket + access-key-**id**, the API's OIDC issuer/audience, the PWA's
+build-time `VITE_OIDC_*`, image tags) is in `.env.prod.example` — copy it into the deploy environment. The
+`secrets/` directory is gitignored. In production, **Slice 3** generates these files + the tunnel runtime
+value from Azure Key Vault via the VM's Managed Identity at deploy time; nothing is committed or baked into
+an image.

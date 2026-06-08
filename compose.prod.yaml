@@ -14,10 +14,13 @@ name: argus-prod
 #     only on the internal Docker network. The only way in is the authenticated Cloudflare tunnel.
 #   - non-root + no-new-privileges + cap_drop:[ALL] where the image allows; resource limits on every service.
 #
-# SECRETS (invariant #5): no secret VALUES live in this file. `postgres` reads its password from a mounted
-# credential file (Docker secret). The api/cloudflared secret-bearing config is sourced from a gitignored
-# `secrets/argus.prod.env` placeholder. Slice 3 REPLACES these with Key Vault → systemd-delivered credential
-# files (fetched by the VM's Managed Identity); see docs/roadmap.md Phase 0 #8 and .env.prod.example.
+# SECRETS (invariant #5): no secret VALUES live in this file. Data-plane secrets are mounted credential
+# FILES (Docker secrets at /run/secrets/*): the Postgres password (POSTGRES_PASSWORD_FILE), the api's
+# password-bearing connection URL (DATABASE_URL_FILE), and the B2 secret key (S3_SECRET_ACCESS_KEY_FILE).
+# The cloudflared TUNNEL_TOKEN is the one credential delivered as a runtime-fetched value (the image has no
+# shell / no --token-file), injected from the deploy environment — never a committed env file. Slice 3
+# populates all of these from Key Vault via the VM's Managed Identity (systemd); see docs/roadmap.md Phase 0
+# #8, docs/deploy.md, and .env.prod.example.
 # Self-hosted Zitadel on the VM is roadmap checkpoint 9 (Phase 1) — it joins this stack there, behind Caddy +
 # Cloudflare Access on an admin subdomain.
 
@@ -101,13 +104,16 @@ services:
       S3_FORCE_PATH_STYLE: 'false' # B2 uses virtual-host style
       OIDC_ISSUER: ${OIDC_ISSUER:-}
       OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
-    # --- Secret-bearing config (DATABASE_URL incl. password, S3_SECRET_ACCESS_KEY) ---
-    # PLACEHOLDER mechanism: a gitignored env file populated out-of-band. Slice 3 replaces this with
-    # Key Vault → credential files read by the app (invariant #5). The file is optional so `compose config`
-    # validates without it; a real deploy requires it.
-    env_file:
-      - path: ./secrets/argus.prod.env
-        required: false
+      # --- Secrets are delivered as FILES, never env (invariant #5) ---
+      # The app reads the password-bearing connection URL and the B2 secret key from mounted credential
+      # files (Docker secrets at /run/secrets/*). On the VM these are systemd-delivered from Key Vault via
+      # the Managed Identity (Slice 3). REDIS_URL is non-secret (no auth — internal-only redis).
+      DATABASE_URL_FILE: /run/secrets/database_url
+      S3_SECRET_ACCESS_KEY_FILE: /run/secrets/s3_secret_access_key
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+    secrets:
+      - database_url
+      - s3_secret_access_key
     depends_on:
       postgres:
         condition: service_healthy
@@ -139,6 +145,12 @@ services:
     build:
       context: .
       dockerfile: infra/vm/caddy/Dockerfile
+      # OIDC is baked into the PWA at build time (Vite VITE_*). Empty until Zitadel-on-VM (roadmap #9);
+      # CD passes the real values so the shipped client does real auth, not demo mode.
+      args:
+        VITE_OIDC_ISSUER: ${VITE_OIDC_ISSUER:-}
+        VITE_OIDC_CLIENT_ID: ${VITE_OIDC_CLIENT_ID:-}
+        VITE_OIDC_REDIRECT_URI: ${VITE_OIDC_REDIRECT_URI:-}
     restart: unless-stopped
     # No published ports — cloudflared reaches caddy:8080 on the internal network.
     # Redirect Caddy's storage/autosave to the writable /tmp tmpfs so the read-only root FS doesn't break
@@ -170,10 +182,12 @@ services:
     image: cloudflare/cloudflared:2024.12.2
     restart: unless-stopped
     command: ['tunnel', '--no-autoupdate', 'run']
-    # TUNNEL_TOKEN is a secret — supplied via the gitignored prod env (Slice 3: Key Vault credential file).
-    env_file:
-      - path: ./secrets/argus.prod.env
-        required: false
+    # TUNNEL_TOKEN is the one secret that can't be a mounted file: the cloudflared image has no shell and no
+    # `--token-file` flag (only `--token` / `$TUNNEL_TOKEN`). Invariant #5 permits a "runtime-fetched value"
+    # as well as a file, so it's injected from the deploy environment — NOT from a committed/on-disk env file.
+    # Slice 3's systemd unit fetches it from Key Vault via the Managed Identity and sets it for `compose up`.
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
     depends_on:
       caddy:
         condition: service_started
@@ -191,9 +205,15 @@ services:
           cpus: '0.25'
 
 secrets:
+  # All gitignored; populated out-of-band (Slice 3: Key Vault → credential file via Managed Identity).
   postgres_password:
-    # Gitignored; populated out-of-band (Slice 3: Key Vault → credential file via Managed Identity).
     file: ./secrets/postgres_password
+  database_url:
+    # Full password-bearing connection URL; the api reads it via DATABASE_URL_FILE (invariant #5).
+    file: ./secrets/database_url
+  s3_secret_access_key:
+    # B2 application-key secret; the api reads it via S3_SECRET_ACCESS_KEY_FILE.
+    file: ./secrets/s3_secret_access_key
 
 volumes:
   pgdata:

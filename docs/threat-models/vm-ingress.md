@@ -50,10 +50,14 @@ the API are crypto-blind (server stores/forwards ciphertext only; invariant #1).
   is an authenticated tunnel; the internal cloudflared↔Caddy↔api legs are plain HTTP but never leave the
   host's Docker network. Message bodies are E2EE ciphertext regardless of the transport.
 - **Info-disclosure of secrets.** A leaked DB/B2/Zitadel/tunnel secret compromises the stack. → No secret
-  values live in `compose.prod.yaml` or the image; they arrive as **credential files / env files** populated
-  out-of-band (Slice 3: Key Vault via Managed Identity). `.env.prod.example` carries placeholders only.
-  Non-secret config (B2 access-key-**id**, region, bucket, issuer URL, public origin) may ride env per
-  invariant #5. Logs carry IDs/metadata only (invariant #2); the tunnel token is never logged.
+  values live in `compose.prod.yaml` or the image. Data-plane secrets are **mounted credential files**
+  (Docker secrets) the app reads via `*_FILE` (`POSTGRES_PASSWORD_FILE`, `DATABASE_URL_FILE`,
+  `S3_SECRET_ACCESS_KEY_FILE`) — never the value in env. The cloudflared `TUNNEL_TOKEN` is a
+  **runtime-fetched value** (the image has no shell/`--token-file`), injected from the deploy environment, not
+  an on-disk env file. All are populated out-of-band (Slice 3: Key Vault via Managed Identity).
+  `.env.prod.example` carries placeholders only. Non-secret config (B2 access-key-**id**, region, bucket,
+  issuer URL, public origin) may ride env per invariant #5. Logs carry IDs/metadata only (invariant #2); the
+  tunnel token is never logged.
 - **Elevation via a compromised container.** A breakout from api/Caddy must not trivially own the host or
   reach more than it needs. → Containers run **non-root** with `no-new-privileges`, `cap_drop: [ALL]`,
   read-only root FS where feasible, and resource limits. Data services hold ciphertext + metadata only (RLS
@@ -73,8 +77,9 @@ the API are crypto-blind (server stores/forwards ciphertext only; invariant #1).
 3. **tenant_id + RLS on tenant tables** — N/A (no schema change); the data services that enforce it run
    with no off-host exposure.
 4. **No hand-rolled crypto** — ✅ none introduced; TLS is Cloudflare's, MLS stays in `packages/crypto`.
-5. **Secrets via Key Vault + Managed Identity as files** — ✅ topology consumes credential/env **files**;
-   the actual Key Vault wiring is Slice 3. Placeholders only in this slice; **no committed secrets**.
+5. **Secrets via Key Vault + Managed Identity as files** — ✅ data-plane secrets are mounted credential
+   **files** (`*_FILE`), the tunnel token a runtime-fetched value; no secret rides a committed env file. The
+   actual Key Vault wiring is Slice 3. Placeholders only in this slice; **no committed secrets**.
 6. **No admin path to content** — ✅ admin surfaces (Zitadel/ops) are metadata-only and gated by Cloudflare
    Access; no content endpoint is exposed to admins.
 
