@@ -2,16 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MessageCircle } from 'lucide-react';
 import type { Conversation as MlsGroup } from '@argus/crypto';
 import type { UserSummary } from '../../lib/api';
-import { uploadAttachment } from '../../lib/attachments';
 import { accessToken } from '../../lib/auth';
 import { ConversationManager, type ConversationSession } from '../../lib/conversations';
 import { joinPendingConversations } from '../../lib/join';
-import { GroupStateConflict, type StoredMessage } from '../../lib/keystore';
+import type { StoredMessage } from '../../lib/keystore';
 import type { AttachmentRef } from '../../lib/message-envelope';
 import {
   backfillConversation,
   receiveLiveMessage,
-  sendLiveMessage,
   type DecryptedMessage,
   type MessagingDeps,
 } from '../../lib/messaging';
@@ -28,6 +26,7 @@ import { StartConversation } from './StartConversation';
 import { contactDisplayName } from './user-label';
 import { VerifySecurity } from './VerifySecurity';
 import { useChatState } from './useChatState';
+import { useMessageSending } from './useMessageSending';
 import { loadArgusProfile, saveArgusProfile } from '../settings/argus-profile';
 import { SettingsPanel, type AnonymousProfile } from '../settings/SettingsPanel';
 import type { Attachment, Conversation, Message, User } from './seed';
@@ -51,26 +50,6 @@ const DEMO_PROFILE_SUBJECT = 'demo-local';
  * ciphertext; it needs the key directory + out-of-band fingerprint verification (#20). No plaintext
  * leaves the browser. The settings button opens profile, privacy, and key-recovery controls.
  */
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error('failed to read file'));
-    reader.readAsDataURL(file);
-  });
-}
-
-// Local data-URI attachment (never an object URL or server URL). Images render inline; other files
-// become a chip. Attachments are demo-local — only the text body goes through the MLS round-trip.
-async function toAttachment(file: File): Promise<Attachment> {
-  const id = `att-${crypto.randomUUID()}`;
-  const size = `${(file.size / 1024 / 1024).toFixed(1)} MB`;
-  if (file.type.startsWith('image/')) {
-    return { id, type: 'image', url: await fileToDataUrl(file), name: file.name, size };
-  }
-  return { id, type: 'file', url: '#', name: file.name, size };
-}
-
 // A live (E2E) attachment ref → a UI attachment. Images download+decrypt lazily from `ref` (no `url`); files
 // get a chip with a working Download. Used for received messages + rehydrated history.
 function refToUiAttachment(ref: AttachmentRef): Attachment {
@@ -224,6 +203,15 @@ export default function ChatScreen() {
     },
     [messagingDeps, sessionKey],
   );
+
+  const handleSend = useMessageSending({
+    selectedId,
+    isLive,
+    liveGroups,
+    messagingDeps,
+    appendHistory,
+    setConversations,
+  });
 
   // Merge decrypted incoming messages into a conversation, deduped by SERVER id (across fetch + WS push) and
   // kept in time order. Shared by fetch-on-open, the WS push, and reconnect catch-up. Also persists them to
@@ -508,147 +496,6 @@ export default function ChatScreen() {
   const handleSelect = (id: string) => {
     setSelectedId(id);
     if (window.innerWidth < 1024) setShowSidebar(false);
-  };
-
-  const patchMessage = (convId: string, msgId: string, patch: Partial<Message>): void => {
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === convId
-          ? { ...c, messages: c.messages.map((m) => (m.id === msgId ? { ...m, ...patch } : m)) }
-          : c,
-      ),
-    );
-  };
-
-  // Live send (Slice 5 + attachments A3): encrypt → persist the advanced ratchet → POST the ciphertext (all
-  // under the conversation's single-writer lock, in lib/messaging). The local bubble echoes optimistically;
-  // the peer receives it via the live push / its next fetch. Attachment `refs` (already uploaded by the
-  // caller) ride E2E inside the MLS envelope; `echo` renders the just-sent images locally without a refetch.
-  const sendLive = (
-    convId: string,
-    group: MlsGroup,
-    deps: MessagingDeps,
-    content: string,
-    files: File[] = [],
-  ): void => {
-    const id = `msg-${crypto.randomUUID()}`;
-    const timestamp = new Date();
-    const ts = timestamp.toISOString();
-    // Filled after a successful upload, so a 'sent' history entry persists the refs (for reload).
-    let refs: AttachmentRef[] = [];
-    const logSend = (status: string, encrypted = false): void =>
-      appendHistory(convId, [
-        {
-          id,
-          senderId: currentUser.id,
-          content,
-          timestamp: ts,
-          status,
-          encrypted,
-          attachments: refs.length ? refs : undefined,
-        },
-      ]);
-    void (async () => {
-      // Optimistic echo from the LOCAL bytes (data URIs for images). The bubble is created BEFORE the upload,
-      // so a failed grant/PUT marks THIS bubble failed — the user never silently loses a message+files
-      // (ChatInput clears the draft on send).
-      const echo: Attachment[] = await Promise.all(
-        files.map(
-          async (f): Promise<Attachment> => ({
-            id: `att-${crypto.randomUUID()}`,
-            type: f.type.startsWith('image/') ? 'image' : 'file',
-            name: f.name,
-            size: `${(f.size / 1024 / 1024).toFixed(1)} MB`,
-            url: f.type.startsWith('image/') ? await fileToDataUrl(f) : undefined,
-          }),
-        ),
-      );
-      const message: Message = {
-        id,
-        senderId: currentUser.id,
-        content,
-        timestamp,
-        status: 'sending',
-        attachments: echo.length ? echo : undefined,
-      };
-      setConversations((prev) =>
-        prev.map((c) => (c.id === convId ? { ...c, messages: [...c.messages, message] } : c)),
-      );
-      logSend('sending');
-      try {
-        // Encrypt + upload each file (outside the conversation lock), then send the refs in the envelope.
-        refs = await Promise.all(files.map((f) => uploadAttachment(convId, f)));
-        await sendLiveMessage(deps, convId, group, content, refs);
-        // Attach the uploaded refs to the echo (index-aligned with `files`) so the sender can Download/open
-        // their OWN files in-session — images already render from the local data URI; the file chip's
-        // Download button needs the ref. Without this it only works after a reload rehydrates from history.
-        const sentAttachments = echo.map((a, i) => ({ ...a, ref: refs[i] }));
-        patchMessage(convId, id, {
-          status: 'sent',
-          encrypted: true,
-          attachments: sentAttachments.length ? sentAttachments : undefined,
-        });
-        logSend('sent', true);
-      } catch (err) {
-        patchMessage(convId, id, { status: 'failed' });
-        logSend('failed');
-        // GroupStateConflict = another tab advanced the durable state (rehydrate to continue); an upload
-        // grant/PUT failure lands here too — the bubble shows failed instead of dropping silently.
-        // id/metadata only in the log (never the plaintext).
-        // eslint-disable-next-line no-console
-        console.warn(
-          err instanceof GroupStateConflict
-            ? 'send: another tab is active for this conversation — reload to continue'
-            : 'send failed',
-          convId,
-          err instanceof Error ? err.message : err,
-        );
-      }
-    })();
-  };
-
-  const handleSend = (content: string, files?: File[]): void => {
-    if (!selectedId) return;
-    const convId = selectedId;
-    // Live conversations: encrypt + send for real over the network. Needs the sealing deps + a non-empty text
-    // OR at least one file; otherwise no-op rather than a false send signal.
-    if (isLive(convId)) {
-      const group = liveGroups.current.get(convId);
-      const deps = messagingDeps;
-      if (!group || !deps) return;
-      const fileList = files ?? [];
-      if (!content.trim() && fileList.length === 0) return;
-      // sendLive creates the optimistic bubble, then uploads + sends — so an upload failure marks it failed.
-      sendLive(convId, group, deps, content, fileList);
-      return;
-    }
-    const id = `msg-${crypto.randomUUID()}`; // CSPRNG id; the real client_message_id is minted the same way
-    void (async () => {
-      const attachments = files?.length ? await Promise.all(files.map(toAttachment)) : undefined;
-      const message: Message = {
-        id,
-        senderId: currentUser.id,
-        content,
-        timestamp: new Date(),
-        status: 'sending',
-        attachments,
-      };
-      setConversations((prev) =>
-        prev.map((c) => (c.id === convId ? { ...c, messages: [...c.messages, message] } : c)),
-      );
-      // Demo/seed conversations: run a REAL MLS encrypt→decrypt round-trip before marking the message sent —
-      // the recovered plaintext confirms the E2EE path and a lock shows. A failure marks the bubble failed,
-      // never sent (no false delivery signal); `encrypted` stays false so no lock shows.
-      try {
-        const session = await getMlsSession(convId);
-        await session.send(content || '(attachment)');
-        patchMessage(convId, id, { status: 'sent', encrypted: true });
-        setTimeout(() => patchMessage(convId, id, { status: 'delivered' }), 1000);
-        setTimeout(() => patchMessage(convId, id, { status: 'read' }), 2500);
-      } catch {
-        patchMessage(convId, id, { status: 'failed' });
-      }
-    })();
   };
 
   return (

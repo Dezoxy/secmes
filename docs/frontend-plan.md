@@ -553,7 +553,7 @@ git commit -m "feat(web): add versioned browser persistence"
 
 - [x] Split this step if the diff becomes large.
 - [x] Step 12A: extract read-only chat state.
-- [ ] Step 12B: extract message sending.
+- [x] Step 12B: extract message sending.
 - [ ] Step 12C: extract WebSocket/live conversation behavior.
 - [ ] Step 12D: extract backfill/history behavior.
 - [ ] Keep crypto and live WebSocket behavior in hooks with narrow inputs.
