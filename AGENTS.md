@@ -71,7 +71,7 @@ Whatever agent you are, these gates run on commit/push regardless — do not byp
 
 - **pre-commit** (lefthook): gitleaks, ESLint, Prettier, Semgrep (`.semgrep/`).
 - **pre-push**: typecheck, tests.
-- **CI**: Semgrep, OSV, Trivy, Checkov, Kubescape, gitleaks, 42Crunch audit, CodeQL; nightly DAST.
+- **CI**: Semgrep, OSV, Trivy, Checkov, gitleaks, 42Crunch audit, CodeQL; nightly DAST. (Kubescape dropped with K8s — deploy is a single VM via Docker Compose.)
 
 ## Per-tool wiring
 
