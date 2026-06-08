@@ -1,7 +1,5 @@
-# Checkov config. Skipped checks are deliberate Phase-0/beta decisions or
-# Phase-6 hardening not built yet — NOT oversights. Each is enforced later;
-# see docs/secure_messaging_platform_plan.md §17 (Hardening) and §16 (cost).
-# Any NEW misconfiguration outside this list still fails CI.
+# Checkov config for the single-VM deploy. Suppressions live as resource-scoped inline
+# `# checkov:skip=` comments in the Terraform (infra/vm/), not here — see the note below.
 directory:
   - .
 framework:
@@ -10,9 +8,6 @@ framework:
   - github_actions
 quiet: true
 compact: true
-skip-check:
-  # --- single-VM deploy (infra/vm) deliberate beta choices ---
-  - CKV_AZURE_119 # public IP on the VM NIC — EGRESS only; the NSG denies ALL inbound. NAT Gateway (no public IP) is the cost upgrade.
-  - CKV_AZURE_50 # VM extension operations — REQUIRED for the `az vm run-command` deploy model (it runs via the RunCommand extension).
-  - CKV_AZURE_93 # managed-disk customer-managed-key disk-encryption-set — platform SSE + encryption_at_host cover the beta; CMK DES is Phase 6.
-  - CKV2_AZURE_32 # Key Vault private endpoint — reached via the subnet's KeyVault service endpoint + default-deny firewall; private endpoint is Phase 6.
+# No global skip-check: the single-VM (infra/vm) suppressions are RESOURCE-SCOPED via inline
+# `# checkov:skip=` comments on the specific resources, so they can't silently hide the same finding
+# elsewhere. Any new misconfiguration fails CI.

@@ -13,9 +13,9 @@ Principle: **OSS self-hosted by default** (nothing leaves our tenancy); external
 | `dast.yml` (nightly) | OWASP ZAP baseline, **42Crunch Conformance Scan** | against staging |
 | `cd.yml` | **Trivy image scan**, **syft SBOM**, **cosign** keyless sign + attest | HIGH/CRITICAL in the image |
 
-`cd.yml` builds, scans, and signs the app image, pushes it to the container registry (GHCR for the VM), then deploys it via `az vm run-command`.
+`cd.yml` (gated behind `vars.ENABLE_DEPLOY`) builds the app image, pushes it to **ACR**, then scans (Trivy), generates an SBOM (syft), and signs/attests (cosign). It does **not** roll out — the VM rollout (image pull + `az vm run-command`) lands with the VM deploy track, which will also move the registry to GHCR.
 
-**Secrets/vars to set before first run:** `X42C_API_TOKEN` (42Crunch), `vars.STAGING_URL` (DAST), `AZURE_*` (CD OIDC for `az vm run-command`). Third-party action versions are pinned but **verify them before the first run**.
+**Secrets/vars to set before first run:** `X42C_API_TOKEN` (42Crunch), `vars.STAGING_URL` (DAST), `vars.ACR_LOGIN_SERVER` + `AZURE_*` (CD OIDC). Third-party action versions are pinned but **verify them before the first run**.
 
 **Dependency updates:** `.github/dependabot.yml` — weekly grouped PRs for npm (pnpm workspace), GitHub Actions, Terraform, and the Docker base image. This is what keeps the pinned action versions current over time. Enable **Dependabot alerts + security updates** in repo Settings → Security (UI toggle, not the config file). Note: Dependabot PRs run without repo secrets, so the 42Crunch audit job will skip/fail on them unless `X42C_API_TOKEN` is also added under Settings → Secrets → **Dependabot**.
 
