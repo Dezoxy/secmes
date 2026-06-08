@@ -72,8 +72,10 @@ while :; do
     # 1) delete the B2 object FIRST (idempotent — a missing key still returns success).
     if aws s3api delete-object \
       --endpoint-url "$S3_ENDPOINT" --bucket "$S3_BUCKET" --key "$object_key" >/dev/null 2>&1; then
-      # 2) then delete the metadata row (psql quotes :'id' — no injection; still RLS-gated to expired rows).
-      if psql -q -v id="$id" -c "delete from attachments where id = :'id'" >/dev/null 2>&1; then
+      # 2) then delete the metadata row. NOTE: `psql -c` does NOT expand psql vars (`:'id'`), so the SQL is
+      # fed via STDIN, where the lexer interpolates the quoted `:'id'` (no injection; still RLS-gated).
+      if printf '%s' "delete from attachments where id = :'id'" |
+        psql -q -v id="$id" >/dev/null 2>&1; then
         batch_reaped=$((batch_reaped + 1))
       else
         total_failed=$((total_failed + 1))
