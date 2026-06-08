@@ -52,3 +52,13 @@ updates:
     labels: ['dependencies']
     commit-message:
       prefix: 'chore(docker-deps)'
+
+  # Production ingress image base layers (infra/vm/caddy/Dockerfile: node + caddy)
+  - package-ecosystem: 'docker'
+    directory: '/infra/vm/caddy'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    labels: ['dependencies']
+    commit-message:
+      prefix: 'chore(docker-deps)'

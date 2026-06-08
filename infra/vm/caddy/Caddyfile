@@ -1,0 +1,58 @@
+# argus production single-origin router.
+#
+# Plain HTTP on :8080 ONLY. TLS terminates at the Cloudflare edge; cloudflared dials this server over the
+# internal Docker network, so Caddy never needs a public cert or :443. A non-privileged port lets Caddy run
+# as a non-root user with all Linux capabilities dropped. Caddy is the single origin: it serves the PWA
+# static build and reverse-proxies /api + /ws to the API. The Cloudflare tunnel ingress (dashboard-managed)
+# points the public hostname at http://caddy:8080. See docs/threat-models/vm-ingress.md.
+{
+	# No public cert, no :443, no Let's Encrypt — the edge owns TLS.
+	auto_https off
+	# Admin API off: nothing on this host should reconfigure Caddy at runtime.
+	admin off
+	# Access log to stdout (collected by Docker). Caddy redacts Authorization + Cookie headers by default,
+	# and request bodies are never logged — so logs stay IDs/metadata only (invariant #2). No URLs carry secrets.
+	log {
+		output stdout
+		format json
+	}
+}
+
+:8080 {
+	# Defense-in-depth response headers (the edge adds HSTS and more). CSP is app-managed in the PWA.
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Frame-Options DENY
+		-Server
+	}
+
+	# --- API (REST) --------------------------------------------------------------------------------------
+	# Strip the /api prefix: the API mounts its routes at the root, and the browser calls /api/* same-origin
+	# (identical to the Vite dev proxy's `^/api` -> `` rewrite). e.g. /api/healthz -> upstream /healthz.
+	handle_path /api/* {
+		reverse_proxy api:3000
+	}
+
+	# --- Realtime gateway (WebSocket) --------------------------------------------------------------------
+	# Path is preserved (the gateway mounts at /ws). Caddy detects the Upgrade and proxies the WS transparently.
+	# The auth token rides the first app frame, never the URL.
+	@ws path /ws /ws/*
+	handle @ws {
+		reverse_proxy api:3000
+	}
+
+	# --- Container healthcheck (cheap, no upstream dependency) -------------------------------------------
+	handle /caddy-healthz {
+		respond 200
+	}
+
+	# --- PWA static assets + SPA fallback ----------------------------------------------------------------
+	# Everything else is the installable PWA; unknown paths fall back to index.html for client-side routing.
+	handle {
+		root * /srv
+		encode zstd gzip
+		try_files {path} /index.html
+		file_server
+	}
+}

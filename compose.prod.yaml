@@ -1,0 +1,199 @@
+name: argus-prod
+
+# Production stack for the single Azure VM (germanywestcentral). STANDALONE — run it on its own, NOT layered
+# over compose.yaml (which is local-dev only and carries throwaway creds + MinIO + dev source mounts):
+#   docker compose -f compose.prod.yaml up -d
+#
+# Topology (see docs/threat-models/vm-ingress.md):
+#   users ─HTTPS─▶ Cloudflare edge (TLS + WAF + rate-limit) ─tunnel─▶ cloudflared ─▶ caddy:8080
+#                  caddy serves the PWA + proxies /api,/ws → api:3000
+#   api ─▶ postgres / redis (internal Docker network, NO published ports) ; api ─▶ Backblaze B2 (egress)
+#
+# Hardening invariants baked in here:
+#   - NO published host ports on ANY service. cloudflared is outbound-only; everything else is reachable
+#     only on the internal Docker network. The only way in is the authenticated Cloudflare tunnel.
+#   - non-root + no-new-privileges + cap_drop:[ALL] where the image allows; resource limits on every service.
+#
+# SECRETS (invariant #5): no secret VALUES live in this file. `postgres` reads its password from a mounted
+# credential file (Docker secret). The api/cloudflared secret-bearing config is sourced from a gitignored
+# `secrets/argus.prod.env` placeholder. Slice 3 REPLACES these with Key Vault → systemd-delivered credential
+# files (fetched by the VM's Managed Identity); see docs/roadmap.md Phase 0 #8 and .env.prod.example.
+# Self-hosted Zitadel on the VM is roadmap checkpoint 9 (Phase 1) — it joins this stack there, behind Caddy +
+# Cloudflare Access on an admin subdomain.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    # Password from a mounted credential file, never inline/env (invariant #5).
+    environment:
+      POSTGRES_USER: argus
+      POSTGRES_DB: argus
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # No published ports — reachable only by the api on the internal network.
+    security_opt:
+      - no-new-privileges:true
+    # Drop all caps, then add back only what the alpine postgres entrypoint needs to chown the data dir and
+    # drop privileges to the `postgres` user (a bare `cap_drop: [ALL]` breaks initdb). Read-only root FS is
+    # impractical for Postgres (socket + temp writes) — documented residual in vm-ingress.md.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+      - FOWNER
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U argus -d argus']
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+          cpus: '1.5'
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Persistence off by default (cache/pubsub only). Internal network, no published port.
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    # NOTE: no requirepass — redis is internal-only (no published port) on a single-host private network.
+    # Enabling AUTH via a config file (not a CLI arg, which would leak into the process list) is a Slice-3 /
+    # hardening follow-up sourced from Key Vault.
+    read_only: true # persistence is off, so nothing durable is written
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
+
+  api:
+    # Image is built + scanned + signed by cd.yml and pulled by tag here (CD sets ARGUS_API_IMAGE to the
+    # registry digest/tag). No build stanza in prod — the VM pulls a known-good image, it does not build.
+    image: ${ARGUS_API_IMAGE:-argus-api:local}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production # no Swagger UI in prod
+      PORT: '3000'
+      # --- Non-secret config (invariant #5 allows these in env) ---
+      S3_ENDPOINT: ${S3_ENDPOINT:-https://s3.eu-central-003.backblazeb2.com}
+      S3_REGION: ${S3_REGION:-eu-central-003}
+      S3_BUCKET: ${S3_BUCKET:-argus-attachments}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-} # non-secret B2 key id — set per .env.prod.example
+      S3_FORCE_PATH_STYLE: 'false' # B2 uses virtual-host style
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+    # --- Secret-bearing config (DATABASE_URL incl. password, S3_SECRET_ACCESS_KEY) ---
+    # PLACEHOLDER mechanism: a gitignored env file populated out-of-band. Slice 3 replaces this with
+    # Key Vault → credential files read by the app (invariant #5). The file is optional so `compose config`
+    # validates without it; a real deploy requires it.
+    env_file:
+      - path: ./secrets/argus.prod.env
+        required: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/healthz || exit 1']
+      interval: 15s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: '1.0'
+
+  caddy:
+    # Single-origin router: serves the PWA static build (baked in) + proxies /api,/ws to the api.
+    # Built from the repo root by cd.yml and pulled by tag; the build stanza lets you build it locally too.
+    image: ${ARGUS_INGRESS_IMAGE:-argus-ingress:local}
+    build:
+      context: .
+      dockerfile: infra/vm/caddy/Dockerfile
+    restart: unless-stopped
+    # No published ports — cloudflared reaches caddy:8080 on the internal network.
+    # Redirect Caddy's storage/autosave to the writable /tmp tmpfs so the read-only root FS doesn't break
+    # startup (Caddy writes $XDG_DATA_HOME/caddy + $XDG_CONFIG_HOME/caddy even with admin/auto_https off).
+    environment:
+      HOME: /tmp
+      XDG_DATA_HOME: /tmp/caddy-data
+      XDG_CONFIG_HOME: /tmp/caddy-config
+    depends_on:
+      api:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: '0.5'
+
+  cloudflared:
+    # Outbound tunnel to the Cloudflare edge — the ONLY ingress. No published ports. Ingress hostnames
+    # (4rgus.com → http://caddy:8080, admin.* behind Cloudflare Access) are dashboard-managed (token tunnel).
+    # Pin: verify/refresh the tag before first deploy (Dependabot tracks it). cloudflared is date-versioned.
+    image: cloudflare/cloudflared:2024.12.2
+    restart: unless-stopped
+    command: ['tunnel', '--no-autoupdate', 'run']
+    # TUNNEL_TOKEN is a secret — supplied via the gitignored prod env (Slice 3: Key Vault credential file).
+    env_file:
+      - path: ./secrets/argus.prod.env
+        required: false
+    depends_on:
+      caddy:
+        condition: service_started
+    read_only: true # static Go binary; nothing durable to write
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: '0.25'
+
+secrets:
+  postgres_password:
+    # Gitignored; populated out-of-band (Slice 3: Key Vault → credential file via Managed Identity).
+    file: ./secrets/postgres_password
+
+volumes:
+  pgdata:
