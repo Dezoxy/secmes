@@ -1,10 +1,19 @@
 import { generatedAvatar, safeAvatarSrc } from '../chat/seed';
+import {
+  browserLocalStorage,
+  LEGACY_ARGUS_PROFILE_STORAGE_KEY,
+  migrateLegacyJsonRecord,
+  readLegacyJsonRecord,
+  readVersionedRecord,
+  versionedStorageKey,
+  wipeKnownArgusStorage,
+  writeVersionedRecord,
+  type BrowserStorage,
+} from '../../lib/persistence';
 import type { AnonymousProfile } from './SettingsPanel';
 
-export const ARGUS_PROFILE_STORAGE_PREFIX = 'argus:v1:profile';
-export const LEGACY_ARGUS_PROFILE_STORAGE_KEY = 'argus.anonymousProfile.v1';
-
-type ProfileStorage = Pick<Storage, 'getItem' | 'setItem'>;
+export { LEGACY_ARGUS_PROFILE_STORAGE_KEY } from '../../lib/persistence';
+export const ARGUS_PROFILE_STORAGE_PREFIX = 'argus:v1:profile:';
 
 interface StoredArgusProfile {
   subjectId: string;
@@ -13,22 +22,18 @@ interface StoredArgusProfile {
 
 interface ProfileOptions {
   subjectId: string;
-  storage?: ProfileStorage;
+  storage?: BrowserStorage;
   randomId?: () => string;
 }
 
 interface SaveProfileOptions {
   subjectId: string;
   profile: AnonymousProfile;
-  storage?: ProfileStorage;
+  storage?: BrowserStorage;
 }
 
 export function profileStorageKey(subjectId: string): string {
-  return `${ARGUS_PROFILE_STORAGE_PREFIX}:${encodeURIComponent(subjectId)}`;
-}
-
-function browserStorage(): ProfileStorage {
-  return window.localStorage;
+  return versionedStorageKey('profile', subjectId);
 }
 
 function randomProfileId(): string {
@@ -57,49 +62,138 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function readStoredProfile(raw: string | null, subjectId: string): AnonymousProfile | null {
-  if (!raw) return null;
-  const parsed: unknown = JSON.parse(raw);
-  if (!isRecord(parsed) || parsed.subjectId !== subjectId || !isRecord(parsed.profile)) {
+function isEmailLike(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function decodeScopedProfileRecord(value: unknown, subjectId: string): StoredArgusProfile | null {
+  if (!isRecord(value) || value.subjectId !== subjectId || !isRecord(value.profile)) {
     return null;
   }
 
-  const profile = parsed.profile;
+  const profile = value.profile;
   if (typeof profile.id !== 'string' || profile.id === subjectId) return null;
 
   const username =
-    typeof profile.username === 'string' && profile.username.trim()
+    typeof profile.username === 'string' &&
+    profile.username.trim() &&
+    !isEmailLike(profile.username.trim())
       ? profile.username.trim()
       : defaultAnonymousName(profile.id);
   const avatar = typeof profile.avatar === 'string' ? profile.avatar : undefined;
 
   return {
-    id: profile.id,
-    username,
-    avatar: safeAvatarSrc(avatar, username),
+    subjectId,
+    profile: {
+      id: profile.id,
+      username,
+      avatar: safeAvatarSrc(avatar, username),
+    },
   };
+}
+
+function decodeLegacyProfileRecord(value: unknown, subjectId: string): StoredArgusProfile | null {
+  if (!isRecord(value)) return null;
+
+  if (isRecord(value.profile)) return decodeScopedProfileRecord(value, subjectId);
+
+  if (typeof value.id !== 'string' || value.id === subjectId || !value.id.startsWith('argus-')) {
+    return null;
+  }
+
+  const username =
+    typeof value.username === 'string' &&
+    value.username.trim() &&
+    !isEmailLike(value.username.trim())
+      ? value.username.trim()
+      : defaultAnonymousName(value.id);
+  const avatar = typeof value.avatar === 'string' ? value.avatar : undefined;
+
+  return {
+    subjectId,
+    profile: {
+      id: value.id,
+      username,
+      avatar: safeAvatarSrc(avatar, username),
+    },
+  };
+}
+
+function migrateCurrentKeyRecord(
+  storage: BrowserStorage,
+  key: string,
+  subjectId: string,
+): AnonymousProfile | null {
+  const legacy = readLegacyJsonRecord({
+    storage,
+    key,
+    decode: (value) => decodeScopedProfileRecord(value, subjectId),
+  });
+  if (legacy.status !== 'ok') return null;
+
+  writeVersionedRecord({ storage, key, value: legacy.value });
+  return legacy.value.profile;
+}
+
+function migrateLegacyProfileRecord(
+  storage: BrowserStorage,
+  key: string,
+  subjectId: string,
+): AnonymousProfile | null {
+  const migrated = migrateLegacyJsonRecord({
+    storage,
+    legacyKey: LEGACY_ARGUS_PROFILE_STORAGE_KEY,
+    targetKey: key,
+    decode: (value) => decodeLegacyProfileRecord(value, subjectId),
+  });
+  return migrated.status === 'migrated' ? migrated.value.profile : null;
+}
+
+function wipeProfileNamespace(storage: BrowserStorage): void {
+  wipeKnownArgusStorage(storage, {
+    prefixes: [ARGUS_PROFILE_STORAGE_PREFIX],
+    legacyKeys: [LEGACY_ARGUS_PROFILE_STORAGE_KEY],
+  });
 }
 
 export function loadArgusProfile({
   subjectId,
-  storage = browserStorage(),
+  storage = browserLocalStorage(),
   randomId,
 }: ProfileOptions): AnonymousProfile {
-  try {
-    const stored = readStoredProfile(storage.getItem(profileStorageKey(subjectId)), subjectId);
-    if (stored) return stored;
-    const fallback = createDefaultProfile(randomId);
-    saveArgusProfile({ subjectId, profile: fallback, storage });
-    return fallback;
-  } catch {
-    return createDefaultProfile(randomId);
+  const key = profileStorageKey(subjectId);
+  const stored = readVersionedRecord({
+    storage,
+    key,
+    decode: (value) => decodeScopedProfileRecord(value, subjectId),
+  });
+
+  if (stored.status === 'ok') return stored.value.profile;
+
+  if (stored.status === 'invalid-record') {
+    const migratedCurrent = migrateCurrentKeyRecord(storage, key, subjectId);
+    if (migratedCurrent) return migratedCurrent;
+    wipeProfileNamespace(storage);
   }
+
+  if (stored.status === 'missing') {
+    const hadLegacyProfile = storage.getItem(LEGACY_ARGUS_PROFILE_STORAGE_KEY) !== null;
+    const migratedLegacy = migrateLegacyProfileRecord(storage, key, subjectId);
+    if (migratedLegacy) return migratedLegacy;
+    if (hadLegacyProfile) wipeProfileNamespace(storage);
+  } else {
+    wipeProfileNamespace(storage);
+  }
+
+  const fallback = createDefaultProfile(randomId);
+  saveArgusProfile({ subjectId, profile: fallback, storage });
+  return fallback;
 }
 
 export function saveArgusProfile({
   subjectId,
   profile,
-  storage = browserStorage(),
+  storage = browserLocalStorage(),
 }: SaveProfileOptions): boolean {
   if (profile.id === subjectId) return false;
   const username = profile.username.trim() || defaultAnonymousName(profile.id);
@@ -111,10 +205,9 @@ export function saveArgusProfile({
       avatar: safeAvatarSrc(profile.avatar, username),
     },
   };
-  try {
-    storage.setItem(profileStorageKey(subjectId), JSON.stringify(stored));
-    return true;
-  } catch {
-    return false;
-  }
+  return writeVersionedRecord({
+    storage,
+    key: profileStorageKey(subjectId),
+    value: stored,
+  }).ok;
 }

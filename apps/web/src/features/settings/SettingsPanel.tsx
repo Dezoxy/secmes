@@ -22,6 +22,14 @@ import {
   type AccentId,
 } from '../ui';
 import { safeAvatarSrc } from '../chat/seed';
+import {
+  browserLocalStorage,
+  LEGACY_ACCENT_STORAGE_KEY,
+  LEGACY_FONT_SIZE_STORAGE_KEY,
+  readVersionedRecord,
+  versionedStorageKey,
+  writeVersionedRecord,
+} from '../../lib/persistence';
 import { AboutSettings } from './AboutSettings';
 import { AppearanceSettings, FONT_SIZE_LEVELS } from './AppearanceSettings';
 import { DataStorageSettings } from './DataStorageSettings';
@@ -61,19 +69,64 @@ const sections: Array<{ id: SectionId; label: string; icon: LucideIcon }> = [
   { id: 'about', label: 'About', icon: Info },
 ];
 
-const ACCENT_STORAGE_KEY = 'argus.accentColor.v1';
-const FONT_SIZE_STORAGE_KEY = 'argus.fontSizeLevel.v1';
+const DEVICE_SETTINGS_STORAGE_KEY = versionedStorageKey('settings', 'device');
+
+interface DeviceSettingsRecord {
+  accentId: AccentId;
+  fontSizeLevel: number;
+}
+
+function decodeDeviceSettingsRecord(value: unknown): DeviceSettingsRecord | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const record = value as Record<string, unknown>;
+  const accentId = typeof record.accentId === 'string' ? record.accentId : defaultAccentId;
+  const fontSizeLevel = typeof record.fontSizeLevel === 'number' ? record.fontSizeLevel : 5;
+
+  return {
+    accentId: isAccentId(accentId) ? accentId : defaultAccentId,
+    fontSizeLevel: FONT_SIZE_LEVELS.includes(fontSizeLevel) ? fontSizeLevel : 5,
+  };
+}
+
+function readStoredDeviceSettings(): DeviceSettingsRecord {
+  if (typeof window === 'undefined') {
+    return { accentId: defaultAccentId, fontSizeLevel: 5 };
+  }
+
+  const storage = browserLocalStorage();
+  const stored = readVersionedRecord({
+    storage,
+    key: DEVICE_SETTINGS_STORAGE_KEY,
+    decode: decodeDeviceSettingsRecord,
+  });
+  if (stored.status === 'ok') return stored.value;
+
+  const legacyAccent = storage.getItem(LEGACY_ACCENT_STORAGE_KEY);
+  const legacyFontSize = Number.parseInt(storage.getItem(LEGACY_FONT_SIZE_STORAGE_KEY) ?? '', 10);
+  const migrated = {
+    accentId: isAccentId(legacyAccent) ? legacyAccent : defaultAccentId,
+    fontSizeLevel: FONT_SIZE_LEVELS.includes(legacyFontSize) ? legacyFontSize : 5,
+  };
+
+  writeVersionedRecord({ storage, key: DEVICE_SETTINGS_STORAGE_KEY, value: migrated });
+  return migrated;
+}
+
+function writeStoredDeviceSettings(settings: DeviceSettingsRecord): void {
+  if (typeof window === 'undefined') return;
+  writeVersionedRecord({
+    storage: browserLocalStorage(),
+    key: DEVICE_SETTINGS_STORAGE_KEY,
+    value: settings,
+  });
+}
 
 function readStoredAccent(): AccentId {
-  if (typeof window === 'undefined') return defaultAccentId;
-  const stored = window.localStorage.getItem(ACCENT_STORAGE_KEY);
-  return isAccentId(stored) ? stored : defaultAccentId;
+  return readStoredDeviceSettings().accentId;
 }
 
 function readStoredFontSize(): number {
-  if (typeof window === 'undefined') return 5;
-  const stored = Number.parseInt(window.localStorage.getItem(FONT_SIZE_STORAGE_KEY) ?? '', 10);
-  return FONT_SIZE_LEVELS.includes(stored) ? stored : 5;
+  return readStoredDeviceSettings().fontSizeLevel;
 }
 
 export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: SettingsPanelProps) {
@@ -92,12 +145,8 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
   }, [profile]);
 
   useEffect(() => {
-    window.localStorage.setItem(ACCENT_STORAGE_KEY, accentId);
-  }, [accentId]);
-
-  useEffect(() => {
-    window.localStorage.setItem(FONT_SIZE_STORAGE_KEY, String(fontSizeLevel));
-  }, [fontSizeLevel]);
+    writeStoredDeviceSettings({ accentId, fontSizeLevel });
+  }, [accentId, fontSizeLevel]);
 
   const activeSection = sections.find((section) => section.id === active) ?? sections[0]!;
   const ActiveIcon = activeSection.icon;

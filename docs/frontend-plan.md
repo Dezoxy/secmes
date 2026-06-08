@@ -511,17 +511,17 @@ git commit -m "refactor(web): centralize typed api client"
 
 - Create: `apps/web/src/lib/persistence.ts`
 - Create: `apps/web/src/lib/persistence.spec.ts`
-- Modify: `apps/web/src/features/chat/ChatScreen.tsx`
-- Modify: `apps/web/src/features/settings/ProfileSettings.tsx`
+- Modify: `apps/web/src/features/settings/argus-profile.ts`
+- Modify: `apps/web/src/features/settings/SettingsPanel.tsx`
 
-- [ ] Define versioned key helpers for localStorage records.
-- [ ] Add safe JSON parse helpers.
-- [ ] Add quota-safe write helpers.
-- [ ] Add migration behavior for legacy anonymous/pseudonymous profile keys.
-- [ ] Add fallback/wipe behavior for unmigratable records and corrupted Argus state.
-- [ ] Wipe only known Argus namespaced keys, not unrelated browser storage.
-- [ ] Keep plaintext message content out of localStorage.
-- [ ] Keep private keys, passphrases, auth tokens, presigned URLs, and decrypted attachments out of localStorage.
+- [x] Define versioned key helpers for localStorage records.
+- [x] Add safe JSON parse helpers.
+- [x] Add quota-safe write helpers.
+- [x] Add migration behavior for legacy anonymous/pseudonymous profile keys.
+- [x] Add fallback/wipe behavior for unmigratable records and corrupted Argus state.
+- [x] Wipe only known Argus namespaced keys, not unrelated browser storage.
+- [x] Keep plaintext message content out of localStorage.
+- [x] Keep private keys, passphrases, auth tokens, presigned URLs, and decrypted attachments out of localStorage.
 
 **Verification:**
 
@@ -535,7 +535,7 @@ Expected: tests cover missing record, invalid JSON, version mismatch, quota fail
 **Commit:**
 
 ```bash
-git add apps/web/src/lib/persistence.ts apps/web/src/lib/persistence.spec.ts apps/web/src/features/chat apps/web/src/features/settings
+git add apps/web/src/lib/persistence.ts apps/web/src/lib/persistence.spec.ts apps/web/src/features/settings docs/frontend-plan.md
 git commit -m "feat(web): add versioned browser persistence"
 ```
 
