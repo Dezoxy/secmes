@@ -3,6 +3,7 @@
 # the repo, env, or Terraform inputs. (The age backup PRIVATE key deliberately does NOT live here on the VM
 # path — it's restore-only; keep it in a separate vault/offline.)
 resource "azurerm_key_vault" "this" {
+  # checkov:skip=CKV2_AZURE_32: reached via the subnet's KeyVault service endpoint + default-deny firewall; a private endpoint is Phase 6.
   name                = "${var.prefix}-kv-${substr(sha1(azurerm_resource_group.this.id), 0, 6)}" # globally-unique, deterministic
   location            = azurerm_resource_group.this.location
   resource_group_name = azurerm_resource_group.this.name

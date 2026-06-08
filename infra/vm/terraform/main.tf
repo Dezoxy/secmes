@@ -60,6 +60,7 @@ resource "azurerm_subnet_network_security_group_association" "this" {
 # It carries no inbound: the NSG denies all internet ingress. A NAT Gateway (no public IP on the VM) is the
 # hardening upgrade — pricier, so a beta uses an egress public IP.
 resource "azurerm_public_ip" "this" {
+  # checkov:skip=CKV_AZURE_119: EGRESS only — the NSG denies ALL inbound. A NAT Gateway (no public IP) is the cost upgrade.
   name                = "${var.prefix}-egress-pip"
   location            = azurerm_resource_group.this.location
   resource_group_name = azurerm_resource_group.this.name
@@ -83,6 +84,7 @@ resource "azurerm_network_interface" "this" {
 }
 
 resource "azurerm_linux_virtual_machine" "this" {
+  # checkov:skip=CKV_AZURE_50: VM extension operations are REQUIRED for the `az vm run-command` deploy (RunCommand extension).
   name                  = "${var.prefix}-vm"
   location              = azurerm_resource_group.this.location
   resource_group_name   = azurerm_resource_group.this.name
@@ -135,6 +137,7 @@ resource "azurerm_linux_virtual_machine" "this" {
 # --- Data disk: Postgres + Docker volumes live here, separate from the OS disk, so a VM rebuild/resize
 #     doesn't lose data. (Mounting + formatting is done in cloud-init / the deploy step.) ---
 resource "azurerm_managed_disk" "data" {
+  # checkov:skip=CKV_AZURE_93: platform SSE + encryption_at_host cover the beta; a customer-managed-key disk-encryption-set is Phase 6.
   name                          = "${var.prefix}-datadisk"
   location                      = azurerm_resource_group.this.location
   resource_group_name           = azurerm_resource_group.this.name

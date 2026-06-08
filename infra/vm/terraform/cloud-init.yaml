@@ -36,6 +36,14 @@ write_files:
       set -euo pipefail
       DEV="/dev/disk/azure/scsi1/lun0"   # the attached data disk (LUN 0)
       MNT="/mnt/argus-data"
+      # The data-disk attachment happens AFTER the VM boots (it depends on the VM id), so on a first apply
+      # cloud-init can run before LUN 0 exists. Wait for the block device (up to ~5 min) before touching it,
+      # so we never format/mount a missing disk and skip the data dirs.
+      for _ in $(seq 1 60); do [ -b "$DEV" ] && break; sleep 5; done
+      if [ ! -b "$DEV" ]; then
+        echo "argus-mount-data: data disk $DEV did not attach within 5min" >&2
+        exit 1
+      fi
       # First run: format if the disk has no filesystem yet (NEVER reformat an existing one).
       if ! blkid "$DEV" >/dev/null 2>&1; then
         mkfs.ext4 -L argus-data "$DEV"
