@@ -74,9 +74,13 @@ for entry in "${SECRETS[@]}"; do
   dest="${SECRETS_DIR}/${file}"
   tmp="${SECRETS_DIR}/.tmp.${file}.$$"
 
-  resp="$(curl -fsS --max-time 15 --retry 3 --retry-connrefused --retry-delay 2 \
-    -H "Authorization: Bearer ${access_token}" \
-    "${VAULT_URL}/secrets/${kv_name}?api-version=${KV_API_VERSION}")" || {
+  # Pass the Bearer token via curl --config on STDIN (a heredoc), never -H on argv — so the Managed-Identity
+  # token can't be read from /proc/<pid>/cmdline by another process during the call.
+  resp="$(curl -fsS --max-time 15 --retry 3 --retry-connrefused --retry-delay 2 --config - \
+    "${VAULT_URL}/secrets/${kv_name}?api-version=${KV_API_VERSION}" <<EOF
+header = "Authorization: Bearer ${access_token}"
+EOF
+  )" || {
     log "FATAL: fetch failed for '${kv_name}'"
     exit 1
   }
