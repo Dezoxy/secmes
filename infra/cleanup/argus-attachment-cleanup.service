@@ -8,6 +8,10 @@ Description=argus — reap expired encrypted attachments (Backblaze B2 + DB)
 Documentation=https://github.com/Dezoxy/secmes/blob/main/docs/threat-models/encrypted-attachments.md
 After=network-online.target
 Wants=network-online.target
+# The LoadCredential sources below are delivered by argus-secrets.service (Key Vault → /run/argus/secrets via
+# the Managed Identity). Gate on it so a missing secret fails closed instead of starting on a stale file.
+Requires=argus-secrets.service
+After=argus-secrets.service
 
 [Service]
 Type=oneshot

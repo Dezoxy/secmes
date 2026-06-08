@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# argus — fetch runtime secrets from Azure Key Vault via the VM Managed Identity → credential FILES.
+#
+# Runs as a boot-time systemd oneshot (argus-secrets.service), BEFORE the Compose stack + the backup/cleanup
+# units. It is the "separate fetch step" the backup/cleanup units already reference: it materialises
+# /run/argus/secrets/* from Key Vault. The stack + workers then read those files (compose Docker secrets /
+# *_FILE env / systemd LoadCredential). See infra/vm/secrets/README.md + docs/threat-models/vm-secrets.md.
+#
+# Security model:
+#   - NO static credentials. The access token is minted by the VM's Managed Identity via IMDS
+#     (169.254.169.254) — link-local, on-box only — and is scoped to vault.azure.net (read).
+#   - Secret VALUES are written to tmpfs (/run, never disk-backed) at mode 0400 owned by root: read by the
+#     Docker daemon and by systemd LoadCredential (both root). Values are written ATOMICALLY (temp + mv) and
+#     are NEVER exported to the environment (so not in /proc/<pid>/environ, not inherited by children) nor
+#     placed in argv. Logs carry secret NAMES + HTTP status ONLY — never a value (invariant #2/#5).
+#   - FAIL CLOSED: any failed fetch or empty value exits non-zero. The stack/backup units declare
+#     Requires=argus-secrets.service, so they never start on a stale/missing secret.
+#
+# Requires: curl + jq (installed by cloud-init). Config via the systemd unit's Environment=:
+#   ARGUS_KEY_VAULT   the Key Vault NAME (non-secret), e.g. argus-kv-ab12cd  [required]
+#   ARGUS_SECRETS_DIR target dir (default /run/argus/secrets)
+set -euo pipefail
+
+SECRETS_DIR="${ARGUS_SECRETS_DIR:-/run/argus/secrets}"
+: "${ARGUS_KEY_VAULT:?ARGUS_KEY_VAULT required (the Key Vault name)}"
+KV_API_VERSION="${KV_API_VERSION:-7.4}"
+IMDS_URL="http://169.254.169.254/metadata/identity/oauth2/token"
+VAULT_URL="https://${ARGUS_KEY_VAULT}.vault.azure.net"
+
+# Key Vault secret name -> local credential filename (in $SECRETS_DIR). KV names are kebab-case (Key Vault
+# disallows underscores); local filenames match what each consumer expects:
+#   compose Docker secrets: postgres_password, database_url, s3_secret_access_key
+#   cloudflared runtime value (stack launcher reads it): tunnel_token
+#   backup/cleanup LoadCredential sources: backup-db-password, cleanup-db-password, b2-app-key
+SECRETS=(
+  "argus-postgres-owner-password=postgres_password"
+  "argus-database-url=database_url"
+  "argus-s3-secret-access-key=s3_secret_access_key"
+  "argus-tunnel-token=tunnel_token"
+  "argus-backup-db-password=backup-db-password"
+  "argus-cleanup-db-password=cleanup-db-password"
+  "argus-b2-app-key=b2-app-key"
+)
+
+log() { printf 'argus-secrets: %s\n' "$*" >&2; } # names/status only — NEVER a secret value
+
+cleanup() { rm -f "${SECRETS_DIR}"/.tmp.* 2>/dev/null || true; }
+trap cleanup EXIT
+
+# Under the systemd unit, `RuntimeDirectory=argus/secrets` already created this dir (root:root 0700) before
+# ExecStart — surviving a reboot that wipes /run. This install -d is just a fallback for a MANUAL run outside
+# systemd; root:root 0700 with NO chgrp (the unit's empty CapabilityBoundingSet drops CAP_CHOWN, and the
+# secret files are 0400 read by root consumers anyway, so the `argus` group was never needed).
+install -d -m 0700 "$SECRETS_DIR"
+umask 0077
+
+# --- 1. Managed-Identity access token for Key Vault (no static creds). ---
+token_json="$(curl -fsS --max-time 15 --retry 3 --retry-connrefused --retry-delay 2 -H 'Metadata: true' \
+  "${IMDS_URL}?api-version=2018-02-01&resource=https%3A%2F%2Fvault.azure.net")" || {
+  log "FATAL: could not obtain a Managed Identity token from IMDS"
+  exit 1
+}
+access_token="$(printf '%s' "$token_json" | jq -r '.access_token // empty')"
+token_json=""
+[ -n "$access_token" ] || {
+  log "FATAL: IMDS returned no access_token"
+  exit 1
+}
+
+# --- 2. Fetch each secret → atomic 0400 root file. Fail closed on the first error. ---
+for entry in "${SECRETS[@]}"; do
+  kv_name="${entry%%=*}"
+  file="${entry##*=}"
+  dest="${SECRETS_DIR}/${file}"
+  tmp="${SECRETS_DIR}/.tmp.${file}.$$"
+
+  # Pass the Bearer token via curl --config on STDIN (a heredoc), never -H on argv — so the Managed-Identity
+  # token can't be read from /proc/<pid>/cmdline by another process during the call.
+  resp="$(curl -fsS --max-time 15 --retry 3 --retry-connrefused --retry-delay 2 --config - \
+    "${VAULT_URL}/secrets/${kv_name}?api-version=${KV_API_VERSION}" <<EOF
+header = "Authorization: Bearer ${access_token}"
+EOF
+  )" || {
+    log "FATAL: fetch failed for '${kv_name}'"
+    exit 1
+  }
+  # $(...) strips the trailing newline jq -r emits, so no spurious newline lands in the file (Postgres reads
+  # POSTGRES_PASSWORD_FILE verbatim — a trailing newline would corrupt the password).
+  value="$(printf '%s' "$resp" | jq -r '.value // empty')"
+  resp=""
+  [ -n "$value" ] || {
+    log "FATAL: '${kv_name}' is missing or empty in Key Vault"
+    exit 1
+  }
+
+  printf '%s' "$value" >"$tmp"
+  value=""
+  chmod 0400 "$tmp"
+  mv -f "$tmp" "$dest" # atomic replace (rotation-safe)
+  log "delivered ${kv_name} -> ${file}"
+done
+
+access_token=""
+log "all secrets delivered to ${SECRETS_DIR}"
