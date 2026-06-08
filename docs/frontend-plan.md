@@ -56,7 +56,7 @@ Rules:
 - Keep **Zitadel** as the auth provider.
 - Keep **passkey-first** as the preferred user-facing login direction.
 - Keep **Tailwind v4**, but move shared visual decisions into Argus tokens and reusable components.
-- Do not add React Router or TanStack Router unless route complexity clearly requires it. Prefer the current lightweight route switch until it becomes a real constraint.
+- Keep the existing `react-router-dom` `BrowserRouter`/`Routes` boundary and extend it for the planned route split. Do not add another routing library or parallel custom route switch unless route complexity clearly requires it.
 
 ## Local Dev URL Rule
 
@@ -335,7 +335,7 @@ git commit -m "refactor(web): adopt shared ui primitives"
 - [ ] Add route shells for settings, security, devices, and storage.
 - [ ] Route components own layout boundaries.
 - [ ] Route components must not make direct untyped backend calls.
-- [ ] Do not add a router dependency unless route complexity clearly requires it.
+- [ ] Extend the existing `react-router-dom` route configuration instead of adding another router dependency or a parallel custom route switch.
 
 **Verification:**
 
