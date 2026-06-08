@@ -143,7 +143,34 @@ log "starting api + caddy + cloudflared"
 TUNNEL_TOKEN="$(cat "$SECRETS_DIR/tunnel_token")" \
   docker compose -f "$COMPOSE" up -d
 
+# --- 6b. Gate on the new app containers becoming HEALTHY — `up -d` returns before they're ready, so without
+#         this a crash-looping rollout would report success. A timeout/unhealthy fails the deploy (set -e),
+#         so the run-command surfaces it instead of silently leaving the old/broken stack. ---
+wait_healthy() { # $1 = compose service
+  local cid
+  cid="$(docker compose -f "$COMPOSE" ps -q "$1")"
+  [ -n "$cid" ] || {
+    log "FATAL: $1 container not found after rollout"
+    return 1
+  }
+  for _ in $(seq 1 60); do
+    case "$(docker inspect -f '{{.State.Health.Status}}' "$cid" 2>/dev/null)" in
+    healthy) return 0 ;;
+    unhealthy)
+      log "FATAL: $1 became unhealthy"
+      return 1
+      ;;
+    esac
+    sleep 2
+  done
+  log "FATAL: $1 did not become healthy within the rollout window"
+  return 1
+}
+log "waiting for the rollout to become healthy (api, caddy)"
+wait_healthy api
+wait_healthy caddy
+
 # --- 7. Tidy up: drop the registry login + dangling images. ---
 docker logout "$GHCR_HOST" >/dev/null 2>&1 || true
 docker image prune -f >/dev/null 2>&1 || true
-log "deploy complete (${IMAGE_TAG})"
+log "deploy complete + healthy (${IMAGE_TAG})"
