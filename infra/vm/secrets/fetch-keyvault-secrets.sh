@@ -47,8 +47,12 @@ log() { printf 'argus-secrets: %s\n' "$*" >&2; } # names/status only — NEVER a
 cleanup() { rm -f "${SECRETS_DIR}"/.tmp.* 2>/dev/null || true; }
 trap cleanup EXIT
 
-# Ensure the tmpfs target exists (cloud-init creates it; be idempotent for manual runs).
-install -d -o root -g argus -m 0750 "$SECRETS_DIR"
+# Ensure the tmpfs target exists, recreating it after a post-first-boot reboot (/run is wiped and cloud-init's
+# runcmd doesn't re-run). Create it root:root 0700 with NO chgrp: this unit runs with an empty
+# CapabilityBoundingSet, and a chgrp to the `argus` group needs CAP_CHOWN (root isn't a member) — it would
+# EPERM and the fetch would abort. root:root is correct anyway: the secret files are 0400 and every consumer
+# (the Docker daemon, systemd LoadCredential) is root.
+install -d -m 0700 "$SECRETS_DIR"
 umask 0077
 
 # --- 1. Managed-Identity access token for Key Vault (no static creds). ---
