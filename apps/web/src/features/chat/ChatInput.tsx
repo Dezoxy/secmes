@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Send, Paperclip, Image as ImageIcon, Plus, Smile, X } from 'lucide-react';
+import { IconButton } from '../ui';
 
 interface ChatInputProps {
   onSend: (content: string, attachments?: File[]) => void;
@@ -129,13 +130,15 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
                   </span>
                 </div>
               )}
-              <button
-                type="button"
+              <IconButton
                 onClick={() => removeAttachment(index)}
-                className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+                variant="danger"
+                size="xs"
+                className="absolute -top-2 -right-2 h-5 w-5 rounded-full bg-red-500 text-white opacity-0 transition-opacity duration-200 hover:bg-red-500/90 group-hover:opacity-100"
+                aria-label={`Remove ${file.name}`}
               >
                 <X className="w-3 h-3 text-white" />
-              </button>
+              </IconButton>
             </div>
           ))}
         </div>
@@ -158,8 +161,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
             onChange={handleFileSelect}
             multiple
           />
-          <button
-            type="button"
+          <IconButton
             onClick={() => setActionMenuOpen((open) => !open)}
             className={`${COMPOSER_CONTROL} flex w-11 items-center justify-center bg-[#1a1a26] text-white/45 hover:border-purple-500/30 hover:text-white/80`}
             aria-label="Open message actions"
@@ -171,7 +173,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
                 actionMenuOpen ? 'rotate-45' : ''
               }`}
             />
-          </button>
+          </IconButton>
 
           <div
             className={`absolute bottom-full left-0 z-20 mb-3 w-48 origin-bottom-left rounded-2xl border border-white/10 bg-[#151520] p-2 shadow-2xl shadow-black/40 transition-all duration-200 ease-out motion-reduce:transition-none ${
@@ -223,14 +225,14 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
           />
         </div>
 
-        <button
-          type="button"
+        <IconButton
           onClick={handleSend}
           disabled={!message.trim() && attachments.length === 0}
           className={`${COMPOSER_CONTROL} flex w-11 shrink-0 items-center justify-center bg-purple-500 shadow-lg shadow-purple-500/25 hover:-translate-y-0.5 hover:bg-purple-400 hover:shadow-purple-500/40 active:translate-y-0 disabled:cursor-not-allowed disabled:bg-purple-500/50 disabled:shadow-none disabled:translate-y-0`}
+          aria-label="Send message"
         >
           <Send className="w-5 h-5 text-white" />
-        </button>
+        </IconButton>
       </div>
     </div>
   );

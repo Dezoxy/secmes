@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
 type IconButtonVariant = 'ghost' | 'subtle' | 'danger';
-type IconButtonSize = 'sm' | 'md';
+type IconButtonSize = 'xs' | 'sm' | 'md' | 'lg';
 
 interface IconButtonProps extends Omit<
   ButtonHTMLAttributes<HTMLButtonElement>,
@@ -24,8 +24,10 @@ const variants: Record<IconButtonVariant, string> = {
 };
 
 const sizes: Record<IconButtonSize, string> = {
+  xs: 'p-0.5',
   sm: 'p-1.5',
   md: 'p-2',
+  lg: 'p-2.5',
 };
 
 function joinClasses(...classes: Array<string | false | undefined>): string {

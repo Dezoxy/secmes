@@ -7,8 +7,8 @@ import {
   getConversationAvatar,
   getOtherParticipant,
   formatMessageTime,
-  safeAvatarSrc,
 } from './seed';
+import { Avatar, Button } from '../ui';
 
 interface ConversationListProps {
   conversations: Conversation[];
@@ -82,13 +82,13 @@ export function ConversationList({
           className="w-full flex items-center gap-3 p-2 rounded-xl hover:bg-[#1a1a26] transition-all duration-300 group"
         >
           <div className="relative shrink-0">
-            <div className="w-10 h-10 rounded-full overflow-hidden ring-2 ring-purple-500/50">
-              <img
-                src={safeAvatarSrc(currentUserProfile.avatar, currentUserProfile.name)}
-                alt={currentUserProfile.name}
-                className="object-cover w-full h-full"
-              />
-            </div>
+            <Avatar
+              src={currentUserProfile.avatar}
+              name={currentUserProfile.name}
+              size="md"
+              shape="circle"
+              className="ring-2 ring-purple-500/50"
+            />
             <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full ring-2 ring-[#12121a]" />
           </div>
           <div className="flex-1 min-w-0 text-left">
@@ -106,14 +106,14 @@ export function ConversationList({
       {/* New Conversation */}
       {onNewConversation && (
         <div className="px-4 pt-4 pb-2">
-          <button
-            type="button"
+          <Button
             onClick={onNewConversation}
-            className="w-full flex items-center justify-center gap-2 bg-purple-500 hover:bg-purple-400 text-white font-medium py-2.5 rounded-xl transition-all duration-300 text-sm shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 hover:-translate-y-0.5 active:translate-y-0"
+            size="lg"
+            className="w-full shadow-purple-500/25 hover:-translate-y-0.5 hover:shadow-purple-500/40 active:translate-y-0"
           >
             <Plus className="w-4 h-4" />
             New Conversation
-          </button>
+          </Button>
         </div>
       )}
 
@@ -187,9 +187,13 @@ export function ConversationList({
               }`}
             >
               <div className="relative shrink-0">
-                <div className="w-12 h-12 rounded-full overflow-hidden ring-2 ring-white/5">
-                  <img src={avatar} alt={displayName} className="object-cover w-full h-full" />
-                </div>
+                <Avatar
+                  src={avatar}
+                  name={displayName}
+                  size="lg"
+                  shape="circle"
+                  className="ring-2 ring-white/5"
+                />
                 {isOnline && (
                   <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 rounded-full ring-2 ring-[#12121a]" />
                 )}
