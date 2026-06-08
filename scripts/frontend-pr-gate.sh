@@ -144,6 +144,22 @@ import sys
 from datetime import datetime, timezone
 
 CODEX_LOGIN = "chatgpt-codex-connector"
+CLEAN_COMMENT_MARKERS = (
+    "didn't find any major issues",
+    "did not find any major issues",
+)
+FAILURE_COMMENT_MARKERS = (
+    "try @codex review again",
+    "try again",
+    "failed",
+    "failure",
+    "error",
+    "couldn't",
+    "could not",
+    "unable to",
+    "timed out",
+    "rate limit",
+)
 
 head_oid = sys.argv[1]
 triggered_at = sys.argv[2]
@@ -151,6 +167,19 @@ payload_file = sys.argv[3]
 
 def parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+def normalized_body(value: str) -> str:
+    return " ".join(value.lower().split())
+
+def is_clean_codex_comment(body: str) -> bool:
+    normalized = normalized_body(body)
+    return any(marker in normalized for marker in CLEAN_COMMENT_MARKERS)
+
+def is_failed_codex_result_comment(body: str) -> bool:
+    normalized = normalized_body(body)
+    return normalized.startswith("codex review:") and any(
+        marker in normalized for marker in FAILURE_COMMENT_MARKERS
+    )
 
 triggered = parse_time(triggered_at)
 with open(payload_file, "r", encoding="utf-8") as fh:
@@ -175,14 +204,24 @@ for comment in pr["comments"]["nodes"]:
         continue
     if parse_time(comment["createdAt"]) < triggered:
         continue
-    if body.startswith("Codex Review:") or "Didn't find any major issues" in body:
+    if is_clean_codex_comment(body):
         print(f"Codex clean-result comment detected at {comment['createdAt']}: {comment['url']}")
         sys.exit(0)
+    if is_failed_codex_result_comment(body):
+        print(f"Codex failed-result comment detected at {comment['createdAt']}: {comment['url']}", file=sys.stderr)
+        sys.exit(2)
+    if normalized_body(body).startswith("codex review:"):
+        print(f"Codex returned an unknown non-clean result at {comment['createdAt']}: {comment['url']}", file=sys.stderr)
+        sys.exit(2)
 
 sys.exit(1)
 PY
   local status=$?
   rm -f "$payload_file"
+  if [[ "$status" == "2" ]]; then
+    echo "Codex did not return an accepted review result; refusing to continue." >&2
+    exit 1
+  fi
   return "$status"
 }
 
