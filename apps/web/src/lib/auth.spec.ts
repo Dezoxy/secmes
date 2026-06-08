@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createMemoryStorage } from './auth';
+import { createMemoryStorage, subjectFromUser } from './auth';
 
 // The §8 invariant: the OIDC user/token store is in-memory only (never the browser's persistent
 // storage), so an XSS can't lift a token from there. The store is wired into the UserManager's
@@ -24,5 +24,30 @@ describe('in-memory OIDC token store', () => {
     const b = createMemoryStorage();
     a.setItem('x', '1');
     expect(b.getItem('x')).toBeNull();
+  });
+});
+
+describe('OIDC subject extraction', () => {
+  it('uses only the stable subject claim for local storage scoping', () => {
+    expect(
+      subjectFromUser({
+        profile: {
+          sub: 'zitadel-subject-123',
+          email: 'alice@example.test',
+          name: 'Alice Example',
+        },
+      }),
+    ).toBe('zitadel-subject-123');
+  });
+
+  it('does not fall back to email or display name as an identity scope', () => {
+    expect(
+      subjectFromUser({
+        profile: {
+          email: 'alice@example.test',
+          name: 'Alice Example',
+        },
+      }),
+    ).toBeNull();
   });
 });

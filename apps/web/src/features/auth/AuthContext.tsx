@@ -6,6 +6,7 @@ import {
   userManager,
   login as oidcLogin,
   logout as oidcLogout,
+  subjectFromUser,
 } from '../../lib/auth';
 import { establishSession, type Me } from '../../lib/api';
 
@@ -15,6 +16,8 @@ interface AuthState {
   /** Initial session restore finished — render gated routes only after this. */
   ready: boolean;
   user: User | null;
+  /** Stable authenticated subject, used only for storage scoping and auth boundaries. */
+  subjectId: string | null;
   /** Server profile from /me after JIT provisioning (null until fetched / if the API is unreachable). */
   profile: Me | null;
   login: () => Promise<void>;
@@ -71,6 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
     configured: oidcConfigured,
     ready,
     user,
+    subjectId: profile?.userId ?? subjectFromUser(user),
     profile,
     login: oidcLogin,
     logout: oidcLogout,
