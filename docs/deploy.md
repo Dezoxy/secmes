@@ -58,8 +58,13 @@ No secret values live in the repo. Data-plane secrets are delivered as **mounted
 secrets at `/run/secrets/*`), which the app reads via `*_FILE` env vars (invariant #5 — never the value in
 env):
 
-- `secrets/postgres_password` → Postgres reads it via `POSTGRES_PASSWORD_FILE`.
-- `secrets/database_url` → the api reads it via `DATABASE_URL_FILE` (full URL incl. the DB password).
+- `secrets/postgres_password` → Postgres reads it via `POSTGRES_PASSWORD_FILE` (the **owner** account, for
+  init + migrations).
+- `secrets/database_url` → the api reads it via `DATABASE_URL_FILE`. This DSN **must** use the non-bypass
+  runtime role `argus_app` (`postgres://argus_app:<pw>@postgres:5432/argus`), **not** the `argus` owner — so
+  RLS and grants still bind on any query path that misses `SET LOCAL ROLE` or under app compromise. Slice 3
+  grants `argus_app` LOGIN + a Key Vault password (migration 0001 creates it NOLOGIN); the owner credential
+  stays separate, used only for migrations (Slice 4 `MIGRATION_DATABASE_URL`).
 - `secrets/s3_secret_access_key` → the api reads it via `S3_SECRET_ACCESS_KEY_FILE` (the B2 key secret).
 
 The **`TUNNEL_TOKEN`** is the one secret that can't be a mounted file — the cloudflared image has no shell and

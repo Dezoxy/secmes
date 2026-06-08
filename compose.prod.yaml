@@ -28,7 +28,9 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
-    # Password from a mounted credential file, never inline/env (invariant #5).
+    # Bootstrap OWNER account (init + migrations). The API does NOT connect as this role — it uses the
+    # non-bypass runtime role argus_app (see the api service's DATABASE_URL_FILE). Password from a mounted
+    # credential file, never inline/env (invariant #5).
     environment:
       POSTGRES_USER: argus
       POSTGRES_DB: argus
@@ -108,6 +110,8 @@ services:
       # The app reads the password-bearing connection URL and the B2 secret key from mounted credential
       # files (Docker secrets at /run/secrets/*). On the VM these are systemd-delivered from Key Vault via
       # the Managed Identity (Slice 3). REDIS_URL is non-secret (no auth — internal-only redis).
+      # database_url MUST be the non-bypass RUNTIME role argus_app (not the argus owner) — least privilege so
+      # RLS/grants bind even off the SET-LOCAL-ROLE path. See .env.prod.example + docs/deploy.md.
       DATABASE_URL_FILE: /run/secrets/database_url
       S3_SECRET_ACCESS_KEY_FILE: /run/secrets/s3_secret_access_key
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
