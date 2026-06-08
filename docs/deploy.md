@@ -77,7 +77,9 @@ Threat model: [`docs/threat-models/vm-cd.md`](threat-models/vm-cd.md).
 
 **Repo vars/secrets** (from the Terraform outputs): secrets `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/
 `AZURE_SUBSCRIPTION_ID`; vars `AZURE_RESOURCE_GROUP`/`AZURE_VM_NAME`/`KEY_VAULT_NAME` + build-time
-`VITE_OIDC_*`; and `ENABLE_DEPLOY=true` to arm it. GHCR push uses the built-in `GITHUB_TOKEN`.
+`VITE_OIDC_*`; and `ENABLE_DEPLOY=true` to arm it. GHCR **push** uses the built-in `GITHUB_TOKEN`; the VM's
+GHCR **pull** uses the `argus-ghcr-token` PAT from Key Vault — set `vars.GHCR_USER` to the account that owns
+that PAT if it isn't the repo owner (the default).
 
 ## Cloudflare tunnel ingress (dashboard-managed)
 

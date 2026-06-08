@@ -117,7 +117,10 @@ jobs:
         env:
           GHCR_OWNER: ${{ github.repository_owner }}
           KEY_VAULT: ${{ vars.KEY_VAULT_NAME }}
-          GHCR_USER: ${{ github.actor }}
+          # The GHCR pull login username must be the account that OWNS the `argus-ghcr-token` PAT — NOT the
+          # workflow actor (github.actor changes per tag-pusher and would mismatch the token owner). Defaults
+          # to the repo owner; override with vars.GHCR_USER if the PAT belongs to a different/bot account.
+          GHCR_USER: ${{ vars.GHCR_USER || github.repository_owner }}
         run: |
           set -euo pipefail
           tar czf deploy-bundle.tgz compose.prod.yaml infra/vm/secrets infra/vm/deploy
