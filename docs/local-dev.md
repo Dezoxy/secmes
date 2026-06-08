@@ -38,7 +38,7 @@ Production is the **same Compose stack** on the single Azure VM, so the mapping 
 | `minio` | Backblaze B2 (S3-compatible) |
 | `api` (built image) | `api` container on the VM (same image) |
 
-The local `compose.yaml` and the prod `compose.prod.yaml` share the same services — keep them in sync; the differences are config (B2 vs MinIO, Cloudflare Tunnel ingress, Key Vault secrets) not architecture.
+Production will run the same services from a `compose.prod.yaml` (added with the VM deploy track) — the differences will be config (B2 vs MinIO, Cloudflare Tunnel ingress, Key Vault secrets), not architecture. Until then, `compose.yaml` is the single source.
 
 ## Develop against it from the host (hot reload)
 
