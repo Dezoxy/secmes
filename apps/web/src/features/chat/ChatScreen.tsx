@@ -2,21 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MessageCircle } from 'lucide-react';
 import type { Conversation as MlsGroup } from '@argus/crypto';
 import type { UserSummary } from '../../lib/api';
-import { uploadAttachment } from '../../lib/attachments';
-import { accessToken } from '../../lib/auth';
 import { ConversationManager, type ConversationSession } from '../../lib/conversations';
-import { joinPendingConversations } from '../../lib/join';
-import { GroupStateConflict, type StoredMessage } from '../../lib/keystore';
+import type { StoredMessage } from '../../lib/keystore';
 import type { AttachmentRef } from '../../lib/message-envelope';
 import {
   backfillConversation,
-  receiveLiveMessage,
-  sendLiveMessage,
   type DecryptedMessage,
   type MessagingDeps,
 } from '../../lib/messaging';
 import { getMlsSession } from '../../lib/mls';
-import { createMessageSocket, type MessageSocket } from '../../lib/ws';
 import { useAuth } from '../auth/AuthContext';
 import { useDevice } from '../device/DeviceContext';
 import { ConversationList } from './ConversationList';
@@ -28,6 +22,8 @@ import { StartConversation } from './StartConversation';
 import { contactDisplayName } from './user-label';
 import { VerifySecurity } from './VerifySecurity';
 import { useChatState } from './useChatState';
+import { liveConversationShell, useLiveConversations } from './useLiveConversations';
+import { useMessageSending } from './useMessageSending';
 import { loadArgusProfile, saveArgusProfile } from '../settings/argus-profile';
 import { SettingsPanel, type AnonymousProfile } from '../settings/SettingsPanel';
 import type { Attachment, Conversation, Message, User } from './seed';
@@ -51,26 +47,6 @@ const DEMO_PROFILE_SUBJECT = 'demo-local';
  * ciphertext; it needs the key directory + out-of-band fingerprint verification (#20). No plaintext
  * leaves the browser. The settings button opens profile, privacy, and key-recovery controls.
  */
-function fileToDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error('failed to read file'));
-    reader.readAsDataURL(file);
-  });
-}
-
-// Local data-URI attachment (never an object URL or server URL). Images render inline; other files
-// become a chip. Attachments are demo-local — only the text body goes through the MLS round-trip.
-async function toAttachment(file: File): Promise<Attachment> {
-  const id = `att-${crypto.randomUUID()}`;
-  const size = `${(file.size / 1024 / 1024).toFixed(1)} MB`;
-  if (file.type.startsWith('image/')) {
-    return { id, type: 'image', url: await fileToDataUrl(file), name: file.name, size };
-  }
-  return { id, type: 'file', url: '#', name: file.name, size };
-}
-
 // A live (E2E) attachment ref → a UI attachment. Images download+decrypt lazily from `ref` (no `url`); files
 // get a chip with a working Download. Used for received messages + rehydrated history.
 function refToUiAttachment(ref: AttachmentRef): Attachment {
@@ -124,24 +100,6 @@ function withCurrentUserProfile(conversation: Conversation, profile: User): Conv
   };
 }
 
-function liveConversationShell(conversationId: string, selfUser: User): Conversation {
-  return {
-    id: conversationId,
-    type: 'direct',
-    participants: [
-      selfUser,
-      {
-        id: `peer-${conversationId}`,
-        name: 'New contact',
-        avatar: generatedAvatar(conversationId),
-        isOnline: false,
-      },
-    ],
-    messages: [],
-    unreadCount: 0,
-  };
-}
-
 export default function ChatScreen() {
   const [mounted, setMounted] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>(initialConversations);
@@ -185,26 +143,11 @@ export default function ChatScreen() {
     [messagingDeps, profile],
   );
   const [startOpen, setStartOpen] = useState(false);
-  // LIVE conversations (real MLS over the network): started via the manager, joined on connect, or rehydrated
-  // on unlock. `liveIds` drives the UI checks; `liveGroups` retains each in-memory MLS group for send/fetch.
-  // `fetchCursors` is the per-conversation keyset high-water mark so re-opening fetches only newer messages.
-  const [liveIds, setLiveIds] = useState<Set<string>>(() => new Set());
-  const liveGroups = useRef(new Map<string, MlsGroup>());
+  // Backfill/history refs stay local until Step 12D extracts the history path.
   const fetchCursors = useRef(new Map<string, string>());
   const backfilling = useRef(new Set<string>());
   const backfillPending = useRef(new Set<string>());
-  const socketRef = useRef<MessageSocket | null>(null);
-  const joinRanRef = useRef(false);
   const rehydratedRef = useRef(false);
-  // Read-only selected chat state is derived in a hook; mutation/live handlers stay local.
-  const { selectedConversation, isDirect, selectedIsLive, currentNumber, verified, isLive } =
-    useChatState({
-      conversations,
-      selectedId,
-      liveIds,
-      numbersByConv,
-      verifiedByConv,
-    });
 
   // Persist messages to the local SEALED history log (fire-and-forget; upsert by id). Plaintext in →
   // sealed at rest under the session key. Only LIVE conversations call this (seed/demo convs aren't logged).
@@ -310,14 +253,35 @@ export default function ChatScreen() {
     [messagingDeps, mergeIncoming],
   );
 
-  // Register a live conversation's MLS group and mark its id live (idempotent). The ref holds the group for
-  // encrypt/decrypt; the id set is React state so the UI re-renders (enables the composer, drives `isLive`).
-  // Also subscribe it on the realtime socket so the gateway pushes its messages.
-  const addLive = (conversationId: string, conversation: MlsGroup): void => {
-    liveGroups.current.set(conversationId, conversation);
-    setLiveIds((prev) => (prev.has(conversationId) ? prev : new Set(prev).add(conversationId)));
-    socketRef.current?.subscribe(conversationId);
-  };
+  const { liveIds, liveGroups, addLive } = useLiveConversations({
+    device,
+    pool,
+    deviceId,
+    messagingDeps,
+    selfUserId: profile?.userId,
+    currentUserProfile,
+    mergeIncoming,
+    backfillInto,
+    setConversations,
+  });
+
+  const { selectedConversation, isDirect, selectedIsLive, currentNumber, verified, isLive } =
+    useChatState({
+      conversations,
+      selectedId,
+      liveIds,
+      numbersByConv,
+      verifiedByConv,
+    });
+
+  const handleSend = useMessageSending({
+    selectedId,
+    isLive,
+    liveGroups,
+    messagingDeps,
+    appendHistory,
+    setConversations,
+  });
 
   useEffect(() => {
     setMounted(true);
@@ -376,35 +340,6 @@ export default function ChatScreen() {
     setStartOpen(false);
   };
 
-  // Join on connect (Slice 4 + 5B): once unlocked + provisioned, drain pending Welcomes into live
-  // conversations — now persisting each group (5A) then consuming its Welcome + pruning the spent private.
-  // Runs once per session. onJoined surfaces each joined conversation (placeholder peer — the inviter's
-  // identity isn't in the welcome list; join-conversation.md §6) and retains its MLS group for send/fetch.
-  useEffect(() => {
-    if (!device || !pool || !deviceId || !messagingDeps || joinRanRef.current) return;
-    joinRanRef.current = true;
-    joinPendingConversations({
-      device,
-      pool,
-      deviceId,
-      keystore: messagingDeps.keystore,
-      passphrase: messagingDeps.passphrase,
-      onJoined: ({ conversationId, conversation }) => {
-        addLive(conversationId, conversation);
-        setConversations((prev) =>
-          prev.some((c) => c.id === conversationId)
-            ? prev
-            : [liveConversationShell(conversationId, currentUserProfile), ...prev],
-        );
-      },
-    }).catch((err: unknown) => {
-      // A whole-drain failure (e.g. listWelcomes errored) is not retried this session; it rides the next
-      // unlock and Slice 5C's reconnect-sync. Per-Welcome failures are already isolated inside the drain.
-      // eslint-disable-next-line no-console
-      console.warn('join-on-connect drain failed', err instanceof Error ? err.message : err);
-    });
-  }, [device, pool, deviceId, messagingDeps, currentUserProfile]);
-
   // Rehydrate on unlock (Slice 5 + history): load every persisted conversation's sealed group state into a
   // live MLS group, seed its decrypted history from the sealed message log, and surface it. The group state
   // is how a conversation comes back (not a re-join); the message log is how its PLAINTEXT history comes back
@@ -438,7 +373,7 @@ export default function ChatScreen() {
         console.warn('rehydrate conversations failed', err instanceof Error ? err.message : err);
       }
     })();
-  }, [messagingDeps, sessionKey, currentUserProfile]);
+  }, [addLive, messagingDeps, sessionKey, currentUserProfile]);
 
   // Compute the selected DIRECT conversation's own safety number (from its own loopback session), once.
   // LIVE conversations are skipped — a started one already holds its REAL number, and none should spin up a
@@ -465,190 +400,9 @@ export default function ChatScreen() {
     void backfillInto(selectedId, group, selfUserId);
   }, [selectedId, selectedIsLive, profile?.userId, backfillInto]);
 
-  // Realtime push (Slice 5C): one reconnecting WebSocket to the `/ws` gateway, authenticated in the first
-  // frame (never a token in the URL). It pushes ciphertext for the conversations we subscribe (each live
-  // group, via addLive). On a message we decrypt + persist + merge (deduped by server id). Catch-up runs
-  // per conversation on its `subscribed` ACK — only then is the socket in the gateway's room, so no message
-  // can slip between the catch-up fetch and the live subscription.
-  useEffect(() => {
-    if (!messagingDeps || !profile?.userId) return;
-    const deps = messagingDeps;
-    const selfUserId = profile.userId;
-    const socket = createMessageSocket({
-      token: accessToken,
-      onMessage: ({ conversationId, message }) => {
-        const group = liveGroups.current.get(conversationId);
-        if (!group) return; // a conversation we hold no keys for — ignore (can't decrypt)
-        void receiveLiveMessage(deps, conversationId, group, message, selfUserId)
-          .then((decrypted) => {
-            if (decrypted) mergeIncoming(conversationId, [decrypted]);
-          })
-          .catch((err: unknown) => {
-            // eslint-disable-next-line no-console
-            console.warn(
-              'ws receive failed',
-              conversationId,
-              err instanceof Error ? err.message : err,
-            );
-          });
-      },
-      onSubscribed: (conversationId) => {
-        const group = liveGroups.current.get(conversationId);
-        if (group) void backfillInto(conversationId, group, selfUserId);
-      },
-    });
-    socketRef.current = socket;
-    for (const id of liveGroups.current.keys()) socket.subscribe(id); // subscribe any already-live convs
-    return () => {
-      socket.close();
-      socketRef.current = null;
-    };
-  }, [messagingDeps, profile, backfillInto, mergeIncoming]);
-
   const handleSelect = (id: string) => {
     setSelectedId(id);
     if (window.innerWidth < 1024) setShowSidebar(false);
-  };
-
-  const patchMessage = (convId: string, msgId: string, patch: Partial<Message>): void => {
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === convId
-          ? { ...c, messages: c.messages.map((m) => (m.id === msgId ? { ...m, ...patch } : m)) }
-          : c,
-      ),
-    );
-  };
-
-  // Live send (Slice 5 + attachments A3): encrypt → persist the advanced ratchet → POST the ciphertext (all
-  // under the conversation's single-writer lock, in lib/messaging). The local bubble echoes optimistically;
-  // the peer receives it via the live push / its next fetch. Attachment `refs` (already uploaded by the
-  // caller) ride E2E inside the MLS envelope; `echo` renders the just-sent images locally without a refetch.
-  const sendLive = (
-    convId: string,
-    group: MlsGroup,
-    deps: MessagingDeps,
-    content: string,
-    files: File[] = [],
-  ): void => {
-    const id = `msg-${crypto.randomUUID()}`;
-    const timestamp = new Date();
-    const ts = timestamp.toISOString();
-    // Filled after a successful upload, so a 'sent' history entry persists the refs (for reload).
-    let refs: AttachmentRef[] = [];
-    const logSend = (status: string, encrypted = false): void =>
-      appendHistory(convId, [
-        {
-          id,
-          senderId: currentUser.id,
-          content,
-          timestamp: ts,
-          status,
-          encrypted,
-          attachments: refs.length ? refs : undefined,
-        },
-      ]);
-    void (async () => {
-      // Optimistic echo from the LOCAL bytes (data URIs for images). The bubble is created BEFORE the upload,
-      // so a failed grant/PUT marks THIS bubble failed — the user never silently loses a message+files
-      // (ChatInput clears the draft on send).
-      const echo: Attachment[] = await Promise.all(
-        files.map(
-          async (f): Promise<Attachment> => ({
-            id: `att-${crypto.randomUUID()}`,
-            type: f.type.startsWith('image/') ? 'image' : 'file',
-            name: f.name,
-            size: `${(f.size / 1024 / 1024).toFixed(1)} MB`,
-            url: f.type.startsWith('image/') ? await fileToDataUrl(f) : undefined,
-          }),
-        ),
-      );
-      const message: Message = {
-        id,
-        senderId: currentUser.id,
-        content,
-        timestamp,
-        status: 'sending',
-        attachments: echo.length ? echo : undefined,
-      };
-      setConversations((prev) =>
-        prev.map((c) => (c.id === convId ? { ...c, messages: [...c.messages, message] } : c)),
-      );
-      logSend('sending');
-      try {
-        // Encrypt + upload each file (outside the conversation lock), then send the refs in the envelope.
-        refs = await Promise.all(files.map((f) => uploadAttachment(convId, f)));
-        await sendLiveMessage(deps, convId, group, content, refs);
-        // Attach the uploaded refs to the echo (index-aligned with `files`) so the sender can Download/open
-        // their OWN files in-session — images already render from the local data URI; the file chip's
-        // Download button needs the ref. Without this it only works after a reload rehydrates from history.
-        const sentAttachments = echo.map((a, i) => ({ ...a, ref: refs[i] }));
-        patchMessage(convId, id, {
-          status: 'sent',
-          encrypted: true,
-          attachments: sentAttachments.length ? sentAttachments : undefined,
-        });
-        logSend('sent', true);
-      } catch (err) {
-        patchMessage(convId, id, { status: 'failed' });
-        logSend('failed');
-        // GroupStateConflict = another tab advanced the durable state (rehydrate to continue); an upload
-        // grant/PUT failure lands here too — the bubble shows failed instead of dropping silently.
-        // id/metadata only in the log (never the plaintext).
-        // eslint-disable-next-line no-console
-        console.warn(
-          err instanceof GroupStateConflict
-            ? 'send: another tab is active for this conversation — reload to continue'
-            : 'send failed',
-          convId,
-          err instanceof Error ? err.message : err,
-        );
-      }
-    })();
-  };
-
-  const handleSend = (content: string, files?: File[]): void => {
-    if (!selectedId) return;
-    const convId = selectedId;
-    // Live conversations: encrypt + send for real over the network. Needs the sealing deps + a non-empty text
-    // OR at least one file; otherwise no-op rather than a false send signal.
-    if (isLive(convId)) {
-      const group = liveGroups.current.get(convId);
-      const deps = messagingDeps;
-      if (!group || !deps) return;
-      const fileList = files ?? [];
-      if (!content.trim() && fileList.length === 0) return;
-      // sendLive creates the optimistic bubble, then uploads + sends — so an upload failure marks it failed.
-      sendLive(convId, group, deps, content, fileList);
-      return;
-    }
-    const id = `msg-${crypto.randomUUID()}`; // CSPRNG id; the real client_message_id is minted the same way
-    void (async () => {
-      const attachments = files?.length ? await Promise.all(files.map(toAttachment)) : undefined;
-      const message: Message = {
-        id,
-        senderId: currentUser.id,
-        content,
-        timestamp: new Date(),
-        status: 'sending',
-        attachments,
-      };
-      setConversations((prev) =>
-        prev.map((c) => (c.id === convId ? { ...c, messages: [...c.messages, message] } : c)),
-      );
-      // Demo/seed conversations: run a REAL MLS encrypt→decrypt round-trip before marking the message sent —
-      // the recovered plaintext confirms the E2EE path and a lock shows. A failure marks the bubble failed,
-      // never sent (no false delivery signal); `encrypted` stays false so no lock shows.
-      try {
-        const session = await getMlsSession(convId);
-        await session.send(content || '(attachment)');
-        patchMessage(convId, id, { status: 'sent', encrypted: true });
-        setTimeout(() => patchMessage(convId, id, { status: 'delivered' }), 1000);
-        setTimeout(() => patchMessage(convId, id, { status: 'read' }), 2500);
-      } catch {
-        patchMessage(convId, id, { status: 'failed' });
-      }
-    })();
   };
 
   return (
