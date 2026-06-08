@@ -55,8 +55,13 @@ export async function restoreFromArtifact(
   identity: string,
   artifactJson: string,
   passphrase: string,
+  activeKeystore?: DeviceKeystore,
 ): Promise<void> {
-  const ks = await keystore();
+  // Run on the ACTIVE keystore instance when one is given (a signed-in restore), so its IN-MEMORY caches
+  // (groupStateVersions / appendChains) are reset by clearDevice along with the IndexedDB stores. Otherwise
+  // a post-remount rejoin would compare against a stale CAS version and throw GroupStateConflict, leaving the
+  // Welcome pending. The recovery singleton is the fallback for the demo / no-active-session path.
+  const ks = activeKeystore ?? (await keystore());
   try {
     await ks.importRecoveryArtifact(identity, artifactJson, passphrase);
   } catch (e) {

@@ -18,7 +18,8 @@ export async function restoreAndProvision(
   artifactJson: string,
   passphrase: string,
 ): Promise<{ device: DeviceKeys; pool: DeviceKeys[]; result: PublishResult }> {
-  await restoreFromArtifact(identity, artifactJson, passphrase);
+  // Pass the ACTIVE keystore so its in-memory caches reset with the cleared stores (no stale GroupStateConflict).
+  await restoreFromArtifact(identity, artifactJson, passphrase, keystore);
   const device = await keystore.loadDevice(identity, passphrase);
   if (!device) throw new Error('restore did not produce a device');
   // Best-effort: a failed revoke only leaves the self-healing residual — it must NOT block the restore.

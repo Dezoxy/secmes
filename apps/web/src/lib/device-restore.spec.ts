@@ -48,6 +48,13 @@ describe('restoreAndProvision', () => {
     // Revoke MUST run before provision — else it would delete the freshly-published pool.
     expect(order).toEqual(['restore', 'revoke', 'provision']);
     expect(vi.mocked(revokeKeyPackages)).toHaveBeenCalledWith('SIGPUB');
+    // The ACTIVE keystore is threaded into restore so clearDevice resets ITS caches (no GroupStateConflict).
+    expect(vi.mocked(restoreFromArtifact)).toHaveBeenCalledWith(
+      'me',
+      'ARTIFACT',
+      'pass',
+      fakeKeystore,
+    );
     expect(res.device).toBe(fakeDevice);
   });
 
