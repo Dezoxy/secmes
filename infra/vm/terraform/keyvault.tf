@@ -14,7 +14,9 @@ resource "azurerm_key_vault" "this" {
   rbac_authorization_enabled = true
 
   soft_delete_retention_days = 7
-  purge_protection_enabled   = var.key_vault_purge_protection
+  # Always on (secure default + required by the CI scanners). To tear down during dev, recover the
+  # soft-deleted vault (`az keyvault recover`) or wait out the 7-day retention, rather than weakening this.
+  purge_protection_enabled = true
 
   # Default-deny firewall. The VM reaches the vault via the subnet's Key Vault service endpoint (deterministic
   # over the Azure backbone — not the VM's egress IP, which may be SNAT'd and fail the firewall). Your

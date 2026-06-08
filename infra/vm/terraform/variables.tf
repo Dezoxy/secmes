@@ -97,12 +97,6 @@ variable "encryption_at_host_enabled" {
   description = "Encrypt the VM host (OS/data caches + temp disk) on top of platform SSE. Requires the one-time subscription feature `Microsoft.Compute/EncryptionAtHost` (see README). Set false only if you can't register it."
 }
 
-variable "key_vault_purge_protection" {
-  type        = bool
-  default     = false
-  description = "Key Vault purge protection. false eases teardown during the beta; set true for production (irreversible 7–90 day retention on delete)."
-}
-
 variable "tags" {
   type = map(string)
   default = {

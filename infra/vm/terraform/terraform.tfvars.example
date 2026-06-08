@@ -18,7 +18,7 @@ admin_ssh_public_key = "ssh-ed25519 AAAA... you@host"
 # --- Sizing / cost knobs (defaults are beta-cheap) ---
 # vm_size                    = "Standard_B2ms"   # → Standard_B4ms (16 GiB) if memory-tight
 # data_disk_size_gb          = 64
-# key_vault_purge_protection = true              # set true for production
+# encryption_at_host_enabled = true              # needs the EncryptionAtHost subscription feature (see README)
 
 # --- CD binding: default trusts the `main` branch. For prod, bind to a protected GitHub Environment: ---
 # github_deploy_subject = "repo:Dezoxy/secmes:environment:production"

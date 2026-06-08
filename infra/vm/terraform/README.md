@@ -66,4 +66,5 @@ key is intentionally NOT here — keep it offline/separate (restore-time only).
 - **Egress public IP** (vs NAT Gateway): cheaper, and inbound is denied — the NAT Gateway is the
   no-public-IP hardening upgrade.
 - **Default egress is open**: tightening to service tags / Azure Firewall is an enterprise follow-up.
-- `key_vault_purge_protection` defaults **false** for easy beta teardown — set **true** for production.
+- **Key Vault purge protection is always on** (secure default; required by the CI scanners). To tear down
+  during dev, `az keyvault recover` the soft-deleted vault or wait out the 7-day retention — don't weaken it.

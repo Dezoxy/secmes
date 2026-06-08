@@ -135,13 +135,14 @@ resource "azurerm_linux_virtual_machine" "this" {
 # --- Data disk: Postgres + Docker volumes live here, separate from the OS disk, so a VM rebuild/resize
 #     doesn't lose data. (Mounting + formatting is done in cloud-init / the deploy step.) ---
 resource "azurerm_managed_disk" "data" {
-  name                 = "${var.prefix}-datadisk"
-  location             = azurerm_resource_group.this.location
-  resource_group_name  = azurerm_resource_group.this.name
-  storage_account_type = var.data_disk_type
-  create_option        = "Empty"
-  disk_size_gb         = var.data_disk_size_gb
-  tags                 = var.tags
+  name                          = "${var.prefix}-datadisk"
+  location                      = azurerm_resource_group.this.location
+  resource_group_name           = azurerm_resource_group.this.name
+  storage_account_type          = var.data_disk_type
+  create_option                 = "Empty"
+  disk_size_gb                  = var.data_disk_size_gb
+  public_network_access_enabled = false # no disk export over the public network
+  tags                          = var.tags
 }
 
 resource "azurerm_virtual_machine_data_disk_attachment" "data" {
