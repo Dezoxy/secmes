@@ -282,13 +282,13 @@ git commit -m "feat(web): add argus design tokens"
 - Create: `apps/web/src/features/ui/StateBlock.tsx`
 - Create: `apps/web/src/features/ui/index.ts`
 
-- [ ] Create primitives and use each in at most one safe location.
-- [ ] `IconButton` must require `aria-label`.
-- [ ] `Button` must support `disabled` and `loading` states.
-- [ ] `Modal` must set `role="dialog"`, `aria-modal="true"`, an accessible label/title, close-on-escape behavior, and visible focus styles.
-- [ ] Clickable row-like controls must be keyboard-friendly.
-- [ ] `Avatar` must reuse the safe avatar source boundary.
-- [ ] Do not redesign chat or settings in this step.
+- [x] Create primitives and use each in at most one safe location.
+- [x] `IconButton` must require `aria-label`.
+- [x] `Button` must support `disabled` and `loading` states.
+- [x] `Modal` must set `role="dialog"`, `aria-modal="true"`, an accessible label/title, close-on-escape behavior, and visible focus styles.
+- [x] Clickable row-like controls must be keyboard-friendly.
+- [x] `Avatar` must reuse the safe avatar source boundary.
+- [x] Do not redesign chat or settings in this step.
 
 **Verification:**
 
