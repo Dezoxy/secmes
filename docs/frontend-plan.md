@@ -551,8 +551,8 @@ git commit -m "feat(web): add versioned browser persistence"
 - Create: `apps/web/src/features/chat/useMessageSending.ts`
 - Create: `apps/web/src/features/chat/useConversationBackfill.ts`
 
-- [ ] Split this step if the diff becomes large.
-- [ ] Step 12A: extract read-only chat state.
+- [x] Split this step if the diff becomes large.
+- [x] Step 12A: extract read-only chat state.
 - [ ] Step 12B: extract message sending.
 - [ ] Step 12C: extract WebSocket/live conversation behavior.
 - [ ] Step 12D: extract backfill/history behavior.
