@@ -6,30 +6,13 @@ directory:
   - .
 framework:
   - terraform
-  - kubernetes
   - dockerfile
   - github_actions
 quiet: true
 compact: true
 skip-check:
-  # --- deliberate beta / cost choices ---
-  - CKV_AZURE_170 # AKS Paid SKU for SLA — beta runs Free tier by choice
-  - CKV_AZURE_165 # geo-replicated ACR — single EU region by choice
-  - CKV_AZURE_233 # ACR zone-redundant — deferred to multi-region (post-GA)
-  - CKV_AZURE_168 # min 50 pods per node — not relevant at beta scale
-  - CKV_AZURE_226 # ephemeral OS disks — node-sizing decision, deferred
-  # --- Phase-6 hardening (planned, not yet built) ---
-  - CKV_AZURE_115 # private AKS cluster — Phase 6
-  - CKV_AZURE_6 # AKS API server authorized IP ranges — Phase 6
-  - CKV_AZURE_117 # AKS disk encryption set — Phase 6
-  - CKV_AZURE_227 # encrypt temp disks/cache/data-flow — Phase 6
-  - CKV_AZURE_141 # disable AKS local admin — needs Entra RBAC wiring (Phase 1/6)
-  - CKV_AZURE_171 # AKS upgrade channel — Phase 6 ops
-  - CKV_AZURE_172 # CSI secret autorotation — added with Key Vault CSI (Phase 0/6)
-  - CKV2_AZURE_31 # subnet NSG — Phase 6 network hardening
-  - CKV_AZURE_139 # ACR disable public networking — needs private endpoint (Phase 6)
-  - CKV_AZURE_237 # ACR dedicated data endpoints — Phase 6
-  - CKV_AZURE_163 # ACR image vulnerability scanning — via Defender (Phase 6, paid)
-  - CKV_AZURE_164 # ACR signed/trusted images — cosign wired in CD; enforce at GA
-  - CKV_AZURE_166 # ACR image quarantine/scan — Phase 6
-  - CKV_AZURE_167 # ACR untagged-manifest retention — Phase 6 ops
+  # --- single-VM deploy (infra/vm) deliberate beta choices ---
+  - CKV_AZURE_119 # public IP on the VM NIC — EGRESS only; the NSG denies ALL inbound. NAT Gateway (no public IP) is the cost upgrade.
+  - CKV_AZURE_50 # VM extension operations — REQUIRED for the `az vm run-command` deploy model (it runs via the RunCommand extension).
+  - CKV_AZURE_93 # managed-disk customer-managed-key disk-encryption-set — platform SSE + encryption_at_host cover the beta; CMK DES is Phase 6.
+  - CKV2_AZURE_32 # Key Vault private endpoint — reached via the subnet's KeyVault service endpoint + default-deny firewall; private endpoint is Phase 6.

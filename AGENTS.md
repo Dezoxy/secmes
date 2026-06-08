@@ -9,7 +9,7 @@ Architecture: `docs/secure_messaging_platform_plan.md`. Security toolchain: `doc
 
 - **All application code is TypeScript** (strict, ESM): React + Vite PWA, NestJS API, WebSocket gateway, workers, and the shared `@argus/contracts` (Zod) package.
 - **Crypto**: a TypeScript wrapper over an MLS (WASM) library in `packages/crypto`. You do not write raw crypto.
-- **Data**: SQL (PostgreSQL). **Infra/glue**: Terraform (HCL), Docker Compose / CI (YAML), Bash, Dockerfile, Make. (Helm/K8s manifests are **legacy** — deploy is a single VM now; see Stack & conventions.)
+- **Data**: SQL (PostgreSQL). **Infra/glue**: Terraform (HCL), Docker Compose / CI (YAML), Bash, Dockerfile, Make. (Kubernetes was dropped; deploy is a single VM via Docker Compose — see Stack & conventions.)
 
 ## Non-negotiable security invariants
 
@@ -19,7 +19,7 @@ Hard rules. A change that violates one is wrong even if it "works".
 2. **Never log or persist** plaintext content, private/session/message keys, passphrases, auth tokens, full `Authorization` headers, or presigned URLs. Logs carry IDs and metadata only.
 3. **Every tenant-scoped table has `tenant_id` + an enforced RLS policy.** No cross-tenant reads. A new table without RLS is a block.
 4. **No hand-rolled crypto.** All cryptography goes through the MLS library in `packages/crypto`. Primitives must not appear elsewhere.
-5. **Secrets come from Key Vault via Workload/Managed Identity.** Never commit secrets; never put long-lived cloud creds in pods, env files, or Helm values — deliver them as runtime-fetched values or mounted credential **files** (e.g. systemd `LoadCredential`, populated from Key Vault by the VM's Managed Identity). A non-secret config value (e.g. an S3 access-key-**id**, which rides in every presigned URL) may use env; the matching secret may not.
+5. **Secrets come from Key Vault via Managed Identity.** Never commit secrets; never put long-lived cloud creds in env files — deliver them as runtime-fetched values or mounted credential **files** (e.g. systemd `LoadCredential`, populated from Key Vault by the VM's Managed Identity). A non-secret config value (e.g. an S3 access-key-**id**, which rides in every presigned URL) may use env; the matching secret may not.
 6. **No admin path to content.** Admin/ops surfaces expose metadata only — never message text or images.
 
 ## Stack & conventions
@@ -27,7 +27,7 @@ Hard rules. A change that violates one is wrong even if it "works".
 - TypeScript strict, ESM. Monorepo via pnpm workspaces (`apps/*`, `packages/*`).
 - Backend **NestJS** (`apps/api`); realtime WebSocket gateway; **PostgreSQL** + RLS; DB layer SQL-first (Drizzle/Kysely, not Prisma) so the tenant session var is set per transaction.
 - Shared client↔server types + **Zod** schemas live in `@argus/contracts`. Validate at every boundary.
-- Frontend **React + Vite** PWA. Deploy: a **single Azure VM** (EU) running the stack via **Docker Compose** — **self-hosted Postgres + Redis + Zitadel**; attachment blobs on **Backblaze B2** (S3-compatible, EU `eu-central-003`); DB backups to a separate private EU B2 bucket. Secrets in **Azure Key Vault**, fetched on the VM via **Managed Identity** (delivered as credential files, never env/Helm). IaC Terraform. (The AKS/Helm/Argo CD scaffolds under `infra/`, `charts/`, `gitops/` are **legacy** — out of scope until K8s is re-opened.)
+- Frontend **React + Vite** PWA. Deploy: a **single Azure VM** (EU) running the stack via **Docker Compose** — **self-hosted Postgres + Redis + Zitadel**; attachment blobs on **Backblaze B2** (S3-compatible, EU `eu-central-003`); DB backups to a separate private EU B2 bucket. Ingress via **Cloudflare Tunnel** (no public ports); CD via **`az vm run-command`** (Azure control plane, GitHub OIDC). Secrets in **Azure Key Vault**, fetched on the VM via **Managed Identity** (delivered as credential files, never env). IaC Terraform (`infra/vm/`). (Kubernetes/AKS was dropped — the old AKS/Helm/Argo CD scaffolds were removed; recover from git history if K8s is ever revisited.)
 
 ## Definition of done
 
@@ -47,8 +47,8 @@ Hard rules. A change that violates one is wrong even if it "works".
 
 - Weaken or bypass crypto, RLS, or auth "to make it work".
 - Add a dependency without a one-line justification.
-- Run `terraform apply`, `terraform destroy`, `kubectl delete/apply`, `helm upgrade`, `docker push`, or `git push --force` without explicit human confirmation.
-- Print secret files (`.env`, `*.tfvars`, kubeconfig, keys).
+- Run `terraform apply`, `terraform destroy`, `az vm run-command`, `docker push`, or `git push --force` without explicit human confirmation.
+- Print secret files (`.env`, `*.tfvars`, keys).
 - Drive-by refactors. Keep diffs tight.
 
 ## Review criteria (apply the matching set after non-trivial changes)
@@ -57,7 +57,7 @@ Hard rules. A change that violates one is wrong even if it "works".
 
 **Server boundary** (`apps/api`, queries, endpoints): no plaintext on the server; `tenant_id` + RLS on every tenant table; tenant context not set from unverified client input; no secrets/tokens/content in logs; authz on every path (no IDOR); Zod-validated I/O; every route documented in the spec.
 
-**Infra** (`infra/`, `charts/`, workflows, Dockerfiles, `compose.yaml`): no secrets in code; containers non-root + read-only FS + dropped caps + limits; data services private (no public endpoints); least-privilege roles + **Managed Identity** (VM) / Workload ID (K8s legacy); secrets delivered from **Key Vault** as files, never in env/Helm; CI uses OIDC and never interpolates untrusted event input into `run:`; EU region pinned.
+**Infra** (`infra/`, workflows, Dockerfiles, `compose.yaml`): no secrets in code; containers non-root + read-only FS + dropped caps + limits; data services private (no public endpoints); least-privilege roles + **Managed Identity** (VM); secrets delivered from **Key Vault** as files, never in env; CI uses OIDC and never interpolates untrusted event input into `run:`; EU region pinned.
 
 ## Procedures
 

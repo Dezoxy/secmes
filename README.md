@@ -5,11 +5,14 @@ The server is **crypto-blind**: it stores ciphertext + metadata only.
 
 Architecture: [`docs/secure_messaging_platform_plan.md`](docs/secure_messaging_platform_plan.md).
 
-> **Deployment update (2026-06):** the target is now a **single Azure VM** (Docker Compose) running
-> self-hosted **Postgres + Redis + Zitadel**, with attachment blobs on **Backblaze B2** (S3-compatible, EU
-> `eu-central-003`), DB backups to a separate private EU B2 bucket, and secrets in **Azure Key Vault** fetched
-> via the VM's **Managed Identity**. The `infra/` (AKS), `charts/` (Helm), and `gitops/` (Argo CD) scaffolds
-> below are **legacy** — kept until/unless Kubernetes is re-opened. Canonical: `AGENTS.md` → *Stack & conventions*.
+> **Deployment (2026-06):** the target is a **single Azure VM** (EU, `germanywestcentral`) running the
+> stack via **Docker Compose** — self-hosted **Postgres + Redis + Zitadel** plus API + web + Caddy +
+> cloudflared. Attachment blobs live on **Backblaze B2** (S3-compatible, EU `eu-central-003`), DB backups on
+> a separate private EU B2 bucket, and secrets in **Azure Key Vault** fetched via the VM's **Managed
+> Identity** (credential files, never env). Ingress is a **Cloudflare Tunnel** (no public ports on the VM);
+> Cloudflare terminates TLS and runs the edge WAF/rate-limit. CD is **`az vm run-command`** from GitHub
+> Actions via Azure OIDC. Kubernetes/AKS was dropped — recover from git history if it is ever revisited.
+> Canonical: `AGENTS.md` → *Stack & conventions*.
 
 ## Repo layout
 
@@ -19,18 +22,15 @@ apps/
 packages/
   contracts/           # Shared TypeScript types + Zod schemas (client <-> server envelope)
 infra/
-  terraform/           # azurerm: RG, VNet, AKS, ACR, Log Analytics
-  bootstrap/           # cluster add-ons (ingress-nginx, cert-manager, Argo CD)
-charts/
-  argus/              # Helm chart for the app workloads
-gitops/
-  apps/                # Argo CD Application manifests
-.github/workflows/     # CI (build/test) + CD (build image -> ACR -> bump tag)
+  vm/                  # Terraform: the Azure VM, NSG (deny inbound), Key Vault, Managed Identity
+.github/workflows/     # CI (build/test) + CD (build/sign image -> az vm run-command deploy)
+compose.yaml           # the running stack (Postgres, Redis, Zitadel, api, web, Caddy, cloudflared)
 ```
 
-## Status: Phase 0 — prove the pipeline
+## Status: Phase 0 — stand up the VM
 
-Goal: a "hello world" service deployed end-to-end (Terraform → AKS → Argo CD) **before** any app logic.
+Goal: the VM provisioned and the stack reachable through the Cloudflare Tunnel, with CD via
+`az vm run-command`, **before** the bulk of the app logic.
 
 ### Local dev
 
@@ -44,16 +44,16 @@ pnpm test
 ### Provision (when you have an Azure subscription)
 
 ```bash
-cd infra/terraform
+cd infra/vm/terraform
 cp terraform.tfvars.example terraform.tfvars   # fill in subscription_id, prefix
 terraform init
 terraform plan
-# terraform apply   # creates RG, VNet, AKS (Free tier), ACR, Log Analytics
+# terraform apply   # creates RG, VNet, NSG (deny inbound), the VM, Key Vault, Managed Identity
 ```
 
-Then bootstrap cluster add-ons and Argo CD: see [`infra/bootstrap/README.md`](infra/bootstrap/README.md).
-
-After cloning: set the Argo CD `repoURL` in `gitops/apps/argus.yaml` and the CD secrets in GitHub before deploying.
+The VM runs the stack via Docker Compose; secrets are pulled from Key Vault by its Managed Identity as
+credential files. Cloudflare (Tunnel + Access) is the only ingress — no inbound ports are opened on the
+NSG. Deploys run through GitHub Actions → Azure OIDC → `az vm run-command` (no SSH, no open ports).
 
 ## License
 

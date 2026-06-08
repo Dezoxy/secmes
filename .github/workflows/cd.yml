@@ -8,7 +8,7 @@ on:
       - '.github/workflows/cd.yml'
 
 # Least privilege. id-token for Azure OIDC (no stored cloud creds) + cosign keyless signing.
-# (The Argo/Helm GitOps tag-bump was retired with the K8s pivot, so no `contents: write` is needed.)
+# (No GitOps tag-bump / deploy step here — the VM rollout is separate — so no `contents: write` is needed.)
 permissions:
   contents: read
   id-token: write
@@ -67,7 +67,7 @@ jobs:
           cosign attest --yes --predicate sbom.spdx.json --type spdxjson "$ACR_LOGIN_SERVER/argus-api:$IMAGE_TAG"
 
       # NOTE: this pipeline builds, scans, SBOMs, and signs the image only — it does NOT roll it out.
-      # The Argo/Helm GitOps tag-bump that used to deploy the chart was retired with the K8s pivot (the
-      # deploy is now a single Azure VM via Docker Compose). The VM rollout step — pull the signed image,
+      # There is no GitOps deploy step; the deploy is a single Azure VM via Docker Compose. The VM rollout
+      # step (lands with the VM deploy track) — pull the signed image,
       # run DB migrations BEFORE serving (e.g. 0009's secmes_app → argus_app role rename, or tenant-scoped
       # requests fail at SET LOCAL ROLE), then restart the compose service — lands with the VM deploy track.

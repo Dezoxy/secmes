@@ -1,7 +1,8 @@
 # Local auth (Zitadel OIDC)
 
-How to run real OIDC login against a local **Zitadel** in the Docker stack. This is the dev stand-in
-for managed Zitadel-on-AKS (roadmap checkpoint 9). The local stack uses Zitadel v4's split shape:
+How to run real OIDC login against a local **Zitadel** in the Docker stack. In production Zitadel runs in
+the same Docker Compose stack on the VM (roadmap checkpoint 9); this local stack is the dev stand-in.
+The local stack uses Zitadel v4's split shape:
 `zitadel` is the OIDC/API/JWKS server, and `zitadel-login` is the hosted Login V2 web UI.
 Security rationale + threat model:
 `docs/threat-models/auth-tenant-context.md` (§8 SPA flow, §9 this bootstrap). **Local creds here are

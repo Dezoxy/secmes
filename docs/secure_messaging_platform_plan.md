@@ -3,7 +3,7 @@
 > Supersedes `aws_secure_internal_messaging_architecture_plan.md` (kept as history / north-star).
 > This version reflects the decisions made: PWA-only, true E2EE (single device in v1), multi-tenant SaaS sold to other companies, privacy-first, EU-hosted. _(The original **Kubernetes learning goal** was dropped 2026-06 — see the banner.)_
 >
-> **⚠️ Composition update (2026-06 — supersedes the AKS / managed-data sections below):** Kubernetes/AKS was **dropped** as solo-dev overhead, and so were the **Azure managed data services** (managed Postgres / Cache). The deploy target is now a **single Azure VM** running **self-hosted Postgres + Redis + Zitadel** via Docker Compose; attachment blobs live on **Backblaze B2** (S3-compatible, EU `eu-central-003`, private buckets; MinIO locally); DB backups on a separate private EU B2 bucket; secrets in **Azure Key Vault**, fetched by the VM's **Managed Identity** and delivered as credential files (never env/Helm). **Azure stays** (the VM + Key Vault + Entra). The detailed AKS / Helm / Argo CD / managed-data sections below are **legacy** — read them as history. Canonical: `AGENTS.md` → _Stack & conventions_.
+> **⚠️ Composition update (2026-06 — supersedes the AKS / managed-data sections below):** Kubernetes/AKS was **dropped** as solo-dev overhead, and so were the **Azure managed data services** (managed Postgres / Cache). The deploy target is now a **single Azure VM** running **self-hosted Postgres + Redis + Zitadel** via Docker Compose; attachment blobs live on **Backblaze B2** (S3-compatible, EU `eu-central-003`, private buckets; MinIO locally); DB backups on a separate private EU B2 bucket; secrets in **Azure Key Vault**, fetched by the VM's **Managed Identity** and delivered as credential files (never env at rest). **Azure stays** (the VM + Key Vault + Entra). The detailed AKS / Helm / Argo CD / managed-data sections below are **legacy** — read them as history. Canonical: `AGENTS.md` → _Stack & conventions_.
 
 ---
 
@@ -23,10 +23,11 @@ A **multi-tenant, end-to-end-encrypted messaging product** delivered as an insta
 | Client crypto | **MLS (RFC 9420)** via wasm — never hand-rolled |
 | Identity | **Zitadel** (self-hosted, EU), OIDC/SAML, multi-tenant |
 | Object storage | **Backblaze B2** (S3-compatible, EU `eu-central-003`, private buckets) — MinIO locally _(was Azure Blob)_ |
-| Orchestration | **Single Azure VM** + Docker Compose (EU) _(AKS legacy)_ |
-| Deploy | **Docker Compose** on the VM (Caddy for TLS) _(Helm + Argo CD legacy)_ |
+| Orchestration | **Single Azure VM** + Docker Compose (EU `germanywestcentral`) _(AKS dropped)_ |
+| Ingress / TLS | **Cloudflare Tunnel** (no public ports) + Cloudflare edge TLS/WAF; **Caddy** plain-HTTP reverse proxy internally |
+| Deploy | **Docker Compose** on the VM; CD via **`az vm run-command`** (GitHub OIDC) _(Helm + Argo CD dropped)_ |
 
-**Why Azure (and the privacy trade you're accepting):** AKS gives you a **free control plane**, managed **Postgres / Blob / Key Vault** (far less ops than self-hosting), native **Entra ID** alignment for the Microsoft-shop companies you're selling to, and enterprise-standard cloud-native skills that transfer to any job. The honest cost: Azure is **US-owned**, so your privacy story shifts from *"EU-owned provider"* to *"E2EE (the cloud only ever holds ciphertext + metadata) + EU Data Boundary + a German region."* That's defensible, but a notch weaker than Hetzner/Scaleway on pure sovereignty. For stricter buyers later you can deploy via an Azure sovereign operator (Delos/Bleu) or move just the data plane to an EU-owned provider — Terraform + Helm keep you portable either way.
+**Why Azure (and the privacy trade you're accepting):** Azure gives you a single low-cost **VM**, **Key Vault** for secrets, native **Entra ID** alignment for the Microsoft-shop companies you're selling to, and cloud skills that transfer to any job — without the K8s ops a solo dev can't justify. The honest cost: Azure is **US-owned**, so your privacy story shifts from *"EU-owned provider"* to *"E2EE (the cloud only ever holds ciphertext + metadata) + EU Data Boundary + a German region."* That's defensible, but a notch weaker than Hetzner/Scaleway on pure sovereignty. For stricter buyers later you can deploy via an Azure sovereign operator (Delos/Bleu) or move just the VM to an EU-owned provider — the stack is plain Docker Compose, so it's portable either way.
 
 ---
 
@@ -120,89 +121,63 @@ The IdP authenticates **who you are**. It **never** sees or holds **message keys
                                   |
                                   | HTTPS / WSS
                                   v
-                   Azure Standard Load Balancer (EU region)
+                   Cloudflare edge (TLS, WAF, rate-limit; Access on admin subdomains)
                                   |
+                                  | Cloudflare Tunnel (cloudflared dials OUT — no public ports)
                                   v
-                     Ingress (ingress-nginx)
-                     TLS via cert-manager (Let's Encrypt)
-                                  |
-        +-------------------------+--------------------------+
-        |              |                |                    |
-        v              v                v                    v
-     web (PWA)        api          realtime (WS)          zitadel
-   static assets    NestJS      WebSocket gateway     identity (OIDC)
-        |              |                |                    |
-        |              +-------+--------+--------+           |
-        |                      |                 |           |
-        v                      v                 v           v
-   (served via       Azure DB for Postgres    Redis    (zitadel db on
-    ingress/CDN)       Flexible Server      (backplane)  same managed PG)
-                              |
-                              v
-                     Azure Blob Storage (EU region)
-                       encrypted image blobs
+        ============== single Azure VM (germanywestcentral) ==============
+        |                Docker Compose stack                            |
+        |                                                                |
+        |   cloudflared ── Caddy (plain-HTTP reverse proxy, single origin)|
+        |                    |        |          |                       |
+        |                    v        v          v                       |
+        |                 web (PWA)  api      realtime (WS)   zitadel     |
+        |                 static    NestJS   WS gateway       identity    |
+        |                              |        |               |        |
+        |                              v        v               v        |
+        |                          Postgres   Redis         zitadel-db    |
+        |                        (self-host) (backplane)   (self-host PG) |
+        ==================================================================
+                                       |
+                                       v
+                          Backblaze B2 (EU eu-central-003)
+                            encrypted image blobs (private)
 
-  Cluster: AKS (Germany West Central / West Europe).
-  Managed data services reach the cluster over Private Endpoints in the VNet.
+  Secrets: Azure Key Vault, fetched by the VM's Managed Identity as credential files.
+  Network: Azure NSG denies all inbound; the VM reaches out only via the Cloudflare Tunnel.
 ```
 
 ---
 
-## 6. Kubernetes Architecture (the learning core)
+## 6. VM Deploy Architecture
 
-### 6.1 Cluster
-- **Service:** Azure Kubernetes Service (AKS), **Free control-plane tier** to start (move to the SLA-backed Standard tier later).
-- **Region:** **Germany West Central** (Frankfurt) for the strongest EU data-residency story, or **West Europe** (Netherlands) for widest service/capacity. Pin every data service to the same region.
-- **Node pools:** a small **system** pool + an autoscaling **user** pool. Start on burstable **B2ms/B2s** VMs for cost; move to **D-series** for steady load. Cluster Autoscaler on the user pool.
-- **CNI:** **Azure CNI powered by Cilium** — eBPF dataplane + **NetworkPolicy enforcement** (you still learn and apply policies) without wiring a CNI by hand.
-- **Pod identity:** **Microsoft Entra Workload ID** (federated, no secrets in pods) — the Azure equivalent of AWS IRSA. Use it for every pod → Azure access (Key Vault, Blob, ACR, Postgres).
-- **Self-hosted fallback:** if you ever want the deeper "wire it yourself" learning, k3s on EU-owned hardware (Hetzner/Scaleway) stays portable — your Helm charts don't change.
+> Kubernetes/AKS was dropped (solo-dev overhead). The deploy is now a **single Azure VM** running the whole stack via **Docker Compose**. The old §6 AKS/Helm/Argo CD design is recoverable from git history if K8s is ever re-opened.
 
-### 6.2 Namespaces
+### 6.1 The VM
+- **Host:** one Azure VM (burstable **B-series** to start) in **Germany West Central** (`germanywestcentral`) for the strongest EU data-residency story. Pin every Azure resource to the same region.
+- **Stack:** **Docker Compose** runs **self-hosted Postgres + Redis + Zitadel** alongside `api`, `web`, **Caddy**, and **cloudflared**. One container per service (no autoscaling — scale up the VM if needed).
+- **Identity:** the VM's **Managed Identity** reads secrets from **Azure Key Vault** with no static creds; secrets are delivered as **credential files** (systemd `LoadCredential`), never env at rest.
+
+### 6.2 Ingress, TLS & isolation
+- **Ingress = Cloudflare Tunnel.** `cloudflared` dials **outbound** to Cloudflare, so **no inbound ports** are opened on the VM. Cloudflare is the edge: **TLS termination, WAF, rate-limit**. Admin/ops surfaces sit on subdomains behind **Cloudflare Access**.
+- **Internal proxy = Caddy** (plain HTTP, single origin): serves the PWA, proxies `/api` and `/ws`. TLS is Cloudflare's job, not Caddy's (no cert-manager / Let's-Encrypt-on-host).
+- **Network isolation = Azure NSG** (deny all inbound) + Cloudflare. There is no K8s NetworkPolicy/Cilium — the NSG + outbound-only tunnel are the boundary.
+
+### 6.3 CD & secrets
+- **CD = `az vm run-command`** driven by **GitHub Actions + Azure OIDC** — no SSH, no open ports, and it works before the tunnel exists. The pipeline builds + signs the image (registry: GHCR), then runs the deploy command on the VM (pull + `docker compose up` + migrate-on-deploy).
+- **Secrets = Key Vault + Managed Identity**, delivered as files (above). The `db:migrate` runs with the owner/migration credential (not the runtime `argus_app` role) before the new container takes traffic.
+
+### 6.4 Container security (Compose-level, apply everywhere)
 ```text
-argus          # app workloads
-data            # redis backplane (Postgres & Blob are managed Azure services)
-identity        # zitadel
-platform        # ingress, cert-manager, external-secrets, reloader
-observability   # prometheus, grafana, loki
-argocd          # gitops controller
-```
-
-### 6.3 Workloads
-| Workload | Type | Notes / what it teaches |
-|---|---|---|
-| `web` | Deployment (nginx serving PWA build) | Ingress, static serving, cache headers |
-| `api` | Deployment + HPA | Stateless scaling, readiness/liveness probes |
-| `realtime` | Deployment + HPA | Scaling **stateful WebSocket** connections, sticky sessions, Redis backplane |
-| `worker` | Deployment + CronJobs | Web Push, attachment GC, KeyPackage replenishment — teaches Jobs/CronJobs |
-| `zitadel` | Helm release | Running a real stateful third-party app |
-| Postgres | **Azure DB for PostgreSQL Flexible Server** (managed, not in-cluster) | Reliability + backups + PITR without the ops; reached via Private Endpoint |
-| `redis` | Deployment/StatefulSet | Pub/sub backplane for realtime fanout (or Azure Cache for Redis) |
-| _(operator option)_ | CloudNativePG in-cluster | Only if you want the StatefulSet/operator learning instead of managed |
-
-### 6.4 Platform add-ons (your K8s curriculum)
-```text
-ingress-nginx                # ingress, TLS, WebSocket + sticky sessions
-                             #   (or App Gateway Ingress Controller for a managed WAF — pricier)
-cert-manager                 # automated Let's Encrypt TLS
-Secrets Store CSI + Key Vault# secrets pulled from Azure Key Vault via Workload ID
-Azure Monitor managed Prometheus + Managed Grafana   # metrics + dashboards (native)
-Container Insights / App Insights   # logs + app traces + error tracking
-Argo CD                      # GitOps  (or the AKS-managed Flux extension)
-Reloader                     # roll pods on config/secret change
-metrics-server + HPA + Cluster Autoscaler   # scaling
-Cilium (via Azure CNI)       # dataplane + NetworkPolicy enforcement
-```
-
-### 6.5 Pod-level security (standard, learn it once, apply everywhere)
-```text
-NetworkPolicies (default-deny, then allow per-path)
-Pod Security Standards: restricted
-runAsNonRoot, readOnlyRootFilesystem, drop ALL capabilities
-resource requests + limits on every container
+runAsNonRoot, read-only root filesystem, drop ALL capabilities
+resource limits on every service
+data services (Postgres/Redis/Zitadel-db) on the private Docker network only — never published
 image scanning (Trivy) in CI; only signed/scanned images deploy
-short-lived tokens; no long-lived cloud keys in pods
+short-lived OIDC tokens for CD; no long-lived cloud keys on the VM
 ```
+
+### 6.5 IaC
+- Terraform (`infra/vm/`) provisions the RG, VNet, NSG (deny inbound), the VM, Key Vault, and the Managed Identity.
 
 ---
 
@@ -247,7 +222,7 @@ audit_events(id, tenant_id, actor_user_id, event_type, ip_address,
 
 ## 8. Identity & Auth
 
-- **Zitadel** self-hosted in the `identity` namespace — built for multi-tenant federation, keeps identity data on infra you control, stays portable. *(Azure-native alternative: Entra External ID — managed CIAM, but more lock-in. Either way, customers' own Entra/Okta/Google federate in.)*
+- **Zitadel** self-hosted in the Docker Compose stack on the VM — built for multi-tenant federation, keeps identity data on infra you control, stays portable. *(Azure-native alternative: Entra External ID — managed CIAM, but more lock-in. Either way, customers' own Entra/Okta/Google federate in.)*
 - Per-tenant **OIDC/SAML** so customers bring their own IdP (Entra ID, Okta, Google Workspace); local accounts as fallback for small tenants.
 - Backend validates JWTs; maps `external_identity_id` → `users`.
 - MFA, conditional access, user lifecycle, disable/revoke all handled by the IdP.
@@ -283,9 +258,9 @@ Object storage: **private buckets, no public URLs, access only via short-lived p
 
 ## 10. Realtime Design
 
-- Dedicated `realtime` gateway (separate Deployment) holds WebSocket connections.
-- **Redis pub/sub backplane** so any `realtime` pod can deliver to a connection held by another pod → horizontal scaling.
-- Ingress configured for **sticky sessions** + WebSocket upgrade.
+- The WebSocket gateway (in the `api` service) holds the connections; on the single-container VM that's one process.
+- **Redis pub/sub backplane** is the realtime bus (and the future throttler store); it would also fan out across instances if the API ever ran more than one.
+- Cloudflare + Caddy proxy the WebSocket upgrade through to the gateway.
 - Offline users: messages persist as ciphertext; delivered on reconnect.
 - Presence/typing indicators: optional, off by default (privacy).
 
@@ -296,26 +271,27 @@ Object storage: **private buckets, no public URLs, access only via short-lived p
 **Log:** request id, tenant id, user id, service, operation, status, latency, error category, message id.
 **Never log:** message text, image data, plaintext metadata, private keys, tokens, full auth headers, presigned URLs.
 
-Stack (Azure-native): OpenTelemetry → **Azure Monitor managed Prometheus** + **Azure Managed Grafana** (metrics + dashboards) + **Container Insights** (logs) + **Application Insights** (traces + error tracking). Portable alternative: self-host kube-prometheus-stack + Loki + Grafana + Sentry. Watch Log Analytics ingestion cost — set retention and a daily cap.
+Stack: OpenTelemetry → self-hosted **Prometheus + Grafana** (metrics + dashboards) + **Loki** (logs) on the VM, with **Sentry** for error tracking. Azure-native alternative if you want managed: Azure Monitor managed Prometheus + Managed Grafana + Application Insights — watch Log Analytics ingestion cost (set retention and a daily cap).
 
 ---
 
-## 12. CI/CD + GitOps
+## 12. CI/CD
 
 ```text
 push / PR
   └─ lint, unit + integration tests, typecheck
   └─ SAST + dependency scan
-  └─ build container images
+  └─ build container image
   └─ Trivy image scan
-  └─ push to Azure Container Registry (ACR)   # GitHub Actions → Azure via OIDC, no stored creds
+  └─ cosign sign + SBOM
+  └─ push to the container registry (GHCR)   # GitHub Actions → Azure via OIDC, no stored creds
 merge to main
-  └─ update image tags in the GitOps repo
-  └─ Argo CD (or AKS-managed Flux) syncs the cluster to match Git
-     (auto to staging, manual gate to prod)
+  └─ az vm run-command on the VM (GitHub Actions → Azure OIDC; no SSH, no open ports)
+       pull the new image → migrate-on-deploy → docker compose up
+       (auto to staging, manual gate to prod)
 ```
 
-Tools: GitHub Actions (OIDC federation to Entra — no stored Azure secrets), Helm, Argo CD / Flux, ACR, Trivy, Checkov (manifest scanning), Renovate (dep updates).
+Tools: GitHub Actions (OIDC federation to Entra — no stored Azure secrets), Docker Compose, `az vm run-command`, GHCR, Trivy, cosign, Checkov, Dependabot (dep updates).
 
 ---
 
@@ -323,22 +299,20 @@ Tools: GitHub Actions (OIDC federation to Entra — no stored Azure secrets), He
 
 ```text
 infra/
-  terraform/            # azurerm: RG, VNet, AKS, ACR, Postgres Flexible Server,
-                        #   Key Vault, Storage Account, Private Endpoints, DNS, Workload ID
-  bootstrap/            # cluster add-ons (ingress-nginx, cert-manager, CSI, Argo CD)
-charts/
-  argus/               # umbrella Helm chart (web, api, realtime, worker)
-  platform/             # cert-manager, ingress, external-secrets values
-gitops/                 # Argo CD app-of-apps, per-env values
+  vm/                   # Terraform (azurerm): RG, VNet, NSG (deny inbound),
+                        #   the VM, Key Vault, Managed Identity
+  backup/               # nightly pg_dump → encrypted → private EU B2 bucket (systemd)
+  cleanup/              # expired-attachment reaper (systemd timer)
+  local/                # local-dev stand-ins (Zitadel bootstrap, etc.)
 apps/
   web/                  # React + Vite PWA
-  api/                  # NestJS
-  realtime/             # WebSocket gateway
+  api/                  # NestJS (HTTP + WebSocket gateway)
   worker/               # background jobs
   packages/
     crypto/             # MLS wrapper, shared client/server
     contracts/          # shared TS types + Zod schemas (the E2EE envelope)
-.github/workflows/
+compose.yaml            # the running stack (Postgres, Redis, Zitadel, api, web, Caddy, cloudflared)
+.github/workflows/      # CI + CD (build/sign image → az vm run-command deploy)
 ```
 
 The `packages/contracts` shared types are the concrete payoff of going TypeScript end-to-end — client and server can never disagree on the encrypted envelope.
@@ -352,8 +326,8 @@ The `packages/contracts` shared types are the concrete payoff of going TypeScrip
 | Database leak | Ciphertext only; RLS limits blast radius per tenant |
 | Object storage leak | Client-side encryption + private buckets + presigned-only access |
 | Cross-tenant access | Postgres RLS + tenant context per request |
-| Stolen infra credentials | Least-privilege, no long-lived keys in pods, audit logs |
-| Compromised pod | NetworkPolicies (default-deny), restricted PSS, non-root |
+| Stolen infra credentials | Least-privilege, no long-lived keys on the VM (Managed Identity + Key Vault), audit logs |
+| Compromised container | NSG deny-inbound + Cloudflare edge; data services private on the Docker network; non-root, read-only FS, dropped caps |
 | Compromised admin | MFA via IdP, least privilege, full audit trail, no content access |
 | Lost device | Key recovery from encrypted backup; device revocation |
 | Malicious insider (you) | E2EE means you *cannot* read content — provable, sellable |
@@ -373,41 +347,41 @@ Maximum-privacy E2EE means you **cannot** offer message archival, eDiscovery, le
 ## 16. Cost Estimate (EU, monthly, rough)
 
 ```text
-AKS control plane (Free tier)             $0
-Nodes: 2–3× B2ms (burstable, autoscale)   ~$120–180
-Azure DB for PostgreSQL (B1ms/B2s)        ~$25–60
-Azure Cache for Redis (Basic C0)          ~$16   (or in-cluster Redis $0)
-Standard Load Balancer                    ~$20   (avoid App Gateway WAF_v2 ~$250+ in beta)
-Blob Storage + egress                     ~$10
-Azure Container Registry (Basic)          ~$5
-Azure Monitor / Log Analytics             ~$10–30 (set caps!)
+Azure VM (1× B2ms/B2s burstable)          ~$30–60   (runs the whole Compose stack)
+Azure Key Vault                           ~$0–5
+Backblaze B2 (blobs + backups + egress)   ~$5–10
+Cloudflare (Tunnel + edge, Free/Pro)      $0–20
+GHCR (container registry)                 $0
+Self-hosted Postgres/Redis/Zitadel        $0   (on the VM)
 ------------------------------------------------
-Total                                     ~$200–320 / month
+Total                                     ~$40–95 / month
 ```
 
-~4–5× the Hetzner option, but you get managed Postgres/Blob/Key Vault (less ops), native Entra alignment for B2B buyers, and enterprise-standard cloud-native skills. Cost levers: burstable nodes, in-cluster Redis, skip App Gateway WAF, a spot node pool for non-critical workloads, reserved instances once load is steady.
+Self-hosting the data services on one VM is far cheaper than managed Azure data + AKS; the trade is you own Postgres/Redis backups + patching (mitigated by the nightly encrypted B2 backup + restore drill). Native Entra alignment for B2B buyers stays. Cost levers: a burstable VM, Cloudflare Free tier, scale the VM up before splitting services out.
 
 ---
 
-## 17. Phased Delivery (ship *and* learn K8s in stages)
+## 17. Phased Delivery
 
-**Phase 0 — Cluster & pipeline (learn the platform)**
-AKS via Terraform (azurerm), Azure CNI + Cilium, Entra Workload ID, ingress-nginx + cert-manager (TLS working), ACR, Argo CD, a "hello world" pod deployed end-to-end via GitOps. *Prove the pipeline before any app logic.*
+> This is an earlier, looser cut. `docs/roadmap.md` is **canonical** for phasing — defer to it when they disagree.
+
+**Phase 0 — VM & pipeline**
+The Azure VM via Terraform (`infra/vm/`), Managed Identity → Key Vault, NSG deny-inbound, Cloudflare Tunnel ingress + Caddy reverse proxy, CD via `az vm run-command`, migrate-on-deploy, a "hello world" `api` live end-to-end. *Prove the pipeline before the bulk of the app logic.*
 
 **Phase 1 — Identity & tenancy**
-Zitadel deployed; tenant + user model with RLS; OIDC login; admin role; audit events for login/logout.
+Zitadel deployed (Docker Compose on the VM); tenant + user model with RLS; OIDC login; admin role; audit events for login/logout.
 
 **Phase 2 — Device keys & recovery**
 Client MLS key generation; KeyPackage upload; key directory; passphrase-encrypted backup + recovery flow.
 
 **Phase 3 — 1:1 encrypted text**
-Azure DB for PostgreSQL (Private Endpoint); encrypt → store ciphertext → `realtime` WSS delivery → offline catch-up → delivery status. Redis backplane; HPA on `realtime`.
+Self-hosted Postgres on the VM; encrypt → store ciphertext → WSS delivery → offline catch-up → delivery status. Redis backplane (the realtime bus).
 
 **Phase 4 — Encrypted images**
 Client-side image encryption; presigned upload to object storage; encrypted metadata message; recipient download + decrypt.
 
 **Phase 5 — Harden & observe**
-NetworkPolicies (default-deny), CSP/SRI, rate limiting, kube-prometheus-stack + Loki + Grafana dashboards, Sentry, backups with a **tested restore**, basic DR runbook.
+NSG deny-inbound + Cloudflare edge, CSP/SRI, rate limiting, Prometheus + Loki + Grafana dashboards, Sentry, backups with a **tested restore**, basic DR runbook.
 
 **Phase 6 — Productize**
 Multi-tenant onboarding polish, per-tenant SSO config UI, Web Push notifications, security page (protocol + bundle hashes), pen-test prep.
@@ -416,10 +390,10 @@ Multi-tenant onboarding polish, per-tenant SSO config UI, Web Push notifications
 
 ## 18. Future / North-Star (not now)
 
-Group chat (MLS makes it incremental), multi-device sync, optional per-tenant compliance mode, multi-region + zone-redundant AKS, Azure sovereign-operator (Delos/Bleu) deployment for stricter buyers, native apps if a buyer demands the stronger code-delivery trust model.
+Group chat (MLS makes it incremental), multi-device sync, optional per-tenant compliance mode, multi-region / zone-redundant deploy, Azure sovereign-operator (Delos/Bleu) deployment for stricter buyers, native apps if a buyer demands the stronger code-delivery trust model.
 
 ---
 
 ## 19. The One Design Principle
 
-> The cluster operates the platform; the clients own message privacy.
+> The server operates the platform; the clients own message privacy.

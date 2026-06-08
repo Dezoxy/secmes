@@ -1,6 +1,6 @@
 # Local development (Docker, no Azure)
 
-Run the whole stack on your machine with Docker Compose. This replaces AKS/Helm/Azure for dev — same app, local backing services.
+Run the whole stack on your machine with Docker Compose — the **same** Compose stack that runs in production on the single Azure VM, just with local backing services (MinIO standing in for Backblaze B2) and dev secrets.
 
 ## Prerequisites
 
@@ -27,16 +27,18 @@ make reset   # stop + wipe data volumes
 | localhost:5432 | Postgres (`argus` / `argus_local_dev`, db `argus`) |
 | localhost:6379 | Redis |
 
-## Service mapping (local → Azure)
+## Service mapping (local → production)
 
-| Local (Compose) | Production (Azure) |
+Production is the **same Compose stack** on the single Azure VM, so the mapping is nearly 1:1:
+
+| Local (Compose) | Production (VM, Docker Compose) |
 |---|---|
-| `postgres` | Azure DB for PostgreSQL Flexible Server |
-| `redis` | Azure Cache for Redis |
-| `minio` | Azure Blob Storage (S3-compatible API) |
-| `api` (built image) | api Deployment on AKS |
+| `postgres` | self-hosted Postgres (same image) on the VM |
+| `redis` | self-hosted Redis (same image) on the VM |
+| `minio` | Backblaze B2 (S3-compatible) |
+| `api` (built image) | `api` container on the VM (same image) |
 
-The Compose file is the **local** equivalent of `charts/argus` — keep them in sync conceptually, but Compose is never deployed to prod.
+The local `compose.yaml` and the prod `compose.prod.yaml` share the same services — keep them in sync; the differences are config (B2 vs MinIO, Cloudflare Tunnel ingress, Key Vault secrets) not architecture.
 
 ## Develop against it from the host (hot reload)
 

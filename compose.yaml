@@ -85,7 +85,7 @@ services:
     command: ['sh', '-c', 'chmod 0777 /bootstrap']
     volumes: ['zitadel-bootstrap:/bootstrap']
 
-  # Local OIDC provider — stands in for managed Zitadel-on-AKS (checkpoint 9). `iss` host is `zitadel`
+  # Local OIDC provider — stands in for the VM's self-hosted Zitadel (checkpoint 9). `iss` host is `zitadel`
   # so it's identical for the in-compose API (compose DNS) and the browser — add `127.0.0.1 zitadel`
   # to /etc/hosts (docs/local-auth.md). All creds here are LOCAL throwaways, never real secrets.
   zitadel:
