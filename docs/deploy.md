@@ -71,8 +71,9 @@ runs. The OIDC federated subject is bound to that environment (`var.github_deplo
 
 `infra/vm/deploy/deploy.sh` on the VM: installs/refreshes `argus-secrets.service` → fetches the runtime
 secret set (Managed Identity → `/run/argus/secrets`) → `docker login ghcr.io` (token from Key Vault) + pulls
-the signed images → brings up Postgres/Redis → runs **DB migrations as the owner** (file-mounted DSN, then
-`shred`-ed) **before** the api serves → brings up `api` + `caddy` + `cloudflared`. Idempotent + fail-closed.
+the images → **`cosign verify`s** each (against this repo's `cd.yml` OIDC identity) and rolls out **by
+digest** → brings up Postgres/Redis → runs **DB migrations as the owner** (file-mounted DSN, then `shred`-ed)
+**before** the api serves → brings up `api` + `caddy` + `cloudflared`. Idempotent + fail-closed.
 Threat model: [`docs/threat-models/vm-cd.md`](threat-models/vm-cd.md).
 
 **Repo vars/secrets** (from the Terraform outputs): secrets `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/

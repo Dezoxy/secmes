@@ -19,6 +19,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 : "${IMAGE_TAG:?IMAGE_TAG required}"
 : "${GHCR_REGISTRY:?GHCR_REGISTRY required (e.g. ghcr.io/owner)}"
 : "${GHCR_USER:?GHCR_USER required}"
+: "${GH_REPO:?GH_REPO required (owner/repo, for the cosign signing identity)}"
 
 APP_DIR=/opt/argus
 SECRETS_DIR=/run/argus/secrets
@@ -70,11 +71,23 @@ _tok="$(mi_token)"
   exit 1
 }
 kv_get argus-ghcr-token "$_tok" | docker login "$GHCR_HOST" -u "$GHCR_USER" --password-stdin
-docker pull "$API_IMAGE"
-docker pull "$INGRESS_IMAGE"
+docker pull "$API_IMAGE" >/dev/null
+docker pull "$INGRESS_IMAGE" >/dev/null
 
-export ARGUS_API_IMAGE="$API_IMAGE"
-export ARGUS_INGRESS_IMAGE="$INGRESS_IMAGE"
+# VERIFY the keyless cosign signature before running anything: resolve each tag to its immutable digest and
+# check it was signed by THIS repo's cd.yml via GitHub OIDC. A bad/missing signature exits non-zero (set -e)
+# → the tampered image never runs. Rolling out by DIGEST also closes the tag-swap TOCTOU window.
+log "verifying image signatures (cosign)"
+api_digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$API_IMAGE")"
+ingress_digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$INGRESS_IMAGE")"
+cosign_id="^https://github.com/${GH_REPO}/\.github/workflows/cd\.yml@refs/tags/"
+cosign verify --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  --certificate-identity-regexp "$cosign_id" "$api_digest" >/dev/null
+cosign verify --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  --certificate-identity-regexp "$cosign_id" "$ingress_digest" >/dev/null
+
+export ARGUS_API_IMAGE="$api_digest"
+export ARGUS_INGRESS_IMAGE="$ingress_digest"
 export ARGUS_SECRETS_DIR="$SECRETS_DIR"
 
 # --- 4. Bring up data services first; wait for Postgres to be healthy before migrating. ---

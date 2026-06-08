@@ -39,8 +39,11 @@ every secret is fetched **on the VM** via the Managed Identity. No message conte
   holds only a custom `run-command` role on the one VM (not Contributor). `vars.ENABLE_DEPLOY` is the master
   kill-switch. See `vm-deploy.md`.
 - **Tampering — a malicious/compromised image.** → Images are built in CI, **Trivy**-scanned (fail on
-  HIGH/CRITICAL), SBOM'd (syft), and **cosign**-signed keyless via OIDC. The VM pulls by the immutable
-  commit-SHA tag that CD just pushed. *Residual:* the VM does not yet `cosign verify` on pull (see §6).
+  HIGH/CRITICAL), SBOM'd (syft), and **cosign**-signed keyless via OIDC. Before rollout the VM resolves each
+  tag to its immutable **digest** and **`cosign verify`s** the signature against this repo's `cd.yml` OIDC
+  identity; a bad/missing signature fails the deploy closed (the tampered image never runs), and the stack
+  runs **by digest** (closing the tag-swap TOCTOU). So a compromised registry or an overwritten tag can't
+  ship an unsigned image.
 - **Info-disclosure — secrets in the deploy.** → The run-command payload carries **no secrets** (only
   non-secret config at the SHA). The GHCR token + owner DSN are fetched on-VM via the Managed Identity, used,
   and dropped: the GHCR token goes to `docker login --password-stdin` (never argv) and the owner DSN is
@@ -80,10 +83,10 @@ vars/secrets exist.
 
 ## 6. Residual risk
 
-- **No `cosign verify` on the VM (yet).** The VM trusts the SHA tag CD pushed; verifying the signature on
-  pull (cosign on the VM, keyed to the CD identity) would harden against a compromised registry. Deferred —
-  add to deploy.sh with `cosign verify --certificate-identity ...`. (Signing already gives downstream/audit
-  value.)
+- **Signature-verification trust roots.** The VM verifies via cosign keyless (Fulcio/Rekor) against the
+  `cd.yml` OIDC identity — so it trusts the public-good Sigstore infrastructure and a correct
+  `--certificate-identity-regexp`. A private Fulcio/Rekor or a pinned key is the enterprise-grade upgrade;
+  the regexp must be kept in sync if the workflow path/ref scheme changes.
 - **`run-command` runs as root.** Inherent to the control-plane deploy model; the boundary is the OIDC
   subject binding + the single custom role (`vm-deploy.md`). A protected GitHub Environment with required
   reviewers is the pre-prod tightening.

@@ -117,6 +117,7 @@ jobs:
         env:
           GHCR_OWNER: ${{ github.repository_owner }}
           KEY_VAULT: ${{ vars.KEY_VAULT_NAME }}
+          GH_REPO: ${{ github.repository }} # owner/repo — the cosign signing identity the VM verifies against
           # The GHCR pull login username must be the account that OWNS the `argus-ghcr-token` PAT — NOT the
           # workflow actor (github.actor changes per tag-pusher and would mismatch the token owner). Defaults
           # to the repo owner; override with vars.GHCR_USER if the PAT belongs to a different/bot account.
@@ -133,8 +134,8 @@ jobs:
             echo 'set -euo pipefail'
             echo 'WORK="$(mktemp -d)"'
             printf "printf '%%s' '%s' | base64 -d | tar xz -C \"\$WORK\"\n" "$B64"
-            printf 'export ARGUS_KEY_VAULT=%q IMAGE_TAG=%q GHCR_REGISTRY=%q GHCR_USER=%q\n' \
-              "$KEY_VAULT" "$IMAGE_TAG" "$GHCR_REGISTRY" "$GHCR_USER"
+            printf 'export ARGUS_KEY_VAULT=%q IMAGE_TAG=%q GHCR_REGISTRY=%q GHCR_USER=%q GH_REPO=%q\n' \
+              "$KEY_VAULT" "$IMAGE_TAG" "$GHCR_REGISTRY" "$GHCR_USER" "$GH_REPO"
             echo 'bash "$WORK/infra/vm/deploy/deploy.sh"'
             echo 'rm -rf "$WORK"'
           } >runcmd.sh

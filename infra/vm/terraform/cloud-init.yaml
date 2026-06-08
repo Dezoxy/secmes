@@ -93,6 +93,11 @@ runcmd:
   - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/azure-cli/ $(. /etc/os-release && echo "$VERSION_CODENAME") main" >/etc/apt/sources.list.d/azure-cli.list
   - apt-get update
   - DEBIAN_FRONTEND=noninteractive apt-get install -y azure-cli
+  # cosign — the deploy (deploy.sh) verifies the keyless image signatures before rollout, so a compromised
+  # registry / overwritten tag can't ship an unsigned image. Pinned; FOLLOW-UP (P2): checksum-verify the
+  # binary against the release's published digest.
+  - curl -fsSLo /usr/local/bin/cosign https://github.com/sigstore/cosign/releases/download/v2.4.1/cosign-linux-amd64
+  - chmod 0755 /usr/local/bin/cosign
   # Layout + data disk. Enable the mount unit (runs now + on every boot, before Docker).
   - install -d -o argus -g argus -m 0750 /opt/argus
   - install -d -o root -g argus -m 0750 /run/argus/secrets
