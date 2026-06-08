@@ -47,7 +47,11 @@ create policy attachments_cleanup_delete on attachments
 -- attachments_tenant_expiry_idx (tenant_id, expires_at) backs the per-tenant expiry scan; the cleanup
 -- worker's cross-tenant scan reads the same column (a partial/expiry index could be added later if needed).
 grant usage on schema public to argus_cleanup;
-grant select, delete on attachments to argus_cleanup;
+-- Column-level SELECT: the worker only reads id + object_key (batch query) and expires_at (the WHERE +
+-- the RLS expiry predicate). So a leaked/misused cleanup credential can't read tenant_id, conversation_id,
+-- uploaded_by, or byte_size — minimizing cross-tenant metadata exposure. DELETE stays table-level (still
+-- RLS-gated to expired rows by the cleanup policies above).
+grant select (id, object_key, expires_at), delete on attachments to argus_cleanup;
 
 -- Backfill pre-A4 rows: attachments uploaded before this lifecycle (migration 0011) have expires_at = NULL,
 -- so neither the cleanup policy nor the worker (both gated on `expires_at < now()`) would ever reap them —
