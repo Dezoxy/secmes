@@ -38,11 +38,11 @@ mi_token() {
     "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fvault.azure.net" |
     jq -r '.access_token // empty'
 }
-kv_get() { # $1 = secret name ; $2 = bearer token
-  curl -fsS --max-time 15 --retry 3 --retry-connrefused --retry-delay 2 \
-    -H "Authorization: Bearer ${2}" \
-    "https://${ARGUS_KEY_VAULT}.vault.azure.net/secrets/${1}?api-version=${KV_API_VERSION}" |
-    jq -r '.value // empty'
+kv_get() { # $1 = secret name ; $2 = MI bearer token (passed via curl --config stdin, never argv/cmdline)
+  curl -fsS --max-time 15 --retry 3 --retry-connrefused --retry-delay 2 --config - \
+    "https://${ARGUS_KEY_VAULT}.vault.azure.net/secrets/${1}?api-version=${KV_API_VERSION}" <<EOF | jq -r '.value // empty'
+header = "Authorization: Bearer ${2}"
+EOF
 }
 
 # --- 1. Stage config + the secret-fetch unit (idempotent). ---
