@@ -247,10 +247,10 @@ git commit -m "test(web): add frontend smoke tests"
 - Create: `apps/web/src/features/ui/theme.ts`
 - Create: `apps/web/src/features/ui/theme.spec.ts`
 
-- [ ] Define tokens for app background, panel, panel-subtle, border, text, muted text, danger, success, and accent colors.
-- [ ] Keep purple as the default accent.
-- [ ] Preserve the existing user-selectable accent color list.
-- [ ] Add a test that validates each accent has `id`, `label`, `hex`, and `soft` values.
+- [x] Define tokens for app background, panel, panel-subtle, border, text, muted text, danger, success, and accent colors.
+- [x] Keep purple as the default accent.
+- [x] Preserve the existing user-selectable accent color list.
+- [x] Add a test that validates each accent has `id`, `label`, `hex`, and `soft` values.
 
 **Verification:**
 

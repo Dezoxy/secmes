@@ -2,6 +2,32 @@
 
 :root {
   color-scheme: dark;
+  --argus-color-app-bg: #1a1a24;
+  --argus-color-panel: #12121a;
+  --argus-color-panel-subtle: #0f0f16;
+  --argus-color-surface: #1a1a26;
+  --argus-color-surface-raised: #151520;
+  --argus-color-border: rgb(255 255 255 / 5%);
+  --argus-color-border-strong: rgb(255 255 255 / 10%);
+  --argus-color-text: rgb(255 255 255 / 92%);
+  --argus-color-text-muted: rgb(255 255 255 / 45%);
+  --argus-color-danger: #f43f5e;
+  --argus-color-success: #22c55e;
+  --argus-color-accent: #a855f7;
+  --argus-color-accent-hover: #c084fc;
+  --argus-color-accent-soft: rgb(168 85 247 / 20%);
+  --argus-space-1: 0.25rem;
+  --argus-space-2: 0.5rem;
+  --argus-space-3: 0.75rem;
+  --argus-space-4: 1rem;
+  --argus-space-6: 1.5rem;
+  --argus-space-8: 2rem;
+  --argus-radius-sm: 0.5rem;
+  --argus-radius-md: 0.75rem;
+  --argus-radius-lg: 1rem;
+  --argus-radius-xl: 1.5rem;
+  --argus-shadow-panel: 0 25px 50px -12px rgb(0 0 0 / 50%);
+  --argus-shadow-accent: 0 18px 34px var(--argus-color-accent-soft);
 }
 
 html,
@@ -19,5 +45,5 @@ body {
     Roboto,
     sans-serif;
   -webkit-font-smoothing: antialiased;
-  background: #1a1a24;
+  background: var(--argus-color-app-bg);
 }
