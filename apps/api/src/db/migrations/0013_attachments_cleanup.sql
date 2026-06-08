@@ -48,3 +48,10 @@ create policy attachments_cleanup_delete on attachments
 -- worker's cross-tenant scan reads the same column (a partial/expiry index could be added later if needed).
 grant usage on schema public to argus_cleanup;
 grant select, delete on attachments to argus_cleanup;
+
+-- Backfill pre-A4 rows: attachments uploaded before this lifecycle (migration 0011) have expires_at = NULL,
+-- so neither the cleanup policy nor the worker (both gated on `expires_at < now()`) would ever reap them —
+-- they would live forever. Bring them into the same 7-day retention path, measured from upload. Idempotent
+-- (touches only NULLs); runs as the migration owner (bypasses RLS) so it covers every tenant exactly once.
+-- 7 days matches ATTACHMENT_RETENTION_DAYS at the time of this migration (migrations are immutable history).
+update attachments set expires_at = created_at + interval '7 days' where expires_at is null;

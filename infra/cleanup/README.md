@@ -19,6 +19,20 @@ credential **files** via systemd `LoadCredential=`, populated from **Azure Key V
 **Managed Identity** at boot. The worker reads them from `$CREDENTIALS_DIRECTORY`. The DB connection uses
 libpq `PG*` env vars (no connstring on argv), so the password never appears in `ps`.
 
+## Prerequisite — provision the cleanup role login
+
+Migration `0013` creates `argus_cleanup` as **NOLOGIN** (its privileges are migration-controlled, and the
+RLS tests assume the role via `SET ROLE`). The systemd unit connects directly as `PGUSER=argus_cleanup`, so
+**before the worker can run** you must grant the role LOGIN + a password out-of-band — the password lives in
+Key Vault and is delivered to the unit via `LoadCredential` (see below). Run once as a superuser/owner:
+
+```sql
+-- NOT in a tracked migration (the password is environment-specific):
+ALTER ROLE argus_cleanup LOGIN PASSWORD '<from-key-vault>';
+```
+
+This mirrors how `argus_app` is provisioned (NOLOGIN in the migration; LOGIN + a Key Vault password at deploy).
+
 ## Install (on the VM)
 
 ```bash
