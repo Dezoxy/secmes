@@ -53,6 +53,24 @@ write_files:
       mount -a
       install -d -o argus -g argus -m 0750 "$MNT/postgres" "$MNT/zitadel-postgres" "$MNT/redis"
 
+  # Run the mount as a boot-time systemd unit, NOT a one-shot cloud-init runcmd: it re-runs on EVERY boot, so
+  # a reboot recovers if the disk ever attaches after the script's wait window; and it's ordered BEFORE
+  # Docker so the compose stack's bind-mounts always see the mounted data disk.
+  - path: /etc/systemd/system/argus-data-disk.service
+    permissions: "0644"
+    owner: root:root
+    content: |
+      [Unit]
+      Description=argus — format + mount the data disk (LUN 0) for Postgres/Redis/Zitadel
+      After=local-fs.target
+      Before=docker.service
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/local/sbin/argus-mount-data.sh
+      [Install]
+      WantedBy=multi-user.target
+
 runcmd:
   # Docker CE + Compose plugin (official repo — the apt `docker.io` lacks the v2 compose plugin).
   - install -m 0755 -d /etc/apt/keyrings
@@ -75,10 +93,11 @@ runcmd:
   - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/azure-cli/ $(. /etc/os-release && echo "$VERSION_CODENAME") main" >/etc/apt/sources.list.d/azure-cli.list
   - apt-get update
   - DEBIAN_FRONTEND=noninteractive apt-get install -y azure-cli
-  # Layout + data disk.
+  # Layout + data disk. Enable the mount unit (runs now + on every boot, before Docker).
   - install -d -o argus -g argus -m 0750 /opt/argus
   - install -d -o root -g argus -m 0750 /run/argus/secrets
-  - /usr/local/sbin/argus-mount-data.sh
+  - systemctl daemon-reload
+  - systemctl enable --now argus-data-disk.service
 
 # The CD pipeline (az vm run-command) takes it from here: deliver the compose/Caddyfile, fetch secrets from
 # Key Vault, run migrations, `docker compose up -d`, enable the backup/cleanup timers.
