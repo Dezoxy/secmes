@@ -34,7 +34,7 @@ jobs:
       matrix:
         include:
           - name: api
-            context: apps/api
+            context: . # repo root — the api build needs the pnpm workspace (@argus/crypto)
             dockerfile: apps/api/Dockerfile
           - name: ingress
             context: .

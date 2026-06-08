@@ -89,9 +89,6 @@ vars/secrets exist.
   reviewers is the pre-prod tightening.
 - **Single VM / no staging gate here.** Staging + prod environments (roadmap 8a) and a blue/green or
   health-gated rollout are later; today it's a single in-place `compose up -d`.
-- **api image build is Phase-0.** `apps/api/Dockerfile` still has its self-contained-build TODO (drizzle
-  drift without the workspace lockfile); the CD assumes a working api image. Reconciling that build is
-  tracked separately.
 - **`TUNNEL_TOKEN` transits the `compose up` process env.** `deploy.sh` reads the delivered file into
   `TUNNEL_TOKEN` for the `docker compose up` invocation, so it's briefly in that process's `/proc/<pid>/environ`
   (root / same-uid only). This is the documented cloudflared exception (no `--token-file`); the exposure
