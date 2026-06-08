@@ -204,8 +204,9 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
         {importOpen && (
           <div className="mt-3 space-y-3">
             <p className="text-xs leading-relaxed text-white/40">
-              Use this to replace this browser&apos;s encrypted device state with a recovery file.
-              Zitadel restores account access; this restores local message keys for future use.
+              Zitadel restores account access. This recovery file replaces this browser&apos;s
+              encrypted device state for future messages only; past message history is not
+              recovered.
             </p>
             <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-white/10 bg-[#1a1a26] px-4 py-3 text-sm text-white/60 transition-colors hover:border-purple-500/40">
               <Upload className="h-4 w-4 shrink-0 text-white/40" />

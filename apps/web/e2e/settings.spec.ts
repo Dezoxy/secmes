@@ -115,6 +115,7 @@ test('security recovery keeps the recovery-file import path available', async ({
   await dialog.getByRole('button', { name: 'Security & Recovery' }).click();
   await dialog.getByRole('button', { name: 'Import recovery file' }).click();
 
+  await expect(dialog.getByText('past message history is not recovered')).toBeVisible();
   await expect(dialog.getByText('Choose your recovery file')).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Replace this device' })).toBeVisible();
 });
