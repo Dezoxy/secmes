@@ -32,6 +32,11 @@ interface SaveProfileOptions {
   storage?: BrowserStorage;
 }
 
+type ProfileMigrationResult =
+  | { status: 'migrated'; profile: AnonymousProfile }
+  | { status: 'not-migrated'; shouldWipe: boolean }
+  | { status: 'unavailable' };
+
 export function profileStorageKey(subjectId: string): string {
   return versionedStorageKey('profile', subjectId);
 }
@@ -123,30 +128,34 @@ function migrateCurrentKeyRecord(
   storage: BrowserStorage,
   key: string,
   subjectId: string,
-): AnonymousProfile | null {
+): ProfileMigrationResult {
   const legacy = readLegacyJsonRecord({
     storage,
     key,
     decode: (value) => decodeScopedProfileRecord(value, subjectId),
   });
-  if (legacy.status !== 'ok') return null;
+  if (legacy.status === 'unavailable') return { status: 'unavailable' };
+  if (legacy.status !== 'ok') return { status: 'not-migrated', shouldWipe: true };
 
   writeVersionedRecord({ storage, key, value: legacy.value });
-  return legacy.value.profile;
+  return { status: 'migrated', profile: legacy.value.profile };
 }
 
 function migrateLegacyProfileRecord(
   storage: BrowserStorage,
   key: string,
   subjectId: string,
-): AnonymousProfile | null {
+): ProfileMigrationResult {
   const migrated = migrateLegacyJsonRecord({
     storage,
     legacyKey: LEGACY_ARGUS_PROFILE_STORAGE_KEY,
     targetKey: key,
     decode: (value) => decodeLegacyProfileRecord(value, subjectId),
   });
-  return migrated.status === 'migrated' ? migrated.value.profile : null;
+  if (migrated.status === 'migrated')
+    return { status: 'migrated', profile: migrated.value.profile };
+  if (migrated.status === 'unavailable') return { status: 'unavailable' };
+  return { status: 'not-migrated', shouldWipe: migrated.status !== 'missing' };
 }
 
 function wipeProfileNamespace(storage: BrowserStorage): void {
@@ -162,6 +171,12 @@ export function loadArgusProfile({
   randomId,
 }: ProfileOptions): AnonymousProfile {
   const key = profileStorageKey(subjectId);
+  const fallback = () => createDefaultProfile(randomId);
+  const fallbackAndSave = () => {
+    const profile = fallback();
+    saveArgusProfile({ subjectId, profile, storage });
+    return profile;
+  };
   const stored = readVersionedRecord({
     storage,
     key,
@@ -169,25 +184,25 @@ export function loadArgusProfile({
   });
 
   if (stored.status === 'ok') return stored.value.profile;
+  if (stored.status === 'unavailable') return fallback();
 
   if (stored.status === 'invalid-record') {
     const migratedCurrent = migrateCurrentKeyRecord(storage, key, subjectId);
-    if (migratedCurrent) return migratedCurrent;
+    if (migratedCurrent.status === 'unavailable') return fallback();
+    if (migratedCurrent.status === 'migrated') return migratedCurrent.profile;
     wipeProfileNamespace(storage);
   }
 
   if (stored.status === 'missing') {
-    const hadLegacyProfile = storage.getItem(LEGACY_ARGUS_PROFILE_STORAGE_KEY) !== null;
     const migratedLegacy = migrateLegacyProfileRecord(storage, key, subjectId);
-    if (migratedLegacy) return migratedLegacy;
-    if (hadLegacyProfile) wipeProfileNamespace(storage);
+    if (migratedLegacy.status === 'unavailable') return fallback();
+    if (migratedLegacy.status === 'migrated') return migratedLegacy.profile;
+    if (migratedLegacy.shouldWipe) wipeProfileNamespace(storage);
   } else {
     wipeProfileNamespace(storage);
   }
 
-  const fallback = createDefaultProfile(randomId);
-  saveArgusProfile({ subjectId, profile: fallback, storage });
-  return fallback;
+  return fallbackAndSave();
 }
 
 export function saveArgusProfile({

@@ -32,6 +32,7 @@ export type SafeJsonParseResult =
 export type StorageReadResult<T> =
   | { status: 'ok'; value: T }
   | { status: 'missing' }
+  | { status: 'unavailable' }
   | { status: 'invalid-json' }
   | { status: 'version-mismatch' }
   | { status: 'invalid-record' };
@@ -43,6 +44,7 @@ export type StorageWriteResult = { ok: true } | { ok: false; reason: StorageWrit
 export type LegacyMigrationResult<T> =
   | { status: 'migrated'; value: T }
   | { status: 'missing' }
+  | { status: 'unavailable' }
   | { status: 'invalid-json' }
   | { status: 'invalid-record' }
   | { status: 'write-failed'; reason: StorageWriteFailureReason };
@@ -105,7 +107,12 @@ export function readVersionedRecord<T>({
   key,
   decode,
 }: ReadVersionedOptions<T>): StorageReadResult<T> {
-  const raw = storage.getItem(key);
+  let raw: string | null;
+  try {
+    raw = storage.getItem(key);
+  } catch {
+    return { status: 'unavailable' };
+  }
   if (raw === null) return { status: 'missing' };
 
   const parsed = safeJsonParse(raw);
@@ -122,7 +129,12 @@ export function readLegacyJsonRecord<T>({
   key,
   decode,
 }: ReadLegacyOptions<T>): StorageReadResult<T> {
-  const raw = storage.getItem(key);
+  let raw: string | null;
+  try {
+    raw = storage.getItem(key);
+  } catch {
+    return { status: 'unavailable' };
+  }
   if (raw === null) return { status: 'missing' };
 
   const parsed = safeJsonParse(raw);

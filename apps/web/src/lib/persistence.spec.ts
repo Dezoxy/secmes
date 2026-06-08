@@ -3,6 +3,7 @@ import {
   ARGUS_STORAGE_VERSION,
   LEGACY_ARGUS_PROFILE_STORAGE_KEY,
   migrateLegacyJsonRecord,
+  readLegacyJsonRecord,
   readVersionedRecord,
   safeJsonParse,
   versionedStorageKey,
@@ -38,6 +39,12 @@ class MemoryStorage implements BrowserStorage {
 class QuotaStorage extends MemoryStorage {
   override setItem(): void {
     throw new DOMException('full', 'QuotaExceededError');
+  }
+}
+
+class ReadBlockedStorage extends MemoryStorage {
+  override getItem(): string | null {
+    throw new DOMException('blocked', 'SecurityError');
   }
 }
 
@@ -77,6 +84,26 @@ describe('browser persistence helpers', () => {
         decode: decodeTestRecord,
       }),
     ).toEqual({ status: 'missing' });
+  });
+
+  it('returns unavailable when versioned storage reads are blocked', () => {
+    expect(
+      readVersionedRecord({
+        storage: new ReadBlockedStorage(),
+        key: versionedStorageKey('profile', 'subject'),
+        decode: decodeTestRecord,
+      }),
+    ).toEqual({ status: 'unavailable' });
+  });
+
+  it('returns unavailable when legacy storage reads are blocked', () => {
+    expect(
+      readLegacyJsonRecord({
+        storage: new ReadBlockedStorage(),
+        key: LEGACY_ARGUS_PROFILE_STORAGE_KEY,
+        decode: decodeTestRecord,
+      }),
+    ).toEqual({ status: 'unavailable' });
   });
 
   it('safe-parses JSON without throwing or exposing the raw payload', () => {

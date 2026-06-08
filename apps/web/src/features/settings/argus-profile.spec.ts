@@ -32,6 +32,12 @@ class MemoryStorage implements BrowserStorage {
   }
 }
 
+class ReadBlockedStorage extends MemoryStorage {
+  override getItem(): string | null {
+    throw new DOMException('blocked', 'SecurityError');
+  }
+}
+
 describe('Argus pseudonymous profile boundary', () => {
   it('does not expose the authenticated subject or email-shaped legacy values as app identity', () => {
     const storage = new MemoryStorage();
@@ -124,6 +130,20 @@ describe('Argus pseudonymous profile boundary', () => {
         },
       },
     });
+  });
+
+  it('falls back without crashing when browser storage reads are unavailable', () => {
+    const storage = new ReadBlockedStorage();
+
+    const profile = loadArgusProfile({
+      subjectId: 'subject-a',
+      storage,
+      randomId: () => '00000000-0000-4000-8000-000000000005',
+    });
+
+    expect(profile.id).toBe('argus-00000000-0000-4000-8000-000000000005');
+    expect(profile.username).toMatch(/^anon-/);
+    expect(storage.items.size).toBe(0);
   });
 
   it('saves profile records under the authenticated subject scope only', () => {
