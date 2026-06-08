@@ -23,14 +23,15 @@ packages/
   contracts/           # Shared TypeScript types + Zod schemas (client <-> server envelope)
 infra/
   vm/                  # Terraform: the Azure VM, NSG (deny inbound), Key Vault, Managed Identity
-.github/workflows/     # CI (build/test) + CD (build/sign image -> az vm run-command deploy)
+.github/workflows/     # CI (build/test); CD (gated: build/scan/sign the image — VM rollout is WIP)
 compose.yaml           # the running stack (Postgres, Redis, Zitadel, api, web, Caddy, cloudflared)
 ```
 
 ## Status: Phase 0 — stand up the VM
 
 Goal: the VM provisioned and the stack reachable through the Cloudflare Tunnel, with CD via
-`az vm run-command`, **before** the bulk of the app logic.
+`az vm run-command`, **before** the bulk of the app logic. (Today: the Terraform + the gated
+build/scan/sign pipeline exist; the VM rollout step is still being built — merges do **not** deploy yet.)
 
 ### Local dev
 
