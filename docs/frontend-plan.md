@@ -103,6 +103,31 @@ Storage key rules:
 | Attachments | Exists in current main | Keep UI behind capability-aware states |
 | Devices/storage | Placeholder-style UI | Turn into real pages when backend contracts are ready |
 
+## Frontend Surface Ownership Inventory
+
+Top-level route ownership is currently small and explicit:
+
+| Route | Owner | Current state | Notes |
+| --- | --- | --- | --- |
+| `/` | `apps/web/src/App.tsx` | Real | Landing/auth entry. One passkey-first button delegates to Zitadel when OIDC is configured or demo chat when it is not. |
+| `/auth/callback` | `apps/web/src/routes/Callback.tsx` | Real | Isolated OIDC callback route. Completes PKCE sign-in and redirects to `/chat`; no chat UI ownership. |
+| `/chat` | `apps/web/src/main.tsx`, `apps/web/src/features/chat/ChatScreen.tsx` | Real | Auth-gated product route wrapped by `DeviceProvider` and `UnlockGate`; currently owns chat, settings modal, recovery entry, and conversation overlays. |
+
+Embedded surface ownership before refactoring:
+
+| Surface | Owner files | Current state | Backend dependency or blocker |
+| --- | --- | --- | --- |
+| Auth session | `apps/web/src/features/auth/AuthContext.tsx`, `apps/web/src/lib/auth.ts`, `apps/web/src/lib/api.ts` | Real | OIDC tokens remain memory-only; `/auth/session` and `/me` are used when the API is reachable. |
+| Callback | `apps/web/src/routes/Callback.tsx` | Real | No blocker; keep isolated from chat rendering. |
+| Chat shell | `apps/web/src/features/chat/ChatScreen.tsx` | Real but too broad | Coordinates conversation state, live MLS groups, WebSocket catch-up, settings modal, start-conversation, verification, and image preview. Step 9 owns decomposition. |
+| Conversation list | `apps/web/src/features/chat/ConversationList.tsx` | Real | Uses seed conversations plus live conversation state from `ChatScreen`; mobile behavior remains chat-owned. |
+| Message view and composer | `apps/web/src/features/chat/MessageList.tsx`, `apps/web/src/features/chat/MessageBubble.tsx`, `apps/web/src/features/chat/ChatInput.tsx` | Real | Demo sends use local MLS loopback; live sends need an unlocked device and server conversation membership. |
+| Attachments | `apps/web/src/features/chat/ChatInput.tsx`, `apps/web/src/features/chat/AttachmentImage.tsx`, `apps/web/src/features/chat/ImagePreviewModal.tsx`, `apps/web/src/lib/attachments.ts` | Real with capability-aware fallback | Live attachments use encrypted upload/download grants. Seed/demo attachments stay local data URIs. UI must keep presigned URLs out of logs and storage. |
+| Settings | `apps/web/src/features/settings/SettingsPanel.tsx` | Real modal, not route-owned | Profile, security, privacy, notifications, appearance, storage, devices, and about sections live in one component. Step 5 owns section split. |
+| Recovery | `apps/web/src/features/recovery/RecoveryPanel.tsx`, `apps/web/src/features/device/UnlockGate.tsx`, `apps/web/src/lib/recovery.ts`, `apps/web/src/lib/device-restore.ts` | Real embedded flow | Recovery stays under Security & Recovery and the unlock gate. No standalone recover route or app-side username/password recovery path. |
+| Devices | `apps/web/src/features/device/DeviceContext.tsx`, `apps/web/src/features/device/UnlockGate.tsx`, `apps/web/src/features/settings/SettingsPanel.tsx` | Mixed | Current device provisioning/unlock is real. Trusted-device listing and revoke UI are placeholders until backend contracts are ready. |
+| Storage | `apps/web/src/features/settings/SettingsPanel.tsx`, `apps/web/src/lib/keystore.ts` | Mixed | Encrypted local device/group/message storage is real. User-facing cache management is placeholder until confirmation and cleanup flows are designed. |
+
 ## Implementation Steps
 
 ### Step 1: Frontend Inventory and Route Ownership
@@ -117,9 +142,9 @@ Storage key rules:
 - Inspect: `apps/web/src/features/settings/SettingsPanel.tsx`
 - Inspect: `apps/web/src/lib/auth.ts`
 
-- [ ] Confirm every user-facing surface has an owner: auth, callback, chat, settings, recovery, devices, storage, attachments.
-- [ ] Document which surfaces are real, placeholder, or blocked by backend work.
-- [ ] Do not move code in this step.
+- [x] Confirm every user-facing surface has an owner: auth, callback, chat, settings, recovery, devices, storage, attachments.
+- [x] Document which surfaces are real, placeholder, or blocked by backend work.
+- [x] Do not move code in this step.
 
 **Verification:**
 
