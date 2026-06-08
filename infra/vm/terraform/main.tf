@@ -60,7 +60,6 @@ resource "azurerm_subnet_network_security_group_association" "this" {
 # It carries no inbound: the NSG denies all internet ingress. A NAT Gateway (no public IP on the VM) is the
 # hardening upgrade — pricier, so a beta uses an egress public IP.
 resource "azurerm_public_ip" "this" {
-  # checkov:skip=CKV_AZURE_119: EGRESS only — the NSG denies ALL inbound. A NAT Gateway (no public IP) is the cost upgrade.
   name                = "${var.prefix}-egress-pip"
   location            = azurerm_resource_group.this.location
   resource_group_name = azurerm_resource_group.this.name
@@ -70,6 +69,7 @@ resource "azurerm_public_ip" "this" {
 }
 
 resource "azurerm_network_interface" "this" {
+  # checkov:skip=CKV_AZURE_119: the attached public IP is EGRESS only — the NSG denies ALL inbound. NAT Gateway (no public IP) is the cost upgrade.
   name                = "${var.prefix}-nic"
   location            = azurerm_resource_group.this.location
   resource_group_name = azurerm_resource_group.this.name
@@ -152,5 +152,7 @@ resource "azurerm_virtual_machine_data_disk_attachment" "data" {
   managed_disk_id    = azurerm_managed_disk.data.id
   virtual_machine_id = azurerm_linux_virtual_machine.this.id
   lun                = 0
-  caching            = "ReadWrite"
+  # None (not ReadWrite): this disk holds the Postgres/Redis/Zitadel data dirs. ReadWrite host caching can
+  # lose host-acknowledged-but-unpersisted writes on a crash; Azure recommends None for write-heavy DB disks.
+  caching = "None"
 }
