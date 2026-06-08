@@ -24,7 +24,12 @@ import type { VerifiedAuth } from '../auth/auth.service.js';
 import { CurrentAuth } from '../auth/current-auth.decorator.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { KeyDirectoryService } from './key-directory.service.js';
-import { PublishKeyPackagesSchema, type PublishKeyPackages } from './key-directory.schemas.js';
+import {
+  PublishKeyPackagesSchema,
+  RevokeKeyPackagesSchema,
+  type PublishKeyPackages,
+  type RevokeKeyPackages,
+} from './key-directory.schemas.js';
 
 // Documents the request body in OpenAPI (the Zod type is erased at runtime). Zod still validates.
 // Bounds mirror PublishKeyPackagesSchema (the enforced Zod) so the documented contract 42Crunch audits
@@ -73,6 +78,20 @@ class ClaimedKeyPackageDto {
   keyPackage!: string;
 }
 
+class RevokeKeyPackagesBody {
+  @ApiProperty({
+    description: "base64 MLS signature public key identifying the caller's own device",
+    maxLength: 512,
+    pattern: BASE64_PATTERN,
+  })
+  signaturePublicKey!: string;
+}
+
+class RevokeResultDto {
+  @ApiProperty({ description: "unclaimed KeyPackages revoked (deleted) for the caller's device" })
+  revoked!: number;
+}
+
 @ApiTags('key-directory')
 @ApiBearerAuth()
 @Controller()
@@ -114,5 +133,24 @@ export class KeyDirectoryController {
     const claimed = await this.dir.claim(auth, userId);
     if (!claimed) throw new NotFoundException('no key package available for this user');
     return claimed;
+  }
+
+  // POST (a mutation): deletes the caller's own device's unclaimed packages. Idempotent — revoking again
+  // returns 0. Authz is the caller's verified identity + their device's signature key (own device only).
+  @Post('devices/me/key-packages/revoke')
+  @HttpCode(200) // 200 (data returned), not Nest's default 201
+  @ApiOperation({
+    summary: "Revoke the caller's own device's UNCLAIMED KeyPackages",
+    operationId: 'revokeKeyPackages',
+  })
+  @ApiBody({ type: RevokeKeyPackagesBody })
+  @ApiOkResponse({ type: RevokeResultDto })
+  @ApiBadRequestResponse({ description: 'invalid body, or user not provisioned' })
+  @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
+  async revoke(
+    @CurrentAuth() auth: VerifiedAuth,
+    @Body(new ZodValidationPipe(RevokeKeyPackagesSchema)) body: RevokeKeyPackages,
+  ): Promise<RevokeResultDto> {
+    return this.dir.revokeUnclaimed(auth, body.signaturePublicKey);
   }
 }

@@ -11,3 +11,8 @@ export const PublishKeyPackagesSchema = z
   })
   .strict(); // reject unknown keys (fail-closed) instead of silently stripping them
 export type PublishKeyPackages = z.infer<typeof PublishKeyPackagesSchema>;
+
+// Revoke the caller's OWN device's unclaimed KeyPackages (identified by its signature public key) — before
+// re-provisioning a cleared/reset device, so stale unclaimable packages can't poison peers' initiations.
+export const RevokeKeyPackagesSchema = z.object({ signaturePublicKey: base64.max(512) }).strict();
+export type RevokeKeyPackages = z.infer<typeof RevokeKeyPackagesSchema>;

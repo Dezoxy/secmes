@@ -96,9 +96,13 @@ opaque base64 to the crypto-blind server). Private keys never leave; the passphr
   degradation only**: the discarded private is unrecoverable, so no Welcome sealed to it ever leaks (FS
   preserved); it is **bounded** (≤ the published pool / 200-per-device cap) and **self-healing** (each dead
   package is consumed on the claim that poisons one initiation attempt, after which fresh packages are
-  served). The proper fix is a **server-side, device-scoped revoke** of unclaimed packages, landing with
-  the claim/Welcome lifecycle in **Slice 3** (a user revokes their own device's unclaimed packages before
-  re-provisioning). The **account-switch** case is intentionally *not* client-revocable: the abandoned
+  served). **NOW BUILT (task #20):** a **server-side, device-scoped revoke** — `POST /devices/me/key-packages/revoke`
+  (`KeyDirectoryService.revokeUnclaimed`) deletes the caller's OWN device's **UNCLAIMED** packages, the
+  device resolved by (caller's verified user + the device's signature key) so a user can only revoke their
+  own device (never another user's/device's). **Claimed** packages survive (an in-flight Welcome may be
+  HPKE-sealed to one). Migration `0014` adds the `delete on key_packages` grant; RLS is unchanged
+  (tenant-scoped). A user calls it before re-provisioning a cleared device. (Client wiring — invoke on
+  `clearDevice` before re-publish — is a follow-up.) The **account-switch** case is intentionally *not* client-revocable: the abandoned
   device belongs to a different user and the current session has no authority over it (correct authz);
   those packages are cleaned when that user next re-provisions. (Codex P2, PR #66 — accepted residual.)
 - **Single device per user** (v1, B2) — multi-device key management is deferred; ties into the
