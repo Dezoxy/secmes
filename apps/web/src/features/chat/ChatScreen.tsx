@@ -2,19 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MessageCircle } from 'lucide-react';
 import type { Conversation as MlsGroup } from '@argus/crypto';
 import type { UserSummary } from '../../lib/api';
-import { accessToken } from '../../lib/auth';
 import { ConversationManager, type ConversationSession } from '../../lib/conversations';
-import { joinPendingConversations } from '../../lib/join';
 import type { StoredMessage } from '../../lib/keystore';
 import type { AttachmentRef } from '../../lib/message-envelope';
 import {
   backfillConversation,
-  receiveLiveMessage,
   type DecryptedMessage,
   type MessagingDeps,
 } from '../../lib/messaging';
 import { getMlsSession } from '../../lib/mls';
-import { createMessageSocket, type MessageSocket } from '../../lib/ws';
 import { useAuth } from '../auth/AuthContext';
 import { useDevice } from '../device/DeviceContext';
 import { ConversationList } from './ConversationList';
@@ -26,6 +22,7 @@ import { StartConversation } from './StartConversation';
 import { contactDisplayName } from './user-label';
 import { VerifySecurity } from './VerifySecurity';
 import { useChatState } from './useChatState';
+import { liveConversationShell, useLiveConversations } from './useLiveConversations';
 import { useMessageSending } from './useMessageSending';
 import { loadArgusProfile, saveArgusProfile } from '../settings/argus-profile';
 import { SettingsPanel, type AnonymousProfile } from '../settings/SettingsPanel';
@@ -103,24 +100,6 @@ function withCurrentUserProfile(conversation: Conversation, profile: User): Conv
   };
 }
 
-function liveConversationShell(conversationId: string, selfUser: User): Conversation {
-  return {
-    id: conversationId,
-    type: 'direct',
-    participants: [
-      selfUser,
-      {
-        id: `peer-${conversationId}`,
-        name: 'New contact',
-        avatar: generatedAvatar(conversationId),
-        isOnline: false,
-      },
-    ],
-    messages: [],
-    unreadCount: 0,
-  };
-}
-
 export default function ChatScreen() {
   const [mounted, setMounted] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>(initialConversations);
@@ -164,26 +143,11 @@ export default function ChatScreen() {
     [messagingDeps, profile],
   );
   const [startOpen, setStartOpen] = useState(false);
-  // LIVE conversations (real MLS over the network): started via the manager, joined on connect, or rehydrated
-  // on unlock. `liveIds` drives the UI checks; `liveGroups` retains each in-memory MLS group for send/fetch.
-  // `fetchCursors` is the per-conversation keyset high-water mark so re-opening fetches only newer messages.
-  const [liveIds, setLiveIds] = useState<Set<string>>(() => new Set());
-  const liveGroups = useRef(new Map<string, MlsGroup>());
+  // Backfill/history refs stay local until Step 12D extracts the history path.
   const fetchCursors = useRef(new Map<string, string>());
   const backfilling = useRef(new Set<string>());
   const backfillPending = useRef(new Set<string>());
-  const socketRef = useRef<MessageSocket | null>(null);
-  const joinRanRef = useRef(false);
   const rehydratedRef = useRef(false);
-  // Read-only selected chat state is derived in a hook; mutation/live handlers stay local.
-  const { selectedConversation, isDirect, selectedIsLive, currentNumber, verified, isLive } =
-    useChatState({
-      conversations,
-      selectedId,
-      liveIds,
-      numbersByConv,
-      verifiedByConv,
-    });
 
   // Persist messages to the local SEALED history log (fire-and-forget; upsert by id). Plaintext in →
   // sealed at rest under the session key. Only LIVE conversations call this (seed/demo convs aren't logged).
@@ -203,15 +167,6 @@ export default function ChatScreen() {
     },
     [messagingDeps, sessionKey],
   );
-
-  const handleSend = useMessageSending({
-    selectedId,
-    isLive,
-    liveGroups,
-    messagingDeps,
-    appendHistory,
-    setConversations,
-  });
 
   // Merge decrypted incoming messages into a conversation, deduped by SERVER id (across fetch + WS push) and
   // kept in time order. Shared by fetch-on-open, the WS push, and reconnect catch-up. Also persists them to
@@ -298,14 +253,35 @@ export default function ChatScreen() {
     [messagingDeps, mergeIncoming],
   );
 
-  // Register a live conversation's MLS group and mark its id live (idempotent). The ref holds the group for
-  // encrypt/decrypt; the id set is React state so the UI re-renders (enables the composer, drives `isLive`).
-  // Also subscribe it on the realtime socket so the gateway pushes its messages.
-  const addLive = (conversationId: string, conversation: MlsGroup): void => {
-    liveGroups.current.set(conversationId, conversation);
-    setLiveIds((prev) => (prev.has(conversationId) ? prev : new Set(prev).add(conversationId)));
-    socketRef.current?.subscribe(conversationId);
-  };
+  const { liveIds, liveGroups, addLive } = useLiveConversations({
+    device,
+    pool,
+    deviceId,
+    messagingDeps,
+    selfUserId: profile?.userId,
+    currentUserProfile,
+    mergeIncoming,
+    backfillInto,
+    setConversations,
+  });
+
+  const { selectedConversation, isDirect, selectedIsLive, currentNumber, verified, isLive } =
+    useChatState({
+      conversations,
+      selectedId,
+      liveIds,
+      numbersByConv,
+      verifiedByConv,
+    });
+
+  const handleSend = useMessageSending({
+    selectedId,
+    isLive,
+    liveGroups,
+    messagingDeps,
+    appendHistory,
+    setConversations,
+  });
 
   useEffect(() => {
     setMounted(true);
@@ -364,35 +340,6 @@ export default function ChatScreen() {
     setStartOpen(false);
   };
 
-  // Join on connect (Slice 4 + 5B): once unlocked + provisioned, drain pending Welcomes into live
-  // conversations — now persisting each group (5A) then consuming its Welcome + pruning the spent private.
-  // Runs once per session. onJoined surfaces each joined conversation (placeholder peer — the inviter's
-  // identity isn't in the welcome list; join-conversation.md §6) and retains its MLS group for send/fetch.
-  useEffect(() => {
-    if (!device || !pool || !deviceId || !messagingDeps || joinRanRef.current) return;
-    joinRanRef.current = true;
-    joinPendingConversations({
-      device,
-      pool,
-      deviceId,
-      keystore: messagingDeps.keystore,
-      passphrase: messagingDeps.passphrase,
-      onJoined: ({ conversationId, conversation }) => {
-        addLive(conversationId, conversation);
-        setConversations((prev) =>
-          prev.some((c) => c.id === conversationId)
-            ? prev
-            : [liveConversationShell(conversationId, currentUserProfile), ...prev],
-        );
-      },
-    }).catch((err: unknown) => {
-      // A whole-drain failure (e.g. listWelcomes errored) is not retried this session; it rides the next
-      // unlock and Slice 5C's reconnect-sync. Per-Welcome failures are already isolated inside the drain.
-      // eslint-disable-next-line no-console
-      console.warn('join-on-connect drain failed', err instanceof Error ? err.message : err);
-    });
-  }, [device, pool, deviceId, messagingDeps, currentUserProfile]);
-
   // Rehydrate on unlock (Slice 5 + history): load every persisted conversation's sealed group state into a
   // live MLS group, seed its decrypted history from the sealed message log, and surface it. The group state
   // is how a conversation comes back (not a re-join); the message log is how its PLAINTEXT history comes back
@@ -426,7 +373,7 @@ export default function ChatScreen() {
         console.warn('rehydrate conversations failed', err instanceof Error ? err.message : err);
       }
     })();
-  }, [messagingDeps, sessionKey, currentUserProfile]);
+  }, [addLive, messagingDeps, sessionKey, currentUserProfile]);
 
   // Compute the selected DIRECT conversation's own safety number (from its own loopback session), once.
   // LIVE conversations are skipped — a started one already holds its REAL number, and none should spin up a
@@ -452,46 +399,6 @@ export default function ChatScreen() {
     if (!group) return;
     void backfillInto(selectedId, group, selfUserId);
   }, [selectedId, selectedIsLive, profile?.userId, backfillInto]);
-
-  // Realtime push (Slice 5C): one reconnecting WebSocket to the `/ws` gateway, authenticated in the first
-  // frame (never a token in the URL). It pushes ciphertext for the conversations we subscribe (each live
-  // group, via addLive). On a message we decrypt + persist + merge (deduped by server id). Catch-up runs
-  // per conversation on its `subscribed` ACK — only then is the socket in the gateway's room, so no message
-  // can slip between the catch-up fetch and the live subscription.
-  useEffect(() => {
-    if (!messagingDeps || !profile?.userId) return;
-    const deps = messagingDeps;
-    const selfUserId = profile.userId;
-    const socket = createMessageSocket({
-      token: accessToken,
-      onMessage: ({ conversationId, message }) => {
-        const group = liveGroups.current.get(conversationId);
-        if (!group) return; // a conversation we hold no keys for — ignore (can't decrypt)
-        void receiveLiveMessage(deps, conversationId, group, message, selfUserId)
-          .then((decrypted) => {
-            if (decrypted) mergeIncoming(conversationId, [decrypted]);
-          })
-          .catch((err: unknown) => {
-            // eslint-disable-next-line no-console
-            console.warn(
-              'ws receive failed',
-              conversationId,
-              err instanceof Error ? err.message : err,
-            );
-          });
-      },
-      onSubscribed: (conversationId) => {
-        const group = liveGroups.current.get(conversationId);
-        if (group) void backfillInto(conversationId, group, selfUserId);
-      },
-    });
-    socketRef.current = socket;
-    for (const id of liveGroups.current.keys()) socket.subscribe(id); // subscribe any already-live convs
-    return () => {
-      socket.close();
-      socketRef.current = null;
-    };
-  }, [messagingDeps, profile, backfillInto, mergeIncoming]);
 
   const handleSelect = (id: string) => {
     setSelectedId(id);
