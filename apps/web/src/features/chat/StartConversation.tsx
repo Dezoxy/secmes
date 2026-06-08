@@ -9,6 +9,7 @@ import {
   type PendingConversation,
 } from '../../lib/conversations';
 import { generatedAvatar } from './seed';
+import { contactDisplayName, contactSearchText } from './user-label';
 import { VerifySecurity } from './VerifySecurity';
 import { Avatar, IconButton, Modal } from '../ui';
 
@@ -90,7 +91,7 @@ export function StartConversation({
     return (
       <VerifySecurity
         mode="live"
-        peerName={peer.displayName || peer.email}
+        peerName={contactDisplayName(peer)}
         safetyNumber={pending.safetyNumber}
         verified={false}
         error={actionError}
@@ -107,7 +108,7 @@ export function StartConversation({
   }
 
   const shown = (users ?? []).filter((u) =>
-    `${u.displayName} ${u.email}`.toLowerCase().includes(filter.trim().toLowerCase()),
+    contactSearchText(u).includes(filter.trim().toLowerCase()),
   );
 
   return (
@@ -154,29 +155,30 @@ export function StartConversation({
             {users.length === 0 ? 'No other members in your workspace yet.' : 'No matches.'}
           </p>
         )}
-        {shown.map((u) => (
-          <button
-            key={u.id}
-            type="button"
-            disabled={busy}
-            onClick={() => pick(u)}
-            className="flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:bg-[#1a1a26] disabled:opacity-50"
-          >
-            <Avatar
-              src={generatedAvatar(u.displayName || u.email)}
-              name={u.displayName || u.email}
-              size="md"
-              shape="circle"
-              className="shrink-0 ring-2 ring-white/5"
-            />
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-white/90">
-                {u.displayName || u.email}
-              </p>
-              <p className="truncate text-xs text-white/40">{u.email}</p>
-            </div>
-          </button>
-        ))}
+        {shown.map((u) => {
+          const label = contactDisplayName(u);
+          return (
+            <button
+              key={u.id}
+              type="button"
+              disabled={busy}
+              onClick={() => pick(u)}
+              className="flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:bg-[#1a1a26] disabled:opacity-50"
+            >
+              <Avatar
+                src={generatedAvatar(`${label} ${u.id}`)}
+                name={label}
+                size="md"
+                shape="circle"
+                className="shrink-0 ring-2 ring-white/5"
+              />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-white/90">{label}</p>
+                <p className="truncate text-xs text-white/40">Pseudonymous member</p>
+              </div>
+            </button>
+          );
+        })}
       </div>
     </Modal>
   );

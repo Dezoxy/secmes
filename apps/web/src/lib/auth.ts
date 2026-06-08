@@ -39,6 +39,21 @@ export function createMemoryStorage(): Storage {
   };
 }
 
+/** Stable authenticated subject for storage scoping. Never use email/name as identity fallback. */
+export function subjectFromUser(
+  user: { profile?: { sub?: unknown; [claim: string]: unknown } } | null,
+): string | null {
+  const subject = user?.profile?.sub;
+  return typeof subject === 'string' && subject.length > 0 ? subject : null;
+}
+
+export function profileScopeFromAuth(
+  user: { profile?: { sub?: unknown; [claim: string]: unknown } } | null,
+  backendUserId: string | null | undefined,
+): string | null {
+  return subjectFromUser(user) ?? backendUserId ?? null;
+}
+
 let manager: UserManager | null = null;
 export function userManager(): UserManager {
   if (!oidcConfigured)

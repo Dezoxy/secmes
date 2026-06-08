@@ -25,7 +25,9 @@ import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import { StartConversation } from './StartConversation';
+import { contactDisplayName } from './user-label';
 import { VerifySecurity } from './VerifySecurity';
+import { loadArgusProfile, saveArgusProfile } from '../settings/argus-profile';
 import { SettingsPanel, type AnonymousProfile } from '../settings/SettingsPanel';
 import type { Attachment, Conversation, Message, User } from './seed';
 import {
@@ -36,43 +38,7 @@ import {
   safeAvatarSrc,
 } from './seed';
 
-const PROFILE_STORAGE_PREFIX = 'argus.anonymousProfile.v1';
-const LEGACY_PROFILE_STORAGE_KEY = PROFILE_STORAGE_PREFIX;
-
-function profileStorageKey(id: string): string {
-  return `${PROFILE_STORAGE_PREFIX}.${encodeURIComponent(id)}`;
-}
-
-function defaultAnonymousName(id: string): string {
-  const suffix = id.replace(/[^a-zA-Z0-9]/g, '').slice(-8) || 'local';
-  return `anon-${suffix}`;
-}
-
-function loadAnonymousProfile(id: string): AnonymousProfile {
-  const fallbackUsername = defaultAnonymousName(id);
-  const fallback = {
-    id,
-    username: fallbackUsername,
-    avatar: generatedAvatar(fallbackUsername),
-  };
-
-  const readProfile = (key: string): AnonymousProfile | null => {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<AnonymousProfile>;
-    if (parsed.id !== id) return null;
-    const username = parsed.username?.trim() || fallbackUsername;
-    return { id, username, avatar: safeAvatarSrc(parsed.avatar, username) };
-  };
-
-  try {
-    return (
-      readProfile(profileStorageKey(id)) ?? readProfile(LEGACY_PROFILE_STORAGE_KEY) ?? fallback
-    );
-  } catch {
-    return fallback;
-  }
-}
+const DEMO_PROFILE_SUBJECT = 'demo-local';
 
 /**
  * Chat experience, ported from the reworked design (`~/Downloads`) into the Vite PWA.
@@ -189,10 +155,10 @@ export default function ChatScreen() {
   const [verifiedByConv, setVerifiedByConv] = useState<Record<string, string>>({});
 
   const { device, pool, deviceId, keystore, passphrase, sessionKey } = useDevice();
-  const { profile } = useAuth();
-  const anonymousId = profile?.userId ?? currentUser.id;
+  const { profile, subjectId } = useAuth();
+  const profileSubjectId = subjectId ?? DEMO_PROFILE_SUBJECT;
   const [anonymousProfile, setAnonymousProfile] = useState<AnonymousProfile>(() =>
-    loadAnonymousProfile(anonymousId),
+    loadArgusProfile({ subjectId: profileSubjectId }),
   );
   const currentUserProfile = useMemo(
     () => currentUserFromProfile(anonymousProfile),
@@ -352,10 +318,8 @@ export default function ChatScreen() {
   }, []);
 
   useEffect(() => {
-    setAnonymousProfile((prev) =>
-      prev.id === anonymousId ? prev : loadAnonymousProfile(anonymousId),
-    );
-  }, [anonymousId]);
+    setAnonymousProfile(loadArgusProfile({ subjectId: profileSubjectId }));
+  }, [profileSubjectId]);
 
   useEffect(() => {
     setConversations((prev) =>
@@ -368,20 +332,23 @@ export default function ChatScreen() {
       ...next,
       avatar: safeAvatarSrc(next.avatar, next.username || next.id),
     };
-    try {
-      window.localStorage.setItem(profileStorageKey(safeNext.id), JSON.stringify(safeNext));
+    if (saveArgusProfile({ subjectId: profileSubjectId, profile: safeNext })) {
       setAnonymousProfile(safeNext);
       return true;
-    } catch {
-      return false;
     }
+    return false;
   };
 
   // Add a freshly-started LIVE conversation to the list: its safety number is the REAL one from the
   // session (not a loopback), and the user just confirmed it out-of-band, so it lands pre-verified.
   const handleStarted = (session: ConversationSession, peer: UserSummary): void => {
-    const name = peer.displayName || peer.email;
-    const peerUser: User = { id: peer.id, name, avatar: generatedAvatar(name), isOnline: false };
+    const name = contactDisplayName(peer);
+    const peerUser: User = {
+      id: peer.id,
+      name,
+      avatar: generatedAvatar(`${name} ${peer.id}`),
+      isOnline: false,
+    };
     addLive(session.conversationId, session.conversation); // retain its MLS group for live send/fetch
     setConversations((prev) =>
       prev.some((c) => c.id === session.conversationId)
