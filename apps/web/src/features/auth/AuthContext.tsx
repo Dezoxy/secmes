@@ -6,7 +6,7 @@ import {
   userManager,
   login as oidcLogin,
   logout as oidcLogout,
-  subjectFromUser,
+  profileScopeFromAuth,
 } from '../../lib/auth';
 import { establishSession, type Me } from '../../lib/api';
 
@@ -74,7 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
     configured: oidcConfigured,
     ready,
     user,
-    subjectId: profile?.userId ?? subjectFromUser(user),
+    subjectId: profileScopeFromAuth(user, profile?.userId),
     profile,
     login: oidcLogin,
     logout: oidcLogout,

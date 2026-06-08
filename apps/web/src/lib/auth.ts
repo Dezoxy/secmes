@@ -47,6 +47,13 @@ export function subjectFromUser(
   return typeof subject === 'string' && subject.length > 0 ? subject : null;
 }
 
+export function profileScopeFromAuth(
+  user: { profile?: { sub?: unknown; [claim: string]: unknown } } | null,
+  backendUserId: string | null | undefined,
+): string | null {
+  return subjectFromUser(user) ?? backendUserId ?? null;
+}
+
 let manager: UserManager | null = null;
 export function userManager(): UserManager {
   if (!oidcConfigured)

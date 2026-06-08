@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createMemoryStorage, subjectFromUser } from './auth';
+import { createMemoryStorage, profileScopeFromAuth, subjectFromUser } from './auth';
 
 // The §8 invariant: the OIDC user/token store is in-memory only (never the browser's persistent
 // storage), so an XSS can't lift a token from there. The store is wired into the UserManager's
@@ -49,5 +49,22 @@ describe('OIDC subject extraction', () => {
         },
       }),
     ).toBeNull();
+  });
+
+  it('keeps the OIDC subject as the stable profile storage scope after /me loads', () => {
+    expect(
+      profileScopeFromAuth(
+        {
+          profile: {
+            sub: 'oidc-subject-123',
+          },
+        },
+        'backend-user-456',
+      ),
+    ).toBe('oidc-subject-123');
+  });
+
+  it('uses the backend user id only when there is no OIDC subject', () => {
+    expect(profileScopeFromAuth(null, 'backend-user-456')).toBe('backend-user-456');
   });
 });
