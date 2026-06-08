@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, Download, KeyRound, Loader2, Upload, X } from 'lucide-react';
+import { restoreAndProvision } from '../../lib/device-restore';
 import {
   RECOVERY_IDENTITY,
   exportRecovery,
@@ -99,11 +100,13 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
     setBusy(true);
     try {
       if (device.keystore) {
-        // Real account: delegate to the gate's restore. It runs the same restore → revoke → publish-fresh
-        // flow AND re-syncs live device state + remounts the chat, so the Welcome drain re-runs against the
-        // fresh pool (a peer claiming a newly-published package can be joined without a manual reload) — #20.
-        // The gate owns the UI from here (status → unlocking → ready, or its error state).
-        await device.restore(await file.text(), passphrase);
+        // Real account: restore on the ACTIVE keystore (its caches reset with the cleared stores), then
+        // RELOAD so the live session re-initializes with the restored device + fresh pool (the Welcome
+        // drain re-runs). On FAILURE the catch below shows the error and the existing ready session is left
+        // untouched — restore fails closed before clearing, and we never flip the gate, so no lock-out (#20).
+        await restoreAndProvision(device.keystore, identity, await file.text(), passphrase);
+        setDone('Device restored — reloading…');
+        window.location.reload();
       } else {
         // Demo (no signed-in account / no directory): a local-only restore.
         await restoreFromArtifact(identity, await file.text(), passphrase);
