@@ -72,6 +72,41 @@ test('profile autosave resets a blank username to the anonymous default', async 
   await expect(page.getByText(defaultName)).toBeVisible();
 });
 
+test('profile autosave flushes before closing settings', async ({ page }) => {
+  await page.goto('/chat');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+
+  await page.getByLabel('Username').fill('quick-close-user');
+  await page.getByRole('button', { name: 'Close settings' }).click();
+
+  await expect(page.getByText('quick-close-user')).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByText('quick-close-user')).toBeVisible();
+});
+
+test('privacy switches persist across section changes', async ({ page }) => {
+  await page.goto('/chat');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Privacy' }).click();
+
+  await dialog.getByRole('switch', { name: 'Read receipts' }).click();
+  await expect(dialog.getByRole('switch', { name: 'Read receipts' })).not.toBeChecked();
+
+  await dialog.getByRole('button', { name: 'Notifications' }).click();
+  await dialog.getByRole('button', { name: 'Privacy' }).click();
+  await expect(dialog.getByRole('switch', { name: 'Read receipts' })).not.toBeChecked();
+
+  await dialog.getByRole('button', { name: 'Close settings' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+
+  const reopened = page.getByRole('dialog', { name: 'Settings' });
+  await reopened.getByRole('button', { name: 'Privacy' }).click();
+  await expect(reopened.getByRole('switch', { name: 'Read receipts' })).not.toBeChecked();
+});
+
 test('settings sections preserve defaults after component split', async ({ page }) => {
   await page.goto('/chat');
   await page.getByRole('button', { name: 'Open settings' }).click();

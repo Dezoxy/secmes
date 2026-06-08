@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import {
   Bell,
   Brush,
@@ -38,7 +38,11 @@ import { AppearanceSettings, FONT_SIZE_LEVELS } from './AppearanceSettings';
 import { DataStorageSettings } from './DataStorageSettings';
 import { DeviceSettings } from './DeviceSettings';
 import { NotificationSettings } from './NotificationSettings';
-import { PrivacySettings } from './PrivacySettings';
+import {
+  DEFAULT_PRIVACY_SETTINGS,
+  PrivacySettings,
+  type PrivacySettingsRecord,
+} from './PrivacySettings';
 import { ProfileSettings, type AnonymousProfile } from './ProfileSettings';
 import { SecuritySettings } from './SecuritySettings';
 
@@ -73,6 +77,7 @@ const sections: Array<{ id: SectionId; label: string; icon: LucideIcon }> = [
 ];
 
 const DEVICE_SETTINGS_STORAGE_KEY = versionedStorageKey('settings', 'device');
+const PRIVACY_SETTINGS_STORAGE_KEY = versionedStorageKey('settings', 'privacy');
 
 interface DeviceSettingsRecord {
   accentId: AccentId;
@@ -124,6 +129,47 @@ function writeStoredDeviceSettings(settings: DeviceSettingsRecord): void {
   });
 }
 
+function decodePrivacySettingsRecord(value: unknown): PrivacySettingsRecord | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const record = value as Record<string, unknown>;
+
+  return {
+    readReceipts:
+      typeof record.readReceipts === 'boolean'
+        ? record.readReceipts
+        : DEFAULT_PRIVACY_SETTINGS.readReceipts,
+    typingIndicators:
+      typeof record.typingIndicators === 'boolean'
+        ? record.typingIndicators
+        : DEFAULT_PRIVACY_SETTINGS.typingIndicators,
+    linkPreviews:
+      typeof record.linkPreviews === 'boolean'
+        ? record.linkPreviews
+        : DEFAULT_PRIVACY_SETTINGS.linkPreviews,
+  };
+}
+
+function readStoredPrivacySettings(): PrivacySettingsRecord {
+  if (typeof window === 'undefined') return DEFAULT_PRIVACY_SETTINGS;
+
+  const stored = readVersionedRecord({
+    storage: browserLocalStorage(),
+    key: PRIVACY_SETTINGS_STORAGE_KEY,
+    decode: decodePrivacySettingsRecord,
+  });
+
+  return stored.status === 'ok' ? stored.value : DEFAULT_PRIVACY_SETTINGS;
+}
+
+function writeStoredPrivacySettings(settings: PrivacySettingsRecord): void {
+  if (typeof window === 'undefined') return;
+  writeVersionedRecord({
+    storage: browserLocalStorage(),
+    key: PRIVACY_SETTINGS_STORAGE_KEY,
+    value: settings,
+  });
+}
+
 function readStoredAccent(): AccentId {
   return readStoredDeviceSettings().accentId;
 }
@@ -137,6 +183,9 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
   const [mobileSectionOpen, setMobileSectionOpen] = useState(false);
   const [accentId, setAccentId] = useState<AccentId>(() => readStoredAccent());
   const [fontSizeLevel, setFontSizeLevel] = useState(() => readStoredFontSize());
+  const [privacySettings, setPrivacySettings] = useState<PrivacySettingsRecord>(() =>
+    readStoredPrivacySettings(),
+  );
   const [username, setUsername] = useState(profile.username);
   const [avatar, setAvatar] = useState(profile.avatar);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -151,6 +200,10 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
     writeStoredDeviceSettings({ accentId, fontSizeLevel });
   }, [accentId, fontSizeLevel]);
 
+  useEffect(() => {
+    writeStoredPrivacySettings(privacySettings);
+  }, [privacySettings]);
+
   const activeSection = sections.find((section) => section.id === active) ?? sections[0]!;
   const ActiveIcon = activeSection.icon;
   const accent = getAccentById(accentId);
@@ -159,30 +212,45 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
     '--settings-accent-soft': accent.soft,
   } as CSSProperties;
 
-  useEffect(() => {
-    const clean = username.trim();
-    const safeAvatar = safeAvatarSrc(avatar, clean || profile.id);
-    if (profile.username === clean && profile.avatar === safeAvatar) {
-      setProfileError(null);
-      return;
-    }
+  const saveProfileDraft = useCallback(
+    (draftUsername: string, draftAvatar: string): boolean => {
+      const clean = draftUsername.trim();
+      const safeAvatar = safeAvatarSrc(draftAvatar, clean || profile.id);
 
-    const handle = window.setTimeout(() => {
+      if (profile.username === clean && profile.avatar === safeAvatar) {
+        setProfileError(null);
+        return true;
+      }
+
       if (onProfileChange({ id: profile.id, username: clean, avatar: safeAvatar })) {
         setProfileError(null);
-        if (safeAvatar !== avatar) setAvatar(safeAvatar);
-        return;
+        if (safeAvatar !== draftAvatar) setAvatar(safeAvatar);
+        return true;
       }
+
       setProfileError('Profile could not be saved on this device. Use a smaller avatar.');
+      return false;
+    },
+    [onProfileChange, profile.avatar, profile.id, profile.username],
+  );
+
+  const closeSettings = useCallback(() => {
+    saveProfileDraft(username, avatar);
+    onClose();
+  }, [avatar, onClose, saveProfileDraft, username]);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      saveProfileDraft(username, avatar);
     }, 300);
 
     return () => window.clearTimeout(handle);
-  }, [avatar, onProfileChange, profile.avatar, profile.id, profile.username, username]);
+  }, [avatar, saveProfileDraft, username]);
 
   return (
     <Modal
       ariaLabel="Settings"
-      onClose={onClose}
+      onClose={closeSettings}
       className={`items-center justify-center bg-black/80 p-4 backdrop-blur-sm ${modalBackdropEnterMotion}`}
       contentClassName={`flex h-[90vh] w-full max-w-4xl overflow-hidden rounded-2xl border border-white/5 bg-[#12121a] shadow-2xl shadow-black/50 sm:h-[82vh] ${modalPanelEnterMotion}`}
       style={accentVariables}
@@ -194,7 +262,7 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">Settings</h2>
-          <IconButton onClick={onClose} size="sm" aria-label="Close settings">
+          <IconButton onClick={closeSettings} size="sm" aria-label="Close settings">
             <X className="h-5 w-5" />
           </IconButton>
         </div>
@@ -246,7 +314,11 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
               <h3 className="text-xl font-semibold text-white">{activeSection.label}</h3>
               <p className="text-sm text-white/40">Anonymous account settings</p>
             </div>
-            <IconButton onClick={onClose} className="ml-auto sm:hidden" aria-label="Close settings">
+            <IconButton
+              onClick={closeSettings}
+              className="ml-auto sm:hidden"
+              aria-label="Close settings"
+            >
               <X className="h-5 w-5" />
             </IconButton>
           </div>
@@ -265,7 +337,9 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
 
           {active === 'security' && <SecuritySettings />}
 
-          {active === 'privacy' && <PrivacySettings />}
+          {active === 'privacy' && (
+            <PrivacySettings settings={privacySettings} onSettingsChange={setPrivacySettings} />
+          )}
 
           {active === 'notifications' && <NotificationSettings />}
 
