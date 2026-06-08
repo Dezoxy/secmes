@@ -15,4 +15,11 @@ describe('contact labels', () => {
     expect(contactDisplayName(user)).toBe('Anonymous contact');
     expect(contactSearchText(user)).toBe('user-2');
   });
+
+  it('handles nullable backend display names', () => {
+    const user = { id: 'user-3', displayName: null, email: 'null-name@example.test' };
+
+    expect(contactDisplayName(user)).toBe('Anonymous contact');
+    expect(contactSearchText(user)).toBe('user-3');
+  });
 });

@@ -24,7 +24,7 @@ export interface Me {
   userId: string;
   tenantId: string;
   email: string;
-  displayName: string;
+  displayName: string | null;
 }
 
 /**
@@ -96,7 +96,7 @@ export async function revokeKeyPackages(signaturePublicKey: string): Promise<Rev
 export interface UserSummary {
   id: string;
   email: string;
-  displayName: string;
+  displayName: string | null;
 }
 
 /** List active members of the caller's tenant (RLS-scoped, metadata only) — the contact picker source. */
