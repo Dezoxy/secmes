@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, Download, KeyRound, Loader2, Upload, X } from 'lucide-react';
-import { restoreAndProvision } from '../../lib/device-restore';
 import {
   RECOVERY_IDENTITY,
   exportRecovery,
@@ -99,18 +98,20 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
     }
     setBusy(true);
     try {
-      // Real account: the SHARED restore flow (restore → revoke now-stale packages → publish a fresh pool),
-      // the same path the unlock gate uses, so a Settings restore can't leave dead packages claimable (#20).
-      // Demo (no keystore / no directory) is a local-only restore.
       if (device.keystore) {
-        await restoreAndProvision(device.keystore, identity, await file.text(), passphrase);
+        // Real account: delegate to the gate's restore. It runs the same restore → revoke → publish-fresh
+        // flow AND re-syncs live device state + remounts the chat, so the Welcome drain re-runs against the
+        // fresh pool (a peer claiming a newly-published package can be joined without a manual reload) — #20.
+        // The gate owns the UI from here (status → unlocking → ready, or its error state).
+        await device.restore(await file.text(), passphrase);
       } else {
+        // Demo (no signed-in account / no directory): a local-only restore.
         await restoreFromArtifact(identity, await file.text(), passphrase);
+        setSetUp(true);
+        setDone('This device was restored from your recovery file.');
+        setFile(null);
+        setPassphrase('');
       }
-      setSetUp(true);
-      setDone('This device was restored from your recovery file.');
-      setFile(null);
-      setPassphrase('');
     } catch {
       setError('Could not restore — check the file and passphrase.');
     } finally {
