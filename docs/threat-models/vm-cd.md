@@ -9,9 +9,9 @@
 ## 1. Feature & data flow
 
 ```
-push main ─▶ cd.yml (GitHub Actions)
-   job images (matrix api + ingress):  build ─▶ push GHCR ─▶ Trivy(HIGH/CRIT) ─▶ syft SBOM ─▶ cosign sign+attest (keyless OIDC)
-   job deploy (gated):  Azure OIDC login ─▶ bundle exact-SHA infra (compose + fetch unit + deploy.sh)
+push tag vX.Y.Z ─▶ cd.yml (GitHub Actions)
+   job images (matrix api + ingress):  build (tag=version) ─▶ push GHCR ─▶ Trivy(HIGH/CRIT) ─▶ syft SBOM ─▶ cosign sign+attest (keyless OIDC)
+   job deploy (gated: ENABLE_DEPLOY + `production` env approval):  Azure OIDC login ─▶ bundle exact-SHA infra (compose + fetch unit + deploy.sh)
         └─ az vm run-command invoke ──Azure control plane──▶ VM guest agent ──▶ deploy.sh (root)
               deploy.sh:  Managed Identity ─▶ Key Vault (GHCR token + owner DSN, transient)
                           docker login GHCR ─▶ pull signed images
@@ -32,10 +32,12 @@ every secret is fetched **on the VM** via the Managed Identity. No message conte
 
 ## 3. Threats (STRIDE-lite)
 
-- **Spoofing the deployer.** A forged OIDC token could roll out arbitrary code (root) to the VM. → The
-  federated credential is bound to this repo's `main` ref; the SP holds only a custom `run-command` role on
-  the one VM (not Contributor). See `vm-deploy.md` (the OIDC subject binding is the real boundary; a protected
-  GitHub Environment is the documented pre-prod tightening).
+- **Spoofing the deployer.** A forged OIDC token, or an unwanted tag, could roll out arbitrary code (root) to
+  the VM. → Releases are **tag-triggered**, and the deploy job runs in the **`production` GitHub Environment**
+  with **required-reviewer approval** — a per-release human gate before any run-command runs. The federated
+  credential is bound to that environment (`repo:OWNER/REPO:environment:production`, not a branch), and the SP
+  holds only a custom `run-command` role on the one VM (not Contributor). `vars.ENABLE_DEPLOY` is the master
+  kill-switch. See `vm-deploy.md`.
 - **Tampering — a malicious/compromised image.** → Images are built in CI, **Trivy**-scanned (fail on
   HIGH/CRITICAL), SBOM'd (syft), and **cosign**-signed keyless via OIDC. The VM pulls by the immutable
   commit-SHA tag that CD just pushed. *Residual:* the VM does not yet `cosign verify` on pull (see §6).

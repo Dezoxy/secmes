@@ -46,16 +46,28 @@ docker build -f infra/vm/caddy/Dockerfile -t argus-ingress:local .   # context =
 docker compose -f compose.prod.yaml config -q                         # validate the stack
 ```
 
-## Rollout (CD — `cd.yml`, gated behind `vars.ENABLE_DEPLOY`)
+## Release & rollout (CD — `cd.yml`)
 
-On push to `main`, `cd.yml`:
+**Release on a version tag.** To cut a release you push a semver tag — the version *is* the image tag, so the
+deployed artifact is always traceable to the git tag:
 
-1. **Builds both images** (matrix: `api` + the Caddy `ingress` that bakes the PWA) → pushes to **GHCR** →
-   **Trivy** scan (fail on HIGH/CRITICAL) → **syft** SBOM → **cosign** keyless sign + attest.
-2. **Rolls out** (gated): logs in to Azure via OIDC, bundles the exact-SHA infra config (compose + the
-   secret-fetch unit + `deploy.sh`) into an `az vm run-command` invocation — so the **VM token stays
-   pull-only** (it can't read the repo). The control plane runs `deploy.sh` as root on the VM (no SSH, no open
-   port).
+```bash
+git tag v1.4.0 && git push origin v1.4.0
+```
+
+That triggers `cd.yml`:
+
+1. **Builds both images** (matrix: `api` + the Caddy `ingress` that bakes the PWA), tagged with the version →
+   pushes to **GHCR** → **Trivy** scan (fail on HIGH/CRITICAL) → **syft** SBOM → **cosign** keyless sign +
+   attest.
+2. **Rolls out** — logs in to Azure via OIDC, bundles the exact-SHA infra config (compose + the secret-fetch
+   unit + `deploy.sh`) into an `az vm run-command` invocation, so the **VM token stays pull-only** (it can't
+   read the repo). The control plane runs `deploy.sh` as root on the VM (no SSH, no open port).
+
+**Two-layer gate.** `vars.ENABLE_DEPLOY` is the master kill-switch (off until the Azure subscription +
+secrets exist). The deploy job runs in the **`production` GitHub Environment** — configure it with **required
+reviewers (you)**, so every tagged release **pauses for your manual approval** before the root run-command
+runs. The OIDC federated subject is bound to that environment (`var.github_deploy_subject`), not a branch.
 
 `infra/vm/deploy/deploy.sh` on the VM: installs/refreshes `argus-secrets.service` → fetches the runtime
 secret set (Managed Identity → `/run/argus/secrets`) → `docker login ghcr.io` (token from Key Vault) + pulls

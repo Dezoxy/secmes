@@ -1,15 +1,11 @@
 name: cd
 
+# Release-on-tag: a maintainer pushes a semver tag (e.g. v1.4.0) to cut a release. The version IS the image
+# tag, so the deployed artifact is traceable to the git tag. PR validation (lint/test/build) lives in ci.yml;
+# this workflow only builds the release artifact + (gated) rolls it out.
 on:
   push:
-    branches: [main]
-    paths:
-      - 'apps/api/**'
-      - 'apps/web/**'
-      - 'packages/**'
-      - 'compose.prod.yaml'
-      - 'infra/vm/**'
-      - '.github/workflows/cd.yml'
+    tags: ['v*.*.*']
 
 # Least privilege. id-token: Azure OIDC (no stored cloud creds) + cosign keyless signing.
 # packages: write to push the images to GHCR. No contents:write (the VM rollout is run-command, not GitOps).
@@ -24,7 +20,9 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_TAG: ${{ github.sha }} # github.sha is trusted (not attacker-controllable)
+  # The release version is the image tag. github.ref_name on a tag push is the tag name (e.g. v1.4.0) —
+  # trusted (a maintainer pushed it), and the VM pulls exactly this version.
+  IMAGE_TAG: ${{ github.ref_name }}
 
 jobs:
   # Build, scan, SBOM, and keyless-sign both images (api + the Caddy ingress that bakes the PWA), push to GHCR.
@@ -99,9 +97,11 @@ jobs:
     needs: images
     if: ${{ vars.ENABLE_DEPLOY == 'true' }}
     runs-on: ubuntu-latest
-    # Bind to a protected GitHub Environment: before arming, configure `production` with required reviewers and
-    # set the OIDC federated subject to `repo:OWNER/REPO:environment:production` (var.github_deploy_subject in
-    # infra/vm/terraform) so a push to main can't trigger a root run-command without the env's approval gate.
+    # TWO-LAYER GATE: `vars.ENABLE_DEPLOY` is the master kill-switch (off until the Azure sub + secrets exist),
+    # and the `production` GitHub Environment is the PER-RELEASE approval gate ("your allowance"): configure it
+    # with required reviewers, so each tagged release PAUSES here for your manual approval before the root
+    # run-command runs. Also set the OIDC federated subject to `repo:OWNER/REPO:environment:production`
+    # (var.github_deploy_subject in infra/vm/terraform) so the credential binds to the environment, not a branch.
     environment: production
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
