@@ -31,8 +31,7 @@
       "Bash(semgrep*)",
       "Bash(trivy*)",
       "Bash(gitleaks*)",
-      "Bash(osv-scanner*)",
-      "Bash(kubescape*)"
+      "Bash(osv-scanner*)"
     ],
     "ask": [
       "Bash(terraform apply*)",

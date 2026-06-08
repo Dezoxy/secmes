@@ -8,7 +8,7 @@ Principle: **OSS self-hosted by default** (nothing leaves our tenancy); external
 | Workflow | Tools | Blocks on |
 |---|---|---|
 | `ci.yml` | ESLint, Prettier, typecheck, tests, build, OpenAPI emit | lint/type/test failure |
-| `security.yml` | Semgrep (custom + auto), OSV-Scanner, gitleaks, Checkov, Kubescape, **42Crunch Audit** | HIGH/CRITICAL findings, secrets, API score < 75 |
+| `security.yml` | Semgrep (custom + auto), OSV-Scanner, gitleaks, Checkov, **42Crunch Audit** | HIGH/CRITICAL findings, secrets, API score < 75 |
 | `codeql.yml` | CodeQL (security-extended) | new code-scanning alerts |
 | `dast.yml` (nightly) | OWASP ZAP baseline, **42Crunch Conformance Scan** | against staging |
 | `cd.yml` | **Trivy image scan**, **syft SBOM**, **cosign** keyless sign + attest | HIGH/CRITICAL in the image |
@@ -55,4 +55,4 @@ Enforce the invariants generic scanners miss: no `Math.random()` for security, n
 
 ## Deliberately excluded (avoid redundancy/cost)
 
-Snyk (covered by OSV+Trivy+Socket), SonarQube (Semgrep+CodeQL), kube-bench/Polaris (Kubescape). **Socket.dev** (malicious-package detection) is recommended but left as a TODO — add when you create the account.
+Snyk (covered by OSV+Trivy+Socket), SonarQube (Semgrep+CodeQL). **Kubescape/kube-bench/Polaris** dropped — the deploy is a single VM via Docker Compose, not K8s (re-add if K8s is ever re-opened; the `charts/` scaffolds stay as dormant legacy). **Socket.dev** (malicious-package detection) is recommended but left as a TODO — add when you create the account.
