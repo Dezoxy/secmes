@@ -13,9 +13,9 @@ Principle: **OSS self-hosted by default** (nothing leaves our tenancy); external
 | `dast.yml` (nightly) | OWASP ZAP baseline, **42Crunch Conformance Scan** | against staging |
 | `cd.yml` | **Trivy image scan**, **syft SBOM**, **cosign** keyless sign + attest | HIGH/CRITICAL in the image |
 
-`cd.yml` (gated behind `vars.ENABLE_DEPLOY`) builds the app image, pushes it to **ACR**, then scans (Trivy), generates an SBOM (syft), and signs/attests (cosign). It does **not** roll out — the VM rollout (image pull + `az vm run-command`) lands with the VM deploy track, which will also move the registry to GHCR.
+`cd.yml` (gated behind `vars.ENABLE_DEPLOY`) builds **both** images (the `api` and the Caddy `ingress` that bakes the PWA), pushes them to **GHCR**, then scans (Trivy), SBOMs (syft), and keyless-signs/attests (cosign). It then **rolls out** to the single VM via **`az vm run-command`** (Azure OIDC) — the VM pulls the signed images and runs DB **migrations before serving** (`infra/vm/deploy/deploy.sh`). The run-command payload is non-secret (exact-SHA config); every secret is fetched on the VM via the Managed Identity. See `docs/threat-models/vm-cd.md`.
 
-**Secrets/vars to set before first run:** `X42C_API_TOKEN` (42Crunch), `vars.STAGING_URL` (DAST), `vars.ACR_LOGIN_SERVER` + `AZURE_*` (CD OIDC). Third-party action versions are pinned but **verify them before the first run**.
+**Secrets/vars to set before first run:** `X42C_API_TOKEN` (42Crunch), `vars.STAGING_URL` (DAST), and for CD: `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID` (OIDC secrets) + `vars.AZURE_RESOURCE_GROUP`/`vars.AZURE_VM_NAME`/`vars.KEY_VAULT_NAME` and the build-time `vars.VITE_OIDC_*` (all from the Terraform outputs). GHCR push uses the built-in `GITHUB_TOKEN` (no extra secret). Third-party action versions are pinned but **verify them before the first run**.
 
 **Dependency updates:** `.github/dependabot.yml` — weekly grouped PRs for npm (pnpm workspace), GitHub Actions, Terraform, and the Docker base image. This is what keeps the pinned action versions current over time. Enable **Dependabot alerts + security updates** in repo Settings → Security (UI toggle, not the config file). Note: Dependabot PRs run without repo secrets, so the 42Crunch audit job will skip/fail on them unless `X42C_API_TOKEN` is also added under Settings → Secrets → **Dependabot**.
 

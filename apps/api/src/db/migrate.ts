@@ -4,12 +4,16 @@ import { fileURLToPath } from 'node:url';
 
 import postgres from 'postgres';
 
-// Minimal forward-only migration runner. Connects as the OWNER (DATABASE_URL / a superuser
-// locally) and applies any *.sql in ./migrations not yet recorded in schema_migrations.
-// schema_migrations is the one allowed global table (no tenant_id).
-const url = process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL;
+import { resolveMigrationDsn } from './migration-dsn.js';
+
+// Minimal forward-only migration runner. Connects as the OWNER (file-first DSN; never the runtime argus_app
+// role) and applies any *.sql in ./migrations not yet recorded in schema_migrations. schema_migrations is the
+// one allowed global table (no tenant_id). On deploy this runs BEFORE the api serves (migrate-on-deploy).
+const url = resolveMigrationDsn();
 if (!url) {
-  console.error('Set DATABASE_URL (owner connection) to run migrations.');
+  console.error(
+    'Set MIGRATION_DATABASE_URL_FILE (or *_URL / DATABASE_URL) — owner connection — to migrate.',
+  );
   process.exit(1);
 }
 

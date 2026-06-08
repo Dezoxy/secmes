@@ -23,7 +23,7 @@ packages/
   contracts/           # Shared TypeScript types + Zod schemas (client <-> server envelope)
 infra/
   vm/                  # Terraform (the Azure VM, NSG deny-inbound, Key Vault, Managed Identity) + caddy/ (ingress image)
-.github/workflows/     # CI (build/test); CD (gated: build/scan/sign the image — VM rollout is WIP)
+.github/workflows/     # CI (build/test); CD (gated: build/scan/sign both images → GHCR + az vm run-command rollout)
 compose.yaml           # dev stack (Postgres, Redis, MinIO, Zitadel, api)
 compose.prod.yaml      # prod stack (Postgres, Redis, api, Caddy single-origin router, cloudflared) — see docs/deploy.md
 ```
@@ -31,8 +31,10 @@ compose.prod.yaml      # prod stack (Postgres, Redis, api, Caddy single-origin r
 ## Status: Phase 0 — stand up the VM
 
 Goal: the VM provisioned and the stack reachable through the Cloudflare Tunnel, with CD via
-`az vm run-command`, **before** the bulk of the app logic. (Today: the Terraform + the gated
-build/scan/sign pipeline exist; the VM rollout step is still being built — merges do **not** deploy yet.)
+`az vm run-command`, **before** the bulk of the app logic. (Today: the Terraform, the prod Compose stack +
+ingress, the Key Vault secret delivery, and the full gated CD pipeline — build/scan/sign → GHCR +
+`az vm run-command` rollout with migrate-before-serve — all exist as code; **`vars.ENABLE_DEPLOY` is off, so
+merges do not deploy yet**.)
 
 ### Local dev
 

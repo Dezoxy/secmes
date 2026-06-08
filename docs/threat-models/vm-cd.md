@@ -1,0 +1,96 @@
+# Threat model: CD rollout (Slice 4)
+
+> Status: **DRAFT for ratification.** The continuous-delivery path (roadmap Phase 0, checkpoints 5/6/7/7a):
+> `cd.yml` builds + scans + signs the images to GHCR, then rolls out to the single VM via `az vm
+> run-command` — pulling the signed images and running DB **migrations before serving**. **Gated** behind
+> `vars.ENABLE_DEPLOY` (off) — nothing deploys. Builds on slice 1's OIDC deploy credential (`vm-deploy.md`)
+> and slices 2/3 (the stack + secret delivery).
+
+## 1. Feature & data flow
+
+```
+push main ─▶ cd.yml (GitHub Actions)
+   job images (matrix api + ingress):  build ─▶ push GHCR ─▶ Trivy(HIGH/CRIT) ─▶ syft SBOM ─▶ cosign sign+attest (keyless OIDC)
+   job deploy (gated):  Azure OIDC login ─▶ bundle exact-SHA infra (compose + fetch unit + deploy.sh)
+        └─ az vm run-command invoke ──Azure control plane──▶ VM guest agent ──▶ deploy.sh (root)
+              deploy.sh:  Managed Identity ─▶ Key Vault (GHCR token + owner DSN, transient)
+                          docker login GHCR ─▶ pull signed images
+                          compose up postgres/redis ─▶ MIGRATE (owner, file DSN) ─▶ compose up api/caddy/cloudflared
+```
+
+The deploy reaches the VM **only** through the Azure control plane (`run-command`) — no SSH, no inbound port
+(NSG denies all inbound). The run-command payload is **non-secret** (compose + scripts at the deployed SHA);
+every secret is fetched **on the VM** via the Managed Identity. No message content is involved.
+
+## 2. Assets & trust boundaries
+
+- **Assets:** the GitHub→Azure OIDC deploy credential; the GHCR pull token + the DB **owner** DSN (both
+  high-value, both transient on the VM); the integrity of the images the VM runs.
+- **Boundaries:** GitHub ↔ Azure (OIDC federation, no stored creds — `vm-deploy.md`); the deploy SP ↔ the VM
+  (control-plane `run-command` only, a custom role on the one VM); VM ↔ Key Vault (MI, read-only); CI ↔ GHCR
+  (`GITHUB_TOKEN`, `packages:write`, job-scoped).
+
+## 3. Threats (STRIDE-lite)
+
+- **Spoofing the deployer.** A forged OIDC token could roll out arbitrary code (root) to the VM. → The
+  federated credential is bound to this repo's `main` ref; the SP holds only a custom `run-command` role on
+  the one VM (not Contributor). See `vm-deploy.md` (the OIDC subject binding is the real boundary; a protected
+  GitHub Environment is the documented pre-prod tightening).
+- **Tampering — a malicious/compromised image.** → Images are built in CI, **Trivy**-scanned (fail on
+  HIGH/CRITICAL), SBOM'd (syft), and **cosign**-signed keyless via OIDC. The VM pulls by the immutable
+  commit-SHA tag that CD just pushed. *Residual:* the VM does not yet `cosign verify` on pull (see §6).
+- **Info-disclosure — secrets in the deploy.** → The run-command payload carries **no secrets** (only
+  non-secret config at the SHA). The GHCR token + owner DSN are fetched on-VM via the Managed Identity, used,
+  and dropped: the GHCR token goes to `docker login --password-stdin` (never argv) and the owner DSN is
+  written `0400` to a tmpfs file, mounted read-only into the one-off migrate container, and **`shred`-ed**
+  immediately after. The owner DSN is **never** part of the persistent `/run/argus/secrets` set the running
+  stack holds (least privilege). `TUNNEL_TOKEN` is a runtime value only for `compose up`.
+- **Elevation — migrate runs as owner.** A breaking migration could serve ahead of its schema, or the owner
+  connection could be misused. → **Migrate-before-serve**: data services come up, migrations run to
+  completion as the owner (file DSN, advisory-locked), and only then do api/caddy/cloudflared start. The
+  **runtime** api connects as the non-bypass `argus_app` role, never the owner (`vm-ingress.md`).
+- **Repudiation / drift.** → The deployed artifact is the signed image at a known SHA + the exact-SHA infra
+  bundle; `run-command` is auditable in Azure activity logs (IDs/metadata, no secrets).
+
+## 4. Invariant check (CLAUDE.md ×6)
+
+1. **Crypto-blind server** — N/A (delivery only).
+2. **No secret/plaintext logging or persistence** — ✅ run-command payload secretless; transient secrets via
+   stdin/file + shredded; CI never echoes a secret; logs are IDs/metadata.
+3. **tenant_id + RLS** — N/A; migrations preserve the RLS schema; runtime is `argus_app`.
+4. **No hand-rolled crypto** — ✅ none; signing is cosign/Sigstore.
+5. **Secrets via Key Vault + Managed Identity** — ✅ every deploy secret (GHCR token, owner DSN) is
+   MI-fetched on the VM; CI holds only the OIDC `id-token` + the job-scoped `GITHUB_TOKEN`. No static cloud
+   creds anywhere.
+6. **No admin path to content** — N/A.
+
+## 5. Decision & mitigations
+
+Ship the gated CD as code. Must-hold: OIDC-only (no stored cloud creds); Trivy/cosign supply-chain gates;
+secretless run-command payload; transient MI-fetched deploy secrets (stdin/file, shredded); migrate-before-
+serve; runtime stays `argus_app`. Reviewer: **infra-reviewer** (workflow + deploy.sh) + **security-boundary-
+auditor** (the migration/role boundary). CI: actionlint/shellcheck on the workflow, gitleaks, Semgrep
+(CI-injection rules). Not deployed — `vars.ENABLE_DEPLOY` stays off until the Azure subscription + repo
+vars/secrets exist.
+
+## 6. Residual risk
+
+- **No `cosign verify` on the VM (yet).** The VM trusts the SHA tag CD pushed; verifying the signature on
+  pull (cosign on the VM, keyed to the CD identity) would harden against a compromised registry. Deferred —
+  add to deploy.sh with `cosign verify --certificate-identity ...`. (Signing already gives downstream/audit
+  value.)
+- **`run-command` runs as root.** Inherent to the control-plane deploy model; the boundary is the OIDC
+  subject binding + the single custom role (`vm-deploy.md`). A protected GitHub Environment with required
+  reviewers is the pre-prod tightening.
+- **Single VM / no staging gate here.** Staging + prod environments (roadmap 8a) and a blue/green or
+  health-gated rollout are later; today it's a single in-place `compose up -d`.
+- **api image build is Phase-0.** `apps/api/Dockerfile` still has its self-contained-build TODO (drizzle
+  drift without the workspace lockfile); the CD assumes a working api image. Reconciling that build is
+  tracked separately.
+- **`TUNNEL_TOKEN` transits the `compose up` process env.** `deploy.sh` reads the delivered file into
+  `TUNNEL_TOKEN` for the `docker compose up` invocation, so it's briefly in that process's `/proc/<pid>/environ`
+  (root / same-uid only). This is the documented cloudflared exception (no `--token-file`); the exposure
+  window is the compose CLI's lifetime. Accepted.
+- **`shred` on tmpfs is best-effort.** The transient owner-DSN file is `0400` on RAM-backed tmpfs and `rm`-ed
+  immediately; the `shred` is defense-in-depth only (overwrite-in-place doesn't apply to tmpfs). The real
+  protection is the tmpfs + `0400` + prompt removal.
