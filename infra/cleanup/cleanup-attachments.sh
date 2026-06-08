@@ -58,7 +58,7 @@ while :; do
   # The argus_cleanup RLS policy already restricts visibility to expired rows; the explicit predicate +
   # ORDER/LIMIT just bound the batch deterministically. Output: id<TAB>object_key per line. A failed query
   # (DB blip) is a logged no-op + stop — never a crash mid-batch, never a truncated partial read.
-  if ! rows="$(psql -At -F $'\t' -c \
+  if ! rows="$(psql -v ON_ERROR_STOP=1 -At -F $'\t' -c \
     "select id, object_key from attachments
      where expires_at is not null and expires_at < now() order by expires_at limit ${BATCH}")"; then
     log "batch query failed (DB unreachable?) — stopping; retries next run"
@@ -74,8 +74,9 @@ while :; do
       --endpoint-url "$S3_ENDPOINT" --bucket "$S3_BUCKET" --key "$object_key" >/dev/null 2>&1; then
       # 2) then delete the metadata row. NOTE: `psql -c` does NOT expand psql vars (`:'id'`), so the SQL is
       # fed via STDIN, where the lexer interpolates the quoted `:'id'` (no injection; still RLS-gated).
+      # ON_ERROR_STOP=1 so a SQL error EXITS non-zero (psql otherwise exits 0 on errors → false success).
       if printf '%s' "delete from attachments where id = :'id'" |
-        psql -q -v id="$id" >/dev/null 2>&1; then
+        psql -q -v ON_ERROR_STOP=1 -v id="$id" >/dev/null 2>&1; then
         batch_reaped=$((batch_reaped + 1))
       else
         total_failed=$((total_failed + 1))
