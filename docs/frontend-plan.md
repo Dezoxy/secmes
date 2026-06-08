@@ -394,14 +394,15 @@ git commit -m "feat(web): add route-owned app shell"
 - Create: `apps/web/src/features/settings/AppearanceSettings.tsx`
 - Create: `apps/web/src/features/settings/DataStorageSettings.tsx`
 - Create: `apps/web/src/features/settings/DeviceSettings.tsx`
+- Create: `apps/web/src/features/settings/AboutSettings.tsx`
 
-- [ ] Keep the mobile behavior: first show section list, then open selected section.
-- [ ] Keep account recovery embedded under Security & Recovery.
-- [ ] Keep Privacy values on default.
-- [ ] Keep Push notifications on Auto.
-- [ ] Keep Appearance dark-only, no language selector, no density, no reduce motion.
-- [ ] Keep font size as 10 selectable levels.
-- [ ] Keep color changer with default purple plus the approved accent list.
+- [x] Keep the mobile behavior: first show section list, then open selected section.
+- [x] Keep account recovery embedded under Security & Recovery.
+- [x] Keep Privacy values on default.
+- [x] Keep Push notifications on Auto.
+- [x] Keep Appearance dark-only, no language selector, no density, no reduce motion.
+- [x] Keep font size as 10 selectable levels.
+- [x] Keep color changer with default purple plus the approved accent list.
 
 **Verification:**
 

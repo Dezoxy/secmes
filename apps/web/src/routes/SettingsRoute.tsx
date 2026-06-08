@@ -11,9 +11,8 @@ export default function SettingsRoute() {
       icon={Settings}
     >
       <StateBlock icon={Settings} title="Settings sections">
-        The chat modal still owns the editable settings panel in this step. Step 8 will move those
-        sections behind explicit route-owned components without changing the passkey-first identity
-        model.
+        The editable settings modal now uses split section components. The route shell can reuse
+        them once profile and device state move out of the chat surface.
       </StateBlock>
     </RoutePageShell>
   );
