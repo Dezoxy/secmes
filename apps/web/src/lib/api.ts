@@ -69,6 +69,29 @@ export async function publishKeyPackages(
   return (await res.json()) as PublishResult;
 }
 
+/** The directory's response to a revoke. */
+export interface RevokeResult {
+  /** How many UNCLAIMED KeyPackages were deleted for this device. */
+  revoked: number;
+}
+
+/**
+ * Revoke (delete) this device's UNCLAIMED KeyPackages from the directory — called before re-provisioning a
+ * cleared/restored device, so its now-unopenable old packages (whose one-time privates were discarded) can't
+ * be claimed by a peer who'd then seal a Welcome this device can never open (device-provisioning §6, #20).
+ * Server-side, this only affects the caller's OWN device (resolved from the verified user + this signature
+ * key). Throws on non-OK — callers treat it as best-effort (the stale packages are an availability residual).
+ */
+export async function revokeKeyPackages(signaturePublicKey: string): Promise<RevokeResult> {
+  const res = await apiFetch('/devices/me/key-packages/revoke', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ signaturePublicKey }),
+  });
+  if (!res.ok) throw new Error(`POST /devices/me/key-packages/revoke → ${res.status}`);
+  return (await res.json()) as RevokeResult;
+}
+
 /** A tenant member as the directory exposes it — metadata only (no keys, no content). */
 export interface UserSummary {
   id: string;

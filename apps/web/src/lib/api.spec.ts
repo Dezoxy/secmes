@@ -14,6 +14,7 @@ import {
   listUsers,
   listWelcomes,
   publishKeyPackages,
+  revokeKeyPackages,
 } from './api';
 
 const token = vi.mocked(accessToken);
@@ -88,6 +89,25 @@ describe('api client', () => {
     token.mockResolvedValue('tok');
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('nope', { status: 400 }));
     await expect(publishKeyPackages('s', ['k'])).rejects.toThrow('key-packages → 400');
+  });
+
+  it('revokeKeyPackages POSTs the device sig key to the revoke route', async () => {
+    token.mockResolvedValue('tok');
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ revoked: 3 }), { status: 200 }));
+    const res = await revokeKeyPackages('sigpub==');
+    expect(res).toEqual({ revoked: 3 });
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe('/api/devices/me/key-packages/revoke');
+    const init = fetchSpy.mock.calls[0]?.[1];
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(init?.body as string)).toEqual({ signaturePublicKey: 'sigpub==' });
+  });
+
+  it('revokeKeyPackages throws on a non-ok response', async () => {
+    token.mockResolvedValue('tok');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('nope', { status: 500 }));
+    await expect(revokeKeyPackages('s')).rejects.toThrow('revoke → 500');
   });
 
   it('listUsers GETs /users with the limit and returns the directory', async () => {

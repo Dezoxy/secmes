@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 
-import type { DeviceKeys } from '@argus/crypto';
+import { deviceSignaturePublicKeyB64, type DeviceKeys } from '@argus/crypto';
 
+import { revokeKeyPackages } from '../../lib/api';
 import { DeviceKeystore } from '../../lib/keystore';
 import { provisionDevice } from '../../lib/provisioning';
 import { restoreFromArtifact } from '../../lib/recovery';
@@ -159,6 +160,20 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         await restoreFromArtifact(identity, artifactJson, passphrase);
         const dev = await keystore.loadDevice(identity, passphrase);
         if (!dev) throw new Error('restore did not produce a device');
+        // The OLD KeyPackages published under this device's stable signature key are now unopenable — a
+        // prior incarnation's one-time privates were discarded (pre-restore wipe / lost browser). Revoke
+        // them BEFORE re-publishing a fresh pool, so a peer can't claim a dead package and seal a Welcome
+        // this device can never open (device-provisioning §6, #20). Best-effort: a failed revoke only leaves
+        // the self-healing residual — it must NOT block getting the user's device back.
+        try {
+          await revokeKeyPackages(deviceSignaturePublicKeyB64(dev));
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            'key-package revoke after restore failed (stale packages remain; self-heal)',
+            e,
+          );
+        }
         const { pool: provisioned, result } = await provisionDevice(keystore, dev, passphrase);
         setDevice(dev);
         setPool(provisioned);
