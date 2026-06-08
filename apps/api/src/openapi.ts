@@ -7,9 +7,9 @@ const PUBLIC_HTTPS_URL = process.env.API_PUBLIC_URL ?? 'https://api.argus.exampl
 
 const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'patch', 'options', 'head'] as const;
 
-// Standard error responses any operation may return, given a shared typed body. `429` is intentionally
-// OMITTED until rate limiting ships (roadmap 46) — documenting it now would describe behavior that does
-// not exist yet. Success responses stay exactly as each controller declares them.
+// Standard error responses any operation may return, given a shared typed body. `429` applies to every
+// route: a global per-user throttle guard (rate limiting, #46) caps request volume, with tighter caps on
+// abuse-prone mutations. Success responses stay exactly as each controller declares them.
 const STD_ERROR_RESPONSES: Record<string, string> = {
   '400': 'Validation failed — malformed or out-of-bounds request.',
   '401': 'Missing or invalid bearer token.',
@@ -17,6 +17,7 @@ const STD_ERROR_RESPONSES: Record<string, string> = {
   '404': 'Resource not found (or deliberately hidden to avoid an existence oracle).',
   '406': 'No acceptable representation for the requested `Accept` header.',
   '415': 'Unsupported request media type.',
+  '429': 'Rate limit exceeded — too many requests; retry after the `Retry-After` interval.',
   default: 'Unexpected server error.',
 };
 

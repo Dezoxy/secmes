@@ -12,10 +12,12 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { CurrentAuth } from '../auth/current-auth.decorator.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
+import { SENSITIVE_LIMITS, perMinute } from '../rate-limit/rate-limit.constants.js';
 import {
   CreateDownloadGrantSchema,
   CreateUploadGrantSchema,
@@ -82,6 +84,7 @@ export class AttachmentsController {
   constructor(private readonly attachments: AttachmentsService) {}
 
   @Post()
+  @Throttle(perMinute(SENSITIVE_LIMITS.uploadGrant))
   @ApiOperation({
     summary: 'Mint an upload grant for an encrypted attachment (member-only)',
     operationId: 'createAttachmentUploadGrant',
@@ -99,6 +102,7 @@ export class AttachmentsController {
   }
 
   @Post('download-url')
+  @Throttle(perMinute(SENSITIVE_LIMITS.downloadGrant))
   @ApiOperation({
     summary: 'Mint a download grant for an encrypted attachment (member-only)',
     operationId: 'createAttachmentDownloadGrant',
