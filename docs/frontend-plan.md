@@ -172,16 +172,16 @@ git commit -m "docs: update frontend upgrade plan"
 - Create: `scripts/fetch-pr-review-threads.py`
 - Modify: `docs/frontend-plan.md`
 
-- [ ] Add root script `frontend:verify`.
-- [ ] If `apps/web` already has `test:e2e`, include it in `frontend:verify`; otherwise print a clear skip message until Step 3 adds it.
-- [ ] Add `scripts/fetch-pr-review-threads.py` using `gh api graphql` to print unresolved review threads with `id`, `isResolved`, `isOutdated`, `path`, `line`, author, and body.
-- [ ] Add `scripts/frontend-pr-gate.sh` that detects the current PR with `gh pr view --json number,url`.
-- [ ] The gate script must wait for CI with `gh pr checks <number> --watch`.
-- [ ] The gate script must comment `@codex review`.
-- [ ] The gate script must poll until a `chatgpt-codex-connector` review for the current head commit appears.
-- [ ] The gate script must fetch unresolved review threads and exit nonzero if unresolved actionable Codex findings remain.
-- [ ] The gate script must print the exact review thread ids and URLs needed for follow-up replies.
-- [ ] Add `--merge` only if it can prove CI is green and the latest Codex review is clean; otherwise leave merge manual.
+- [x] Add root script `frontend:verify`.
+- [x] If `apps/web` already has `test:e2e`, include it in `frontend:verify`; otherwise print a clear skip message until Step 3 adds it.
+- [x] Add `scripts/fetch-pr-review-threads.py` using `gh api graphql` to print unresolved review threads with `id`, `isResolved`, `isOutdated`, `path`, `line`, author, and body.
+- [x] Add `scripts/frontend-pr-gate.sh` that detects the current PR with `gh pr view --json number,url`.
+- [x] The gate script must wait for CI with `gh pr checks <number> --watch`.
+- [x] The gate script must comment `@codex review`.
+- [x] The gate script must poll until a `chatgpt-codex-connector` review for the current head commit appears.
+- [x] The gate script must fetch unresolved review threads and exit nonzero if unresolved actionable Codex findings remain.
+- [x] The gate script must print the exact review thread ids and URLs needed for follow-up replies.
+- [x] Add `--merge` only if it can prove CI is green and the latest Codex review is clean; otherwise leave merge manual.
 
 **Verification:**
 
