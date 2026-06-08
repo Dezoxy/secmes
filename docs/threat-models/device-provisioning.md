@@ -101,8 +101,12 @@ opaque base64 to the crypto-blind server). Private keys never leave; the passphr
   device resolved by (caller's verified user + the device's signature key) so a user can only revoke their
   own device (never another user's/device's). **Claimed** packages survive (an in-flight Welcome may be
   HPKE-sealed to one). Migration `0014` adds the `delete on key_packages` grant; RLS is unchanged
-  (tenant-scoped). A user calls it before re-provisioning a cleared device. (Client wiring — invoke on
-  `clearDevice` before re-publish — is a follow-up.) The **account-switch** case is intentionally *not* client-revocable: the abandoned
+  (tenant-scoped). The client wires this into the **restore path**
+  (`DeviceContext.restore` → `revokeKeyPackages(deviceSignaturePublicKeyB64)` **before** `provisionDevice`):
+  on a pre-restore wipe or a fresh-browser restore, the stable signature key's stale (now-unopenable)
+  packages are revoked before a fresh pool is published. **Best-effort** — a failed revoke only leaves the
+  self-healing residual, never blocks getting the device back. The **account-switch reset**
+  (`resetForNewAccount`) still does NOT revoke (the device is a different user's — no authority). The **account-switch** case is intentionally *not* client-revocable: the abandoned
   device belongs to a different user and the current session has no authority over it (correct authz);
   those packages are cleaned when that user next re-provisions. (Codex P2, PR #66 — accepted residual.)
 - **Single device per user** (v1, B2) — multi-device key management is deferred; ties into the

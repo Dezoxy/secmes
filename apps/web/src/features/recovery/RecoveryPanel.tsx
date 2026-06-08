@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, Download, KeyRound, Loader2, Upload, X } from 'lucide-react';
+import { RestoreCommittedError, restoreAndProvision } from '../../lib/device-restore';
 import {
   RECOVERY_IDENTITY,
   exportRecovery,
@@ -8,6 +9,7 @@ import {
   setUpRecovery,
 } from '../../lib/recovery';
 import { useAuth } from '../auth/AuthContext';
+import { useDevice } from '../device/DeviceContext';
 
 const INPUT =
   'w-full rounded-xl border border-white/5 bg-[#1a1a26] px-4 py-2.5 text-sm text-white placeholder-white/30 transition-all focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20';
@@ -32,6 +34,7 @@ interface RecoveryPanelProps {
 
 export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps) {
   const { profile } = useAuth();
+  const device = useDevice();
   // Back up / restore the SIGNED-IN account's device (the same identity the unlock gate sealed it under),
   // so recovery and unlock share one device. RECOVERY_IDENTITY is only the demo fallback (no real account).
   const identity = profile?.userId ?? RECOVERY_IDENTITY;
@@ -96,12 +99,30 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
     }
     setBusy(true);
     try {
-      await restoreFromArtifact(identity, await file.text(), passphrase);
-      setSetUp(true);
-      setDone('This device was restored from your recovery file.');
-      setFile(null);
-      setPassphrase('');
-    } catch {
+      if (device.keystore) {
+        // Real account: restore on the ACTIVE keystore (its caches reset with the cleared stores), then
+        // RELOAD so the live session re-initializes with the restored device + fresh pool (the Welcome
+        // drain re-runs). On FAILURE the catch below shows the error and the existing ready session is left
+        // untouched — restore fails closed before clearing, and we never flip the gate, so no lock-out (#20).
+        await restoreAndProvision(device.keystore, identity, await file.text(), passphrase);
+        setDone('Device restored — reloading…');
+        window.location.reload();
+      } else {
+        // Demo (no signed-in account / no directory): a local-only restore.
+        await restoreFromArtifact(identity, await file.text(), passphrase);
+        setSetUp(true);
+        setDone('This device was restored from your recovery file.');
+        setFile(null);
+        setPassphrase('');
+      }
+    } catch (e) {
+      if (e instanceof RestoreCommittedError) {
+        // The artifact WAS applied (the active stores are already replaced) — the live session is now stale.
+        // Reload to re-initialize rather than show a "preserved" session whose stores were cleared (the
+        // failed publish self-heals on the next login). Only a PRE-clear failure (below) keeps the session.
+        window.location.reload();
+        return;
+      }
       setError('Could not restore — check the file and passphrase.');
     } finally {
       setBusy(false);

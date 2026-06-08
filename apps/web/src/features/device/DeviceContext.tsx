@@ -2,9 +2,9 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 
 import type { DeviceKeys } from '@argus/crypto';
 
+import { restoreAndProvision } from '../../lib/device-restore';
 import { DeviceKeystore } from '../../lib/keystore';
 import { provisionDevice } from '../../lib/provisioning';
-import { restoreFromArtifact } from '../../lib/recovery';
 import { useAuth } from '../auth/AuthContext';
 
 // Holds the SESSION's unlocked MLS device + its one-time KeyPackage pool. The device is sealed at rest
@@ -156,10 +156,12 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
       setStatus('unlocking');
       setError(null);
       try {
-        await restoreFromArtifact(identity, artifactJson, passphrase);
-        const dev = await keystore.loadDevice(identity, passphrase);
-        if (!dev) throw new Error('restore did not produce a device');
-        const { pool: provisioned, result } = await provisionDevice(keystore, dev, passphrase);
+        // Shared with the Settings recovery panel: restore → revoke now-stale packages → publish fresh (#20).
+        const {
+          device: dev,
+          pool: provisioned,
+          result,
+        } = await restoreAndProvision(keystore, identity, artifactJson, passphrase);
         setDevice(dev);
         setPool(provisioned);
         setDeviceId(result.deviceId);
