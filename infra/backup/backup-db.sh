@@ -17,7 +17,9 @@
 #     and is fetched only at RESTORE time, so a compromised backup host cannot read past dumps.
 #   - Secrets (DB password, B2 secret key) are read from FILES delivered by systemd LoadCredential, populated
 #     from Azure Key Vault via the VM's Managed Identity — never committed, never in env at rest (invariant
-#     #5). libpq PG* env (no connstring on argv) keeps the password out of `ps`/argv.
+#     #5). They stay FILE-BACKED end-to-end: the script writes a libpq passfile + an AWS credentials file in a
+#     private tmpfs dir (0600) and points the CLIs at them by PATH — the secret VALUES never enter the process
+#     environment (so they're not in /proc/<pid>/environ, not inherited by children) nor argv/`ps`.
 #   - Logs object keys / sizes / counts ONLY — never a secret, never a presigned URL, never plaintext.
 #
 # Requires: pg_dump + pg_dumpall (libpq client), age (https://age-encryption.org — asymmetric file
@@ -39,12 +41,10 @@ export PGHOST PGUSER PGDATABASE
 export PGPORT="${PGPORT:-5432}"
 export PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-10}"
 export AWS_REGION="${S3_REGION:-eu-central-003}" # EU default (B2 ignores it for routing; the host carries it)
-export AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY_ID"
 
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
 BACKUP_PREFIX="${BACKUP_PREFIX:-argus}" # common root → both objects share it so one prune covers them
 
-# --- Secrets from credential files (systemd LoadCredential / Key Vault). Trim the trailing newline. ---
 read_secret_file() {
   local f="$1"
   [[ -r "$f" ]] || {
@@ -53,10 +53,39 @@ read_secret_file() {
   }
   tr -d '\n' <"$f"
 }
-PGPASSWORD="$(read_secret_file "${BACKUP_DB_PASSWORD_FILE:?BACKUP_DB_PASSWORD_FILE required}")"
-export PGPASSWORD
-AWS_SECRET_ACCESS_KEY="$(read_secret_file "${S3_SECRET_ACCESS_KEY_FILE:?S3_SECRET_ACCESS_KEY_FILE required}")"
-export AWS_SECRET_ACCESS_KEY
+
+# --- Secrets stay FILE-BACKED end-to-end. We do NOT `export PGPASSWORD` / `AWS_SECRET_ACCESS_KEY`: an
+#     exported secret is readable via /proc/<pid>/environ (root + same-UID) and is inherited by EVERY child,
+#     including the ones that don't need it (`age`, `aws` don't need the DB password; `pg_dump` doesn't need
+#     the B2 secret). Instead we materialise a libpq passfile + an AWS credentials file in a private tmpfs
+#     work dir (0600) and point the CLIs at them by PATH — so no secret VALUE ever enters the environment
+#     (invariant #5: secret delivered as a file, end-to-end). The source secrets arrive via systemd
+#     LoadCredential (Key Vault). The work dir is removed on exit. ---
+umask 077
+WORKDIR="$(mktemp -d)"
+trap 'rm -rf -- "$WORKDIR"' EXIT
+chmod 700 "$WORKDIR"
+
+# libpq passfile (hostname:port:database:username:password). Wildcards are safe in a private 0600 file used
+# only by this unit. The password's `\` and `:` are escaped per the .pgpass format.
+_db_pw="$(read_secret_file "${BACKUP_DB_PASSWORD_FILE:?BACKUP_DB_PASSWORD_FILE required}")"
+_esc_pw="$(printf '%s' "$_db_pw" | sed -e 's/\\/\\\\/g' -e 's/:/\\:/g')"
+PGPASSFILE="$WORKDIR/pgpass"
+printf '*:*:*:%s:%s\n' "$PGUSER" "$_esc_pw" >"$PGPASSFILE"
+chmod 600 "$PGPASSFILE"
+export PGPASSFILE
+unset _db_pw _esc_pw
+
+# AWS shared-credentials file. The access-key-id is NOT a secret; the secret key rides only in this 0600 file.
+AWS_SHARED_CREDENTIALS_FILE="$WORKDIR/aws-credentials"
+{
+  printf '[default]\n'
+  printf 'aws_access_key_id = %s\n' "$S3_ACCESS_KEY_ID"
+  printf 'aws_secret_access_key = %s\n' \
+    "$(read_secret_file "${S3_SECRET_ACCESS_KEY_FILE:?S3_SECRET_ACCESS_KEY_FILE required}")"
+} >"$AWS_SHARED_CREDENTIALS_FILE"
+chmod 600 "$AWS_SHARED_CREDENTIALS_FILE"
+export AWS_SHARED_CREDENTIALS_FILE
 
 log() { printf '[%s] backup: %s\n' "$(date -u +%FT%TZ)" "$*"; }
 
@@ -104,7 +133,7 @@ db_key="${BACKUP_PREFIX}-db-${stamp}.dump.age"
 # 1) Cluster ROLES first (tiny). Definitions + memberships, NO passwords. Without this a restore onto a fresh
 #    cluster fails: the schema's role-scoped RLS policies + grants reference argus_app/argus_cleanup/etc.
 dump_upload "roles (globals)" "$globals_key" 64 -- \
-  pg_dumpall --database="$PGDATABASE" --roles-only --no-role-passwords || exit 1
+  pg_dumpall --database="$PGDATABASE" --no-password --roles-only --no-role-passwords || exit 1
 
 # 2) The database (custom format → compact, supports selective/parallel restore). A run is ALL-OR-NOTHING:
 #    if the DB dump fails, delete the roles object we just wrote so no orphaned `globals` is left to be paired

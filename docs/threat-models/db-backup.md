@@ -37,8 +37,11 @@ in the backup — they are re-applied from Key Vault at restore.
   by anyone who gets the bucket) would leak every tenant's metadata. → **Client-side age encryption** before
   upload; B2 stores ciphertext only. Private key in Key Vault, never on the backup host (a host compromise
   cannot decrypt past backups). Bucket is **private** + SSE-B2 as a second layer.
-- **Information disclosure — secrets in logs / argv / env.** → libpq `PG*` env (no connstring on argv, so no
-  password in `ps`); secrets read from `LoadCredential` files (tmpfs 0400), never in the unit at rest
+- **Information disclosure — secrets in logs / argv / env.** → secrets stay **file-backed end-to-end**: a
+  libpq passfile + an AWS credentials file in a private tmpfs work dir (0600), pointed at by `PGPASSFILE` /
+  `AWS_SHARED_CREDENTIALS_FILE`, so no secret VALUE is ever in the process environment (`/proc/<pid>/environ`)
+  or inherited by children, and none on argv/`ps`; source secrets read from `LoadCredential` files (tmpfs
+  0400), never in the unit at rest
   (invariant #5); the worker logs object keys / sizes / counts only.
 - **Elevation / tampering — the backup role.** `argus_backup` can read every tenant's data (BYPASSRLS), which
   is the inherent power of a full backup. → Bounded to **read-only** (`pg_read_all_data`, no INSERT/UPDATE/
@@ -84,9 +87,10 @@ in the backup — they are re-applied from Key Vault at restore.
 - Migration `0015_db_backup_role.sql`: `argus_backup` — NOLOGIN, NOSUPERUSER, **BYPASSRLS**, INHERIT, granted
   **`pg_read_all_data`** (read-only, covers future tables). LOGIN + password provisioned out-of-band from Key
   Vault (README).
-- `infra/backup/backup-db.sh`: streamed `pg_dump | age | aws s3 cp` (no plaintext on disk), `PIPESTATUS`
-  failure handling with partial-upload cleanup, size verification, day-granular retention prune. Secrets from
-  credential files; libpq `PG*` env.
+- `infra/backup/backup-db.sh`: a roles dump + DB dump, each streamed `… | age | aws s3 cp` (no plaintext on
+  disk), `PIPESTATUS` failure handling with partial-upload cleanup + atomic role/DB pairing, size
+  verification, day-granular retention prune. Secrets stay file-backed (libpq passfile + AWS credentials
+  file, 0600 tmpfs) — never exported into the environment.
 - `argus-db-backup.{service,timer}`: hardened oneshot (`ProtectSystem=strict`, `MemoryDenyWriteExecute`,
   empty `CapabilityBoundingSet`, …), `LoadCredential` for the two secrets, daily timer with `Persistent=true`.
 - Gate: **`security-boundary-auditor`** (BYPASSRLS role least-privilege, no secret in logs, secret delivery)
