@@ -16,12 +16,22 @@ import { RealtimeBus, type MessageCreatedEvent } from './realtime-bus.js';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const AUTH_DEADLINE_MS = 10_000; // close a socket that doesn't authenticate (first frame) in time
 
+// Per-socket subscribe-frame rate limit. Each NEW-room `subscribe` triggers a `messaging.isMember` DB
+// lookup, so an authenticated socket spamming distinct UUIDs could hammer the DB — the WS analogue of the
+// HTTP abuse caps (the HTTP throttler can't see `ws` frames). 120/window is far above any real reconnect
+// burst (the client re-subscribes only its tracked conversations) yet bounds the lookups one socket can
+// force. Per-user-aggregate + connection-count caps remain the edge's job (Caddy/WAF) — see rate-limiting.md.
+const SUBSCRIBE_WINDOW_MS = 60_000;
+const SUBSCRIBE_MAX_PER_WINDOW = 120;
+
 /** Per-socket state. A socket does nothing until it has authenticated. */
 interface ConnState {
   authed: boolean;
   auth?: VerifiedAuth;
   subs: Set<string>; // room keys this socket joined
   authTimer?: ReturnType<typeof setTimeout>;
+  subWindowStart: number; // ms; start of the current subscribe-rate window
+  subCount: number; // new-room subscribe frames counted in the current window
 }
 
 const roomKey = (tenantId: string, conversationId: string): string =>
@@ -50,7 +60,12 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   handleConnection(client: WebSocket): void {
-    const state: ConnState = { authed: false, subs: new Set() };
+    const state: ConnState = {
+      authed: false,
+      subs: new Set(),
+      subWindowStart: Date.now(),
+      subCount: 0,
+    };
     // Close sockets that connect but never authenticate (resource exhaustion / probing).
     state.authTimer = setTimeout(() => {
       if (!state.authed) client.close(4408, 'auth timeout');
@@ -109,6 +124,18 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       this.send(client, 'error', { message: 'invalid conversationId' });
       return;
     }
+    // Already in this room: ACK without a DB lookup. Makes repeated subscribes to the same conversation
+    // idempotent + free, and ensures a reconnect-storm of already-tracked rooms can't hammer `isMember`.
+    const room = roomKey(state.auth.tenantId, conversationId);
+    if (state.subs.has(room)) {
+      this.send(client, 'subscribed', { conversationId });
+      return;
+    }
+    // Bound the NEW-room subscribe rate per socket — each one costs a DB lookup (see SUBSCRIBE_MAX_PER_WINDOW).
+    if (!this.allowSubscribe(state)) {
+      this.send(client, 'error', { message: 'rate limited' });
+      return;
+    }
     // Same authz as REST: must be a member. Don't distinguish non-member from non-existent.
     const isMember = await this.messaging.isMember(state.auth, conversationId);
     // The socket may have disconnected DURING the async lookup — handleDisconnect then already ran and
@@ -119,7 +146,6 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       this.send(client, 'error', { message: 'conversation not found' });
       return;
     }
-    const room = roomKey(state.auth.tenantId, conversationId);
     state.subs.add(room);
     let sockets = this.rooms.get(room);
     if (!sockets) {
@@ -128,6 +154,17 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
     sockets.add(client);
     this.send(client, 'subscribed', { conversationId });
+  }
+
+  /** Fixed-window rate check for new-room subscribes on one socket. Returns false once over the cap. */
+  private allowSubscribe(state: ConnState): boolean {
+    const now = Date.now();
+    if (now - state.subWindowStart >= SUBSCRIBE_WINDOW_MS) {
+      state.subWindowStart = now;
+      state.subCount = 0;
+    }
+    state.subCount += 1;
+    return state.subCount <= SUBSCRIBE_MAX_PER_WINDOW;
   }
 
   /** Fan a newly-stored message out to the subscribed sockets of its (tenant, conversation). */

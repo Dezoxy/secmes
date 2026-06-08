@@ -10,12 +10,16 @@
 ```
 request → JwtAuthGuard (sets req.auth = {tenantId, sub} from the verified token)
         → UserThrottlerGuard
-            ├─ shouldSkip: true for non-HTTP (WS) and @Public (health/version) → no throttle
+            ├─ shouldSkip: true for non-HTTP (WS) and @Public (health/version) → no HTTP throttle
             └─ getTracker: key = `u:<tenantId>:<sub>`  (verified identity, never client input)
                             `ip:<ip>` is a defensive default only — see scope note below
         → in-memory fixed-window counter per (key, route) → over limit ⇒ 429 + Retry-After
         → handler
-```
+
+WS frame `subscribe` → RealtimeGateway.onSubscribe (own per-socket rate limit; HTTP throttler can't see ws frames)
+                       ├─ already in room → ACK, NO DB lookup (dedup; idempotent)
+                       └─ new room → fixed-window cap (120/60s/socket) → over ⇒ `error: rate limited`
+                                     else messaging.isMember (DB) → join
 
 Two layers: a **global default** (120 req / 60 s / user) applied to every HTTP route, and per-route
 `@Throttle` **overrides** on the abuse-prone mutations. The guard reads only the request's verified identity
@@ -68,6 +72,11 @@ Everything else rides the 120/min baseline. Two row-creation paths are **conscio
 - **Denial of service (the primary risk).** An authenticated caller iterates user-ids to drain KeyPackage
   pools, floods publish/backup writes, or mints upload grants to churn storage. → Per-user per-route caps
   far below any drain rate but above legitimate bursts; the global baseline bounds everything else.
+- **DoS via WebSocket `subscribe` frames.** The HTTP throttler can't see `ws` frames, and each new-room
+  `subscribe` triggers a `messaging.isMember` DB lookup — an authenticated socket spamming distinct UUIDs
+  could hammer the DB outside the HTTP caps. → The gateway carries its **own** per-socket limit: a
+  re-subscribe to an already-joined room ACKs with **no** DB lookup (dedup), and new-room subscribes are
+  capped at 120/60s/socket (far above any reconnect burst) before the lookup runs.
 - **Spoofing the tracking key.** If the limit keyed on client-supplied input (an IP header, a body field),
   an attacker would rotate it to reset their counter. → The key is the **verified token's** `tenantId:sub`,
   set by `JwtAuthGuard` *before* this guard runs (guard order is fixed in `auth.module.ts`); never a header.
@@ -125,5 +134,9 @@ Everything else rides the 120/min baseline. Two row-creation paths are **conscio
 - **Coarse-grained, not per-(caller,target).** The claim cap is per-caller, not per-(caller, victim) — a
   caller still gets 30 claims/min to spread across victims. Combined with **per-claim audit**
   (`keydir.key_package_claimed`) drains stay detectable; finer per-target limiting is a follow-up.
+- **WS subscribe limit is per-socket, not per-user-aggregate.** A user opening many sockets multiplies their
+  subscribe budget. Each socket still requires a valid token (attributable) and counts against connection
+  limits, and `isMember` is an indexed lookup — so the unbounded single-socket amplification is closed.
+  Per-user-aggregate + max-connections-per-user caps ride the realtime hardening / edge follow-up.
 - **DDoS / L7 volumetric** (many IPs, pre-auth) is **out of scope** for app-layer throttling — that belongs at
   the edge (Caddy/WAF/CDN), part of the VM deploy track.
