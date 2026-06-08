@@ -36,6 +36,9 @@ resource "azurerm_role_assignment" "vm_kv_secrets_user" {
   scope                = azurerm_key_vault.this.id
   role_definition_name = "Key Vault Secrets User"
   principal_id         = azurerm_linux_virtual_machine.this.identity[0].principal_id
+  # The VM's identity is created in this same apply — skip the AAD existence check to avoid a
+  # PrincipalNotFound replication race on the first `terraform apply`.
+  skip_service_principal_aad_check = true
 }
 
 # Optional: you (admin) may manage secrets (create/rotate). Requires admin_object_id + admin_source_ip.

@@ -43,4 +43,7 @@ resource "azurerm_role_assignment" "github_run_command" {
   scope              = azurerm_linux_virtual_machine.this.id
   role_definition_id = azurerm_role_definition.run_command.role_definition_resource_id
   principal_id       = azuread_service_principal.github_deploy.object_id
+  # The SP is created in this same apply, so ARM can race AAD replication and fail with PrincipalNotFound;
+  # skip the existence check so the first `terraform apply` is reliable (no manual retry).
+  skip_service_principal_aad_check = true
 }
