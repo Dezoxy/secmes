@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, Download, KeyRound, Loader2, Upload, X } from 'lucide-react';
+import { restoreAndProvision } from '../../lib/device-restore';
 import {
   RECOVERY_IDENTITY,
   exportRecovery,
@@ -8,6 +9,7 @@ import {
   setUpRecovery,
 } from '../../lib/recovery';
 import { useAuth } from '../auth/AuthContext';
+import { useDevice } from '../device/DeviceContext';
 
 const INPUT =
   'w-full rounded-xl border border-white/5 bg-[#1a1a26] px-4 py-2.5 text-sm text-white placeholder-white/30 transition-all focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20';
@@ -32,6 +34,7 @@ interface RecoveryPanelProps {
 
 export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps) {
   const { profile } = useAuth();
+  const device = useDevice();
   // Back up / restore the SIGNED-IN account's device (the same identity the unlock gate sealed it under),
   // so recovery and unlock share one device. RECOVERY_IDENTITY is only the demo fallback (no real account).
   const identity = profile?.userId ?? RECOVERY_IDENTITY;
@@ -96,7 +99,14 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
     }
     setBusy(true);
     try {
-      await restoreFromArtifact(identity, await file.text(), passphrase);
+      // Real account: the SHARED restore flow (restore → revoke now-stale packages → publish a fresh pool),
+      // the same path the unlock gate uses, so a Settings restore can't leave dead packages claimable (#20).
+      // Demo (no keystore / no directory) is a local-only restore.
+      if (device.keystore) {
+        await restoreAndProvision(device.keystore, identity, await file.text(), passphrase);
+      } else {
+        await restoreFromArtifact(identity, await file.text(), passphrase);
+      }
       setSetUp(true);
       setDone('This device was restored from your recovery file.');
       setFile(null);
