@@ -1,6 +1,6 @@
 # Frontend Upgrade Implementation Plan (`apps/web`)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Keep each task in its own commit unless the user asks to batch changes.
+> **For agentic workers:** Implement this plan task-by-task using the repo's agent instructions and the tools available in your environment. Steps use checkbox (`- [ ]`) syntax for tracking. Keep each task in its own commit unless the user asks to batch changes.
 
 **Goal:** Make the Argus frontend easier to extend without weakening the E2EE, passkey-first, pseudonymous product direction.
 
