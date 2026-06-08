@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { Injectable, NotFoundException, PayloadTooLargeException } from '@nestjs/common';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, gt, isNull, or, sql } from 'drizzle-orm';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { BlobStore } from '../blob/blob-store.js';
@@ -71,10 +71,15 @@ export class AttachmentsService {
         .from(schema.attachments)
         // RLS already scopes this to the caller's tenant; the explicit tenant_id predicate is
         // defense-in-depth (invariant #3) so a future RLS misconfig fails at the query, not silently.
+        // The expiry predicate enforces the retention boundary AT THE API: an attachment past its
+        // expires_at is 404 the instant it lapses — independent of the cleanup worker, so a delayed or
+        // down worker can't keep expired blobs reachable (Codex P2). (Null = never expires → still served;
+        // post-A4 + the 0013 backfill there are no nulls, but fail-open for that edge.)
         .where(
           and(
             eq(schema.attachments.objectKey, objectKey),
             eq(schema.attachments.tenantId, auth.tenantId),
+            or(isNull(schema.attachments.expiresAt), gt(schema.attachments.expiresAt, sql`now()`)),
           ),
         )
         .limit(1);
