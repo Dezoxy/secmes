@@ -90,6 +90,14 @@ done
   exit 1
 }
 
+# --- 4b. Stop the OLD api before migrating. On a redeploy the previous api container keeps running while the
+#         owner migration mutates the schema below — a non-backward-compatible migration would have old code
+#         hitting the new schema mid-deploy. Stopping it first closes that window. Brief /api downtime is the
+#         in-place trade-off (caddy keeps serving the PWA; expand/contract migrations are the zero-downtime
+#         future). No-op on the first deploy. ---
+log "stopping the old api before migrating"
+docker compose -f "$COMPOSE" stop api 2>/dev/null || true
+
 # --- 5. MIGRATE BEFORE SERVING — as the OWNER, via a file-mounted DSN (never env). Runs to completion (and
 #        the advisory lock serialises concurrent deploys) before the new api container takes traffic. ---
 log "running DB migrations (owner) before serving"

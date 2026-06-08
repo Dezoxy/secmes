@@ -47,10 +47,13 @@ every secret is fetched **on the VM** via the Managed Identity. No message conte
   written `0400` to a tmpfs file, mounted read-only into the one-off migrate container, and **`shred`-ed**
   immediately after. The owner DSN is **never** part of the persistent `/run/argus/secrets` set the running
   stack holds (least privilege). `TUNNEL_TOKEN` is a runtime value only for `compose up`.
-- **Elevation — migrate runs as owner.** A breaking migration could serve ahead of its schema, or the owner
-  connection could be misused. → **Migrate-before-serve**: data services come up, migrations run to
-  completion as the owner (file DSN, advisory-locked), and only then do api/caddy/cloudflared start. The
-  **runtime** api connects as the non-bypass `argus_app` role, never the owner (`vm-ingress.md`).
+- **Elevation — migrate runs as owner.** A breaking migration could serve ahead of (or behind) its schema, or
+  the owner connection could be misused. → **Migrate-before-serve**: data services come up, the **old api is
+  stopped** (so on a redeploy old code can't hit the new schema mid-migration), migrations run to completion
+  as the owner (file DSN, advisory-locked), and only then do api/caddy/cloudflared (re)start on the new image.
+  Brief `/api` downtime during migration is the in-place trade-off (caddy keeps serving the PWA; expand/contract
+  migrations are the zero-downtime future). The **runtime** api connects as the non-bypass `argus_app` role,
+  never the owner (`vm-ingress.md`).
 - **Repudiation / drift.** → The deployed artifact is the signed image at a known SHA + the exact-SHA infra
   bundle; `run-command` is auditable in Azure activity logs (IDs/metadata, no secrets).
 
