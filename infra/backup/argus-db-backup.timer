@@ -1,0 +1,13 @@
+# argus — daily timer for the encrypted DB backup worker. Runs in the early-morning quiet window (UTC);
+# the worker prunes backups older than RETENTION_DAYS each run, so storage stays bounded.
+[Unit]
+Description=argus — nightly encrypted DB backup
+
+[Timer]
+# 02:30 UTC daily. Persistent=true runs a missed backup after downtime (a skipped night is a real gap).
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target
