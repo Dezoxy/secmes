@@ -127,4 +127,16 @@ describe.skipIf(!DB_URL)('AttachmentsService — membership-gated grants', () =>
       PayloadTooLargeException,
     );
   });
+
+  it('download grant: refuses an EXPIRED attachment (404 — retention enforced at the API, not just the worker)', async () => {
+    const { objectKey } = await svc.createUploadGrant(aliceAuth, {
+      conversationId: convId,
+      byteSize: 8,
+    });
+    // Force it past its retention window — the daily cleanup worker may not have run yet (or be down).
+    await sql`update attachments set expires_at = now() - interval '1 second' where object_key = ${objectKey}`;
+    await expect(svc.createDownloadGrant(aliceAuth, objectKey)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
 });

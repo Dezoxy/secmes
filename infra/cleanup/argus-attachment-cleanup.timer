@@ -1,0 +1,12 @@
+# argus — daily timer for the expired-attachment cleanup worker. Retention is 7 days (set at upload), so a
+# daily sweep is ample. Tune OnCalendar to run more often if attachment volume is high.
+[Unit]
+Description=argus — daily expired-attachment cleanup
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target
