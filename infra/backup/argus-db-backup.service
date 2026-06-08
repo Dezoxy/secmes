@@ -1,0 +1,77 @@
+# argus — nightly logical DB backup (pg_dump → age → Backblaze B2). Triggered by the .timer (daily).
+# Install: copy this dir to /opt/argus/backup, place the units in /etc/systemd/system, then
+#   systemctl daemon-reload && systemctl enable --now argus-db-backup.timer
+# Before trusting the timer, do a dry run + check the journal:  systemctl start argus-db-backup
+# (verify the hardening below — esp. MemoryDenyWriteExecute — doesn't trip your AWS CLI v2 build).
+# Prerequisites: the argus_backup role provisioned LOGIN + password (see README), and an age keypair whose
+# PUBLIC key is set in AGE_RECIPIENT below (the PRIVATE key stays in Key Vault, used only at restore).
+[Unit]
+Description=argus — nightly encrypted DB backup (pg_dump → age → B2)
+Documentation=https://github.com/Dezoxy/secmes/blob/main/infra/backup/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=argus
+Group=argus
+# A full dump + upload can take a while as the DB grows; cap generously.
+TimeoutStartSec=3600
+
+# --- Non-secret config (edit for your deployment). The access-key-id is NOT a secret (it rides in every
+#     presigned URL); the bucket/endpoint/region and the age PUBLIC recipient key are public. ---
+Environment=PGHOST=127.0.0.1
+Environment=PGPORT=5432
+Environment=PGUSER=argus_backup
+Environment=PGDATABASE=argus
+Environment=PGCONNECT_TIMEOUT=10
+# Loopback Postgres on the VM → plaintext is acceptable. If PGHOST is ever a REMOTE Postgres, set
+# PGSSLMODE=verify-full + a CA bundle so this never silently falls back to an unencrypted connection.
+Environment=PGSSLMODE=prefer
+Environment=S3_ENDPOINT=https://s3.eu-central-003.backblazeb2.com
+Environment=S3_REGION=eu-central-003
+# The PRIVATE backup bucket — separate from the attachment bucket, never public.
+Environment=S3_BUCKET=db-q7m2z9x4v6n8p3k1
+Environment=S3_ACCESS_KEY_ID=REPLACE_WITH_B2_KEY_ID
+# age PUBLIC recipient key (age1...). The matching PRIVATE key is NOT here — it lives in Key Vault and is
+# fetched only at restore time, so this host cannot decrypt the backups it writes.
+Environment=AGE_RECIPIENT=REPLACE_WITH_AGE_PUBLIC_KEY
+Environment=RETENTION_DAYS=30
+
+# --- Secrets: delivered as credential FILES, never in env/Helm at rest (invariant #5). On the VM the two
+#     source paths are populated from Azure Key Vault by the Managed Identity at boot (a separate fetch
+#     step). systemd copies them into $CREDENTIALS_DIRECTORY (mode 0400, tmpfs), referenced as %d below. ---
+LoadCredential=db-password:/run/argus/secrets/backup-db-password
+LoadCredential=b2-secret:/run/argus/secrets/b2-app-key
+Environment=BACKUP_DB_PASSWORD_FILE=%d/db-password
+Environment=S3_SECRET_ACCESS_KEY_FILE=%d/b2-secret
+
+# AWS CLI v2 wants a writable HOME/cache, but ProtectHome + ProtectSystem=strict make the FS read-only.
+# Give it a private tmpfs runtime dir as HOME so it never touches the real home.
+RuntimeDirectory=argus-db-backup
+Environment=HOME=%t/argus-db-backup
+
+ExecStart=/opt/argus/backup/backup-db.sh
+
+# --- Hardening: least-privilege oneshot that needs only egress + the two credential files. ---
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectHostname=true
+ProtectClock=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+UMask=0077
