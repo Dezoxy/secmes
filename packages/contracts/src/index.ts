@@ -40,3 +40,157 @@ export const ServiceInfoSchema = z.object({
   status: z.literal('ok'),
 });
 export type ServiceInfo = z.infer<typeof ServiceInfoSchema>;
+
+const base64 = z.string().regex(/^[A-Za-z0-9+/]+={0,2}$/, 'must be base64');
+const objectKey = z
+  .string()
+  .min(1)
+  .max(512)
+  .refine((s) => !s.includes('://'), 'must be an object key, not a URL');
+
+export const MeSchema = z.object({
+  userId: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  email: z.string().email(),
+  displayName: z.string().nullable(),
+});
+export type Me = z.infer<typeof MeSchema>;
+
+export const PublishKeyPackagesRequestSchema = z.object({
+  signaturePublicKey: base64.max(512),
+  keyPackages: z.array(base64.max(8192)).min(1).max(100),
+});
+export type PublishKeyPackagesRequest = z.infer<typeof PublishKeyPackagesRequestSchema>;
+
+export const PublishKeyPackagesResponseSchema = z.object({
+  deviceId: z.string().uuid(),
+  published: z.number().int().nonnegative(),
+  available: z.number().int().nonnegative(),
+});
+export type PublishKeyPackagesResponse = z.infer<typeof PublishKeyPackagesResponseSchema>;
+
+export const RevokeKeyPackagesRequestSchema = z.object({
+  signaturePublicKey: base64.max(512),
+});
+export type RevokeKeyPackagesRequest = z.infer<typeof RevokeKeyPackagesRequestSchema>;
+
+export const RevokeKeyPackagesResponseSchema = z.object({
+  revoked: z.number().int().nonnegative(),
+});
+export type RevokeKeyPackagesResponse = z.infer<typeof RevokeKeyPackagesResponseSchema>;
+
+export const UserSummarySchema = z.object({
+  id: z.string().uuid(),
+  email: z.string().email(),
+  displayName: z.string().nullable(),
+});
+export type UserSummary = z.infer<typeof UserSummarySchema>;
+
+export const UserDirectorySchema = z.array(UserSummarySchema);
+export type UserDirectory = z.infer<typeof UserDirectorySchema>;
+
+export const ClaimedKeyPackageSchema = z.object({
+  deviceId: z.string().uuid(),
+  signaturePublicKey: base64,
+  keyPackage: base64,
+});
+export type ClaimedKeyPackage = z.infer<typeof ClaimedKeyPackageSchema>;
+
+export const CreateConversationRequestSchema = z.object({
+  memberUserIds: z.array(z.string().uuid()).min(1).max(256),
+});
+export type CreateConversationRequest = z.infer<typeof CreateConversationRequestSchema>;
+
+export const CreatedConversationSchema = z.object({
+  conversationId: z.string().uuid(),
+});
+export type CreatedConversation = z.infer<typeof CreatedConversationSchema>;
+
+export const DeliverWelcomeRequestSchema = z.object({
+  recipientUserId: z.string().uuid(),
+  recipientDeviceId: z.string().uuid(),
+  welcome: base64.min(1).max(32768),
+  ratchetTree: base64.min(1).max(32768),
+});
+export type DeliverWelcomeRequest = z.infer<typeof DeliverWelcomeRequestSchema>;
+
+export const DeliveredWelcomeSchema = z.object({
+  welcomeId: z.string().uuid(),
+});
+export type DeliveredWelcome = z.infer<typeof DeliveredWelcomeSchema>;
+
+export const PendingWelcomeSchema = z.object({
+  id: z.string().uuid(),
+  conversationId: z.string().uuid(),
+  createdAt: z.string().datetime(),
+});
+export type PendingWelcome = z.infer<typeof PendingWelcomeSchema>;
+
+export const PendingWelcomesSchema = z.array(PendingWelcomeSchema);
+export type PendingWelcomes = z.infer<typeof PendingWelcomesSchema>;
+
+export const WelcomeMaterialSchema = z.object({
+  welcome: base64,
+  ratchetTree: base64,
+});
+export type WelcomeMaterial = z.infer<typeof WelcomeMaterialSchema>;
+
+export const SendConversationMessageRequestSchema = z.object({
+  clientMessageId: z.string().uuid(),
+  ciphertext: base64.min(1).max(65536),
+  alg: z.string().min(1).max(64),
+  epoch: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  attachmentObjectKey: objectKey.optional(),
+});
+export type SendConversationMessageRequest = z.infer<typeof SendConversationMessageRequestSchema>;
+
+export const SentMessageSchema = z.object({
+  messageId: z.string().uuid(),
+  createdAt: z.string().datetime(),
+  deduplicated: z.boolean(),
+});
+export type SentMessage = z.infer<typeof SentMessageSchema>;
+
+export const FetchedMessageSchema = z.object({
+  id: z.string().uuid(),
+  senderUserId: z.string().uuid(),
+  clientMessageId: z.string().uuid(),
+  ciphertext: base64,
+  alg: z.string().min(1),
+  epoch: z.number().int().nonnegative(),
+  attachmentObjectKey: objectKey.nullable(),
+  createdAt: z.string().datetime(),
+});
+export type FetchedMessage = z.infer<typeof FetchedMessageSchema>;
+
+export const MessagePageSchema = z.object({
+  messages: z.array(FetchedMessageSchema),
+  nextCursor: z.string().uuid().nullable(),
+});
+export type MessagePage = z.infer<typeof MessagePageSchema>;
+
+export const CreateUploadGrantRequestSchema = z.object({
+  conversationId: z.string().uuid(),
+  byteSize: z
+    .number()
+    .int()
+    .positive()
+    .max(10 * 1024 * 1024),
+});
+export type CreateUploadGrantRequest = z.infer<typeof CreateUploadGrantRequestSchema>;
+
+export const UploadGrantSchema = z.object({
+  objectKey,
+  uploadUrl: z.string().url(),
+});
+export type UploadGrant = z.infer<typeof UploadGrantSchema>;
+
+export const CreateDownloadGrantRequestSchema = z.object({
+  objectKey,
+});
+export type CreateDownloadGrantRequest = z.infer<typeof CreateDownloadGrantRequestSchema>;
+
+export const DownloadGrantSchema = z.object({
+  url: z.string().url(),
+});
+export type DownloadGrant = z.infer<typeof DownloadGrantSchema>;

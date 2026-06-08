@@ -478,14 +478,14 @@ git commit -m "feat(web): harden pseudonymous profile boundary"
 - Modify: `apps/web/src/lib/api.ts`
 - Create: `apps/web/src/lib/api-client.ts`
 - Create: `apps/web/src/lib/api-client.spec.ts`
-- Inspect: `packages/contracts/src`
+- Modify: `packages/contracts/src/index.ts`
 
-- [ ] Centralize request creation, auth headers, JSON parsing, and Zod validation.
-- [ ] Rely on inferred types from `@argus/contracts` Zod schemas instead of duplicate hand-written response types.
-- [ ] Return typed success/error results instead of throwing from component code.
-- [ ] Keep tokens out of logs.
-- [ ] Keep presigned URLs out of logs.
-- [ ] If a backend contract changes, the frontend build should fail at compile time or validation tests should fail.
+- [x] Centralize request creation, auth headers, JSON parsing, and Zod validation.
+- [x] Rely on inferred types from `@argus/contracts` Zod schemas instead of duplicate hand-written response types.
+- [x] Return typed success/error results instead of throwing from component code.
+- [x] Keep tokens out of logs.
+- [x] Keep presigned URLs out of logs.
+- [x] If a backend contract changes, the frontend build should fail at compile time or validation tests should fail.
 
 **Verification:**
 
