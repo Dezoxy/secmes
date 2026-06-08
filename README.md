@@ -22,9 +22,10 @@ apps/
 packages/
   contracts/           # Shared TypeScript types + Zod schemas (client <-> server envelope)
 infra/
-  vm/                  # Terraform: the Azure VM, NSG (deny inbound), Key Vault, Managed Identity
+  vm/                  # Terraform (the Azure VM, NSG deny-inbound, Key Vault, Managed Identity) + caddy/ (ingress image)
 .github/workflows/     # CI (build/test); CD (gated: build/scan/sign the image — VM rollout is WIP)
-compose.yaml           # dev stack today (Postgres, Redis, MinIO, Zitadel, api); prod overlay adds web, Caddy, cloudflared
+compose.yaml           # dev stack (Postgres, Redis, MinIO, Zitadel, api)
+compose.prod.yaml      # prod stack (Postgres, Redis, api, Caddy single-origin router, cloudflared) — see docs/deploy.md
 ```
 
 ## Status: Phase 0 — stand up the VM

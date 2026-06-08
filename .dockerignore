@@ -1,0 +1,48 @@
+# Build context hygiene for repo-root image builds (infra/vm/caddy/Dockerfile).
+# NOTE: scoped to builds whose context is the repo root. The apps/api image builds with context
+# ./apps/api and is unaffected by this file.
+
+# Dependencies & build outputs — reinstalled/rebuilt inside the image.
+**/node_modules
+**/dist
+**/build
+**/.turbo
+**/*.tsbuildinfo
+
+# VCS & CI
+.git
+.github
+.gitignore
+
+# Secrets & local config — must NEVER enter an image layer or the build context.
+# `secrets/` holds the mounted credential files (DB URL, B2 key) compose.prod.yaml delivers at runtime; a
+# repo-root `COPY . .` would otherwise pull them into the daemon context + intermediate layers.
+secrets/
+.secrets/
+**/.env
+**/.env.*
+**/*.tfvars
+**/*.tfstate
+**/*.tfstate.*
+**/.terraform
+*.pem
+*.key
+
+# Tests, coverage, reports — not needed to build the PWA.
+**/coverage
+**/playwright-report
+**/test-results
+**/*.spec.ts
+**/*.test.ts
+**/__tests__
+
+# Editor / OS cruft
+.vscode
+.idea
+**/.DS_Store
+
+# Docs & infra not needed in the build context (keep the context small).
+docs
+infra/backup
+infra/cleanup
+infra/local

@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { sql as dsql } from 'drizzle-orm';
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import postgres, { type Sql } from 'postgres';
@@ -11,11 +13,27 @@ export type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 let pool: Sql | undefined;
 let db: Db | undefined;
 
-/** Lazily open the pool so importing this module never requires DATABASE_URL (e.g. unit tests). */
+/**
+ * Resolve the connection URL WITHOUT requiring the DB password in env (invariant #5). Prefers a file-mounted
+ * secret (`DATABASE_URL_FILE`) — on the VM a systemd-delivered credential file fetched from Key Vault via the
+ * Managed Identity, so the password never lands in env. Falls back to `DATABASE_URL` for LOCAL dev. Mirrors
+ * the `S3_SECRET_ACCESS_KEY_FILE` pattern in blob-config.ts.
+ */
+export function resolveDatabaseUrl(): string | undefined {
+  const file = process.env.DATABASE_URL_FILE;
+  if (file) {
+    // Operator-set deployment path (DATABASE_URL_FILE / systemd LoadCredential), never user input.
+    // eslint-disable-next-line security/detect-non-literal-fs-filename
+    return readFileSync(file, 'utf8').trim();
+  }
+  return process.env.DATABASE_URL;
+}
+
+/** Lazily open the pool so importing this module never requires a DB URL (e.g. unit tests). */
 export function getDb(): { sql: Sql; db: Db } {
   if (!pool || !db) {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error('DATABASE_URL is not set');
+    const url = resolveDatabaseUrl();
+    if (!url) throw new Error('DATABASE_URL (or DATABASE_URL_FILE) is not set');
     // prepare:false — the runtime runs behind PgBouncer in transaction mode (see threat model),
     // where server-side prepared statements don't survive backend switches across pooled txns.
     pool = postgres(url, { max: 10, prepare: false });
