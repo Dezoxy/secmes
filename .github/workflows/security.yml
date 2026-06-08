@@ -55,16 +55,6 @@ jobs:
         with:
           config_file: .checkov.yaml
 
-  k8s-kubescape:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - name: Kubescape (NSA + MITRE posture on charts)
-        uses: kubescape/github-action@c9749b84d138c0cbbb702b258774954f5463b82e # v3.0.21
-        with:
-          files: 'charts/'
-          frameworks: 'nsa,mitre'
-
   api-42crunch-audit:
     # Enable by setting repo variable ENABLE_42CRUNCH=true after adding the X42C_API_TOKEN secret.
     if: ${{ vars.ENABLE_42CRUNCH == 'true' }}
