@@ -40,12 +40,12 @@ describe('UserThrottlerGuard — tracking key', () => {
     expect(key).toBe(`u:${AUTH.tenantId}:${AUTH.sub}`);
   });
 
-  it('falls back to the IP before auth runs (pre-auth brute-force protection)', async () => {
+  it('falls back to the IP as a defensive default when auth is absent (not the pre-auth control)', async () => {
     const key = await makeGuard(false).track({ ip: '203.0.113.7' });
     expect(key).toBe('ip:203.0.113.7');
   });
 
-  it('falls back to ip:unknown when neither auth nor ip is present', async () => {
+  it('falls back to ip:unknown when neither auth nor ip is present (never throws)', async () => {
     const key = await makeGuard(false).track({});
     expect(key).toBe('ip:unknown');
   });

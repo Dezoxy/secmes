@@ -12,7 +12,7 @@ request → JwtAuthGuard (sets req.auth = {tenantId, sub} from the verified toke
         → UserThrottlerGuard
             ├─ shouldSkip: true for non-HTTP (WS) and @Public (health/version) → no throttle
             └─ getTracker: key = `u:<tenantId>:<sub>`  (verified identity, never client input)
-                            fallback `ip:<ip>` only before auth runs
+                            `ip:<ip>` is a defensive default only — see scope note below
         → in-memory fixed-window counter per (key, route) → over limit ⇒ 429 + Retry-After
         → handler
 ```
@@ -22,6 +22,16 @@ Two layers: a **global default** (120 req / 60 s / user) applied to every HTTP r
 and the matched route — it never touches the body, so it stays crypto-blind. Counters are in-memory
 (single-VM deployment = one API process); a Redis store is the multi-instance / restart-safe upgrade and is
 noted in the constants (Redis is already wired for the realtime bus).
+
+**Scope — authenticated abuse only.** This guard runs **after** `JwtAuthGuard`, which rejects a
+missing/invalid token before the throttler is reached. So it bounds *authenticated* abuse (the app-specific
+risks: pool drain, storage flood) — it does **not** see, and does not bound, **unauthenticated** request
+floods. That is deliberate: a pre-auth IP throttle can't tell an authed user from an attacker before auth
+runs, so it would penalise legitimate NAT'd office traffic; and this API has **no password/login endpoint**
+(auth is OIDC-delegated to Zitadel), so "pre-auth brute-force" is really a generic HTTP flood against a cheap
+token-rejection path. Unauthenticated-flood protection is therefore delegated to the **edge** (Caddy
+`rate_limit` / WAF), part of the VM deploy track (§6). The `ip:` key is only a degradation default so the
+guard never crashes if `req.auth` is somehow absent.
 
 Per-route caps (one source of truth: `rate-limit.constants.ts → SENSITIVE_LIMITS`):
 
@@ -49,8 +59,9 @@ Everything else rides the 120/min baseline. Two row-creation paths are **conscio
 - **Asset:** *availability* — finite server resources (DB rows, blob storage, KeyPackage pools) and one
   tenant/user's fair share of them. The control itself holds no secret; its job is to bound consumption.
 - **Boundaries:** authenticated user ↔ server (an authenticated caller is the threat actor here — a valid
-  member draining another member's pool); tenant ↔ tenant (one tenant must not spend another's budget);
-  pre-auth client ↔ server (brute-force before a token exists).
+  member draining another member's pool); tenant ↔ tenant (one tenant must not spend another's budget). The
+  unauthenticated client ↔ server boundary (request floods before a token exists) is **out of this guard's
+  scope** — handled at the edge (§1 scope note, §6).
 
 ## 3. Threats (STRIDE-lite)
 
@@ -60,7 +71,8 @@ Everything else rides the 120/min baseline. Two row-creation paths are **conscio
 - **Spoofing the tracking key.** If the limit keyed on client-supplied input (an IP header, a body field),
   an attacker would rotate it to reset their counter. → The key is the **verified token's** `tenantId:sub`,
   set by `JwtAuthGuard` *before* this guard runs (guard order is fixed in `auth.module.ts`); never a header.
-  Pre-auth, the fallback is the socket IP (`req.ip`), not a spoofable `X-Forwarded-*` value.
+  The `ip:` fallback is unreachable for protected routes (auth runs first) — a degradation default, not a
+  control (see §1 scope note).
 - **Elevation / cross-tenant budget theft.** A shared (e.g. IP-based) bucket would let one tenant exhaust
   another's allowance, or lump many users behind one NAT. → Keying on `tenant:sub` isolates every user's
   budget; NAT-safe and tenant-safe by construction.
@@ -94,6 +106,15 @@ Everything else rides the 120/min baseline. Two row-creation paths are **conscio
 
 ## 6. Residual risk
 
+- **Unauthenticated request floods are not bounded by this guard.** Because `JwtAuthGuard` runs first and
+  rejects a missing/invalid token before the throttler, failed-auth requests never reach it — so the app
+  layer does not throttle the pre-auth/JWKS-verification path. This is an accepted, deliberate boundary: a
+  pre-auth IP throttle would penalise legitimate NAT'd traffic, and the API has no password endpoint to
+  brute-force (OIDC-delegated). **Resolution:** unauthenticated-flood throttling is the **edge's** job —
+  Caddy `rate_limit` (per-IP, connection-level) / WAF, landing with the VM deploy track. If app-layer
+  coverage is ever needed, the correct hook is the **auth-failure path** (count only failed verifies by IP),
+  not a blanket pre-auth IP guard. Token verification itself is cheap (jose, cached JWKS, no DB), so the
+  un-throttled surface is a generic HTTP flood, not a credential oracle.
 - **In-memory counters reset on restart / aren't shared across instances.** A pod restart clears windows, and
   a future scale-out (>1 API process) would give each its own counters (effective limit ×N). Acceptable for
   the single-VM beta; the upgrade is the **Redis store** (`@nestjs/throttler` storage adapter) — Redis is

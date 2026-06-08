@@ -1,9 +1,10 @@
 import { seconds } from '@nestjs/throttler';
 
-// Per-VERIFIED-USER rate limits (the guard keys on tenant+sub, with an IP fallback pre-auth). A generous
-// baseline so normal use is never touched, plus tighter caps on the abuse-prone mutations the threat models
-// flag: pool-drain on claim/publish/revoke (key-directory.md §3), backup drain (key-backup.md), upload abuse
-// (encrypted-attachments.md), and login brute-force. Single-VM in-memory storage; a Redis store is the
+// Per-VERIFIED-USER rate limits (the guard keys on tenant+sub, applied AFTER auth). A generous baseline so
+// normal use is never touched, plus tighter caps on the abuse-prone AUTHENTICATED mutations the threat
+// models flag: pool-drain on claim/publish/revoke (key-directory.md §3), backup drain (key-backup.md), and
+// upload abuse (encrypted-attachments.md). Unauthenticated-flood protection is the edge's job (Caddy/WAF),
+// not this guard's — see rate-limiting.md §6. Single-VM in-memory storage; a Redis store is the
 // multi-instance / restart-safe upgrade (Redis is already wired for the realtime bus).
 export const DEFAULT_THROTTLE = [{ name: 'default', ttl: seconds(60), limit: 120 }];
 
