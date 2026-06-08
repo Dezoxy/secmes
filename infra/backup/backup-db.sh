@@ -62,9 +62,14 @@ read_secret_file() {
 #     (invariant #5: secret delivered as a file, end-to-end). The source secrets arrive via systemd
 #     LoadCredential (Key Vault). The work dir is removed on exit. ---
 umask 077
-WORKDIR="$(mktemp -d)"
+# Put the secret files under the systemd RuntimeDirectory ($RUNTIME_DIRECTORY) — a service-private tmpfs with
+# NO host-disk backing — rather than /tmp. (PrivateTmp=true isolates /tmp but its boolean form still backs
+# onto the host /tmp, so a crash/power-loss could leave the materialised secrets on disk.) Fall back to
+# TMPDIR/tmp for a local dry-run. mktemp makes the dir 0700; the trap removes it on exit.
+secbase="${RUNTIME_DIRECTORY:-}"
+secbase="${secbase%%:*}" # first path if systemd gave a colon-separated list
+WORKDIR="$(mktemp -d "${secbase:-${TMPDIR:-/tmp}}/argus-db-backup.XXXXXXXX")"
 trap 'rm -rf -- "$WORKDIR"' EXIT
-chmod 700 "$WORKDIR"
 
 # libpq passfile (hostname:port:database:username:password). Wildcards are safe in a private 0600 file used
 # only by this unit. The password's `\` and `:` are escaped per the .pgpass format.

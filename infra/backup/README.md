@@ -36,7 +36,8 @@ compromised backup host can read neither the live secrets nor any past backup it
 The DB password and the B2 application key are **never** in the unit/env at rest. They are delivered as
 credential **files** via systemd `LoadCredential=`, populated from **Azure Key Vault** by the VM's **Managed
 Identity** at boot. The worker reads them from `$CREDENTIALS_DIRECTORY` and keeps them **file-backed
-end-to-end**: it writes a libpq passfile + an AWS credentials file in a private tmpfs work dir (0600) and
+end-to-end**: it writes a libpq passfile + an AWS credentials file in a service-private tmpfs work dir under
+the systemd `RuntimeDirectory` (0600 — no host-disk backing, unlike `PrivateTmp`'s `/tmp`) and
 points the CLIs at them by path (`PGPASSFILE` / `AWS_SHARED_CREDENTIALS_FILE`), so the secret **values** are
 never exported into the process environment (hence not in `/proc/<pid>/environ`, not inherited by children)
 nor on argv/`ps`. The work dir is removed on exit. The age **public** key is not a secret and rides in the

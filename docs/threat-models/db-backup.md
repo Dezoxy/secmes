@@ -38,7 +38,8 @@ in the backup — they are re-applied from Key Vault at restore.
   upload; B2 stores ciphertext only. Private key in Key Vault, never on the backup host (a host compromise
   cannot decrypt past backups). Bucket is **private** + SSE-B2 as a second layer.
 - **Information disclosure — secrets in logs / argv / env.** → secrets stay **file-backed end-to-end**: a
-  libpq passfile + an AWS credentials file in a private tmpfs work dir (0600), pointed at by `PGPASSFILE` /
+  libpq passfile + an AWS credentials file in a service-private tmpfs work dir under the systemd
+  `RuntimeDirectory` (0600 — no host-disk backing, unlike `PrivateTmp`'s `/tmp`), pointed at by `PGPASSFILE` /
   `AWS_SHARED_CREDENTIALS_FILE`, so no secret VALUE is ever in the process environment (`/proc/<pid>/environ`)
   or inherited by children, and none on argv/`ps`; source secrets read from `LoadCredential` files (tmpfs
   0400), never in the unit at rest
