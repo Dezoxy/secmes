@@ -1,0 +1,12 @@
+-- 0014_keypackage_revoke — server-side, device-scoped revoke of UNCLAIMED KeyPackages (task #20,
+-- device-provisioning.md §6). When a device is cleared/reset (account-switch reset, pre-restore wipe), its
+-- local HPKE privates are discarded but the matching PUBLIC KeyPackages stay claimable in the directory — a
+-- peer could claim one and seal a Welcome the device can never open (availability degradation). The fix:
+-- let a user delete their OWN device's UNCLAIMED packages before re-provisioning.
+--
+-- Authz (own device + unclaimed-only) is enforced in the app layer (KeyDirectoryService.revokeUnclaimed);
+-- this migration only adds the missing DELETE privilege. RLS is UNCHANGED: the existing
+-- key_packages_tenant_isolation policy governs the DELETE (USING the tenant match), so a revoke can only
+-- touch the caller's tenant; the app further scopes to the caller's device_id and claimed_at IS NULL.
+-- CLAIMED packages are never deleted (an in-flight Welcome may be HPKE-sealed to one — consumed history).
+grant delete on key_packages to argus_app;

@@ -13,6 +13,7 @@ describe.skipIf(!DB_URL)('KeyDirectoryService', () => {
   let tenantA: string;
   let tenantB: string;
   let bobId: string;
+  let frankId: string;
   const dir = new KeyDirectoryService(new AuditService());
 
   let aliceAuth: VerifiedAuth;
@@ -20,6 +21,7 @@ describe.skipIf(!DB_URL)('KeyDirectoryService', () => {
   let carolAuth: VerifiedAuth;
   let daveAuth: VerifiedAuth;
   let eveAuth: VerifiedAuth;
+  let frankAuth: VerifiedAuth;
 
   beforeAll(async () => {
     sql = getDb().sql;
@@ -31,12 +33,15 @@ describe.skipIf(!DB_URL)('KeyDirectoryService', () => {
     await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantB}, 'kd-carol', 'c@b.test')`;
     await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantA}, 'kd-dave', 'dave@a.test')`;
     await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantA}, 'kd-eve', 'eve@a.test')`;
+    [{ id: frankId }] =
+      await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantA}, 'kd-frank', 'frank@a.test') returning id`;
 
     aliceAuth = { sub: 'kd-alice', tenantId: tenantA };
     bobAuth = { sub: 'kd-bob', tenantId: tenantA };
     carolAuth = { sub: 'kd-carol', tenantId: tenantB };
     daveAuth = { sub: 'kd-dave', tenantId: tenantA };
     eveAuth = { sub: 'kd-eve', tenantId: tenantA };
+    frankAuth = { sub: 'kd-frank', tenantId: tenantA };
   });
 
   afterAll(async () => {
@@ -97,5 +102,63 @@ describe.skipIf(!DB_URL)('KeyDirectoryService', () => {
     const retry = await dir.publish(daveAuth, 'REFWRQ==', batchA);
     expect(retry.published).toBe(0);
     expect(retry.available).toBe(200); // still 200 unclaimed (republish inserted nothing)
+  });
+
+  // Count Frank's device packages (owner connection, bypasses RLS — assertion helper, not the SUT path).
+  const countPackages = async (sig: string, claimed: boolean): Promise<number> => {
+    const [r] = await sql`select count(*)::int as n from key_packages kp
+                          join devices d on d.id = kp.device_id
+                          where d.user_id = ${frankId} and d.signature_public_key = ${sig}
+                            and kp.claimed_at is ${claimed ? sql`not null` : sql`null`}`;
+    return (r as { n: number }).n;
+  };
+
+  it('revoke: deletes only the caller’s own UNCLAIMED packages; claimed ones survive', async () => {
+    const sig = 'RlJBTksx'; // Frank device 1
+    await dir.publish(frankAuth, sig, ['f1', 'f2', 'f3']); // 3 unclaimed
+    await dir.claim(aliceAuth, frankId); // Alice claims one → 1 claimed, 2 unclaimed
+    const res = await dir.revokeUnclaimed(frankAuth, sig);
+    expect(res.revoked).toBe(2); // the two UNCLAIMED were deleted
+    expect(await countPackages(sig, false)).toBe(0); // no unclaimed left
+    expect(await countPackages(sig, true)).toBe(1); // the claimed one survives (in-flight Welcome)
+  });
+
+  it('revoke: is idempotent — revoking again returns 0', async () => {
+    const sig = 'RlJBTksy';
+    await dir.publish(frankAuth, sig, ['g1', 'g2']);
+    expect((await dir.revokeUnclaimed(frankAuth, sig)).revoked).toBe(2);
+    expect((await dir.revokeUnclaimed(frankAuth, sig)).revoked).toBe(0); // nothing left
+  });
+
+  it('revoke: cannot touch another user’s device packages (ownership authz)', async () => {
+    const sig = 'RlJBTksz';
+    await dir.publish(frankAuth, sig, ['h1', 'h2']); // Frank's device + packages
+    // Eve (same tenant) tries to revoke using Frank's device sig key → no device for Eve+sig → 0.
+    expect((await dir.revokeUnclaimed(eveAuth, sig)).revoked).toBe(0);
+    expect(await countPackages(sig, false)).toBe(2); // Frank's packages intact
+  });
+
+  it('revoke: cannot cross tenants (RLS hides the device)', async () => {
+    const sig = 'RlJBTksw';
+    await dir.publish(frankAuth, sig, ['i1', 'i2']); // tenant-A device
+    expect((await dir.revokeUnclaimed(carolAuth, sig)).revoked).toBe(0); // Carol is tenant B
+    expect(await countPackages(sig, false)).toBe(2); // intact
+  });
+
+  it('revoke: audits an EFFECTIVE revoke, not a no-op', async () => {
+    const sig = 'RlJBTksp';
+    await dir.publish(frankAuth, sig, ['j1']);
+    const auditCount = async (): Promise<number> => {
+      const [r] = await sql`select count(*)::int as n from audit_events
+                            where tenant_id = ${tenantA} and event_type = 'keydir.key_packages_revoked'`;
+      return (r as { n: number }).n;
+    };
+    const before = await auditCount();
+    await dir.revokeUnclaimed(frankAuth, sig); // revokes 1 → audited
+    const afterEffective = await auditCount();
+    await dir.revokeUnclaimed(frankAuth, sig); // 0 → NOT audited
+    const afterNoop = await auditCount();
+    expect(afterEffective - before).toBe(1); // the effective revoke added exactly one event
+    expect(afterNoop - afterEffective).toBe(0); // the no-op added none
   });
 });

@@ -30,6 +30,11 @@ export interface ClaimedKeyPackage {
   keyPackage: string;
 }
 
+export interface RevokeResult {
+  /** Number of UNCLAIMED KeyPackages deleted for the caller's device (0 if none / no such device). */
+  revoked: number;
+}
+
 @Injectable()
 export class KeyDirectoryService {
   constructor(private readonly audit: AuditService) {}
@@ -152,5 +157,57 @@ export class KeyDirectoryService {
       });
     }
     return claimed;
+  }
+
+  /**
+   * Revoke (delete) the caller's OWN device's UNCLAIMED KeyPackages, identified by the device's signature
+   * public key. Used before re-provisioning a cleared/reset device so its now-unopenable public packages
+   * can't poison peers' initiations (device-provisioning.md §6). Authz: the device is resolved by
+   * (caller's user, signaturePublicKey), so a user can ONLY revoke their own device — never another user's
+   * or device's packages. CLAIMED packages are left untouched (an in-flight Welcome may be sealed to one).
+   */
+  async revokeUnclaimed(auth: VerifiedAuth, signaturePublicKey: string): Promise<RevokeResult> {
+    const revoked = await withTenant(auth.tenantId, async (tx) => {
+      const [user] = await tx
+        .select({ id: schema.users.id })
+        .from(schema.users)
+        .where(eq(schema.users.externalIdentityId, auth.sub))
+        .limit(1);
+      if (!user) throw new BadRequestException('user not provisioned; sign in first');
+
+      // Resolve the caller's OWN device by its signature key (ownership authz — never another user's device;
+      // the row is also tenant-scoped by RLS). No such device → nothing to revoke (no existence oracle).
+      const [device] = await tx
+        .select({ id: schema.devices.id })
+        .from(schema.devices)
+        .where(
+          and(
+            eq(schema.devices.userId, user.id),
+            eq(schema.devices.signaturePublicKey, signaturePublicKey),
+          ),
+        )
+        .limit(1);
+      if (!device) return 0;
+
+      // Delete ONLY the unclaimed packages for this device. claimed_at IS NULL = available; a set value =
+      // consumed (one-time-use), which we must keep (a recipient may still be joining via its sealed Welcome).
+      const deleted = await tx
+        .delete(schema.keyPackages)
+        .where(
+          and(eq(schema.keyPackages.deviceId, device.id), isNull(schema.keyPackages.claimedAt)),
+        )
+        .returning({ id: schema.keyPackages.id });
+      return deleted.length;
+    });
+
+    // Audit only an effective revoke (separate tx) so it's detectable; a no-op (no device / nothing to
+    // revoke) adds no audit noise. Per-resource rate-limiting rides checkpoint 46.
+    if (revoked > 0) {
+      await this.audit.record(auth.tenantId, {
+        eventType: 'keydir.key_packages_revoked',
+        actorSub: auth.sub,
+      });
+    }
+    return { revoked };
   }
 }
