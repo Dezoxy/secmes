@@ -1,12 +1,8 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter } from 'react-router-dom';
 import App from './App';
-import Callback from './routes/Callback';
-import ChatScreen from './features/chat/ChatScreen';
-import { AuthProvider, RequireAuth } from './features/auth/AuthContext';
-import { DeviceProvider } from './features/device/DeviceContext';
-import { UnlockGate } from './features/device/UnlockGate';
+import { AuthProvider } from './features/auth/AuthContext';
 import './index.css';
 
 const root = document.getElementById('root');
@@ -16,22 +12,7 @@ createRoot(root).render(
   <StrictMode>
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
-          <Route path="/" element={<App />} />
-          <Route
-            path="/chat"
-            element={
-              <RequireAuth>
-                <DeviceProvider>
-                  <UnlockGate>
-                    <ChatScreen />
-                  </UnlockGate>
-                </DeviceProvider>
-              </RequireAuth>
-            }
-          />
-          <Route path="/auth/callback" element={<Callback />} />
-        </Routes>
+        <App />
       </AuthProvider>
     </BrowserRouter>
   </StrictMode>,

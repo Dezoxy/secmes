@@ -1,7 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Navigate, useNavigate } from 'react-router-dom';
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { Fingerprint, MessageCircle } from 'lucide-react';
 import { useAuth } from './features/auth/AuthContext';
+import AuthCallbackRoute from './routes/AuthCallbackRoute';
+import ChatRoute from './routes/ChatRoute';
+import DevicesRoute from './routes/DevicesRoute';
+import SecurityRoute from './routes/SecurityRoute';
+import SettingsRoute from './routes/SettingsRoute';
+import StorageRoute from './routes/StorageRoute';
 
 /**
  * Landing / sign-in screen. Argus exposes one primary passkey entry point and delegates login,
@@ -17,7 +23,7 @@ const slides = [
   { image: '/images/login-slide-3.png', title: 'Your Conversations,', subtitle: 'Your Control' },
 ];
 
-export default function App() {
+function LandingRoute() {
   const { configured, ready, user, login } = useAuth();
   const navigate = useNavigate();
   const [mounted, setMounted] = useState(false);
@@ -183,5 +189,19 @@ export default function App() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<LandingRoute />} />
+      <Route path="/chat" element={<ChatRoute />} />
+      <Route path="/settings" element={<SettingsRoute />} />
+      <Route path="/security" element={<SecurityRoute />} />
+      <Route path="/devices" element={<DevicesRoute />} />
+      <Route path="/storage" element={<StorageRoute />} />
+      <Route path="/auth/callback" element={<AuthCallbackRoute />} />
+    </Routes>
   );
 }

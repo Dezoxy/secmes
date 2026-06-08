@@ -356,12 +356,12 @@ git commit -m "refactor(web): adopt shared ui primitives"
 - Create: `apps/web/src/routes/DevicesRoute.tsx`
 - Create: `apps/web/src/routes/StorageRoute.tsx`
 
-- [ ] Keep `/chat` as the main product route.
-- [ ] Keep `/auth/callback` isolated from chat rendering.
-- [ ] Add route shells for settings, security, devices, and storage.
-- [ ] Route components own layout boundaries.
-- [ ] Route components must not make direct untyped backend calls.
-- [ ] Extend the existing `react-router-dom` route configuration instead of adding another router dependency or a parallel custom route switch.
+- [x] Keep `/chat` as the main product route.
+- [x] Keep `/auth/callback` isolated from chat rendering.
+- [x] Add route shells for settings, security, devices, and storage.
+- [x] Route components own layout boundaries.
+- [x] Route components must not make direct untyped backend calls.
+- [x] Extend the existing `react-router-dom` route configuration instead of adding another router dependency or a parallel custom route switch.
 
 **Verification:**
 
