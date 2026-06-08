@@ -4,9 +4,10 @@ How the production stack runs on the single Azure VM (`germanywestcentral`). **S
 deployed.** The infrastructure exists as code across slices; CD (`vars.ENABLE_DEPLOY`) is still off.
 
 - **Slice 1** — VM + network + Key Vault + Managed Identity + GitHub-OIDC deploy role (`infra/vm/terraform/`).
-- **Slice 2 (this)** — the prod runtime topology: `compose.prod.yaml`, the Caddy single-origin router
+- **Slice 2** — the prod runtime topology: `compose.prod.yaml`, the Caddy single-origin router
   (`infra/vm/caddy/`), and the cloudflared tunnel.
-- **Slice 3** — Key Vault → systemd credential files (replaces the secret placeholders below).
+- **Slice 3 (this)** — Key Vault → credential files: `argus-secrets.service` fetches secrets via the Managed
+  Identity into `/run/argus/secrets/` (tmpfs) — `infra/vm/secrets/`.
 - **Slice 4** — CD: build/scan/sign the images, then `az vm run-command` rollout + migrate-on-deploy.
 
 ## Topology
@@ -46,17 +47,20 @@ docker compose -f compose.prod.yaml config -q                         # validate
 
 ## Cloudflare tunnel ingress (dashboard-managed)
 
-cloudflared uses a **token** tunnel (the token you store in Key Vault / `secrets/argus.prod.env`). Ingress
+cloudflared uses a **token** tunnel (the token stored in Key Vault as `argus-tunnel-token`). Ingress
 hostnames are configured in the Cloudflare Zero Trust dashboard, not in this repo:
 
 - `4rgus.com` → `http://caddy:8080`  (the app — PWA + `/api` + `/ws`, all same-origin)
 - admin subdomains (e.g. ops/identity) → their service, **gated by Cloudflare Access** (identity at the edge)
 
-## Secrets (placeholder today → Key Vault in Slice 3)
+## Secrets (Key Vault → credential files — Slice 3)
 
-No secret values live in the repo. Data-plane secrets are delivered as **mounted credential files** (Docker
-secrets at `/run/secrets/*`), which the app reads via `*_FILE` env vars (invariant #5 — never the value in
-env):
+No secret values live in the repo. `argus-secrets.service` fetches them from Azure Key Vault via the VM's
+Managed Identity into `/run/argus/secrets/` (tmpfs, `0400` root) at boot — see
+[`infra/vm/secrets/`](../infra/vm/secrets/README.md). The stack consumes them as **mounted credential files**
+(Docker secrets at `/run/secrets/*`), which the app reads via `*_FILE` env vars (invariant #5 — never the
+value in env). Compose's secret sources point at `${ARGUS_SECRETS_DIR}` (`/run/argus/secrets` in prod,
+`./secrets` in local dev):
 
 - `secrets/postgres_password` → Postgres reads it via `POSTGRES_PASSWORD_FILE` (the **owner** account, for
   init + migrations).
@@ -71,8 +75,8 @@ The **`TUNNEL_TOKEN`** is the one secret that can't be a mounted file — the cl
 no `--token-file` flag. Invariant #5 also permits a **runtime-fetched value**, so it's injected from the
 deploy environment (`environment: TUNNEL_TOKEN`), never an on-disk env file.
 
-Non-secret config (B2 endpoint/region/bucket + access-key-**id**, the API's OIDC issuer/audience, the PWA's
-build-time `VITE_OIDC_*`, image tags) is in `.env.prod.example` — copy it into the deploy environment. The
-`secrets/` directory is gitignored. In production, **Slice 3** generates these files + the tunnel runtime
-value from Azure Key Vault via the VM's Managed Identity at deploy time; nothing is committed or baked into
-an image.
+Set the actual values in Key Vault once (the `az keyvault secret set` commands + the full name→file→consumer
+table are in [`infra/vm/secrets/README.md`](../infra/vm/secrets/README.md)). Non-secret config (B2
+endpoint/region/bucket + access-key-**id**, the API's OIDC issuer/audience, the PWA's build-time
+`VITE_OIDC_*`, image tags) is in `.env.prod.example` — copy it into the deploy environment. The `secrets/`
+directory (local dev) is gitignored; nothing is committed or baked into an image.

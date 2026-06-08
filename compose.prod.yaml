@@ -189,7 +189,8 @@ services:
     # TUNNEL_TOKEN is the one secret that can't be a mounted file: the cloudflared image has no shell and no
     # `--token-file` flag (only `--token` / `$TUNNEL_TOKEN`). Invariant #5 permits a "runtime-fetched value"
     # as well as a file, so it's injected from the deploy environment — NOT from a committed/on-disk env file.
-    # Slice 3's systemd unit fetches it from Key Vault via the Managed Identity and sets it for `compose up`.
+    # The stack launcher sets it from the Slice-3 credential file:
+    #   export TUNNEL_TOKEN="$(cat /run/argus/secrets/tunnel_token)"   # delivered by argus-secrets.service
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
     depends_on:
@@ -209,15 +210,17 @@ services:
           cpus: '0.25'
 
 secrets:
-  # All gitignored; populated out-of-band (Slice 3: Key Vault → credential file via Managed Identity).
+  # Sourced from ${ARGUS_SECRETS_DIR} — local dev uses the gitignored ./secrets; prod points it at the tmpfs
+  # dir that argus-secrets.service fills from Key Vault via the Managed Identity (Slice 3:
+  # ARGUS_SECRETS_DIR=/run/argus/secrets). Either way the values are credential FILES, never committed/env.
   postgres_password:
-    file: ./secrets/postgres_password
+    file: ${ARGUS_SECRETS_DIR:-./secrets}/postgres_password
   database_url:
-    # Full password-bearing connection URL; the api reads it via DATABASE_URL_FILE (invariant #5).
-    file: ./secrets/database_url
+    # Full password-bearing connection URL (argus_app role); the api reads it via DATABASE_URL_FILE.
+    file: ${ARGUS_SECRETS_DIR:-./secrets}/database_url
   s3_secret_access_key:
     # B2 application-key secret; the api reads it via S3_SECRET_ACCESS_KEY_FILE.
-    file: ./secrets/s3_secret_access_key
+    file: ${ARGUS_SECRETS_DIR:-./secrets}/s3_secret_access_key
 
 volumes:
   pgdata:
