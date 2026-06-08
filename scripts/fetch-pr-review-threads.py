@@ -48,14 +48,18 @@ def current_pr_number() -> int:
     return int(data["number"])
 
 
-def fetch_threads(owner: str, repo: str, number: int) -> dict[str, Any]:
+def fetch_thread_page(owner: str, repo: str, number: int, after: str | None) -> dict[str, Any]:
     query = """
-    query($owner: String!, $repo: String!, $number: Int!) {
+    query($owner: String!, $repo: String!, $number: Int!, $after: String) {
       repository(owner: $owner, name: $repo) {
         pullRequest(number: $number) {
           number
           url
-          reviewThreads(first: 100) {
+          reviewThreads(first: 100, after: $after) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
             nodes {
               id
               isResolved
@@ -77,20 +81,49 @@ def fetch_threads(owner: str, repo: str, number: int) -> dict[str, Any]:
       }
     }
     """
-    return gh_json(
-        [
-            "api",
-            "graphql",
-            "-f",
-            f"query={query}",
-            "-f",
-            f"owner={owner}",
-            "-f",
-            f"repo={repo}",
-            "-F",
-            f"number={number}",
-        ]
-    )
+    command = [
+        "api",
+        "graphql",
+        "-f",
+        f"query={query}",
+        "-f",
+        f"owner={owner}",
+        "-f",
+        f"repo={repo}",
+        "-F",
+        f"number={number}",
+    ]
+    if after is not None:
+        command.extend(["-f", f"after={after}"])
+    return gh_json(command)
+
+
+def fetch_threads(owner: str, repo: str, number: int) -> dict[str, Any]:
+    pull_request: dict[str, Any] | None = None
+    threads: list[dict[str, Any]] = []
+    after: str | None = None
+
+    while True:
+        data = fetch_thread_page(owner, repo, number, after)
+        page_pull_request = data["data"]["repository"]["pullRequest"]
+        if pull_request is None:
+            pull_request = {
+                "number": page_pull_request["number"],
+                "url": page_pull_request["url"],
+                "reviewThreads": {"nodes": []},
+            }
+
+        review_threads = page_pull_request["reviewThreads"]
+        threads.extend(review_threads["nodes"])
+        page_info = review_threads["pageInfo"]
+        if not page_info["hasNextPage"]:
+            break
+        after = page_info["endCursor"]
+
+    if pull_request is None:
+        raise RuntimeError("pull request not found")
+    pull_request["reviewThreads"]["nodes"] = threads
+    return {"data": {"repository": {"pullRequest": pull_request}}}
 
 
 def has_codex_comment(thread: dict[str, Any]) -> bool:
