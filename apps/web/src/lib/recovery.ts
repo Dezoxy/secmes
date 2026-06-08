@@ -10,6 +10,7 @@
 // the demo fallback when no account is signed in.
 
 import { DeviceExistsError, DeviceKeystore } from './keystore';
+import { RestoreCommittedError } from './restore-errors';
 
 export const RECOVERY_IDENTITY = 'you@argus.local';
 
@@ -66,10 +67,16 @@ export async function restoreFromArtifact(
     await ks.importRecoveryArtifact(identity, artifactJson, passphrase);
   } catch (e) {
     if (e instanceof DeviceExistsError) {
-      await ks.clearDevice();
-      await ks.importRecoveryArtifact(identity, artifactJson, passphrase);
+      await ks.clearDevice(); // DESTRUCTIVE — the live device/group/history stores are now cleared
+      try {
+        await ks.importRecoveryArtifact(identity, artifactJson, passphrase);
+      } catch (committed) {
+        // The re-import failed AFTER the clear — the stores are already gone. Surface it distinctly so a
+        // live caller RELOADS instead of preserving a now-stale session (recreating the corruption otherwise).
+        throw new RestoreCommittedError(committed);
+      }
     } else {
-      throw e; // invalid artifact — the existing device is untouched
+      throw e; // PRE-clear: an invalid artifact / wrong passphrase — the existing device is untouched
     }
   }
 }

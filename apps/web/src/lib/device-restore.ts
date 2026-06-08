@@ -18,15 +18,11 @@ import { revokeKeyPackages, type PublishResult } from './api';
 import type { DeviceKeystore } from './keystore';
 import { provisionDevice } from './provisioning';
 import { restoreFromArtifact } from './recovery';
+import { RestoreCommittedError } from './restore-errors';
 
-/** Thrown when the artifact WAS applied (the active stores are already replaced) but a post-restore step
- *  failed. A live caller must reload — its in-memory session is now stale on the cleared stores. */
-export class RestoreCommittedError extends Error {
-  constructor(readonly cause: unknown) {
-    super('restore applied but a post-restore step failed');
-    this.name = 'RestoreCommittedError';
-  }
-}
+// Re-export for callers (the gate, the recovery panel) that catch it; defined in restore-errors.ts so
+// recovery.ts can throw it too (the destructive clear lives there) without an import cycle.
+export { RestoreCommittedError };
 
 export async function restoreAndProvision(
   keystore: DeviceKeystore,
