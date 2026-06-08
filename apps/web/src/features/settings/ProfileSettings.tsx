@@ -1,6 +1,6 @@
-import { useEffect, useState, type CSSProperties, type ChangeEvent } from 'react';
+import { useState, type CSSProperties, type ChangeEvent } from 'react';
 import { Check, Copy, Image, RefreshCw } from 'lucide-react';
-import { generatedAvatar, MAX_AVATAR_DATA_URI_LENGTH, safeAvatarSrc } from '../chat/seed';
+import { generatedAvatar, MAX_AVATAR_DATA_URI_LENGTH } from '../chat/seed';
 import { Avatar, Button } from '../ui';
 
 export interface AnonymousProfile {
@@ -11,8 +11,14 @@ export interface AnonymousProfile {
 
 interface ProfileSettingsProps {
   profile: AnonymousProfile;
+  username: string;
+  avatar: string;
+  profileError: string | null;
   primaryButtonStyle: CSSProperties;
-  onProfileChange: (profile: AnonymousProfile) => boolean;
+  onUsernameChange: (username: string) => void;
+  onAvatarChange: (avatar: string) => void;
+  onProfileErrorChange: (message: string | null) => void;
+  onProfileSave: () => void;
 }
 
 const INPUT =
@@ -74,30 +80,16 @@ async function compressAvatar(file: File): Promise<string> {
 
 export function ProfileSettings({
   profile,
+  username,
+  avatar,
+  profileError,
   primaryButtonStyle,
-  onProfileChange,
+  onUsernameChange,
+  onAvatarChange,
+  onProfileErrorChange,
+  onProfileSave,
 }: ProfileSettingsProps) {
-  const [username, setUsername] = useState(profile.username);
-  const [avatar, setAvatar] = useState(profile.avatar);
   const [copied, setCopied] = useState(false);
-  const [profileError, setProfileError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setUsername(profile.username);
-    setAvatar(profile.avatar);
-    setProfileError(null);
-  }, [profile]);
-
-  const saveProfile = () => {
-    const clean = username.trim() || profile.id.slice(0, 12);
-    const safeAvatar = safeAvatarSrc(avatar, clean);
-    if (onProfileChange({ ...profile, username: clean, avatar: safeAvatar })) {
-      setAvatar(safeAvatar);
-      setProfileError(null);
-      return;
-    }
-    setProfileError('Profile could not be saved on this device. Use a smaller avatar.');
-  };
 
   const copyId = async () => {
     try {
@@ -113,15 +105,15 @@ export function ProfileSettings({
     const file = event.target.files?.[0];
     if (!file) return;
     if (!ALLOWED_AVATAR_TYPES.has(file.type)) {
-      setProfileError('Use PNG, JPG, WebP, or GIF.');
+      onProfileErrorChange('Use PNG, JPG, WebP, or GIF.');
       event.target.value = '';
       return;
     }
     try {
-      setAvatar(await compressAvatar(file));
-      setProfileError(null);
+      onAvatarChange(await compressAvatar(file));
+      onProfileErrorChange(null);
     } catch {
-      setProfileError('Avatar could not be processed. Use a smaller image.');
+      onProfileErrorChange('Avatar could not be processed. Use a smaller image.');
     } finally {
       event.target.value = '';
     }
@@ -149,7 +141,7 @@ export function ProfileSettings({
           </label>
           <Button
             variant="subtle"
-            onClick={() => setAvatar(generatedAvatar(username || profile.id))}
+            onClick={() => onAvatarChange(generatedAvatar(username || profile.id))}
           >
             <RefreshCw className="h-4 w-4" />
             Generate
@@ -161,7 +153,7 @@ export function ProfileSettings({
         <span className="mb-2 block text-sm font-medium text-white/70">Username</span>
         <input
           value={username}
-          onChange={(event) => setUsername(event.target.value)}
+          onChange={(event) => onUsernameChange(event.target.value)}
           placeholder="Choose a username"
           className={INPUT}
         />
@@ -178,7 +170,7 @@ export function ProfileSettings({
         </div>
       </div>
 
-      <Button onClick={saveProfile} style={primaryButtonStyle}>
+      <Button onClick={onProfileSave} style={primaryButtonStyle}>
         Save profile
       </Button>
       {profileError && <p className="text-sm text-rose-300">{profileError}</p>}

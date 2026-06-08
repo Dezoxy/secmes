@@ -37,6 +37,20 @@ test('profile save accepts a generated avatar and user-chosen username', async (
   await expect(page.getByText('smoke-user')).toBeVisible();
 });
 
+test('profile draft survives settings section changes', async ({ page }) => {
+  await page.goto('/chat');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+
+  await dialog.getByLabel('Username').fill('draft-user');
+  await dialog.getByRole('button', { name: 'Appearance' }).click();
+  await expect(dialog.getByRole('heading', { name: 'Appearance' })).toBeVisible();
+
+  await dialog.getByRole('button', { name: 'Profile' }).click();
+  await expect(dialog.getByLabel('Username')).toHaveValue('draft-user');
+});
+
 test('settings sections preserve defaults after component split', async ({ page }) => {
   await page.goto('/chat');
   await page.getByRole('button', { name: 'Open settings' }).click();

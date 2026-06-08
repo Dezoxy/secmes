@@ -21,6 +21,7 @@ import {
   isAccentId,
   type AccentId,
 } from '../ui';
+import { safeAvatarSrc } from '../chat/seed';
 import { AboutSettings } from './AboutSettings';
 import { AppearanceSettings, FONT_SIZE_LEVELS } from './AppearanceSettings';
 import { DataStorageSettings } from './DataStorageSettings';
@@ -80,6 +81,15 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
   const [mobileSectionOpen, setMobileSectionOpen] = useState(false);
   const [accentId, setAccentId] = useState<AccentId>(() => readStoredAccent());
   const [fontSizeLevel, setFontSizeLevel] = useState(() => readStoredFontSize());
+  const [username, setUsername] = useState(profile.username);
+  const [avatar, setAvatar] = useState(profile.avatar);
+  const [profileError, setProfileError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setUsername(profile.username);
+    setAvatar(profile.avatar);
+    setProfileError(null);
+  }, [profile]);
 
   useEffect(() => {
     window.localStorage.setItem(ACCENT_STORAGE_KEY, accentId);
@@ -100,6 +110,18 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
     '--settings-accent': accent.hex,
     '--settings-accent-soft': accent.soft,
   } as CSSProperties;
+
+  const saveProfile = () => {
+    const clean = username.trim() || profile.id.slice(0, 12);
+    const safeAvatar = safeAvatarSrc(avatar, clean);
+    if (onProfileChange({ ...profile, username: clean, avatar: safeAvatar })) {
+      setUsername(clean);
+      setAvatar(safeAvatar);
+      setProfileError(null);
+      return;
+    }
+    setProfileError('Profile could not be saved on this device. Use a smaller avatar.');
+  };
 
   return (
     <Modal
@@ -175,8 +197,14 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
         {active === 'profile' && (
           <ProfileSettings
             profile={profile}
+            username={username}
+            avatar={avatar}
+            profileError={profileError}
             primaryButtonStyle={primaryButtonStyle}
-            onProfileChange={onProfileChange}
+            onUsernameChange={setUsername}
+            onAvatarChange={setAvatar}
+            onProfileErrorChange={setProfileError}
+            onProfileSave={saveProfile}
           />
         )}
 
