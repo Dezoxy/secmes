@@ -10,6 +10,7 @@ import {
 } from '../../lib/conversations';
 import { generatedAvatar } from './seed';
 import { VerifySecurity } from './VerifySecurity';
+import { Avatar, IconButton, Modal } from '../ui';
 
 interface StartConversationProps {
   manager: ConversationManager;
@@ -110,74 +111,73 @@ export function StartConversation({
   );
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-      onClick={onClose}
+    <Modal
+      ariaLabel="New conversation"
+      onClose={onClose}
+      closeOnBackdrop
+      className="items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      contentClassName={CARD}
     >
-      <div className={CARD} onClick={(e) => e.stopPropagation()}>
-        <div className="mb-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <UserPlus className="h-5 w-5 text-purple-400" />
-            <h2 className="text-lg font-semibold text-white">New conversation</h2>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-white/40 transition-colors hover:bg-white/5 hover:text-white/80"
-          >
-            <X className="h-5 w-5" />
-          </button>
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <UserPlus className="h-5 w-5 text-purple-400" />
+          <h2 className="text-lg font-semibold text-white">New conversation</h2>
         </div>
-
-        <div className="relative mb-3">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30" />
-          <input
-            type="text"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Search people…"
-            className="w-full rounded-xl border border-white/5 bg-[#1a1a26] py-2.5 pl-10 pr-4 text-sm text-white placeholder-white/30 outline-none transition-colors focus:border-purple-500/50"
-          />
-        </div>
-
-        {busy && <p className="px-1 pb-2 text-xs text-white/40">Claiming a one-time key…</p>}
-        {actionError && <p className="px-1 pb-2 text-xs text-red-400/80">{actionError}</p>}
-
-        <div className="max-h-72 space-y-1 overflow-y-auto">
-          {users === null && !loadError && (
-            <div className="flex items-center justify-center gap-2 py-8 text-sm text-white/40">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading contacts…
-            </div>
-          )}
-          {loadError && <p className="py-8 text-center text-sm text-red-400/80">{loadError}</p>}
-          {users !== null && !loadError && shown.length === 0 && (
-            <p className="py-8 text-center text-sm text-white/40">
-              {users.length === 0 ? 'No other members in your workspace yet.' : 'No matches.'}
-            </p>
-          )}
-          {shown.map((u) => (
-            <button
-              key={u.id}
-              type="button"
-              disabled={busy}
-              onClick={() => pick(u)}
-              className="flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:bg-[#1a1a26] disabled:opacity-50"
-            >
-              <img
-                src={generatedAvatar(u.displayName || u.email)}
-                alt=""
-                className="h-10 w-10 shrink-0 rounded-full ring-2 ring-white/5"
-              />
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-white/90">
-                  {u.displayName || u.email}
-                </p>
-                <p className="truncate text-xs text-white/40">{u.email}</p>
-              </div>
-            </button>
-          ))}
-        </div>
+        <IconButton onClick={onClose} size="sm" aria-label="Close new conversation">
+          <X className="h-5 w-5" />
+        </IconButton>
       </div>
-    </div>
+
+      <div className="relative mb-3">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30" />
+        <input
+          type="text"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Search people…"
+          className="w-full rounded-xl border border-white/5 bg-[#1a1a26] py-2.5 pl-10 pr-4 text-sm text-white placeholder-white/30 outline-none transition-colors focus:border-purple-500/50"
+        />
+      </div>
+
+      {busy && <p className="px-1 pb-2 text-xs text-white/40">Claiming a one-time key…</p>}
+      {actionError && <p className="px-1 pb-2 text-xs text-red-400/80">{actionError}</p>}
+
+      <div className="max-h-72 space-y-1 overflow-y-auto">
+        {users === null && !loadError && (
+          <div className="flex items-center justify-center gap-2 py-8 text-sm text-white/40">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading contacts…
+          </div>
+        )}
+        {loadError && <p className="py-8 text-center text-sm text-red-400/80">{loadError}</p>}
+        {users !== null && !loadError && shown.length === 0 && (
+          <p className="py-8 text-center text-sm text-white/40">
+            {users.length === 0 ? 'No other members in your workspace yet.' : 'No matches.'}
+          </p>
+        )}
+        {shown.map((u) => (
+          <button
+            key={u.id}
+            type="button"
+            disabled={busy}
+            onClick={() => pick(u)}
+            className="flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:bg-[#1a1a26] disabled:opacity-50"
+          >
+            <Avatar
+              src={generatedAvatar(u.displayName || u.email)}
+              name={u.displayName || u.email}
+              size="md"
+              shape="circle"
+              className="shrink-0 ring-2 ring-white/5"
+            />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-white/90">
+                {u.displayName || u.email}
+              </p>
+              <p className="truncate text-xs text-white/40">{u.email}</p>
+            </div>
+          </button>
+        ))}
+      </div>
+    </Modal>
   );
 }

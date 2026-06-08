@@ -317,12 +317,12 @@ git commit -m "feat(web): create shared ui primitives"
 - Modify: `apps/web/src/features/settings`
 - Modify: `apps/web/src/routes` if route files already exist
 
-- [ ] Replace duplicated button classes with `Button`.
-- [ ] Replace icon-only buttons with `IconButton`.
-- [ ] Replace repeated modal shells with `Modal`.
-- [ ] Replace repeated avatar image rendering with `Avatar`.
-- [ ] Replace repeated settings rows with `SettingsRow`.
-- [ ] Keep visual output as close as possible to the baseline screenshots.
+- [x] Replace duplicated button classes with `Button`.
+- [x] Replace icon-only buttons with `IconButton`.
+- [x] Replace repeated modal shells with `Modal`.
+- [x] Replace repeated avatar image rendering with `Avatar`.
+- [x] Replace repeated settings rows with `SettingsRow`.
+- [x] Keep visual output as close as possible to the baseline screenshots.
 
 **Verification:**
 

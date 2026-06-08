@@ -3,6 +3,7 @@ import { saveAttachment } from '../../lib/attachments';
 import { AttachmentImage } from './AttachmentImage';
 import type { Message, User, MessageStatus } from './seed';
 import { formatFullTime } from './seed';
+import { Avatar, IconButton } from '../ui';
 
 function StatusIcon({ status }: { status: MessageStatus }) {
   switch (status) {
@@ -42,9 +43,13 @@ export function MessageBubble({
         {/* Avatar for received messages in a group */}
         {!isOwn && showSender && sender && (
           <div className="shrink-0 mt-auto">
-            <div className="w-8 h-8 rounded-full overflow-hidden ring-2 ring-white/5">
-              <img src={sender.avatar} alt={sender.name} className="object-cover w-full h-full" />
-            </div>
+            <Avatar
+              src={sender.avatar}
+              name={sender.name}
+              size="sm"
+              shape="circle"
+              className="ring-2 ring-white/5"
+            />
           </div>
         )}
 
@@ -117,19 +122,18 @@ export function MessageBubble({
                           </p>
                         )}
                       </div>
-                      <button
-                        type="button"
+                      <IconButton
                         onClick={() => attachment.ref && void saveAttachment(attachment.ref)}
                         disabled={!attachment.ref}
                         aria-label={`Download ${attachment.name}`}
-                        className={`p-2 rounded-lg transition-colors disabled:opacity-40 ${
+                        className={`rounded-lg ${
                           isOwn
                             ? 'hover:bg-purple-700 text-white/80 hover:text-white'
                             : 'hover:bg-white/5 text-white/40 hover:text-white/60'
                         }`}
                       >
                         <Download className="w-4 h-4" />
-                      </button>
+                      </IconButton>
                     </div>
                   ),
                 )}

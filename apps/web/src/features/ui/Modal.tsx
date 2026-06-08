@@ -6,6 +6,7 @@ interface ModalProps {
   onClose: () => void;
   className?: string;
   contentClassName?: string;
+  closeOnBackdrop?: boolean;
   style?: CSSProperties;
 }
 
@@ -19,6 +20,7 @@ export function Modal({
   onClose,
   className,
   contentClassName,
+  closeOnBackdrop = false,
   style,
 }: ModalProps) {
   useEffect(() => {
@@ -36,6 +38,9 @@ export function Modal({
       role="dialog"
       aria-modal="true"
       aria-label={ariaLabel}
+      onClick={(event) => {
+        if (closeOnBackdrop && event.target === event.currentTarget) onClose();
+      }}
       style={style}
     >
       <div
@@ -43,6 +48,9 @@ export function Modal({
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60',
           contentClassName,
         )}
+        onClick={(event) => {
+          if (closeOnBackdrop) event.stopPropagation();
+        }}
         tabIndex={-1}
       >
         {children}
