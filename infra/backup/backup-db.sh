@@ -106,9 +106,16 @@ db_key="${BACKUP_PREFIX}-db-${stamp}.dump.age"
 dump_upload "roles (globals)" "$globals_key" 64 -- \
   pg_dumpall --database="$PGDATABASE" --roles-only --no-role-passwords || exit 1
 
-# 2) The database (custom format → compact, supports selective/parallel restore).
-dump_upload "db dump" "$db_key" 1024 -- \
-  pg_dump --format=custom --no-password "$PGDATABASE" || exit 1
+# 2) The database (custom format → compact, supports selective/parallel restore). A run is ALL-OR-NOTHING:
+#    if the DB dump fails, delete the roles object we just wrote so no orphaned `globals` is left to be paired
+#    with an OLDER db at restore (which, after a role/grant-affecting migration, would restore mismatched
+#    ACL/policy state). Either both of this run's objects land, or neither.
+if ! dump_upload "db dump" "$db_key" 1024 -- \
+  pg_dump --format=custom --no-password "$PGDATABASE"; then
+  log "db dump failed — removing the now-orphaned roles object ${globals_key} (keep the run atomic)"
+  aws s3api delete-object --endpoint-url "$S3_ENDPOINT" --bucket "$S3_BUCKET" --key "$globals_key" >/dev/null 2>&1 || true
+  exit 1
+fi
 
 # --- Retention prune. Day-granular (perfect for a daily timer): delete backups whose date is older than the
 #     cutoff. One list under the shared prefix covers BOTH object families. ISO-8601 date strings compare

@@ -51,6 +51,11 @@ in the backup — they are re-applied from Key Vault at restore.
   the object + exits non-zero) on a verified-tiny dump, but only *warns and keeps* if the size can't be read,
   so a transient `head-object` error never false-fails a good backup. The **restore drill** is the real
   integrity test (documented, required by checkpoint 49).
+- **Mismatched roles/DB pair.** The roles object and the DB object must come from the **same run**, or a
+  restore could combine newer roles (after a role/grant-affecting migration) with an older DB. → Each run is
+  **all-or-nothing**: if the DB dump fails after the roles object uploaded, that orphan roles object is
+  deleted, so the latest complete pair is always consistent. The restore runbook also pairs **by shared
+  timestamp** (pick the latest DB, fetch the roles object with the same stamp) as defence-in-depth.
 - **Denial of availability — silent backup gap.** A backup that quietly stops is the classic DR trap. →
   `Persistent=true` reruns a missed nightly after downtime; the worker exits non-zero on failure for an
   `OnFailure=`/journal alert (flagged as the follow-up). Retention pruning keeps storage bounded so the timer

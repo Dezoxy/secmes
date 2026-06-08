@@ -100,13 +100,17 @@ On a trusted host (NOT the backup VM — it must NOT hold the age private key):
 ```bash
 EP=https://s3.eu-central-003.backblazeb2.com ; BUCKET=db-q7m2z9x4v6n8p3k1
 
-# 1. Fetch the age private key from Key Vault (mode 0400), and the latest globals + db objects from B2.
+# 1. Fetch the age private key from Key Vault (mode 0400). Then pick the latest DB object and its PAIRED
+#    roles object BY SHARED TIMESTAMP — never mix a newer roles dump with an older DB (each run writes both
+#    objects with the same stamp; a failed run leaves neither).
 az keyvault secret show --vault-name <vault> --name argus-backup-age-key --query value -o tsv > age.key
 chmod 0400 age.key
-pick() { aws s3api list-objects-v2 --endpoint-url "$EP" --bucket "$BUCKET" --prefix "$1" \
-  --query 'sort_by(Contents,&LastModified)[-1].Key' --output text; }
-aws s3 cp "s3://$BUCKET/$(pick argus-globals-)" ./globals.sql.age --endpoint-url "$EP"
-aws s3 cp "s3://$BUCKET/$(pick argus-db-)"      ./backup.dump.age --endpoint-url "$EP"
+DB_KEY=$(aws s3api list-objects-v2 --endpoint-url "$EP" --bucket "$BUCKET" --prefix argus-db- \
+  --query 'sort_by(Contents,&LastModified)[-1].Key' --output text)
+STAMP=${DB_KEY#argus-db-}; STAMP=${STAMP%.dump.age}          # e.g. 20260608T023012Z
+GLOBALS_KEY="argus-globals-${STAMP}.sql.age"
+aws s3 cp "s3://$BUCKET/$GLOBALS_KEY" ./globals.sql.age --endpoint-url "$EP"
+aws s3 cp "s3://$BUCKET/$DB_KEY"      ./backup.dump.age --endpoint-url "$EP"
 
 # 2. Roles FIRST (no passwords — re-applied from Key Vault in step 4). Connect to the maintenance DB.
 age -d -i age.key globals.sql.age | psql -d postgres
