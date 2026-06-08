@@ -206,6 +206,41 @@ describe('RealtimeGateway', () => {
     }); // live still delivered
   });
 
+  it('re-subscribing to an already-joined room ACKs without a second membership lookup', async () => {
+    const s = mkSocket();
+    await authed(s);
+    messaging.isMember.mockResolvedValue(true);
+    await gw.onSubscribe(sock(s), { conversationId: CONV });
+    expect(messaging.isMember).toHaveBeenCalledTimes(1);
+
+    // Same conversation again → idempotent ACK, no extra DB lookup (no hammering via repeat-subscribe).
+    await gw.onSubscribe(sock(s), { conversationId: CONV });
+    expect(messaging.isMember).toHaveBeenCalledTimes(1);
+    expect(lastSend(s)).toEqual({ event: 'subscribed', data: { conversationId: CONV } });
+  });
+
+  it('rate-limits new-room subscribe frames per socket (bounds the isMember DB lookups)', async () => {
+    const s = mkSocket();
+    await authed(s);
+    messaging.isMember.mockResolvedValue(false); // every distinct UUID is a non-member → fresh DB lookup
+
+    const uuid = (i: number) =>
+      `550e8400-e29b-41d4-a716-${(446655550000 + i).toString().slice(-12)}`;
+    // 120 distinct-UUID subscribes are allowed (each hits isMember)...
+    for (let i = 0; i < 120; i++) await gw.onSubscribe(sock(s), { conversationId: uuid(i) });
+    expect(messaging.isMember).toHaveBeenCalledTimes(120);
+
+    // ...the 121st in the same window is rejected BEFORE the DB lookup.
+    await gw.onSubscribe(sock(s), { conversationId: uuid(120) });
+    expect(lastSend(s)).toEqual({ event: 'error', data: { message: 'rate limited' } });
+    expect(messaging.isMember).toHaveBeenCalledTimes(120); // no extra lookup
+
+    // The window resets after 60s → subscribes flow again.
+    vi.advanceTimersByTime(60_000);
+    await gw.onSubscribe(sock(s), { conversationId: uuid(121) });
+    expect(messaging.isMember).toHaveBeenCalledTimes(121);
+  });
+
   it('disconnect removes the socket from its rooms', async () => {
     const s = mkSocket();
     await authed(s);

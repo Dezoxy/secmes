@@ -19,10 +19,12 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { CurrentAuth } from '../auth/current-auth.decorator.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
+import { SENSITIVE_LIMITS, perMinute } from '../rate-limit/rate-limit.constants.js';
 import { KeyDirectoryService } from './key-directory.service.js';
 import {
   PublishKeyPackagesSchema,
@@ -100,6 +102,7 @@ export class KeyDirectoryController {
 
   @Post('devices/me/key-packages')
   @HttpCode(200) // Nest defaults POST to 201; this returns 200 to match @ApiOkResponse
+  @Throttle(perMinute(SENSITIVE_LIMITS.publishKeyPackages))
   @ApiOperation({
     summary: "Register the caller's device + publish one-time-use KeyPackages",
     operationId: 'publishKeyPackages',
@@ -118,6 +121,7 @@ export class KeyDirectoryController {
   // POST, not GET: claiming consumes a one-time-use package (a mutation) — must not be cacheable/prefetchable.
   @Post('users/:userId/key-package/claim')
   @HttpCode(200) // 200 (data returned), not Nest's default 201
+  @Throttle(perMinute(SENSITIVE_LIMITS.claimKeyPackage))
   @ApiOperation({
     summary: 'Claim a fresh one-time-use KeyPackage for a user',
     operationId: 'claimKeyPackage',
@@ -139,6 +143,7 @@ export class KeyDirectoryController {
   // returns 0. Authz is the caller's verified identity + their device's signature key (own device only).
   @Post('devices/me/key-packages/revoke')
   @HttpCode(200) // 200 (data returned), not Nest's default 201
+  @Throttle(perMinute(SENSITIVE_LIMITS.revokeKeyPackages))
   @ApiOperation({
     summary: "Revoke the caller's own device's UNCLAIMED KeyPackages",
     operationId: 'revokeKeyPackages',

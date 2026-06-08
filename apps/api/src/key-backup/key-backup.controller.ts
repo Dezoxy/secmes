@@ -11,10 +11,12 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { CurrentAuth } from '../auth/current-auth.decorator.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
+import { SENSITIVE_LIMITS, perMinute } from '../rate-limit/rate-limit.constants.js';
 import { KeyBackupService } from './key-backup.service.js';
 import { StoreBackupSchema, type StoreBackup } from './key-backup.schemas.js';
 
@@ -37,6 +39,7 @@ export class KeyBackupController {
 
   @Put()
   @HttpCode(204)
+  @Throttle(perMinute(SENSITIVE_LIMITS.storeBackup))
   @ApiOperation({ summary: "Store/replace the caller's sealed backup", operationId: 'storeBackup' })
   @ApiBody({ type: BackupBody })
   @ApiNoContentResponse({ description: 'backup stored' })
@@ -50,6 +53,7 @@ export class KeyBackupController {
   }
 
   @Get()
+  @Throttle(perMinute(SENSITIVE_LIMITS.fetchBackup))
   @ApiOperation({
     summary: "Fetch the caller's sealed backup for restore",
     operationId: 'getBackup',
