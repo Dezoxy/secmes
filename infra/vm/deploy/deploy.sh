@@ -71,6 +71,9 @@ _tok="$(mi_token)"
   exit 1
 }
 kv_get argus-ghcr-token "$_tok" | docker login "$GHCR_HOST" -u "$GHCR_USER" --password-stdin
+# Drop the GHCR credentials on ANY exit (incl. a mid-rollout failure) so the token isn't left in the VM's
+# docker config after a failed deploy.
+trap 'docker logout "$GHCR_HOST" >/dev/null 2>&1 || true' EXIT
 docker pull "$API_IMAGE" >/dev/null
 docker pull "$INGRESS_IMAGE" >/dev/null
 
@@ -166,11 +169,33 @@ wait_healthy() { # $1 = compose service
   log "FATAL: $1 did not become healthy within the rollout window"
   return 1
 }
-log "waiting for the rollout to become healthy (api, caddy)"
+# cloudflared has no healthcheck (it's the outbound tunnel = the only ingress); require it's up and NOT
+# crash-looping (RestartCount stable across a short window), else the app is unreachable.
+wait_running() { # $1 = compose service without a healthcheck
+  local cid r1 r2
+  cid="$(docker compose -f "$COMPOSE" ps -q "$1")"
+  [ -n "$cid" ] || {
+    log "FATAL: $1 container not found after rollout"
+    return 1
+  }
+  sleep 8
+  [ "$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null)" = "true" ] || {
+    log "FATAL: $1 is not running"
+    return 1
+  }
+  r1="$(docker inspect -f '{{.RestartCount}}' "$cid")"
+  sleep 6
+  r2="$(docker inspect -f '{{.RestartCount}}' "$cid")"
+  [ "$r1" = "$r2" ] || {
+    log "FATAL: $1 is restart-looping"
+    return 1
+  }
+}
+log "waiting for the rollout to become healthy (api, caddy) + the tunnel to stay up (cloudflared)"
 wait_healthy api
 wait_healthy caddy
+wait_running cloudflared
 
-# --- 7. Tidy up: drop the registry login + dangling images. ---
-docker logout "$GHCR_HOST" >/dev/null 2>&1 || true
+# --- 7. Tidy up: drop dangling images (the GHCR login is cleared by the EXIT trap). ---
 docker image prune -f >/dev/null 2>&1 || true
 log "deploy complete + healthy (${IMAGE_TAG})"
