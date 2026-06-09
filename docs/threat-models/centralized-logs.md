@@ -99,9 +99,10 @@ Semgrep. Enables nothing — deploys at arming alongside #47.
 - **A buggy log line could persist a secret/content for up to the 7-day retention** before compaction drops
   it. → Mitigated by the app discipline + Semgrep + the Alloy scrub; accepted as best-effort, same class as
   the #48 residual. A periodic audit of stored logs at arming is the follow-up.
-- **Lossy label enrichment** — without the socket, logs are labeled by container id / filename, not a friendly
-  compose service name. → Acceptable for a first slice (queryable by id/content/time); friendly-name relabel
-  is a follow-up.
+- **Lossy label enrichment** — without the socket, each entry is labeled by its **container id** (derived from
+  the log path via `discovery.relabel`, so every container is its own Loki stream), not a friendly compose
+  service name. → Acceptable for a first slice (queryable per container / content / time); mapping ids to
+  friendly service names is a follow-up.
 - **First-run backfill of pre-existing container logs.** Alloy reads each new `*-json.log` from the start
   (`tail_from_end = false`) so per-deploy boot/crash-loop startup lines — the highest-value logs for debugging
   a failed rollout — are captured every deploy (the alternative, `tail_from_end = true`, would skip them, since

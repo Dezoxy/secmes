@@ -16,8 +16,22 @@ local.file_match "containers" {
   }]
 }
 
+// Give each container its OWN Loki stream by deriving a `container` label from the log path (the container id
+// directory). Without this every container collapses into one {job="docker", stream=…} stream — which both
+// makes interlaced timestamps from different files trip Loki's out-of-order rejection (worst during the
+// first-arming backfill) and leaves logs unqueryable per container. No Docker socket needed — the id is in the
+// path. Bounded cardinality: ~one stream per running container, well under max_streams_per_user.
+discovery.relabel "containers" {
+  targets = local.file_match.containers.targets
+  rule {
+    source_labels = ["__path__"]
+    regex         = ".*/containers/([0-9a-f]+)/.*"
+    target_label  = "container"
+  }
+}
+
 loki.source.file "containers" {
-  targets    = local.file_match.containers.targets
+  targets    = discovery.relabel.containers.output
   forward_to = [loki.process.scrub.receiver]
   // tail_from_end = false (the default, set explicitly + documented because it's a real trade-off): read each
   // NEW container file from the START. Docker creates a fresh *-json.log per container on every deploy/restart,
