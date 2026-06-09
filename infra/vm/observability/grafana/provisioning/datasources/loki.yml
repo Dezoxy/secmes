@@ -1,0 +1,10 @@
+# Grafana datasource provisioning (checkpoint 47b). Points at the internal Loki. Read-only (not editable in
+# the UI) so the provisioned file stays the source of truth. No secrets (Loki has no auth — internal only).
+apiVersion: 1
+datasources:
+  - name: Loki
+    uid: argus-loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false

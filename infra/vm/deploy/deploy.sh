@@ -310,6 +310,10 @@ fi
 wait_running prometheus
 wait_running alertmanager
 wait_running grafana
+# Centralized logs (checkpoint 47b): same posture — Loki + Alloy have no shell for a CMD healthcheck, so gate
+# on running + not-crash-looping (catches a bad config mount / missing log dir / image pull).
+wait_running loki
+wait_running alloy
 
 # --- 7. Tidy up: drop dangling images (the GHCR login is cleared by the EXIT trap). ---
 docker image prune -f >/dev/null 2>&1 || true

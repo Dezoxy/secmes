@@ -1,0 +1,72 @@
+// Grafana Alloy — log collector (roadmap #47b). Tails Docker container json-file logs and ships them to Loki.
+//
+// NO DOCKER SOCKET: a socket mount is daemon-root-equivalent (even `:ro` doesn't restrict API calls), which
+// would breach the stack's hardening. Instead Alloy file-tails /var/lib/docker/containers (mounted read-only).
+// Those json logs are root:root 0640, so Alloy runs as uid 0 to read them — bounded by cap_drop:[ALL] +
+// read-only rootfs + the read-only log mount + no socket (see docs/threat-models/centralized-logs.md).
+//
+// App logs are IDs/metadata only by discipline; the scrub stage below masks secret-shaped values as
+// defense-in-depth (invariant #2) before anything persists in Loki.
+
+// Discover the per-container json log files (no Docker service discovery — that needs the socket).
+local.file_match "containers" {
+  path_targets = [{
+    __path__ = "/var/lib/docker/containers/*/*-json.log",
+    job      = "docker",
+  }]
+}
+
+loki.source.file "containers" {
+  targets    = local.file_match.containers.targets
+  forward_to = [loki.process.scrub.receiver]
+}
+
+loki.process "scrub" {
+  // Docker json-file line shape: {"log":"<line>\n","stream":"stdout|stderr","time":"<rfc3339nano>"}
+  stage.json {
+    expressions = {
+      log    = "log",
+      stream = "stream",
+      time   = "time",
+    }
+  }
+  stage.timestamp {
+    source = "time"
+    format = "RFC3339Nano"
+  }
+  stage.labels {
+    values = { stream = "stream" }
+  }
+  stage.output {
+    source = "log"
+  }
+
+  // Defense-in-depth: mask credential-shaped values that should never appear in a log line anyway.
+  stage.replace {
+    expression = "(Bearer\\s+[\\w.\\-+/=]+)"
+    replace    = "[REDACTED]"
+  }
+  stage.replace {
+    expression = "(eyJ[\\w+/=-]+\\.[\\w+/=-]+\\.[\\w+/=-]+)"
+    replace    = "[REDACTED]"
+  }
+  stage.replace {
+    expression = "([?&](?:X-Amz-[\\w-]+|AWSAccessKeyId|Signature)=[^&\\s\"']+)"
+    replace    = "[REDACTED]"
+  }
+  // Opaque high-entropy tokens NOT prefixed by Bearer and NOT JWT-shaped (e.g. a Zitadel PAT, a B2 app key, a
+  // GHCR token): mask any 40+ char run of token chars. Over-redacting a long id in a log line is the safe
+  // direction (invariant #2); UUIDs/short ids are < 40 chars and unaffected. RE2 — no backtracking risk.
+  stage.replace {
+    expression = "([A-Za-z0-9_-]{40,})"
+    replace    = "[REDACTED]"
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

@@ -507,6 +507,63 @@ services:
           memory: 512m
           cpus: '0.5'
 
+  # Loki — centralized log store (roadmap #47b). INTERNAL ONLY (no published port, no auth — same posture as
+  # Prometheus), queried by Grafana over the internal network. Non-root (image default uid 10001), read-only
+  # FS + tmpfs, filesystem storage on a named volume; 7-day retention. Verify/refresh the image tag at arming.
+  # Threat model: docs/threat-models/centralized-logs.md.
+  loki:
+    image: grafana/loki:3.5.0
+    restart: unless-stopped
+    command: ['-config.file=/etc/loki/loki-config.yml']
+    volumes:
+      - ./infra/vm/observability/loki:/etc/loki:ro
+      - loki-data:/loki # named volume inherits the image's loki-user (10001) ownership on first init
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
+
+  # Grafana Alloy — log COLLECTOR (roadmap #47b). Tails container json logs from a READ-ONLY mount of
+  # /var/lib/docker/containers — NO Docker socket (a socket mount is daemon-root-equivalent). Runs as uid 0
+  # ONLY to read the root:root 0640 logs; cap_drop:[ALL] + read-only rootfs + the read-only log mount + no
+  # socket bound it (it can read logs and nothing more). Pushes to Loki over the internal network; no published
+  # port. The config scrubs secret-shaped values as defense-in-depth. See docs/threat-models/centralized-logs.md.
+  alloy:
+    image: grafana/alloy:v1.16.3
+    restart: unless-stopped
+    command:
+      - 'run'
+      - '--storage.path=/var/lib/alloy/data'
+      - '/etc/alloy/config.alloy'
+    user: '0:0' # required to read root-owned /var/lib/docker/containers/*-json.log (read-only mount; no socket)
+    volumes:
+      - ./infra/vm/observability/alloy:/etc/alloy:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro # host container logs, READ-ONLY; never the socket
+      - alloy-data:/var/lib/alloy/data # read offsets/WAL — avoids re-ingesting on restart
+    depends_on:
+      loki:
+        condition: service_started
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: '0.5'
+
 secrets:
   # Sourced from ${ARGUS_SECRETS_DIR} — local dev uses the gitignored ./secrets; prod points it at the tmpfs
   # dir that argus-secrets.service fills from Key Vault via the Managed Identity (Slice 3:
@@ -564,3 +621,6 @@ volumes:
   prometheus-data:
   grafana-data:
   alertmanager-data:
+  # Centralized logs (roadmap #47b): Loki chunks/index, Alloy read offsets/WAL.
+  loki-data:
+  alloy-data:
