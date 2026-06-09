@@ -1,14 +1,15 @@
-import { useState, useEffect, useCallback } from 'react';
+import { Suspense, lazy, useState, useEffect, useCallback } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Fingerprint, MessageCircle, RefreshCw } from 'lucide-react';
 import { useAuth } from './features/auth/AuthContext';
 import { usePwaUpdate } from './features/pwa/PwaUpdateContext';
 import AuthCallbackRoute from './routes/AuthCallbackRoute';
 import ChatRoute from './routes/ChatRoute';
-import DevicesRoute from './routes/DevicesRoute';
-import SecurityRoute from './routes/SecurityRoute';
-import SettingsRoute from './routes/SettingsRoute';
-import StorageRoute from './routes/StorageRoute';
+
+const DevicesRoute = lazy(() => import('./routes/DevicesRoute'));
+const SecurityRoute = lazy(() => import('./routes/SecurityRoute'));
+const SettingsRoute = lazy(() => import('./routes/SettingsRoute'));
+const StorageRoute = lazy(() => import('./routes/StorageRoute'));
 
 /**
  * Landing / sign-in screen. Argus exposes one primary passkey entry point and delegates login,
@@ -214,18 +215,28 @@ function RouteUpdateAction() {
   );
 }
 
+function RouteLoadingFallback() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-[#1a1a24] p-4 text-sm text-white/50">
+      Loading...
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <>
-      <Routes>
-        <Route path="/" element={<LandingRoute />} />
-        <Route path="/chat" element={<ChatRoute />} />
-        <Route path="/settings" element={<SettingsRoute />} />
-        <Route path="/security" element={<SecurityRoute />} />
-        <Route path="/devices" element={<DevicesRoute />} />
-        <Route path="/storage" element={<StorageRoute />} />
-        <Route path="/auth/callback" element={<AuthCallbackRoute />} />
-      </Routes>
+      <Suspense fallback={<RouteLoadingFallback />}>
+        <Routes>
+          <Route path="/" element={<LandingRoute />} />
+          <Route path="/chat" element={<ChatRoute />} />
+          <Route path="/settings" element={<SettingsRoute />} />
+          <Route path="/security" element={<SecurityRoute />} />
+          <Route path="/devices" element={<DevicesRoute />} />
+          <Route path="/storage" element={<StorageRoute />} />
+          <Route path="/auth/callback" element={<AuthCallbackRoute />} />
+        </Routes>
+      </Suspense>
       <RouteUpdateAction />
     </>
   );

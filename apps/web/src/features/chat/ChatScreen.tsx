@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { MessageCircle } from 'lucide-react';
 import type { UserSummary } from '../../lib/api';
 import { ConversationManager, type ConversationSession } from '../../lib/conversations';
@@ -24,7 +24,7 @@ import { useChatState } from './useChatState';
 import { useLiveConversations } from './useLiveConversations';
 import { useMessageSending } from './useMessageSending';
 import { loadArgusProfile, saveArgusProfile } from '../settings/argus-profile';
-import { SettingsPanel, type AnonymousProfile } from '../settings/SettingsPanel';
+import type { AnonymousProfile } from '../settings/SettingsPanel';
 import {
   ReconnectBanner,
   conversationEnterMotion,
@@ -41,6 +41,9 @@ import {
 } from './seed';
 
 const DEMO_PROFILE_SUBJECT = 'demo-local';
+const SettingsPanel = lazy(() =>
+  import('../settings/SettingsPanel').then((module) => ({ default: module.SettingsPanel })),
+);
 
 function prefersReducedMotion(): boolean {
   return (
@@ -84,6 +87,21 @@ function withCurrentUserProfile(conversation: Conversation, profile: User): Conv
         : participant,
     ),
   };
+}
+
+function SettingsPanelFallback() {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Settings"
+    >
+      <div className="flex h-[90vh] w-full max-w-6xl items-center justify-center rounded-3xl border border-white/5 bg-[#12121a] text-sm text-white/45 shadow-2xl shadow-black/50">
+        Loading settings...
+      </div>
+    </div>
+  );
 }
 
 export default function ChatScreen() {
@@ -405,12 +423,14 @@ export default function ChatScreen() {
 
       <ImagePreviewModal imageUrl={previewImage} onClose={() => setPreviewImage(null)} />
       {settingsOpen && (
-        <SettingsPanel
-          profile={anonymousProfile}
-          deviceId={deviceId}
-          onProfileChange={handleProfileChange}
-          onClose={closeSettings}
-        />
+        <Suspense fallback={<SettingsPanelFallback />}>
+          <SettingsPanel
+            profile={anonymousProfile}
+            deviceId={deviceId}
+            onProfileChange={handleProfileChange}
+            onClose={closeSettings}
+          />
+        </Suspense>
       )}
       {startOpen && manager && (
         <StartConversation

@@ -73,6 +73,7 @@ test('mobile settings sections expose current state and focus section content', 
   await page.getByRole('button', { name: 'Open settings' }).click();
 
   const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await expect(dialog.getByRole('navigation', { name: 'Settings sections' })).toBeVisible();
   const settingsPanel = dialog.locator(':scope > div');
   await expect
     .poll(async () => (await settingsPanel.boundingBox())?.x ?? 999)
