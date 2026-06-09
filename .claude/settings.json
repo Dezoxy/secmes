@@ -28,12 +28,7 @@
       "Bash(gitleaks*)",
       "Bash(osv-scanner*)"
     ],
-    "ask": [
-      "Bash(terraform apply*)",
-      "Bash(terraform -chdir=* apply*)",
-      "Bash(docker push*)",
-      "Bash(git push*)"
-    ],
+    "ask": ["Bash(terraform apply*)", "Bash(terraform -chdir=* apply*)", "Bash(docker push*)"],
     "deny": [
       "Bash(terraform destroy*)",
       "Bash(terraform -chdir=* destroy*)",
