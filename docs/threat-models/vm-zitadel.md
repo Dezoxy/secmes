@@ -91,7 +91,11 @@ plain HTTP behind the TLS-terminating edge.
 2. **No secret logging/persistence** — masterkey + DB password come from Key Vault as a file / runtime value;
    the fetch script logs names + status only; no secret in an env file at rest. The DB-password runtime-env
    delivery reuses the **same accepted exception** as the cloudflared `TUNNEL_TOKEN` (a runtime-fetched value,
-   not a committed/on-disk env file) — Zitadel has no `_FILE` env convention for the DB password. ✔ (noted)
+   not a committed/on-disk env file) — Zitadel has no `_FILE` env convention for the DB password. The **Login
+   V2 service-user PAT** is likewise a Key-Vault-delivered credential **file** on `/run` tmpfs — **never a
+   persisted Docker volume** (Zitadel stores only a hash of the PAT, so the file would otherwise be the only
+   plaintext copy; persisting it in a volume would breach this invariant). FirstInstance writes its first-boot
+   PAT to the container's tmpfs only; the operator stores it in Key Vault during arming. ✔ (noted)
 3. **Tenant isolation** — Zitadel is the **source** of the `tenant_id` claim that drives RLS; the Action sets
    it server-side, the API trusts only the verified claim. No argus tenant table is added here. ✔
 4. **No hand-rolled crypto** — Zitadel is an established IdP; we configure it, we do not implement crypto. ✔
@@ -139,7 +143,12 @@ and already covered by `auth-tenant-context.md`.
 - **Multi-tenant claim model unbuilt** — prod login works, but mapping real orgs to argus tenants is G1; until
   then the instance is single-tenant by configuration. Flagged, not hidden.
 - **read-only root FS is untested for these images** — local dev runs zitadel/zitadel-login *without*
-  `read_only`, so prod is the first place they run read-only-root. If either writes outside `/tmp` or the
-  bootstrap volume it will crash-loop — which `wait_running` catches loudly (fails the deploy, never silently
+  `read_only`, so prod is the first place they run read-only-root. If either writes outside its `/tmp` tmpfs it
+  will crash-loop — which the deploy's health/running gates catch loudly (fails the deploy, never silently
   serves broken), so it fails closed. Smoke-test read-only in a scratch env before arming; drop `read_only`
   for that one service if it can't tolerate it.
+- **Login UI degraded until the PAT is seeded** — on the very first boot the Key-Vault login PAT doesn't exist
+  yet (Zitadel mints it at init), so the fetch seeds an empty file and the login UI can't complete sign-in
+  until the operator stores the PAT in Key Vault (an arming step that folds into provisioning). The rest of
+  the stack is unaffected; `deploy.sh` gates zitadel-login on running-not-crash-looping (not healthy) so the
+  first deploy still succeeds. Accepted for this phase.

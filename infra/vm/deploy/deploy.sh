@@ -210,12 +210,15 @@ log "waiting for the rollout to become healthy (api, caddy, zitadel-db, zitadel,
 wait_healthy api
 wait_healthy caddy
 wait_running cloudflared
-# Zitadel exposes real readiness probes (zitadel: `zitadel ready`; login: its node healthcheck), so gate on
-# HEALTHY — not just "didn't crash". zitadel gets a longer window (150×2s=300s) for the cold first-init schema
-# migration + FirstInstance seed; a bad masterkey/DB password or a stuck init now fails the deploy loudly here.
+# Zitadel exposes a real readiness probe (`zitadel ready`), so gate the DB + the API server on HEALTHY — not
+# just "didn't crash". zitadel gets a longer window (150×2s=300s) for the cold first-init schema migration +
+# FirstInstance seed; a bad masterkey/DB password or a stuck init fails the deploy loudly here.
 wait_healthy zitadel-db
 wait_healthy zitadel 150
-wait_healthy zitadel-login
+# zitadel-login readiness depends on its Key-Vault-delivered service PAT, which is seeded during arming (empty
+# on a first boot) — so gate it on running+not-crash-looping, NOT healthy, or the very first deploy (before
+# the PAT exists) would fail. Its healthcheck still drives restarts; login goes healthy once the PAT lands.
+wait_running zitadel-login
 
 # --- 7. Tidy up: drop dangling images (the GHCR login is cleared by the EXIT trap). ---
 docker image prune -f >/dev/null 2>&1 || true

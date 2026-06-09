@@ -151,25 +151,39 @@ az keyvault secret set --vault-name "$KV" --name argus-zitadel-admin-password --
 ```
 
 **2 — First init.** On the first `deploy.sh` run, `start-from-init` creates the instance: the org, the Login
-V2 service user (its PAT is written to the `zitadel-bootstrap` volume so `zitadel-login` can authenticate),
-a bootstrap human admin (`admin`, password = `argus-zitadel-admin-password`, **change-required**), and — via
-the `ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_*` + `ZITADEL_OIDC_DEFAULTLOGINURLV2` env (init-only) — **Login
-V2 is wired at first boot**, so the console + auth use `https://auth.4rgus.com/ui/v2/login` immediately (no
-chicken-and-egg where you can't log in to provision). The DB password + admin password are runtime values
-`deploy.sh` reads from the delivered Key Vault files. On every later boot the instance already exists, so
-FirstInstance is skipped (the admin password is ignored).
+V2 service-user machine account, a bootstrap human admin (`admin`, password = `argus-zitadel-admin-password`,
+**change-required**), and — via the `ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_*` + `ZITADEL_OIDC_DEFAULTLOGINURLV2`
+env (init-only) — **Login V2 is wired at first boot** (the instance's login URLs point at `/ui/v2/login`). The
+DB password + admin password are runtime values `deploy.sh` reads from the delivered Key Vault files. On every
+later boot the instance already exists, so FirstInstance is skipped (the admin password is ignored).
 
 **3 — Cloudflare ingress.** Add `auth.4rgus.com` → `http://caddy:8080` in the Zero Trust dashboard (a
 **public** hostname, NOT behind Access — it's the end-user login surface). Caddy host-splits it to
 `zitadel`/`zitadel-login`.
 
-**4 — Harden + provision (manual, post-arm).** Log in to the console at `https://auth.4rgus.com` (Login V2 is
-already wired from step 2), **change the admin password + enable MFA** immediately, then create the project /
-SPA OIDC app / tenant-claim Action. The local provisioner (`infra/local/zitadel/provision.sh`) is the
-reference for those API calls; the **multi-tenant org→`tenant_id` mapping** (the local Action hardcodes a
-single dev UUID) is the deferred **G1** work. Set the **project id** as `OIDC_AUDIENCE` (the API's token
-audience — what Zitadel puts in the access-token `aud`, per the local provisioner's `OIDC_AUDIENCE=$PROJECT_ID`)
-and the **SPA client id** as `VITE_OIDC_CLIENT_ID`, then re-cut the release so the PWA build embeds them.
+**4 — Seed the Login V2 PAT into Key Vault.** The login container authenticates to the Zitadel API with a
+service-user PAT that — per invariant #2 — is **not** persisted to a Docker volume; it's a Key-Vault-delivered
+credential file, empty until you provision it (so the login UI is degraded until this step). FirstInstance
+writes its first PAT to the zitadel container's tmpfs; grab it and store it in Key Vault, then re-deliver:
+
+```bash
+PAT="$(docker compose -f compose.prod.yaml exec -T zitadel cat /tmp/login-client.pat)"
+az keyvault secret set --vault-name "$KV" --name argus-zitadel-login-pat --value "$PAT"
+sudo systemctl restart argus-secrets.service                 # re-fetch → /run/argus/secrets/zitadel_login_pat
+docker compose -f compose.prod.yaml up -d zitadel-login      # pick up the now-populated secret
+```
+
+From here on `argus-secrets.service` re-delivers it on every boot (reboot-safe). If `/tmp/login-client.pat` is
+already gone (container restarted), mint a fresh PAT for the `login-client` machine user in the console
+instead.
+
+**5 — Harden + provision (manual, post-arm).** Log in to the console at `https://auth.4rgus.com`, **change the
+admin password + enable MFA** immediately, then create the project / SPA OIDC app / tenant-claim Action. The
+local provisioner (`infra/local/zitadel/provision.sh`) is the reference for those API calls; the **multi-tenant
+org→`tenant_id` mapping** (the local Action hardcodes a single dev UUID) is the deferred **G1** work. Set the
+**project id** as `OIDC_AUDIENCE` (the API's token audience — what Zitadel puts in the access-token `aud`, per
+the local provisioner's `OIDC_AUDIENCE=$PROJECT_ID`) and the **SPA client id** as `VITE_OIDC_CLIENT_ID`, then
+re-cut the release so the PWA build embeds them.
 
 > **Footprint.** Zitadel adds ~1.8 GB of memory limits (`zitadel` 768m + `zitadel-db` 768m + `zitadel-login`
 > 256m) on top of the app stack (~4 GB) — size the VM for ~6 GB+ before arming.

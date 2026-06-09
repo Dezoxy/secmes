@@ -30,6 +30,7 @@ consumers `Requires=` this unit, so they don't start on a missing secret).
 | `argus-zitadel-masterkey`       | `zitadel_masterkey`                | `zitadel` (`--masterkeyFile`) — 32-byte instance masterkey |
 | `argus-zitadel-db-password`     | `zitadel_db_password`              | `zitadel-db` (`POSTGRES_PASSWORD_FILE`) + `zitadel` (`ZITADEL_DB_PASSWORD` runtime value — same file) |
 | `argus-zitadel-admin-password`  | `zitadel_admin_password`           | `zitadel` (`ZITADEL_ADMIN_PASSWORD` runtime value) — **first-init bootstrap only**, change-required |
+| `argus-zitadel-login-pat`       | `zitadel_login_pat`                | `zitadel-login` (`ZITADEL_SERVICE_USER_TOKEN_FILE`) — **OPTIONAL**: minted after first init, stored during arming; the fetch seeds an empty file until then |
 | `argus-backup-db-password`      | `backup-db-password`               | `argus-db-backup` (`LoadCredential`) — `argus_backup` role |
 | `argus-cleanup-db-password`     | `cleanup-db-password`              | `argus-attachment-cleanup` (`LoadCredential`) — `argus_cleanup` role |
 | `argus-b2-app-key`              | `b2-app-key`                       | `argus-db-backup` + `argus-attachment-cleanup` (`LoadCredential`) |
@@ -43,6 +44,11 @@ consumers `Requires=` this unit, so they don't start on a missing secret).
 > stores in its DB, so loss makes the instance's encrypted data unrecoverable (rely on Key Vault soft-delete
 > + purge-protection). `argus-zitadel-admin-password` seeds the bootstrap admin on the **very first** init
 > only (change it + enable MFA immediately after first login); it is ignored on every later boot.
+>
+> `argus-zitadel-login-pat` is **optional / set during arming** — Zitadel only mints the Login V2 service PAT
+> after first init, so you can't pre-seed it. The fetch script writes an **empty** file until you provision it
+> (login UI is degraded, the rest of the stack is fine); set it from the value FirstInstance writes
+> (`docker compose -f compose.prod.yaml exec zitadel cat /tmp/login-client.pat`) — see `docs/deploy.md`.
 
 ### Deploy-time secrets (fetched by `deploy.sh`, NOT delivered to the running stack)
 

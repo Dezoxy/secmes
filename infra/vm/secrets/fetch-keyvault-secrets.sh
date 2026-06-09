@@ -48,6 +48,14 @@ SECRETS=(
   "argus-b2-app-key=b2-app-key"
 )
 
+# OPTIONAL secrets — may be ABSENT on a first boot (provisioned later). Unlike the mandatory set, an absent
+# value is NOT fatal: we seed an EMPTY 0400 file so the compose secret mount still resolves, and the consumer
+# runs degraded until the value is provisioned. Used for the Zitadel Login V2 service-user PAT, which Zitadel
+# only mints AFTER first init — the operator stores it in Key Vault during arming (see vm-zitadel.md).
+OPTIONAL_SECRETS=(
+  "argus-zitadel-login-pat=zitadel_login_pat"
+)
+
 log() { printf 'argus-secrets: %s\n' "$*" >&2; } # names/status only — NEVER a secret value
 
 cleanup() { rm -f "${SECRETS_DIR}"/.tmp.* 2>/dev/null || true; }
@@ -104,6 +112,35 @@ EOF
   chmod 0400 "$tmp"
   mv -f "$tmp" "$dest" # atomic replace (rotation-safe)
   log "delivered ${kv_name} -> ${file}"
+done
+
+# --- 3. Optional secrets: absent-on-first-boot is OK. Seed an empty 0400 file so the compose mount resolves;
+#        the consumer runs degraded until provisioned. A genuine fetch error also seeds empty + logs (the
+#        consumer notices) — only the MANDATORY set above fails closed. ---
+for entry in "${OPTIONAL_SECRETS[@]}"; do
+  kv_name="${entry%%=*}"
+  file="${entry##*=}"
+  dest="${SECRETS_DIR}/${file}"
+  tmp="${SECRETS_DIR}/.tmp.${file}.$$"
+  value=""
+  # Don't fail closed: capture the fetch in an `if` so a 404/error doesn't trip `set -e`.
+  if resp="$(curl -fsS --max-time 15 --retry 2 --retry-connrefused --retry-delay 2 --config - \
+    "${VAULT_URL}/secrets/${kv_name}?api-version=${KV_API_VERSION}" <<EOF
+header = "Authorization: Bearer ${access_token}"
+EOF
+  )"; then
+    value="$(printf '%s' "$resp" | jq -r '.value // empty')"
+    resp=""
+  fi
+  printf '%s' "$value" >"$tmp" # empty when absent — the mount still resolves
+  chmod 0400 "$tmp"
+  mv -f "$tmp" "$dest"
+  if [ -s "$dest" ]; then
+    log "delivered ${kv_name} -> ${file}"
+  else
+    log "optional ${kv_name} absent — seeded EMPTY ${file} (consumer degraded until provisioned)"
+  fi
+  value=""
 done
 
 access_token=""
