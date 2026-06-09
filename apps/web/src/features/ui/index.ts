@@ -10,7 +10,11 @@ export {
   floatingMenuMotion,
   floatingMenuSurfaceClass,
   modalBackdropEnterMotion,
+  modalBackdropExitMotion,
   modalPanelEnterMotion,
+  modalPanelExitMotion,
+  paneBackEnterMotion,
+  paneBackExitMotion,
   sentMessageEnterMotion,
   surfaceEnterMotion,
 } from './motion';

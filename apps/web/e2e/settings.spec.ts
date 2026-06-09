@@ -18,10 +18,12 @@ test('mobile settings opens sections from the menu', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Profile' })).toBeHidden();
 
   await page.getByRole('button', { name: 'Security & Recovery' }).click();
+  const securityRegion = page.getByRole('region', { name: 'Security & Recovery settings' });
   await expect(page.getByRole('heading', { name: 'Security & Recovery' })).toBeVisible();
   await expect(page.getByText('Passkey-only login')).toBeVisible();
 
   await page.getByRole('button', { name: 'Back to settings menu' }).click();
+  await expect(securityRegion).toHaveClass(/argus-pane-back-exit/);
   await expect(page.getByRole('button', { name: 'Appearance' })).toBeVisible();
 });
 
@@ -193,7 +195,33 @@ test('settings sections preserve defaults after component split', async ({ page 
   await expect(dialog.getByText('Current device')).toBeVisible();
 });
 
-test('about exposes manual PWA update status without changing iPhone metadata expectations', async ({
+test('appearance font size preview follows the slider', async ({ page }) => {
+  await page.goto('/chat');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Appearance' }).click();
+
+  const slider = dialog.getByRole('slider', { name: 'Font size' });
+  const preview = dialog.locator('[aria-label^="Font size preview"]');
+
+  await slider.focus();
+  await slider.press('Home');
+  await expect(preview).toHaveAttribute('aria-label', 'Font size preview level 1');
+  const minimumSize = Number.parseFloat(
+    await preview.evaluate((element) => getComputedStyle(element).fontSize),
+  );
+
+  await slider.press('End');
+  await expect(preview).toHaveAttribute('aria-label', 'Font size preview level 10');
+  const maximumSize = Number.parseFloat(
+    await preview.evaluate((element) => getComputedStyle(element).fontSize),
+  );
+
+  expect(maximumSize).toBeGreaterThan(minimumSize);
+});
+
+test('about exposes manual PWA update status and platform install expectations', async ({
   page,
 }) => {
   await page.goto('/chat');
@@ -203,7 +231,39 @@ test('about exposes manual PWA update status without changing iPhone metadata ex
   await dialog.getByRole('button', { name: 'About' }).click();
 
   await expect(dialog.getByRole('heading', { name: 'About' })).toBeVisible();
-  await expect(dialog.getByText('App update')).toBeVisible();
+  await expect(dialog.getByText('App update', { exact: true })).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Check' })).toBeVisible();
-  await expect(dialog.getByText('Home Screen name changes may still require')).toBeVisible();
+  await expect(
+    dialog.getByText('Android, iOS, iPadOS, macOS, and desktop browsers can install Argus'),
+  ).toBeVisible();
+
+  const releaseNotes = dialog.getByRole('region', { name: 'Release notes' });
+  const releaseNotesScrollbar = dialog.getByTestId('release-notes-scrollbar');
+  await expect(releaseNotes.getByText('v0.3.2', { exact: true })).toBeVisible();
+
+  const layout = await releaseNotes.evaluate((node) => {
+    const aboutRegion = node.closest('[aria-label="About settings"]');
+    const aboutRect = aboutRegion?.getBoundingClientRect();
+    const releaseRect = node.getBoundingClientRect();
+
+    return {
+      releaseCanScroll: node.scrollHeight > node.clientHeight,
+      aboutCanScroll: aboutRegion ? aboutRegion.scrollHeight > aboutRegion.clientHeight : true,
+      bottomMargin: aboutRect ? Math.round(aboutRect.bottom - releaseRect.bottom) : null,
+      leftMargin: aboutRect ? Math.round(releaseRect.left - aboutRect.left) : null,
+      rightMargin: aboutRect ? Math.round(aboutRect.right - releaseRect.right) : null,
+    };
+  });
+
+  expect(layout.releaseCanScroll).toBe(true);
+  expect(layout.aboutCanScroll).toBe(false);
+  expect(Math.abs(layout.bottomMargin! - layout.leftMargin!)).toBeLessThanOrEqual(8);
+  expect(Math.abs(layout.bottomMargin! - layout.rightMargin!)).toBeLessThanOrEqual(8);
+  await expect(releaseNotesScrollbar).toHaveClass(/opacity-0/);
+
+  await releaseNotes.hover();
+  await page.mouse.wheel(0, 5_000);
+  await expect(releaseNotesScrollbar).toHaveClass(/opacity-100/);
+  await expect(releaseNotesScrollbar).toHaveClass(/opacity-0/, { timeout: 2_000 });
+  await expect(releaseNotes.getByText('v0.0.1', { exact: true })).toBeVisible();
 });

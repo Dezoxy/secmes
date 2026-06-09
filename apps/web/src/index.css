@@ -24,6 +24,18 @@
   }
 }
 
+@keyframes argus-modal-exit {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(0.75rem) scale(0.96);
+  }
+}
+
 @keyframes argus-overlay-enter {
   from {
     opacity: 0;
@@ -31,6 +43,16 @@
 
   to {
     opacity: 1;
+  }
+}
+
+@keyframes argus-overlay-exit {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
   }
 }
 
@@ -43,6 +65,30 @@
   to {
     opacity: 1;
     transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes argus-pane-back-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-0.875rem) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes argus-pane-back-exit {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateX(0.875rem) scale(0.985);
   }
 }
 
@@ -71,12 +117,30 @@
   animation: argus-modal-enter 240ms ease-out both;
 }
 
+.argus-modal-exit {
+  animation: argus-modal-exit 220ms ease-in both;
+}
+
 .argus-overlay-enter {
   animation: argus-overlay-enter 180ms ease-out both;
 }
 
+.argus-overlay-exit {
+  animation: argus-overlay-exit 220ms ease-in both;
+}
+
 .argus-pane-enter {
   animation: argus-pane-enter 240ms ease-out both;
+}
+
+.argus-pane-back-enter {
+  animation: argus-pane-back-enter 200ms ease-out both;
+  will-change: opacity, transform;
+}
+
+.argus-pane-back-exit {
+  animation: argus-pane-back-exit 180ms ease-in both;
+  will-change: opacity, transform;
 }
 
 .argus-message-send-enter {
@@ -87,8 +151,12 @@
 @media (prefers-reduced-motion: reduce) {
   .argus-surface-enter,
   .argus-modal-enter,
+  .argus-modal-exit,
   .argus-overlay-enter,
+  .argus-overlay-exit,
   .argus-pane-enter,
+  .argus-pane-back-enter,
+  .argus-pane-back-exit,
   .argus-message-send-enter {
     animation: none;
   }

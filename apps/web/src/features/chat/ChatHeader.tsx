@@ -9,6 +9,7 @@ import {
   LockKeyhole,
   MoreVertical,
   Phone,
+  RefreshCw,
   Search,
   Shield,
   ShieldCheck,
@@ -45,6 +46,8 @@ interface ChatHeaderProps {
   /** Out-of-band safety-number verification state + opener (checkpoint 20). */
   verified?: boolean;
   onVerify?: () => void;
+  updateReady?: boolean;
+  onApplyUpdate?: () => void | Promise<void>;
 }
 
 type HeaderPanel = 'info' | 'members' | 'search' | 'media' | 'notifications' | 'security';
@@ -105,7 +108,14 @@ function collectAttachments(messages: Message[]): Array<Attachment & { senderNam
   });
 }
 
-export function ChatHeader({ conversation, onBack, verified, onVerify }: ChatHeaderProps) {
+export function ChatHeader({
+  conversation,
+  onBack,
+  verified,
+  onVerify,
+  updateReady,
+  onApplyUpdate,
+}: ChatHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [activePanel, setActivePanel] = useState<HeaderPanel | null>(null);
   const [muted, setMuted] = useState(false);
@@ -244,6 +254,17 @@ export function ChatHeader({ conversation, onBack, verified, onVerify }: ChatHea
         >
           <Video className="h-5 w-5" />
         </IconButton>
+        {updateReady && onApplyUpdate && (
+          <IconButton
+            onClick={() => void onApplyUpdate()}
+            size="lg"
+            title="Update Argus"
+            className="rounded-xl border border-purple-400/30 bg-purple-500/15 text-purple-100 hover:border-purple-300/60 hover:bg-purple-500/25 lg:hidden"
+            aria-label="Update Argus"
+          >
+            <RefreshCw className="h-5 w-5" />
+          </IconButton>
+        )}
         <div ref={menuRef} className="relative">
           <IconButton
             onClick={(event) => {

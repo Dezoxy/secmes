@@ -6,6 +6,7 @@ import type { MessagingDeps } from '../../lib/messaging';
 import { getMlsSession } from '../../lib/mls';
 import { useAuth } from '../auth/AuthContext';
 import { useDevice } from '../device/DeviceContext';
+import { usePwaUpdate } from '../pwa/PwaUpdateContext';
 import { ConversationList } from './ConversationList';
 import { ChatHeader } from './ChatHeader';
 import { MessageList } from './MessageList';
@@ -24,7 +25,12 @@ import { useLiveConversations } from './useLiveConversations';
 import { useMessageSending } from './useMessageSending';
 import { loadArgusProfile, saveArgusProfile } from '../settings/argus-profile';
 import { SettingsPanel, type AnonymousProfile } from '../settings/SettingsPanel';
-import { ReconnectBanner, conversationEnterMotion } from '../ui';
+import {
+  ReconnectBanner,
+  conversationEnterMotion,
+  paneBackEnterMotion,
+  paneBackExitMotion,
+} from '../ui';
 import type { Conversation, User } from './seed';
 import {
   conversations as initialConversations,
@@ -35,6 +41,12 @@ import {
 } from './seed';
 
 const DEMO_PROFILE_SUBJECT = 'demo-local';
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}
 
 /**
  * Chat experience, ported from the reworked design (`~/Downloads`) into the Vite PWA.
@@ -80,8 +92,12 @@ export default function ChatScreen() {
   const [selectedId, setSelectedId] = useState<string | null>('conv-1');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [mobileThreadClosing, setMobileThreadClosing] = useState(false);
+  const [mobileSidebarReturning, setMobileSidebarReturning] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsReturnFocusRef = useRef<HTMLButtonElement | null>(null);
+  const mobileThreadBackTimerRef = useRef<number | undefined>(undefined);
+  const mobileSidebarReturnTimerRef = useRef<number | undefined>(undefined);
   const [verifyOpen, setVerifyOpen] = useState(false);
   // Each direct conversation has its own MLS session, so its own safety number (#20).
   const [numbersByConv, setNumbersByConv] = useState<Record<string, string>>({});
@@ -90,6 +106,7 @@ export default function ChatScreen() {
 
   const { device, pool, deviceId, keystore, passphrase, sessionKey } = useDevice();
   const { profile, subjectId } = useAuth();
+  const { updateReady, applyUpdate } = usePwaUpdate();
   const profileSubjectId = subjectId ?? DEMO_PROFILE_SUBJECT;
   const [anonymousProfile, setAnonymousProfile] = useState<AnonymousProfile>(() =>
     loadArgusProfile({ subjectId: profileSubjectId }),
@@ -156,6 +173,17 @@ export default function ChatScreen() {
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (mobileThreadBackTimerRef.current !== undefined) {
+        window.clearTimeout(mobileThreadBackTimerRef.current);
+      }
+      if (mobileSidebarReturnTimerRef.current !== undefined) {
+        window.clearTimeout(mobileSidebarReturnTimerRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -242,8 +270,40 @@ export default function ChatScreen() {
   });
 
   const handleSelect = (id: string) => {
+    if (mobileThreadBackTimerRef.current !== undefined) {
+      window.clearTimeout(mobileThreadBackTimerRef.current);
+    }
+    if (mobileSidebarReturnTimerRef.current !== undefined) {
+      window.clearTimeout(mobileSidebarReturnTimerRef.current);
+    }
+    setMobileThreadClosing(false);
+    setMobileSidebarReturning(false);
     setSelectedId(id);
     if (window.innerWidth < 1024) setShowSidebar(false);
+  };
+
+  const handleBackToConversations = () => {
+    if (window.innerWidth >= 1024 || prefersReducedMotion()) {
+      setShowSidebar(true);
+      return;
+    }
+
+    if (mobileThreadBackTimerRef.current !== undefined) {
+      window.clearTimeout(mobileThreadBackTimerRef.current);
+    }
+    if (mobileSidebarReturnTimerRef.current !== undefined) {
+      window.clearTimeout(mobileSidebarReturnTimerRef.current);
+    }
+
+    setMobileThreadClosing(true);
+    mobileThreadBackTimerRef.current = window.setTimeout(() => {
+      setShowSidebar(true);
+      setMobileThreadClosing(false);
+      setMobileSidebarReturning(true);
+      mobileSidebarReturnTimerRef.current = window.setTimeout(() => {
+        setMobileSidebarReturning(false);
+      }, 220);
+    }, 180);
   };
 
   const openSettings = (trigger: HTMLButtonElement) => {
@@ -267,10 +327,10 @@ export default function ChatScreen() {
         <aside
           aria-label="Conversations"
           className={`${
-            showSidebar ? 'flex' : 'hidden lg:flex'
+            showSidebar && !mobileThreadClosing ? 'flex' : 'hidden lg:flex'
           } w-full lg:w-80 shrink-0 flex-col bg-[#0f0f16] border-r border-white/5 transition-all duration-500 ${
             mounted ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-8'
-          }`}
+          } ${mobileSidebarReturning ? paneBackEnterMotion : ''}`}
         >
           <div className="border-b border-white/5 p-4">
             <div className="flex items-center justify-center gap-2">
@@ -292,6 +352,8 @@ export default function ChatScreen() {
             currentUserProfile={currentUserProfile}
             onSettings={openSettings}
             onNewConversation={manager ? () => setStartOpen(true) : undefined}
+            updateReady={updateReady}
+            onApplyUpdate={applyUpdate}
           />
         </aside>
 
@@ -300,10 +362,10 @@ export default function ChatScreen() {
           role="main"
           aria-label="Chat"
           className={`${
-            !showSidebar ? 'flex' : 'hidden lg:flex'
+            !showSidebar || mobileThreadClosing ? 'flex' : 'hidden lg:flex'
           } flex-1 flex-col transition-all duration-500 delay-100 ${
             mounted ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-8'
-          }`}
+          } ${mobileThreadClosing ? paneBackExitMotion : ''}`}
         >
           {selectedConversation ? (
             <div
@@ -312,9 +374,11 @@ export default function ChatScreen() {
             >
               <ChatHeader
                 conversation={selectedConversation}
-                onBack={() => setShowSidebar(true)}
+                onBack={handleBackToConversations}
                 verified={verified}
                 onVerify={isDirect && currentNumber ? () => setVerifyOpen(true) : undefined}
+                updateReady={updateReady}
+                onApplyUpdate={applyUpdate}
               />
               {selectedIsLive && (
                 <ReconnectBanner status={connectionStatus} className="mx-4 mt-3" />

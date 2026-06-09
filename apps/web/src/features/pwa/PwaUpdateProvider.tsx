@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 // VitePWA's virtual register dynamically imports workbox-window for prompt-mode updates.
 import { registerSW } from 'virtual:pwa-register';
 import {
@@ -10,6 +10,8 @@ import {
 const SW_UPDATE_FETCH_HEADERS = {
   'cache-control': 'no-cache',
 } as const;
+const BACKGROUND_UPDATE_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+const DEV_UPDATE_PREVIEW_PARAM = 'previewPwaUpdate';
 
 interface PwaUpdateProviderProps {
   children: ReactNode;
@@ -19,11 +21,58 @@ export function PwaUpdateProvider({ children }: PwaUpdateProviderProps) {
   const updateServiceWorker = useRef<((reloadPage?: boolean) => Promise<void>) | null>(null);
   const registration = useRef<ServiceWorkerRegistration | null>(null);
   const serviceWorkerUrl = useRef<string | null>(null);
+  const [devUpdatePreview, setDevUpdatePreview] = useState(isDevUpdatePreviewEnabled);
   const [status, setStatus] = useState<PwaUpdateStatus>(() =>
-    supportsServiceWorkers() ? 'idle' : 'unsupported',
+    isDevUpdatePreviewEnabled() ? 'available' : supportsServiceWorkers() ? 'idle' : 'unsupported',
   );
   const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
-  const [promptDismissed, setPromptDismissed] = useState(false);
+
+  const checkForWaitingUpdate = useCallback(async (options?: { silent?: boolean }) => {
+    if (!supportsServiceWorkers()) {
+      if (!options?.silent) setStatus('unsupported');
+      return;
+    }
+
+    if (!options?.silent) {
+      setStatus('checking');
+      setLastCheckedAt(new Date());
+    }
+
+    try {
+      const nextRegistration =
+        registration.current ?? (await navigator.serviceWorker.getRegistration());
+      registration.current = nextRegistration ?? null;
+
+      if (!nextRegistration) {
+        if (!options?.silent) setStatus('unsupported');
+        return;
+      }
+
+      const swUrl = serviceWorkerUrl.current;
+      if (swUrl) {
+        const response = await fetch(swUrl, {
+          cache: 'no-store',
+          headers: SW_UPDATE_FETCH_HEADERS,
+        });
+        if (!response.ok) {
+          if (!options?.silent) setStatus('error');
+          return;
+        }
+      }
+
+      await nextRegistration.update();
+      if (nextRegistration.waiting) {
+        setStatus('available');
+        return;
+      }
+
+      if (!nextRegistration.installing && !options?.silent) {
+        setStatus('up-to-date');
+      }
+    } catch {
+      if (!options?.silent) setStatus('error');
+    }
+  }, []);
 
   useEffect(() => {
     if (!supportsServiceWorkers()) {
@@ -34,7 +83,6 @@ export function PwaUpdateProvider({ children }: PwaUpdateProviderProps) {
     updateServiceWorker.current = registerSW({
       immediate: true,
       onNeedRefresh() {
-        setPromptDismissed(false);
         setStatus('available');
       },
       onOfflineReady() {
@@ -51,65 +99,67 @@ export function PwaUpdateProvider({ children }: PwaUpdateProviderProps) {
     });
   }, []);
 
+  useEffect(() => {
+    if (!supportsServiceWorkers()) return;
+
+    const checkWhenActive = () => {
+      if (document.visibilityState !== 'visible') return;
+      void checkForWaitingUpdate({ silent: true });
+    };
+
+    const interval = window.setInterval(checkWhenActive, BACKGROUND_UPDATE_CHECK_INTERVAL_MS);
+    window.addEventListener('focus', checkWhenActive);
+    window.addEventListener('online', checkWhenActive);
+    document.addEventListener('visibilitychange', checkWhenActive);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', checkWhenActive);
+      window.removeEventListener('online', checkWhenActive);
+      document.removeEventListener('visibilitychange', checkWhenActive);
+    };
+  }, [checkForWaitingUpdate]);
+
   const value = useMemo<PwaUpdateContextValue>(() => {
-    const updateReady = status === 'available';
+    const updateReady = devUpdatePreview || status === 'available';
 
     return {
       canCheckForUpdate: status !== 'unsupported',
       updateReady,
-      showUpdatePrompt: updateReady && !promptDismissed,
       status,
       lastCheckedAt,
-      checkForUpdate: async () => {
-        if (!supportsServiceWorkers()) {
-          setStatus('unsupported');
+      checkForUpdate: () => checkForWaitingUpdate(),
+      applyUpdate: async () => {
+        if (devUpdatePreview) {
+          clearDevUpdatePreviewUrl();
+          setDevUpdatePreview(false);
+          setStatus(supportsServiceWorkers() ? 'idle' : 'unsupported');
           return;
         }
 
-        setStatus('checking');
-        setPromptDismissed(false);
-        setLastCheckedAt(new Date());
-        try {
-          const nextRegistration =
-            registration.current ?? (await navigator.serviceWorker.getRegistration());
-          registration.current = nextRegistration ?? null;
-
-          if (!nextRegistration) {
-            setStatus('unsupported');
-            return;
-          }
-
-          const swUrl = serviceWorkerUrl.current;
-          if (swUrl) {
-            const response = await fetch(swUrl, {
-              cache: 'no-store',
-              headers: SW_UPDATE_FETCH_HEADERS,
-            });
-            if (!response.ok) {
-              setStatus('error');
-              return;
-            }
-          }
-
-          await nextRegistration.update();
-          if (!nextRegistration.waiting && !nextRegistration.installing) {
-            setStatus('up-to-date');
-          }
-        } catch {
-          setStatus('error');
-        }
-      },
-      applyUpdate: async () => {
         if (!updateServiceWorker.current) return;
         await updateServiceWorker.current(true);
       },
-      dismissUpdate: () => {
-        setPromptDismissed(true);
-      },
     };
-  }, [lastCheckedAt, promptDismissed, status]);
+  }, [checkForWaitingUpdate, devUpdatePreview, lastCheckedAt, status]);
 
   return <PwaUpdateContextProvider value={value}>{children}</PwaUpdateContextProvider>;
+}
+
+function isDevUpdatePreviewEnabled(): boolean {
+  return (
+    import.meta.env.DEV &&
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get(DEV_UPDATE_PREVIEW_PARAM) === '1'
+  );
+}
+
+function clearDevUpdatePreviewUrl(): void {
+  if (!import.meta.env.DEV || typeof window === 'undefined') return;
+
+  const url = new URL(window.location.href);
+  url.searchParams.delete(DEV_UPDATE_PREVIEW_PARAM);
+  window.history.replaceState(window.history.state, '', url);
 }
 
 function supportsServiceWorkers(): boolean {

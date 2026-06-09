@@ -17,7 +17,11 @@ import {
   IconButton,
   Modal,
   modalBackdropEnterMotion,
+  modalBackdropExitMotion,
   modalPanelEnterMotion,
+  modalPanelExitMotion,
+  paneBackEnterMotion,
+  paneBackExitMotion,
   defaultAccentId,
   surfaceEnterMotion,
   getAccentById,
@@ -78,6 +82,7 @@ const sections: Array<{ id: SectionId; label: string; icon: LucideIcon }> = [
 
 const DEVICE_SETTINGS_STORAGE_KEY = versionedStorageKey('settings', 'device');
 const PRIVACY_SETTINGS_STORAGE_KEY = versionedStorageKey('settings', 'privacy');
+const SETTINGS_CLOSE_ANIMATION_MS = 220;
 
 interface DeviceSettingsRecord {
   accentId: AccentId;
@@ -174,6 +179,12 @@ function isMobileSettingsViewport(): boolean {
   return typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches;
 }
 
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  );
+}
+
 function readStoredAccent(): AccentId {
   return readStoredDeviceSettings().accentId;
 }
@@ -184,7 +195,10 @@ function readStoredFontSize(): number {
 
 export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: SettingsPanelProps) {
   const [active, setActive] = useState<SectionId>('profile');
+  const [closing, setClosing] = useState(false);
   const [mobileSectionOpen, setMobileSectionOpen] = useState(false);
+  const [mobileBackAnimating, setMobileBackAnimating] = useState(false);
+  const [mobileMenuReturning, setMobileMenuReturning] = useState(false);
   const [accentId, setAccentId] = useState<AccentId>(() => readStoredAccent());
   const [fontSizeLevel, setFontSizeLevel] = useState(() => readStoredFontSize());
   const [privacySettings, setPrivacySettings] = useState<PrivacySettingsRecord>(() =>
@@ -195,6 +209,9 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
   const [profileError, setProfileError] = useState<string | null>(null);
   const sectionButtonRefs = useRef(new Map<SectionId, HTMLButtonElement>());
   const sectionContentRef = useRef<HTMLElement>(null);
+  const mobileBackTimerRef = useRef<number | undefined>(undefined);
+  const mobileMenuTimerRef = useRef<number | undefined>(undefined);
+  const closeTimerRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     setUsername(profile.username);
@@ -241,20 +258,54 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
   );
 
   const closeSettings = useCallback(() => {
+    if (closing) return;
+
     saveProfileDraft(username, avatar);
-    onClose();
-  }, [avatar, onClose, saveProfileDraft, username]);
+
+    if (prefersReducedMotion()) {
+      onClose();
+      return;
+    }
+
+    setClosing(true);
+    closeTimerRef.current = window.setTimeout(() => {
+      onClose();
+    }, SETTINGS_CLOSE_ANIMATION_MS);
+  }, [avatar, closing, onClose, saveProfileDraft, username]);
 
   const openSection = useCallback((id: SectionId) => {
+    if (mobileBackTimerRef.current !== undefined) window.clearTimeout(mobileBackTimerRef.current);
+    if (mobileMenuTimerRef.current !== undefined) window.clearTimeout(mobileMenuTimerRef.current);
+    setMobileBackAnimating(false);
+    setMobileMenuReturning(false);
     setActive(id);
     if (isMobileSettingsViewport()) setMobileSectionOpen(true);
   }, []);
 
   const returnToSettingsMenu = useCallback(() => {
-    setMobileSectionOpen(false);
-    window.requestAnimationFrame(() => {
-      sectionButtonRefs.current.get(active)?.focus({ preventScroll: true });
-    });
+    if (!isMobileSettingsViewport() || prefersReducedMotion()) {
+      setMobileSectionOpen(false);
+      window.requestAnimationFrame(() => {
+        sectionButtonRefs.current.get(active)?.focus({ preventScroll: true });
+      });
+      return;
+    }
+
+    if (mobileBackTimerRef.current !== undefined) window.clearTimeout(mobileBackTimerRef.current);
+    if (mobileMenuTimerRef.current !== undefined) window.clearTimeout(mobileMenuTimerRef.current);
+
+    setMobileBackAnimating(true);
+    mobileBackTimerRef.current = window.setTimeout(() => {
+      setMobileSectionOpen(false);
+      setMobileBackAnimating(false);
+      setMobileMenuReturning(true);
+      window.requestAnimationFrame(() => {
+        sectionButtonRefs.current.get(active)?.focus({ preventScroll: true });
+      });
+      mobileMenuTimerRef.current = window.setTimeout(() => {
+        setMobileMenuReturning(false);
+      }, 220);
+    }, 180);
   }, [active]);
 
   useEffect(() => {
@@ -275,18 +326,32 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
     return () => window.cancelAnimationFrame(animationFrame);
   }, [active, mobileSectionOpen]);
 
+  useEffect(() => {
+    return () => {
+      if (mobileBackTimerRef.current !== undefined) window.clearTimeout(mobileBackTimerRef.current);
+      if (mobileMenuTimerRef.current !== undefined) window.clearTimeout(mobileMenuTimerRef.current);
+      if (closeTimerRef.current !== undefined) window.clearTimeout(closeTimerRef.current);
+    };
+  }, []);
+
   return (
     <Modal
       ariaLabel="Settings"
       onClose={closeSettings}
-      className={`items-center justify-center bg-black/80 p-2 backdrop-blur-sm sm:p-4 ${modalBackdropEnterMotion}`}
-      contentClassName={`flex h-[calc(100dvh-1rem)] w-full max-w-4xl overflow-hidden rounded-xl border border-white/5 bg-[#12121a] shadow-2xl shadow-black/50 sm:h-[82vh] sm:rounded-2xl ${modalPanelEnterMotion}`}
+      className={`items-center justify-center bg-black/80 p-4 backdrop-blur-sm ${
+        closing ? modalBackdropExitMotion : modalBackdropEnterMotion
+      }`}
+      contentClassName={`flex h-[90vh] w-full max-w-6xl overflow-hidden rounded-3xl border border-white/5 bg-[#12121a] shadow-2xl shadow-black/50 ${
+        closing ? modalPanelExitMotion : modalPanelEnterMotion
+      }`}
       style={accentVariables}
     >
       <aside
         className={`${
-          mobileSectionOpen ? 'hidden' : 'flex'
-        } w-full flex-col bg-[#0f0f16] p-3 sm:flex sm:w-64 sm:shrink-0 sm:border-r sm:border-white/5 sm:p-4`}
+          mobileSectionOpen || mobileBackAnimating ? 'hidden' : 'flex'
+        } w-full flex-col bg-[#0f0f16] p-3 sm:flex sm:w-64 sm:shrink-0 sm:border-r sm:border-white/5 sm:p-4 ${
+          mobileMenuReturning ? paneBackEnterMotion : ''
+        }`}
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">Settings</h2>
@@ -326,10 +391,17 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
         aria-label={`${activeSection.label} settings`}
         tabIndex={-1}
         className={`${
-          mobileSectionOpen ? 'block' : 'hidden'
-        } flex-1 overflow-y-auto p-3 focus:outline-none sm:block sm:p-6`}
+          mobileSectionOpen || mobileBackAnimating ? 'block' : 'hidden'
+        } flex-1 p-3 focus:outline-none sm:block sm:p-6 ${
+          active === 'about' ? 'overflow-hidden' : 'overflow-y-auto'
+        } ${mobileBackAnimating ? paneBackExitMotion : ''}`}
       >
-        <div key={active} className={surfaceEnterMotion}>
+        <div
+          key={active}
+          className={`${mobileBackAnimating ? '' : surfaceEnterMotion} ${
+            active === 'about' ? 'flex h-full min-h-0 flex-col' : ''
+          }`}
+        >
           <div className="mb-4 flex items-center gap-3 sm:mb-6">
             <IconButton
               onClick={returnToSettingsMenu}

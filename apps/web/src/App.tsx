@@ -1,14 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Navigate, Route, Routes, useNavigate } from 'react-router-dom';
-import { Fingerprint, MessageCircle } from 'lucide-react';
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { Fingerprint, MessageCircle, RefreshCw } from 'lucide-react';
 import { useAuth } from './features/auth/AuthContext';
+import { usePwaUpdate } from './features/pwa/PwaUpdateContext';
 import AuthCallbackRoute from './routes/AuthCallbackRoute';
 import ChatRoute from './routes/ChatRoute';
 import DevicesRoute from './routes/DevicesRoute';
 import SecurityRoute from './routes/SecurityRoute';
 import SettingsRoute from './routes/SettingsRoute';
 import StorageRoute from './routes/StorageRoute';
-import { PwaUpdatePrompt } from './features/pwa/PwaUpdatePrompt';
 
 /**
  * Landing / sign-in screen. Argus exposes one primary passkey entry point and delegates login,
@@ -193,6 +193,27 @@ function LandingRoute() {
   );
 }
 
+function RouteUpdateAction() {
+  const { pathname } = useLocation();
+  const { updateReady, applyUpdate } = usePwaUpdate();
+
+  if (!updateReady || pathname === '/chat') return null;
+
+  return (
+    <div className="fixed bottom-4 right-4 z-50 sm:bottom-6 sm:right-6">
+      <button
+        type="button"
+        onClick={() => void applyUpdate()}
+        aria-label="Update Argus"
+        className="inline-flex h-10 items-center gap-2 rounded-full border border-purple-400/40 bg-[#2b123d]/95 px-4 text-sm font-semibold text-white shadow-2xl shadow-black/35 backdrop-blur transition-all duration-200 hover:border-purple-300/70 hover:bg-[#37164f] active:scale-95"
+      >
+        <RefreshCw className="h-4 w-4" />
+        Update
+      </button>
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <>
@@ -205,7 +226,7 @@ export default function App() {
         <Route path="/storage" element={<StorageRoute />} />
         <Route path="/auth/callback" element={<AuthCallbackRoute />} />
       </Routes>
-      <PwaUpdatePrompt />
+      <RouteUpdateAction />
     </>
   );
 }
