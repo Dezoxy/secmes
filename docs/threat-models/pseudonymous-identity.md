@@ -58,17 +58,21 @@ already surfaced intra-tenant by the directory (`GET /users`). The server still 
 
 Server generates the handle on first provision (CSPRNG, 200×200 lists), enforces `unique (tenant_id,
 display_name)` with bounded regenerate-on-conflict, preserves an existing user's handle, and still refreshes
-`email`. Migration `0016` adds the unique index (NULLs distinct, so legacy rows are unaffected). **Gated by:**
-`security-boundary-auditor` (provisioning + migration + RLS), Semgrep (`argus-no-insecure-random`), and the
-service tests (uniqueness, conflict-retry, existing-user-keeps-handle).
+`email`. Migration `0016` first NULLs any DUPLICATE legacy `(tenant_id, display_name)` (keeping the earliest)
+so the unique index can build, then adds the index (NULLs distinct); a NULLed/legacy-NULL handle is then healed
+to a fresh handle on next login (`coalesce(display_name, <new handle>)`). **Gated by:** `security-boundary-auditor`
+(provisioning + migration + RLS), Semgrep (`argus-no-insecure-random`), and the service tests (uniqueness,
+conflict-retry, existing-user-keeps-handle, NULL-handle-healing).
 
 ## 6. Residual risk
 
 - **Handle-pool exhaustion** — 40 000 combinations per tenant; beyond that, generation would retry until the
   bounded attempt cap and then error. Acceptable for current scale; a future numeric suffix or larger lists
   lifts the ceiling. Logged as a TODO in `handle-words.ts`.
-- **Legacy display names** — users provisioned **before** this change keep their IdP-derived `display_name`
-  (the unique index allows pre-existing NULLs and doesn't backfill). No production data exists yet (local-first
-  build); a backfill migration is a future option if needed.
+- **Legacy display names** — a pre-#44b user with a NON-duplicate IdP-derived `display_name` keeps it until they
+  next log in (the client treats `display_name` as nullable, and a duplicate one was NULLed by 0016 then healed
+  on login). So a legacy real-name can linger on an inactive account until its owner next authenticates. No
+  production data exists yet (local-first build); a one-shot backfill-to-handles migration is a future option if
+  a deployment ever carries legacy names.
 - **Handles are guessable/enumerable intra-tenant** — intended for a team directory; cross-tenant is blocked by
   RLS. Same posture as `user-directory.md`.

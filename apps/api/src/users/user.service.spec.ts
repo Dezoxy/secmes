@@ -94,6 +94,18 @@ describe.skipIf(!DB_URL)('UserService (JIT provisioning)', () => {
     expect(u2.id).not.toBe(u1.id);
   });
 
+  it('heals a legacy NULL display name to a generated handle on next login', async () => {
+    // Simulate a pre-#44b row with no handle (owner conn bypasses RLS — like a row NULLed by 0016's backfill).
+    await sql`insert into users (tenant_id, external_identity_id, email, display_name)
+              values (${tenantA}, 'sub-legacy-null', 'legacy@a.test', null)`;
+    const healed = await users.provisionFromToken({
+      sub: 'sub-legacy-null',
+      tenantId: tenantA,
+      email: 'legacy@a.test',
+    });
+    expectValidHandle(healed.displayName); // NULL coalesced to a fresh handle
+  });
+
   it('rejects provisioning without a verified email claim', async () => {
     await expect(
       users.provisionFromToken({ sub: 'no-email', tenantId: tenantA }),
