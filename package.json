@@ -12,7 +12,7 @@
     "build:packages": "pnpm --filter \"./packages/*\" run build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "frontend:verify": "pnpm build:packages && pnpm --filter @argus/web typecheck && pnpm --filter @argus/web test && node -e \"const { spawnSync } = require('node:child_process'); const pkg = require('./apps/web/package.json'); if (!pkg.scripts?.['test:e2e']) { console.log('Skipping @argus/web test:e2e until Step 3 adds it.'); process.exit(0); } const result = spawnSync('pnpm', ['--filter', '@argus/web', 'test:e2e'], { stdio: 'inherit', shell: process.platform === 'win32' }); process.exit(result.status ?? 1);\"",
+    "frontend:verify": "pnpm build:packages && pnpm --filter @argus/web typecheck && pnpm --filter @argus/web test && pnpm --filter @argus/web build && node scripts/verify-web-pwa-build.mjs && node -e \"const { spawnSync } = require('node:child_process'); const pkg = require('./apps/web/package.json'); if (!pkg.scripts?.['test:e2e']) { console.log('Skipping @argus/web test:e2e until Step 3 adds it.'); process.exit(0); } const result = spawnSync('pnpm', ['--filter', '@argus/web', 'test:e2e'], { stdio: 'inherit', shell: process.platform === 'win32' }); process.exit(result.status ?? 1);\"",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",

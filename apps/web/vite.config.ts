@@ -4,7 +4,12 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import webPackage from './package.json';
-import { pwaNavigateFallbackDenylist, pwaPrecacheGlobPatterns } from './src/lib/pwa-cache-policy';
+import {
+  pwaNavigateFallback,
+  pwaNavigateFallbackDenylist,
+  pwaPrecacheGlobPatterns,
+} from './src/lib/pwa-cache-policy';
+import { argusPwaManifest } from './src/lib/pwa-installability';
 
 interface BundleReportEntry {
   fileName: string;
@@ -87,21 +92,13 @@ export default defineConfig({
       workbox: {
         cleanupOutdatedCaches: true,
         globPatterns: [...pwaPrecacheGlobPatterns],
-        navigateFallback: '/index.html',
+        navigateFallback: pwaNavigateFallback,
         navigateFallbackDenylist: [...pwaNavigateFallbackDenylist],
         // Static precache only. API, auth, WebSocket, attachment, and authorization-bearing requests must
         // remain network-only until a threat-modeled runtime cache is intentionally added.
         runtimeCaching: [],
       },
-      manifest: {
-        name: 'argus',
-        short_name: 'argus',
-        description: 'Privacy-first, end-to-end-encrypted messaging',
-        theme_color: '#1a1a24',
-        background_color: '#1a1a24',
-        display: 'standalone',
-        icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
-      },
+      manifest: argusPwaManifest,
     }),
   ],
 });

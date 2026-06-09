@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   isPresignedAttachmentUrl,
+  isPwaOfflineShellAsset,
   isPwaNavigationFallbackAllowed,
   isPwaStaticPrecacheCandidate,
+  pwaNavigateFallback,
   pwaPrecacheGlobPatterns,
   shouldUsePwaRuntimeCache,
 } from './pwa-cache-policy';
@@ -23,6 +25,9 @@ describe('PWA cache policy', () => {
   });
 
   it('does not serve navigation fallback for auth callback or API-like routes', () => {
+    expect(pwaNavigateFallback).toBe('/index.html');
+    expect(isPwaOfflineShellAsset('/index.html')).toBe(true);
+    expect(isPwaOfflineShellAsset('/auth/callback')).toBe(false);
     expect(isPwaNavigationFallbackAllowed('/chat')).toBe(true);
     expect(isPwaNavigationFallbackAllowed('/settings')).toBe(true);
     expect(isPwaNavigationFallbackAllowed('/auth/callback?code=secret&state=opaque')).toBe(false);
