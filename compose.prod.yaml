@@ -258,13 +258,24 @@ services:
   # Login V2 service-user PAT into /bootstrap. Make it writable before Zitadel starts (mirrors local dev).
   # NOTE (arming): 0777 mirrors the proven local setup; tighten to 0750 + a shared group ONCE the zitadel
   # (rw writer) and zitadel-login (ro reader) image UIDs are verified on the live instance.
+  # Runs as root *by purpose* (only root can chmod the root-owned volume), but otherwise carries the same
+  # hardening as every other service: no caps (root chmod-ing a root-owned path needs none), read-only root FS
+  # (it writes only the mounted volume), no-new-privileges, and a tight resource cap.
   zitadel-bootstrap-perms:
     image: alpine:3.20
     command: ['sh', '-c', 'chmod 0777 /bootstrap']
     volumes:
       - zitadel-bootstrap:/bootstrap
+    read_only: true
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 32m
+          cpus: '0.25'
 
   # Zitadel identity server — OIDC/OAuth/JWKS + the admin console. Public issuer at https://auth.4rgus.com
   # (Caddy host-splits that domain here). TLS terminates at Cloudflare, so it serves plain HTTP internally with
