@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
-import { MessageCircle } from 'lucide-react';
+import { MessageCircle, X } from 'lucide-react';
 import type { UserSummary } from '../../lib/api';
 import { ConversationManager, type ConversationSession } from '../../lib/conversations';
 import type { MessagingDeps } from '../../lib/messaging';
@@ -26,8 +26,12 @@ import { useMessageSending } from './useMessageSending';
 import { loadArgusProfile, saveArgusProfile } from '../settings/argus-profile';
 import type { AnonymousProfile } from '../settings/SettingsPanel';
 import {
+  IconButton,
+  Modal,
   ReconnectBanner,
   conversationEnterMotion,
+  modalBackdropEnterMotion,
+  modalPanelEnterMotion,
   paneBackEnterMotion,
   paneBackExitMotion,
 } from '../ui';
@@ -89,18 +93,28 @@ function withCurrentUserProfile(conversation: Conversation, profile: User): Conv
   };
 }
 
-function SettingsPanelFallback() {
+interface SettingsPanelFallbackProps {
+  onClose: () => void;
+}
+
+function SettingsPanelFallback({ onClose }: SettingsPanelFallbackProps) {
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Settings"
+    <Modal
+      ariaLabel="Settings"
+      onClose={onClose}
+      className={`items-center justify-center bg-black/80 p-4 backdrop-blur-sm ${modalBackdropEnterMotion}`}
+      contentClassName={`relative flex h-[90vh] w-full max-w-6xl items-center justify-center rounded-3xl border border-white/5 bg-[#12121a] text-sm text-white/45 shadow-2xl shadow-black/50 ${modalPanelEnterMotion}`}
     >
-      <div className="flex h-[90vh] w-full max-w-6xl items-center justify-center rounded-3xl border border-white/5 bg-[#12121a] text-sm text-white/45 shadow-2xl shadow-black/50">
-        Loading settings...
-      </div>
-    </div>
+      <IconButton
+        onClick={onClose}
+        size="sm"
+        aria-label="Close settings"
+        className="absolute right-4 top-4 text-white/55 hover:bg-white/[0.06] hover:text-white"
+      >
+        <X className="h-5 w-5" />
+      </IconButton>
+      <span>Loading settings...</span>
+    </Modal>
   );
 }
 
@@ -423,7 +437,7 @@ export default function ChatScreen() {
 
       <ImagePreviewModal imageUrl={previewImage} onClose={() => setPreviewImage(null)} />
       {settingsOpen && (
-        <Suspense fallback={<SettingsPanelFallback />}>
+        <Suspense fallback={<SettingsPanelFallback onClose={closeSettings} />}>
           <SettingsPanel
             profile={anonymousProfile}
             deviceId={deviceId}
