@@ -6,9 +6,10 @@ deployed.** The infrastructure exists as code across slices; CD (`vars.ENABLE_DE
 - **Slice 1** — VM + network + Key Vault + Managed Identity + GitHub-OIDC deploy role (`infra/vm/terraform/`).
 - **Slice 2** — the prod runtime topology: `compose.prod.yaml`, the Caddy single-origin router
   (`infra/vm/caddy/`), and the cloudflared tunnel.
-- **Slice 3 (this)** — Key Vault → credential files: `argus-secrets.service` fetches secrets via the Managed
+- **Slice 3** — Key Vault → credential files: `argus-secrets.service` fetches secrets via the Managed
   Identity into `/run/argus/secrets/` (tmpfs) — `infra/vm/secrets/`.
-- **Slice 4** — CD: build/scan/sign the images, then `az vm run-command` rollout + migrate-on-deploy.
+- **Slice 4 (this)** — CD: `cd.yml` builds/scans/signs both images → GHCR, then `az vm run-command` rolls out
+  (`infra/vm/deploy/deploy.sh`) with **migrate-before-serve**. Gated behind `vars.ENABLE_DEPLOY`.
 
 ## Topology
 
@@ -44,6 +45,44 @@ the ingress image locally for verification:
 docker build -f infra/vm/caddy/Dockerfile -t argus-ingress:local .   # context = repo root
 docker compose -f compose.prod.yaml config -q                         # validate the stack
 ```
+
+## Release & rollout (CD — `cd.yml`)
+
+**Release on a version tag.** To cut a release you push a semver tag — the version *is* the image tag, so the
+deployed artifact is always traceable to the git tag:
+
+```bash
+git tag v1.4.0 && git push origin v1.4.0
+```
+
+That triggers `cd.yml`:
+
+1. **Builds both images** (matrix: `api` + the Caddy `ingress` that bakes the PWA), tagged with the version →
+   pushes to **GHCR** → **Trivy** scan (fail on HIGH/CRITICAL) → **syft** SBOM → **cosign** keyless sign +
+   attest.
+2. **Rolls out** — logs in to Azure via OIDC, bundles the exact-SHA infra config (compose + the secret-fetch
+   unit + `deploy.sh`) into an `az vm run-command` invocation, so the **VM token stays pull-only** (it can't
+   read the repo). The control plane runs `deploy.sh` as root on the VM (no SSH, no open port).
+
+**Two-layer gate.** `vars.ENABLE_DEPLOY` is the master kill-switch (off until the Azure subscription +
+secrets exist). The deploy job runs in the **`prod` GitHub Environment** — configure it with **required
+reviewers (you)**, so every tagged release **pauses for your manual approval** before the root run-command
+runs. The OIDC federated subject is bound to that environment (`var.github_deploy_subject`), not a branch.
+
+`infra/vm/deploy/deploy.sh` on the VM: installs/refreshes `argus-secrets.service` → fetches the runtime
+secret set (Managed Identity → `/run/argus/secrets`) → `docker login ghcr.io` (token from Key Vault) + pulls
+the images → **`cosign verify`s** each (against this repo's `cd.yml` OIDC identity) and rolls out **by
+digest** → brings up Postgres/Redis → runs **DB migrations as the owner** (file-mounted DSN, then `shred`-ed)
+**before** the api serves → brings up `api` + `caddy` + `cloudflared`. Idempotent + fail-closed.
+Threat model: [`docs/threat-models/vm-cd.md`](threat-models/vm-cd.md).
+
+**Repo vars/secrets** (from the Terraform outputs): secrets `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/
+`AZURE_SUBSCRIPTION_ID`; vars `AZURE_RESOURCE_GROUP`/`AZURE_VM_NAME`/`KEY_VAULT_NAME`; the api's non-secret
+runtime config `S3_ENDPOINT`/`S3_REGION`/`S3_BUCKET`/`S3_ACCESS_KEY_ID` (the B2 key **id**) +
+`OIDC_ISSUER`/`OIDC_AUDIENCE` (CD passes these into `compose up`); the PWA's build-time `VITE_OIDC_*`; and
+`ENABLE_DEPLOY=true` to arm it. GHCR **push** uses the built-in `GITHUB_TOKEN`; the VM's GHCR **pull** uses
+the `argus-ghcr-token` PAT from Key Vault — set `vars.GHCR_USER` to the account that owns that PAT if it isn't
+the repo owner (the default).
 
 ## Cloudflare tunnel ingress (dashboard-managed)
 

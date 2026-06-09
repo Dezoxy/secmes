@@ -1,73 +1,178 @@
 name: cd
 
+# Release-on-tag: a maintainer pushes a semver tag (e.g. v1.4.0) to cut a release. The version IS the image
+# tag, so the deployed artifact is traceable to the git tag. PR validation (lint/test/build) lives in ci.yml;
+# this workflow only builds the release artifact + (gated) rolls it out.
 on:
   push:
-    branches: [main]
-    paths:
-      - 'apps/api/**'
-      - '.github/workflows/cd.yml'
+    tags: ['v*.*.*']
 
-# Least privilege. id-token for Azure OIDC (no stored cloud creds) + cosign keyless signing.
-# (No GitOps tag-bump / deploy step here — the VM rollout is separate — so no `contents: write` is needed.)
+# Least privilege. id-token: Azure OIDC (no stored cloud creds) + cosign keyless signing.
+# packages: write to push the images to GHCR. No contents:write (the VM rollout is run-command, not GitOps).
 permissions:
   contents: read
   id-token: write
+  packages: write
 
 concurrency:
   group: cd-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  REGISTRY: ghcr.io
+  # The release version is the image tag. github.ref_name on a tag push is the tag name (e.g. v1.4.0) —
+  # trusted (a maintainer pushed it), and the VM pulls exactly this version.
+  IMAGE_TAG: ${{ github.ref_name }}
+
 jobs:
-  build-push:
-    # Enable by setting repo variable ENABLE_DEPLOY=true once Azure OIDC + ACR vars/secrets exist.
+  # Build, scan, SBOM, and keyless-sign both images (api + the Caddy ingress that bakes the PWA), push to GHCR.
+  images:
     if: ${{ vars.ENABLE_DEPLOY == 'true' }}
     runs-on: ubuntu-latest
-    env:
-      # github.sha is trusted (not attacker-controllable). Use via env per hardening guidance.
-      IMAGE_TAG: ${{ github.sha }}
-      ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }} # e.g. argusacr.azurecr.io
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: api
+            context: . # repo root — the api build needs the pnpm workspace (@argus/crypto)
+            dockerfile: apps/api/Dockerfile
+          - name: ingress
+            context: .
+            dockerfile: infra/vm/caddy/Dockerfile
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Resolve image ref (lowercase owner — GHCR requires it)
+        env:
+          OWNER: ${{ github.repository_owner }}
+          NAME: ${{ matrix.name }}
+        run: echo "IMAGE=${REGISTRY}/$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')/argus-${NAME}:${IMAGE_TAG}" >>"$GITHUB_ENV"
+
+      - name: GHCR login
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.name }}
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ env.IMAGE }}
+          # The PWA's OIDC config is build-time (Vite VITE_*); empty for the api. Repo vars, non-secret.
+          build-args: |
+            VITE_OIDC_ISSUER=${{ vars.VITE_OIDC_ISSUER }}
+            VITE_OIDC_CLIENT_ID=${{ vars.VITE_OIDC_CLIENT_ID }}
+            VITE_OIDC_REDIRECT_URI=${{ vars.VITE_OIDC_REDIRECT_URI }}
+
+      - name: Trivy image scan (fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
+      - name: Generate SBOM (syft)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          image: ${{ env.IMAGE }}
+          format: spdx-json
+          output-file: sbom-${{ matrix.name }}.spdx.json
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+
+      - name: Sign image + attest SBOM (keyless via OIDC)
+        run: |
+          cosign sign --yes "$IMAGE"
+          cosign attest --yes --predicate "sbom-${{ matrix.name }}.spdx.json" --type spdxjson "$IMAGE"
+
+  # Roll out to the single VM through the Azure control plane (no SSH, no open port). Gated; runs only after
+  # both images are built + signed. The exact-SHA infra files are bundled INTO the run-command, so the VM
+  # token stays pull-only (it can't read the repo). The VM pulls the signed images + migrates before serving.
+  deploy:
+    needs: images
+    if: ${{ vars.ENABLE_DEPLOY == 'true' }}
+    runs-on: ubuntu-latest
+    # Serialize rollouts to the SINGLE VM: a constant group (not per-ref) means two releases pushed close
+    # together queue instead of running `az vm run-command` + `compose up` against the one host in parallel.
+    # cancel-in-progress:false — never cancel a deploy mid-rollout; let it finish, then the next one runs.
+    concurrency:
+      group: argus-vm-rollout
+      cancel-in-progress: false
+    # TWO-LAYER GATE: `vars.ENABLE_DEPLOY` is the master kill-switch (off until the Azure sub + secrets exist),
+    # and the `prod` GitHub Environment is the PER-RELEASE approval gate ("your allowance"): configure it
+    # with required reviewers, so each tagged release PAUSES here for your manual approval before the root
+    # run-command runs. Also set the OIDC federated subject to `repo:OWNER/REPO:environment:prod`
+    # (var.github_deploy_subject in infra/vm/terraform) so the credential binds to the environment, not a branch.
+    environment: prod
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
       - name: Azure login (OIDC)
-        uses: azure/login@v3
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: ACR login
-        run: az acr login --name "${ACR_LOGIN_SERVER%%.*}"
-
-      - name: Build and push api image
+      - name: Build the run-command rollout script (bundles exact-SHA infra config)
+        env:
+          GHCR_OWNER: ${{ github.repository_owner }}
+          KEY_VAULT: ${{ vars.KEY_VAULT_NAME }}
+          GH_REPO: ${{ github.repository }} # owner/repo — the cosign signing identity the VM verifies against
+          # The GHCR pull login username must be the account that OWNS the `argus-ghcr-token` PAT — NOT the
+          # workflow actor (github.actor changes per tag-pusher and would mismatch the token owner). Defaults
+          # to the repo owner; override with vars.GHCR_USER if the PAT belongs to a different/bot account.
+          GHCR_USER: ${{ vars.GHCR_USER || github.repository_owner }}
+          # Non-secret runtime config the api needs (invariant #5 allows these in env). compose.prod.yaml has
+          # defaults for endpoint/region/bucket; the B2 access-key-ID + OIDC issuer/audience have none, so the
+          # deploy MUST pass them or attachments/auth break. (The matching B2 SECRET key is a Key Vault file.)
+          S3_ENDPOINT: ${{ vars.S3_ENDPOINT }}
+          S3_REGION: ${{ vars.S3_REGION }}
+          S3_BUCKET: ${{ vars.S3_BUCKET }}
+          S3_ACCESS_KEY_ID: ${{ vars.S3_ACCESS_KEY_ID }}
+          OIDC_ISSUER: ${{ vars.OIDC_ISSUER }}
+          OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
         run: |
-          docker build -t "$ACR_LOGIN_SERVER/argus-api:$IMAGE_TAG" apps/api
-          docker push "$ACR_LOGIN_SERVER/argus-api:$IMAGE_TAG"
+          set -euo pipefail
+          tar czf deploy-bundle.tgz compose.prod.yaml infra/vm/secrets infra/vm/deploy
+          B64="$(base64 -w0 deploy-bundle.tgz)"
+          GHCR_REGISTRY="ghcr.io/$(echo "$GHCR_OWNER" | tr '[:upper:]' '[:lower:]')"
+          # The script runs as root on the VM: unpack the bundle, then run deploy.sh with non-secret params.
+          # `docker compose up` (a child of deploy.sh) inherits the exported S3_*/OIDC_* and interpolates them.
+          # The single-quoted echos below write LITERAL shell to runcmd.sh ($WORK expands on the VM, not here).
+          # shellcheck disable=SC2016
+          {
+            echo 'set -euo pipefail'
+            echo 'WORK="$(mktemp -d)"'
+            printf "printf '%%s' '%s' | base64 -d | tar xz -C \"\$WORK\"\n" "$B64"
+            printf 'export ARGUS_KEY_VAULT=%q IMAGE_TAG=%q GHCR_REGISTRY=%q GHCR_USER=%q GH_REPO=%q\n' \
+              "$KEY_VAULT" "$IMAGE_TAG" "$GHCR_REGISTRY" "$GHCR_USER" "$GH_REPO"
+            printf 'export S3_ENDPOINT=%q S3_REGION=%q S3_BUCKET=%q S3_ACCESS_KEY_ID=%q OIDC_ISSUER=%q OIDC_AUDIENCE=%q\n' \
+              "$S3_ENDPOINT" "$S3_REGION" "$S3_BUCKET" "$S3_ACCESS_KEY_ID" "$OIDC_ISSUER" "$OIDC_AUDIENCE"
+            echo 'bash "$WORK/infra/vm/deploy/deploy.sh"'
+            echo 'rm -rf "$WORK"'
+          } >runcmd.sh
 
-      - name: Trivy image scan (fail on HIGH/CRITICAL)
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ${{ env.ACR_LOGIN_SERVER }}/argus-api:${{ env.IMAGE_TAG }}
-          severity: HIGH,CRITICAL
-          exit-code: '1'
-
-      - name: Generate SBOM (syft)
-        uses: anchore/sbom-action@v0
-        with:
-          image: ${{ env.ACR_LOGIN_SERVER }}/argus-api:${{ env.IMAGE_TAG }}
-          format: spdx-json
-          output-file: sbom.spdx.json
-
-      - name: Install cosign
-        uses: sigstore/cosign-installer@v3
-
-      - name: Sign image + attest SBOM (keyless via OIDC)
+      - name: Roll out via az vm run-command
+        env:
+          RG: ${{ vars.AZURE_RESOURCE_GROUP }}
+          VM: ${{ vars.AZURE_VM_NAME }}
         run: |
-          cosign sign --yes "$ACR_LOGIN_SERVER/argus-api:$IMAGE_TAG"
-          cosign attest --yes --predicate sbom.spdx.json --type spdxjson "$ACR_LOGIN_SERVER/argus-api:$IMAGE_TAG"
-
-      # NOTE: this pipeline builds, scans, SBOMs, and signs the image only — it does NOT roll it out.
-      # There is no GitOps deploy step; the deploy is a single Azure VM via Docker Compose. The VM rollout
-      # step (lands with the VM deploy track) — pull the signed image,
-      # run DB migrations BEFORE serving (e.g. 0009's secmes_app → argus_app role rename, or tenant-scoped
-      # requests fail at SET LOCAL ROLE), then restart the compose service — lands with the VM deploy track.
+          set -euo pipefail
+          # `az vm run-command invoke` exits 0 for the API call even if the in-VM script FAILED — so inspect
+          # the captured output and require deploy.sh's final success sentinel (it only prints this as its last
+          # line, after the rollout is healthy; any earlier `set -e` failure exits before it).
+          out="$(az vm run-command invoke \
+            --resource-group "$RG" --name "$VM" \
+            --command-id RunShellScript --scripts @runcmd.sh -o json)"
+          printf '%s\n' "$out" | jq -r '.value[].message'
+          printf '%s\n' "$out" | jq -r '.value[].message' \
+            | grep -q 'argus-deploy: deploy complete + healthy' || {
+              echo '::error::VM rollout failed — deploy.sh did not reach the healthy-complete sentinel'
+              exit 1
+            }

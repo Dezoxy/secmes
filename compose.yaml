@@ -149,16 +149,15 @@ services:
       - 'zitadel-bootstrap:/bootstrap'
     entrypoint: ['sh', '-c', 'apk add --no-cache curl jq >/dev/null && sh /scripts/provision.sh']
 
-  # NOTE: this image build is currently broken (the self-contained Dockerfile does `npm install`
-  # without a lockfile → drizzle-orm drifts to a version with non-compiling .d.ts; see the Dockerfile
-  # TODO). `make up` therefore does NOT build the API — run it on the host with `make api-dev`. The
-  # service + env_file stay defined for when the build is reworked to the pnpm workspace.
-  # `profiles: [app]` keeps the broken build out of a bare `docker compose up` — start it explicitly
-  # (`docker compose --profile app up api`) once the Dockerfile is fixed.
+  # The api image is a workspace-aware build (repo-root context — the Dockerfile pulls in @argus/crypto via
+  # the pnpm workspace). `make up` keeps it out of a bare `docker compose up` via `profiles: [app]` (for the
+  # hot-reload host workflow, run `make api-dev`); start it in a container with
+  # `docker compose --profile app up --build api`.
   api:
     profiles: ['app']
     build:
-      context: ./apps/api
+      context: .
+      dockerfile: apps/api/Dockerfile
     environment:
       NODE_ENV: development # enables Swagger UI at /docs locally
       PORT: '3000'

@@ -1,24 +1,33 @@
-# Phase 0: self-contained build (context = apps/api).
-# TODO (Phase 1+): switch to a repo-root build that wires in @argus/contracts
-# via pnpm workspace `--filter ... deploy`.
+# syntax=docker/dockerfile:1
+#
+# Workspace-aware build. The api depends on @argus/crypto via `workspace:*`, so it MUST build inside the pnpm
+# workspace from the REPO ROOT (a self-contained `npm install` in apps/api fails: EUNSUPPORTEDPROTOCOL on the
+# workspace: spec). Build from the repo root:
+#   docker build -f apps/api/Dockerfile -t argus-api .
+# A root .dockerignore prunes node_modules/.git/secrets from the context.
 
-# ---- build ----
+# ---- build (full workspace) ----
 FROM node:24-alpine AS build
-WORKDIR /app
-COPY package.json ./
-RUN corepack enable && npm install --no-audit --no-fund
-COPY tsconfig.json nest-cli.json ./
-COPY src ./src
-RUN npm run build && npm prune --omit=dev
+ENV CI=true
+RUN corepack enable
+WORKDIR /repo
+COPY . .
+# Install the whole workspace (the root `prepare` builds packages/* incl. @argus/crypto), then build the api
+# → apps/api/dist (migration .sql files ride along via nest-cli `assets`).
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @argus/api build
+# Produce a SELF-CONTAINED prod deployable at /app: prod deps only, with the workspace dep (@argus/crypto)
+# hard-copied (not symlinked) so it survives the copy into the runtime stage.
+RUN pnpm --filter @argus/api --prod deploy /app
 
 # ---- runtime ----
 FROM node:24-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
-# non-root, read-only-friendly
+RUN apk add --no-cache wget # for the healthcheck
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
-COPY --chown=node:node package.json ./
+COPY --from=build --chown=node:node /app/package.json ./package.json
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \

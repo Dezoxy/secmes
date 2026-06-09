@@ -56,8 +56,8 @@ key is intentionally NOT here — keep it offline/separate (restore-time only).
   mint the GitHub OIDC token effectively owns the host (incl. the secrets the MI fetched into
   `/run/argus/secrets`). The token's **branch/environment binding is the real security boundary** — so:
 - **Before prod, bind the OIDC credential to a protected GitHub Environment**, not the `main` branch ref.
-  Set `github_deploy_subject = "repo:Dezoxy/secmes:environment:production"` and gate the CD job with
-  `environment: production` + required reviewers. The default (`main` ref) is fine only for the beta.
+  Set `github_deploy_subject = "repo:Dezoxy/secmes:environment:prod"` and gate the CD job with
+  `environment: prod` + required reviewers. The default (`main` ref) is fine only for the beta.
 
 ## Notes / trade-offs
 

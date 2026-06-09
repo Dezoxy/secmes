@@ -72,7 +72,7 @@ No message content is involved here; this is pure infrastructure (identity, netw
 ## 6. Residual risk
 
 - **OIDC bound to the `main` branch ref**, not a protected GitHub Environment — any workflow on `main` can
-  mint a deploy token. **Must-before-prod:** bind to `environment:production` with required reviewers
+  mint a deploy token. **Must-before-prod:** bind to `environment:prod` with required reviewers
   (documented in the module README + `var.github_deploy_subject`).
 - **Egress public IP** (vs a NAT Gateway) and **open egress** (vs service-tag/Firewall filtering) — accepted
   for cost; inbound is denied either way. NAT Gateway + egress filtering are the hardening upgrades.

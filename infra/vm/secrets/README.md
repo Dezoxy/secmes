@@ -35,6 +35,17 @@ consumers `Requires=` this unit, so they don't start on a missing secret).
 > never the `argus` owner — least privilege so RLS/grants bind even off the `SET LOCAL ROLE` path. The owner
 > password (`argus-postgres-owner-password`) is for init + migrations only.
 
+### Deploy-time secrets (fetched by `deploy.sh`, NOT delivered to the running stack)
+
+The CD rollout (`infra/vm/deploy/deploy.sh`, Slice 4) fetches two extra secrets via the Managed Identity,
+uses them, and drops them — they are **never** written to `/run/argus/secrets` (least privilege: the running
+stack never holds a GitHub token or the DB owner DSN):
+
+| Key Vault secret name          | Used for                                                              |
+| ------------------------------ | -------------------------------------------------------------------- |
+| `argus-ghcr-token`             | `docker login ghcr.io` to pull the signed images (`packages:read`)   |
+| `argus-migration-database-url` | the **owner** DSN for migrate-before-serve (`MIGRATION_DATABASE_URL_FILE`) — file-mounted, then `shred`-ed |
+
 ## Populate the vault (one-time, by you)
 
 The VM's Managed Identity has **Key Vault Secrets User** (read-only) from `infra/vm/terraform`. You set the
@@ -49,6 +60,10 @@ az keyvault secret set --vault-name "$KV" --name argus-tunnel-token           --
 az keyvault secret set --vault-name "$KV" --name argus-backup-db-password     --value '<argus_backup-role-pw>'
 az keyvault secret set --vault-name "$KV" --name argus-cleanup-db-password    --value '<argus_cleanup-role-pw>'
 az keyvault secret set --vault-name "$KV" --name argus-b2-app-key             --value '<b2-key-secret>'
+
+# Deploy-time only (consumed by deploy.sh, never delivered to the running stack):
+az keyvault secret set --vault-name "$KV" --name argus-ghcr-token            --value '<github-PAT-with-packages:read>'
+az keyvault secret set --vault-name "$KV" --name argus-migration-database-url --value 'postgres://argus:<owner-pw>@postgres:5432/argus'
 ```
 
 Set values **without a trailing newline** (the fetch strips one defensively, but `az ... --value` is exact).
