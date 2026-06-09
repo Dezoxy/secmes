@@ -1,15 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { MessageCircle } from 'lucide-react';
-import type { Conversation as MlsGroup } from '@argus/crypto';
 import type { UserSummary } from '../../lib/api';
 import { ConversationManager, type ConversationSession } from '../../lib/conversations';
-import type { StoredMessage } from '../../lib/keystore';
-import type { AttachmentRef } from '../../lib/message-envelope';
-import {
-  backfillConversation,
-  type DecryptedMessage,
-  type MessagingDeps,
-} from '../../lib/messaging';
+import type { MessagingDeps } from '../../lib/messaging';
 import { getMlsSession } from '../../lib/mls';
 import { useAuth } from '../auth/AuthContext';
 import { useDevice } from '../device/DeviceContext';
@@ -21,13 +14,18 @@ import { ImagePreviewModal } from './ImagePreviewModal';
 import { StartConversation } from './StartConversation';
 import { contactDisplayName } from './user-label';
 import { VerifySecurity } from './VerifySecurity';
+import {
+  useConversationBackfill,
+  useConversationHistoryRehydration,
+  useSelectedConversationBackfill,
+} from './useConversationBackfill';
 import { useChatState } from './useChatState';
-import { liveConversationShell, useLiveConversations } from './useLiveConversations';
+import { useLiveConversations } from './useLiveConversations';
 import { useMessageSending } from './useMessageSending';
 import { loadArgusProfile, saveArgusProfile } from '../settings/argus-profile';
 import { SettingsPanel, type AnonymousProfile } from '../settings/SettingsPanel';
 import { conversationEnterMotion } from '../ui';
-import type { Attachment, Conversation, Message, User } from './seed';
+import type { Conversation, User } from './seed';
 import {
   conversations as initialConversations,
   currentUser,
@@ -48,31 +46,6 @@ const DEMO_PROFILE_SUBJECT = 'demo-local';
  * ciphertext; it needs the key directory + out-of-band fingerprint verification (#20). No plaintext
  * leaves the browser. The settings button opens profile, privacy, and key-recovery controls.
  */
-// A live (E2E) attachment ref → a UI attachment. Images download+decrypt lazily from `ref` (no `url`); files
-// get a chip with a working Download. Used for received messages + rehydrated history.
-function refToUiAttachment(ref: AttachmentRef): Attachment {
-  return {
-    id: `att-${ref.objectKey}`,
-    type: ref.mime.startsWith('image/') ? 'image' : 'file',
-    name: ref.name,
-    size: `${(ref.size / 1024 / 1024).toFixed(1)} MB`,
-    ref,
-  };
-}
-
-// Map a persisted history entry back to a UI Message (timestamp string → Date). Plaintext stays local.
-function storedToMessage(m: StoredMessage): Message {
-  return {
-    id: m.id,
-    senderId: m.senderId,
-    content: m.content,
-    timestamp: new Date(m.timestamp),
-    status: m.status as Message['status'],
-    encrypted: m.encrypted,
-    attachments: m.attachments?.map(refToUiAttachment),
-  };
-}
-
 // The sidebar entry for a LIVE conversation surfaced without a known peer identity (joined on connect, or
 // rehydrated on unlock). The inviter's identity isn't in the welcome/persistence metadata (it would leak the
 // social graph to the server), so we show a neutral placeholder; verification (#20) names it out-of-band.
@@ -144,115 +117,11 @@ export default function ChatScreen() {
     [messagingDeps, profile],
   );
   const [startOpen, setStartOpen] = useState(false);
-  // Backfill/history refs stay local until Step 12D extracts the history path.
-  const fetchCursors = useRef(new Map<string, string>());
-  const backfilling = useRef(new Set<string>());
-  const backfillPending = useRef(new Set<string>());
-  const rehydratedRef = useRef(false);
-
-  // Persist messages to the local SEALED history log (fire-and-forget; upsert by id). Plaintext in →
-  // sealed at rest under the session key. Only LIVE conversations call this (seed/demo convs aren't logged).
-  const appendHistory = useCallback(
-    (conversationId: string, entries: StoredMessage[]): void => {
-      if (!messagingDeps || !sessionKey || entries.length === 0) return;
-      void messagingDeps.keystore
-        .appendMessages(messagingDeps.device, conversationId, sessionKey, entries)
-        .catch((err: unknown) => {
-          // eslint-disable-next-line no-console
-          console.warn(
-            'persist history failed',
-            conversationId,
-            err instanceof Error ? err.message : err,
-          );
-        });
-    },
-    [messagingDeps, sessionKey],
-  );
-
-  // Merge decrypted incoming messages into a conversation, deduped by SERVER id (across fetch + WS push) and
-  // kept in time order. Shared by fetch-on-open, the WS push, and reconnect catch-up. Also persists them to
-  // the local sealed history so they survive a reload.
-  const mergeIncoming = useCallback(
-    (conversationId: string, incoming: DecryptedMessage[]): void => {
-      if (incoming.length === 0) return;
-      setConversations((prev) =>
-        prev.map((c) => {
-          if (c.id !== conversationId) return c;
-          const existing = new Set(c.messages.map((m) => m.id));
-          const fresh: Message[] = incoming
-            .filter((m) => !existing.has(m.serverId))
-            .map((m) => ({
-              id: m.serverId,
-              senderId: m.senderUserId,
-              content: m.text,
-              timestamp: new Date(m.createdAt),
-              status: 'read',
-              encrypted: true,
-              attachments: m.attachments.length ? m.attachments.map(refToUiAttachment) : undefined,
-            }));
-          if (fresh.length === 0) return c;
-          return {
-            ...c,
-            messages: [...c.messages, ...fresh].sort(
-              (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
-            ),
-          };
-        }),
-      );
-      appendHistory(
-        conversationId,
-        incoming.map((m) => ({
-          id: m.serverId,
-          senderId: m.senderUserId,
-          content: m.text,
-          timestamp: m.createdAt,
-          status: 'read',
-          encrypted: true,
-          attachments: m.attachments.length ? m.attachments : undefined,
-        })),
-      );
-    },
-    [appendHistory],
-  );
-
-  // Back-fill ONE live conversation from its keyset cursor → decrypt → merge. Drives both fetch-on-open and
-  // the on-`subscribed` catch-up. A call that arrives while one is in flight does NOT drop — it COALESCES a
-  // trailing rerun, so the ack-triggered catch-up still runs (with a fresh snapshot past the room-join) after
-  // an in-flight fetch-on-open finishes; otherwise a message committed between that earlier fetch and the
-  // gateway joining the room would be neither fetched nor pushed.
-  const backfillInto = useCallback(
-    async (conversationId: string, group: MlsGroup, selfUserId: string): Promise<void> => {
-      if (!messagingDeps) return;
-      if (backfilling.current.has(conversationId)) {
-        backfillPending.current.add(conversationId); // one more pass after the in-flight one completes
-        return;
-      }
-      backfilling.current.add(conversationId);
-      try {
-        do {
-          backfillPending.current.delete(conversationId);
-          const after = fetchCursors.current.get(conversationId);
-          const { messages, cursor } = await backfillConversation(
-            messagingDeps,
-            conversationId,
-            group,
-            selfUserId,
-            after,
-          );
-          if (cursor) fetchCursors.current.set(conversationId, cursor);
-          mergeIncoming(conversationId, messages);
-          // Loop once more iff a call arrived DURING this pass (its snapshot may post-date ours).
-        } while (backfillPending.current.has(conversationId));
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('backfill failed', conversationId, err instanceof Error ? err.message : err);
-      } finally {
-        backfilling.current.delete(conversationId);
-        backfillPending.current.delete(conversationId);
-      }
-    },
-    [messagingDeps, mergeIncoming],
-  );
+  const { appendHistory, mergeIncoming, backfillInto } = useConversationBackfill({
+    messagingDeps,
+    sessionKey,
+    setConversations,
+  });
 
   const { liveIds, liveGroups, addLive } = useLiveConversations({
     device,
@@ -341,40 +210,13 @@ export default function ChatScreen() {
     setStartOpen(false);
   };
 
-  // Rehydrate on unlock (Slice 5 + history): load every persisted conversation's sealed group state into a
-  // live MLS group, seed its decrypted history from the sealed message log, and surface it. The group state
-  // is how a conversation comes back (not a re-join); the message log is how its PLAINTEXT history comes back
-  // (the ratchet can't re-derive consumed messages). Runs once per unlock; needs the session key for history.
-  useEffect(() => {
-    if (!messagingDeps || !sessionKey || rehydratedRef.current) return;
-    rehydratedRef.current = true;
-    const { keystore: ks, device: dev, passphrase: pass } = messagingDeps;
-    const sKey = sessionKey;
-    void (async () => {
-      try {
-        const restored = await ks.loadConversations(dev, pass);
-        const logs = await ks.loadAllMessageLogs(dev, sKey);
-        for (const [conversationId, conversation] of restored) {
-          addLive(conversationId, conversation);
-          const history = (logs.get(conversationId) ?? []).map(storedToMessage);
-          setConversations((prev) =>
-            prev.some((c) => c.id === conversationId)
-              ? prev
-              : [
-                  {
-                    ...liveConversationShell(conversationId, currentUserProfile),
-                    messages: history,
-                  },
-                  ...prev,
-                ],
-          );
-        }
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn('rehydrate conversations failed', err instanceof Error ? err.message : err);
-      }
-    })();
-  }, [addLive, messagingDeps, sessionKey, currentUserProfile]);
+  useConversationHistoryRehydration({
+    messagingDeps,
+    sessionKey,
+    currentUserProfile,
+    addLive,
+    setConversations,
+  });
 
   // Compute the selected DIRECT conversation's own safety number (from its own loopback session), once.
   // LIVE conversations are skipped — a started one already holds its REAL number, and none should spin up a
@@ -390,16 +232,13 @@ export default function ChatScreen() {
       .catch(() => {});
   }, [selectedId, isDirect, selectedIsLive]);
 
-  // Fetch-on-open (Slice 5): when a LIVE conversation is selected, back-fill new ciphertext from the server,
-  // decrypt it against the retained group, and append the peer's messages. The keyset cursor advances so a
-  // re-open pulls only newer rows. Live PUSH (no re-open needed) is the WebSocket path below.
-  useEffect(() => {
-    const selfUserId = profile?.userId;
-    if (!selectedId || !selectedIsLive || !selfUserId) return;
-    const group = liveGroups.current.get(selectedId);
-    if (!group) return;
-    void backfillInto(selectedId, group, selfUserId);
-  }, [selectedId, selectedIsLive, profile?.userId, backfillInto]);
+  useSelectedConversationBackfill({
+    selectedId,
+    selectedIsLive,
+    selfUserId: profile?.userId,
+    liveGroups,
+    backfillInto,
+  });
 
   const handleSelect = (id: string) => {
     setSelectedId(id);
