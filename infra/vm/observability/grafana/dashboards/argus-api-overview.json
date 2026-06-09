@@ -1,0 +1,97 @@
+{
+  "uid": "argus-api-overview",
+  "title": "argus API overview",
+  "tags": ["argus"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Request rate by status",
+      "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "sum(rate(argus_api_http_requests_total[5m])) by (status)",
+          "legendFormat": "{{status}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Server-error (5xx) ratio — SLO < 1% / 5%",
+      "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "sum(rate(argus_api_http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(argus_api_http_requests_total[5m])), 1)",
+          "legendFormat": "5xx ratio"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Request latency p50 / p95 / p99 — SLO p95 < 1s",
+      "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "histogram_quantile(0.50, sum(rate(argus_api_http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(argus_api_http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "histogram_quantile(0.99, sum(rate(argus_api_http_request_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "API process — resident memory & CPU",
+      "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "argus_api_process_resident_memory_bytes",
+          "legendFormat": "RSS (bytes)"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "rate(argus_api_process_cpu_seconds_total[5m])",
+          "legendFormat": "CPU (cores)"
+        }
+      ]
+    }
+  ]
+}

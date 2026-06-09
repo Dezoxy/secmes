@@ -66,6 +66,14 @@ http://auth.4rgus.com:8080 {
 	}
 }
 
+# --- Grafana (observability dashboards, https://grafana.4rgus.com) — roadmap #47 ------------------------
+# Admin surface: gated by Cloudflare Access at the edge (identity) + Grafana's own login; NEVER public. Caddy
+# just forwards (Grafana speaks plain HTTP/1.1, no h2c). Prometheus + Alertmanager are NOT routed here — they
+# stay internal-only, viewed through Grafana. GF_SERVER_ROOT_URL makes Grafana emit correct https URLs.
+http://grafana.4rgus.com:8080 {
+	reverse_proxy grafana:3000
+}
+
 # --- App origin (PWA + /api + /ws) — catch-all :8080 for every other host (4rgus.com, health, direct IP) ---
 :8080 {
 	# Defense-in-depth response headers (the edge adds HSTS and more). CSP is app-managed in the PWA.

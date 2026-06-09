@@ -1,0 +1,11 @@
+# Grafana datasource provisioning (checkpoint 47). Points at the internal Prometheus. Read-only (not editable
+# in the UI) so the provisioned source of truth stays the file. No secrets (Prometheus has no auth — internal).
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: argus-prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

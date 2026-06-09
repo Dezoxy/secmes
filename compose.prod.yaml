@@ -403,10 +403,99 @@ services:
           memory: 256m
           cpus: '0.5'
 
+  # --- Observability (roadmap #47, Slice B) -------------------------------------------------------------
+  # Prometheus scrapes the API's content-blind metrics (api:9090) over the internal network; Grafana
+  # visualises them (behind Cloudflare Access on grafana.4rgus.com); Alertmanager routes alerts. Pin images
+  # (Dependabot-tracked); verify tags before first deploy. Config files are bind-mounted read-only from the
+  # repo tree deploy.sh stages into /opt/argus. NO published ports — only Grafana is reachable, via Caddy +
+  # Access. Threat model: docs/threat-models/observability.md.
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+    volumes:
+      - ./infra/vm/observability/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus # named volume inherits the image's nobody:nobody ownership on first init
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 768m
+          cpus: '0.75'
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    volumes:
+      - ./infra/vm/observability/alertmanager:/etc/alertmanager:ro
+      - alertmanager-data:/alertmanager
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: '0.25'
+
+  # Grafana — the ONLY observability service with ingress (Caddy host-splits grafana.4rgus.com here, behind
+  # Cloudflare Access). Admin password is a Key-Vault credential FILE via Grafana's native `__FILE` support
+  # (invariant #5 — never an env value at rest). Anonymous + sign-up disabled; phone-home off.
+  grafana:
+    image: grafana/grafana:11.4.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_SERVER_ROOT_URL: https://grafana.4rgus.com
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+    secrets:
+      - grafana_admin_password
+    volumes:
+      - ./infra/vm/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/vm/observability/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana # inherits the image's grafana-user ownership on first init
+    depends_on:
+      prometheus:
+        condition: service_started
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
+
 secrets:
   # Sourced from ${ARGUS_SECRETS_DIR} — local dev uses the gitignored ./secrets; prod points it at the tmpfs
   # dir that argus-secrets.service fills from Key Vault via the Managed Identity (Slice 3:
   # ARGUS_SECRETS_DIR=/run/argus/secrets). Either way the values are credential FILES, never committed/env.
+  # NOTE: the on-disk files are 0400 root:root, but Docker Compose v2 (non-swarm) CHOWNS each mounted secret
+  # at /run/secrets/<name> to the consuming container's effective UID — so the NON-root services read them
+  # fine (api uid 1000, postgres uid 999, grafana uid 472, …). Empirically verified; do NOT widen to 0444.
   postgres_password:
     file: ${ARGUS_SECRETS_DIR:-./secrets}/postgres_password
   database_url:
@@ -428,8 +517,16 @@ secrets:
     # Key Vault (argus-zitadel-login-pat); the fetch script seeds an EMPTY file on first boot (before it's
     # provisioned) so the mount always resolves — login is degraded until the operator stores the real PAT.
     file: ${ARGUS_SECRETS_DIR:-./secrets}/zitadel_login_pat
+  grafana_admin_password:
+    # Grafana admin password — Grafana reads it via GF_SECURITY_ADMIN_PASSWORD__FILE (native `__FILE` support).
+    # Delivered from Key Vault (argus-grafana-admin-password); set it before the first deploy.
+    file: ${ARGUS_SECRETS_DIR:-./secrets}/grafana_admin_password
 
 volumes:
   pgdata:
   # Zitadel's own Postgres data — separate cluster from the argus app DB (pgdata).
   zitadel-pgdata:
+  # Observability state (roadmap #47): Prometheus TSDB, Grafana DB, Alertmanager silences/notification state.
+  prometheus-data:
+  grafana-data:
+  alertmanager-data:

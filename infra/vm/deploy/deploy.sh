@@ -50,6 +50,14 @@ EOF
 log "staging config into ${APP_DIR}"
 install -d -m 0750 -o root -g argus "$APP_DIR" "$APP_DIR/secrets"
 install -m 0640 -o root -g argus "$REPO_ROOT/compose.prod.yaml" "$COMPOSE"
+# Observability config tree (Prometheus/Grafana/Alertmanager) — the compose services bind-mount it read-only
+# at ./infra/vm/observability (relative to $COMPOSE in $APP_DIR). World-readable (0755 dirs / 0644 files) so
+# the non-root prometheus/grafana container users can read it; it contains NO secrets (Grafana's admin pw is a
+# Key Vault credential file, not in this tree). Refresh from the staged repo each deploy.
+rm -rf "$APP_DIR/infra/vm/observability"
+install -d -m 0755 "$APP_DIR/infra/vm"
+cp -a "$REPO_ROOT/infra/vm/observability" "$APP_DIR/infra/vm/observability"
+chmod -R a+rX "$APP_DIR/infra/vm/observability"
 install -m 0755 "$REPO_ROOT/infra/vm/secrets/fetch-keyvault-secrets.sh" "$APP_DIR/secrets/fetch-keyvault-secrets.sh"
 install -m 0644 "$REPO_ROOT/infra/vm/secrets/argus-secrets.service" /etc/systemd/system/argus-secrets.service
 # Point the unit at our fetch script + the real vault name (the repo ships a placeholder).
@@ -225,6 +233,12 @@ else
   log "zitadel-login: service PAT not yet provisioned (empty) — gating on running only; seed it per docs/deploy.md"
   wait_running zitadel-login
 fi
+# Observability (checkpoint 47): the Prometheus/Grafana/Alertmanager images have no shell for a CMD
+# healthcheck, so gate on running + not-crash-looping — catches a bad config mount / image without depending
+# on an in-container probe. (Their own /-/healthy + /api/health endpoints are visible once up.)
+wait_running prometheus
+wait_running alertmanager
+wait_running grafana
 
 # --- 7. Tidy up: drop dangling images (the GHCR login is cleared by the EXIT trap). ---
 docker image prune -f >/dev/null 2>&1 || true

@@ -31,6 +31,7 @@ consumers `Requires=` this unit, so they don't start on a missing secret).
 | `argus-zitadel-db-password`     | `zitadel_db_password`              | `zitadel-db` (`POSTGRES_PASSWORD_FILE`) + `zitadel` (`ZITADEL_DB_PASSWORD` runtime value — same file) |
 | `argus-zitadel-admin-password`  | `zitadel_admin_password`           | `zitadel` (`ZITADEL_ADMIN_PASSWORD` runtime value) — **first-init bootstrap only**, change-required |
 | `argus-zitadel-login-pat`       | `zitadel_login_pat`                | `zitadel-login` (`ZITADEL_SERVICE_USER_TOKEN_FILE`) — **OPTIONAL**: minted after first init, stored during arming; the fetch seeds an empty file until then |
+| `argus-grafana-admin-password`  | `grafana_admin_password`           | `grafana` (`GF_SECURITY_ADMIN_PASSWORD__FILE`) — observability dashboards admin login |
 | `argus-backup-db-password`      | `backup-db-password`               | `argus-db-backup` (`LoadCredential`) — `argus_backup` role |
 | `argus-cleanup-db-password`     | `cleanup-db-password`              | `argus-attachment-cleanup` (`LoadCredential`) — `argus_cleanup` role |
 | `argus-b2-app-key`              | `b2-app-key`                       | `argus-db-backup` + `argus-attachment-cleanup` (`LoadCredential`) |
@@ -77,6 +78,7 @@ az keyvault secret set --vault-name "$KV" --name argus-tunnel-token           --
 az keyvault secret set --vault-name "$KV" --name argus-zitadel-masterkey      --value "$(openssl rand -base64 32 | head -c 32)"
 az keyvault secret set --vault-name "$KV" --name argus-zitadel-db-password    --value '<zitadel-db-owner-pw>'
 az keyvault secret set --vault-name "$KV" --name argus-zitadel-admin-password --value '<bootstrap-admin-pw-change-on-first-login>'
+az keyvault secret set --vault-name "$KV" --name argus-grafana-admin-password --value '<grafana-admin-pw>'   # observability #47
 az keyvault secret set --vault-name "$KV" --name argus-backup-db-password     --value '<argus_backup-role-pw>'
 az keyvault secret set --vault-name "$KV" --name argus-cleanup-db-password    --value '<argus_cleanup-role-pw>'
 az keyvault secret set --vault-name "$KV" --name argus-b2-app-key             --value '<b2-key-secret>'
