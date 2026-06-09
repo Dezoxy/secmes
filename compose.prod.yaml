@@ -310,6 +310,16 @@ services:
       ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: zitadel
       ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: ${ZITADEL_DB_PASSWORD:-}
       ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
+      # Wire Login V2 at FIRST BOOT (the DEFAULTINSTANCE_* keys only apply during init) so the fresh instance's
+      # console + auth use the /ui/v2/login app immediately — without this the instance comes up with no working
+      # login URL and you can't even reach the console to provision it (chicken-and-egg). The OIDC/SAML default
+      # URLs are runtime config (every boot). Values mirror Zitadel's canonical v4.15 Compose for an external
+      # https domain. These replace the post-boot `loginV2.baseUri` API call the local provisioner makes.
+      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: 'true'
+      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_BASEURI: https://auth.4rgus.com/ui/v2/login/
+      ZITADEL_OIDC_DEFAULTLOGINURLV2: https://auth.4rgus.com/ui/v2/login/login?authRequest=
+      ZITADEL_OIDC_DEFAULTLOGOUTURLV2: https://auth.4rgus.com/ui/v2/login/logout?post_logout_redirect=
+      ZITADEL_SAML_DEFAULTLOGINURLV2: https://auth.4rgus.com/ui/v2/login/login?samlRequest=
       # FirstInstance (env-only) — runs once on the very first init, skipped on every later boot.
       ZITADEL_FIRSTINSTANCE_ORG_NAME: argus
       ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH: /bootstrap/login-client.pat
@@ -350,7 +360,8 @@ services:
   # Zitadel v4 hosted Login V2 UI — a separate app from the identity server. The main `zitadel` container
   # serves OIDC/API/JWKS/console; this renders the browser login screens at /ui/v2/login (Caddy routes that
   # path here). It authenticates to the Zitadel API with the Login V2 service-user PAT FirstInstance wrote to
-  # the shared volume. The public base URI (https://auth.4rgus.com/ui/v2/login) is set during provisioning (G1).
+  # the shared volume. The instance's Login V2 base URI is wired at first boot by the zitadel service's
+  # ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_BASEURI env (above), so login works immediately after init.
   # NEXT_PUBLIC_BASE_PATH tells the Next.js app it's mounted under /ui/v2/login (Caddy forwards that prefix
   # unchanged) — without it the prefixed routes/assets 404 even though the container stays up. CUSTOM_REQUEST_HEADERS
   # makes its server-side calls to the Zitadel API carry the real external Host + scheme behind the TLS-terminating
