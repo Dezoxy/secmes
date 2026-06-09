@@ -10,11 +10,19 @@
 	auto_https off
 	# Admin API off: nothing on this host should reconfigure Caddy at runtime.
 	admin off
-	# Access log to stdout (collected by Docker). Caddy redacts Authorization + Cookie headers by default,
-	# and request bodies are never logged — so logs stay IDs/metadata only (invariant #2). No URLs carry secrets.
+	# Access log to stdout (collected by Docker). Caddy redacts Authorization + Cookie headers by default and
+	# never logs bodies; on top of that we strip the ENTIRE query string from the logged URI — the OIDC
+	# callback carries `?code=<auth-code>` and some API routes carry `?proof=`, both auth material (invariant
+	# #2). The `filter` encoder's regexp filter replaces everything after `?`, so no query-borne credential
+	# ever lands in Docker logs. Logs stay IDs/metadata + path only.
 	log {
 		output stdout
-		format json
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp "\?.*" "?[redacted]"
+			}
+		}
 	}
 }
 
