@@ -8,6 +8,7 @@ import DevicesRoute from './routes/DevicesRoute';
 import SecurityRoute from './routes/SecurityRoute';
 import SettingsRoute from './routes/SettingsRoute';
 import StorageRoute from './routes/StorageRoute';
+import { PwaUpdatePrompt } from './features/pwa/PwaUpdatePrompt';
 
 /**
  * Landing / sign-in screen. Argus exposes one primary passkey entry point and delegates login,
@@ -194,14 +195,17 @@ function LandingRoute() {
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/" element={<LandingRoute />} />
-      <Route path="/chat" element={<ChatRoute />} />
-      <Route path="/settings" element={<SettingsRoute />} />
-      <Route path="/security" element={<SecurityRoute />} />
-      <Route path="/devices" element={<DevicesRoute />} />
-      <Route path="/storage" element={<StorageRoute />} />
-      <Route path="/auth/callback" element={<AuthCallbackRoute />} />
-    </Routes>
+    <>
+      <Routes>
+        <Route path="/" element={<LandingRoute />} />
+        <Route path="/chat" element={<ChatRoute />} />
+        <Route path="/settings" element={<SettingsRoute />} />
+        <Route path="/security" element={<SecurityRoute />} />
+        <Route path="/devices" element={<DevicesRoute />} />
+        <Route path="/storage" element={<StorageRoute />} />
+        <Route path="/auth/callback" element={<AuthCallbackRoute />} />
+      </Routes>
+      <PwaUpdatePrompt />
+    </>
   );
 }

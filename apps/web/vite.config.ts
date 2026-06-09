@@ -88,7 +88,7 @@ export default defineConfig({
     tailwindcss(),
     bundleVisibilityPlugin(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
       workbox: {
         cleanupOutdatedCaches: true,
         globPatterns: [...pwaPrecacheGlobPatterns],
