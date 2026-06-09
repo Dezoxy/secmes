@@ -25,6 +25,14 @@
 # X-Frame-Options here — oidc-client-ts silent-renew loads the authorize endpoint in a hidden iframe, and
 # Zitadel sets its own framing/security headers. TLS terminates at Cloudflare; this stays plain HTTP on :8080.
 http://auth.4rgus.com:8080 {
+	# Bare root → the Login V2 UI (mirrors the canonical compose's priority-400 `zitadel-root-rewrite`:
+	# Path(`/`) → replacepath /ui/v2/login/ → login service). Without this, hitting the bare auth domain
+	# falls through to the API server instead of the login page.
+	@root path /
+	handle @root {
+		rewrite * /ui/v2/login/
+		reverse_proxy zitadel-login:3000
+	}
 	# Login V2 UI is a separate container; everything else (OIDC/OAuth/JWKS/console/gRPC) is the main server.
 	@login path /ui/v2/login /ui/v2/login/*
 	handle @login {
