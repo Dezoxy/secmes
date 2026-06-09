@@ -763,10 +763,10 @@ this roadmap.
 **Purpose:** Run Lighthouse against the locally built PWA and fix frontend-owned installability, performance,
 and accessibility warnings.
 
-- [ ] Keep this frontend-only: no deploy-header or Cloudflare changes.
-- [ ] Preserve the static-only service-worker policy.
-- [ ] Keep auth/API/WS/presigned URLs out of runtime caches.
-- [ ] Document any remaining iOS installed-PWA proof as user/device work.
+- [x] Keep this frontend-only: no deploy-header or Cloudflare changes.
+- [x] Preserve the static-only service-worker policy.
+- [x] Keep auth/API/WS/presigned URLs out of runtime caches.
+- [x] Document any remaining iOS installed-PWA proof as user/device work.
 
 ### F3: Key-loss UX Polish
 
