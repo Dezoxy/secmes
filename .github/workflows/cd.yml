@@ -97,6 +97,12 @@ jobs:
     needs: images
     if: ${{ vars.ENABLE_DEPLOY == 'true' }}
     runs-on: ubuntu-latest
+    # Serialize rollouts to the SINGLE VM: a constant group (not per-ref) means two releases pushed close
+    # together queue instead of running `az vm run-command` + `compose up` against the one host in parallel.
+    # cancel-in-progress:false — never cancel a deploy mid-rollout; let it finish, then the next one runs.
+    concurrency:
+      group: argus-vm-rollout
+      cancel-in-progress: false
     # TWO-LAYER GATE: `vars.ENABLE_DEPLOY` is the master kill-switch (off until the Azure sub + secrets exist),
     # and the `prod` GitHub Environment is the PER-RELEASE approval gate ("your allowance"): configure it
     # with required reviewers, so each tagged release PAUSES here for your manual approval before the root
