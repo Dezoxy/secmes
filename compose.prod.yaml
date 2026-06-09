@@ -125,6 +125,12 @@ services:
       S3_FORCE_PATH_STYLE: 'false' # B2 uses virtual-host style
       OIDC_ISSUER: ${OIDC_ISSUER:-}
       OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      # Error tracking (#48) — DSN-GATED: unset = a complete no-op (the Slice-A default). At arming, set
+      # SENTRY_DSN in the deploy env to enable (it's a write-only INGEST key — env is acceptable, like the B2
+      # key-id; events are default-deny scrubbed). SENTRY_RELEASE tags the deployed commit. The optional
+      # SENTRY_DSN_FILE (mounted secret) form arrives with the GlitchTip service in Slice B.
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_RELEASE: ${IMAGE_TAG:-}
       # --- Secrets are delivered as FILES, never env (invariant #5) ---
       # The app reads the password-bearing connection URLs and the B2 secret key from mounted credential
       # files (Docker secrets at /run/secrets/*), never env. On the VM these are systemd-delivered from Key

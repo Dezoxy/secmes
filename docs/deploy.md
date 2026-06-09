@@ -227,3 +227,21 @@ rest of the deploy.**
 - **Arming:** add the `grafana.4rgus.com` Cloudflare Access app + tunnel hostname; set the Grafana admin
   password in Key Vault; pin/refresh the `prom/*` + `grafana/grafana` image tags. Smoke-test the read-only FS
   on the three images in a scratch env (prod is the first place they run read-only-root).
+
+## Error tracking (Sentry/GlitchTip — roadmap #48)
+
+The API integrates the `@sentry/node` SDK (Slice A, merged), **DSN-GATED**: with `SENTRY_DSN` unset — the
+default — it is a complete **no-op** (nothing initialised, nothing sent). Events are **default-deny scrubbed**
+before send: no message content, MLS/session/device keys, tokens, full `Authorization` headers, cookies,
+request bodies/query, or presigned URLs ever leave; an event carries only error type/message/stack, the HTTP
+method + route-**template**, the release, and opaque tenant/user id tags (invariant #2). Threat model:
+`docs/threat-models/error-tracking.md`. Only genuine server faults are captured (5xx + unhandled; 4xx is
+skipped), via a non-invasive interceptor that observes + rethrows — the response shape is unchanged.
+
+- **Backend:** self-hosted **GlitchTip** (Sentry-API-compatible) as a gated Compose service is **Slice B** (not
+  yet in the tree); SaaS Sentry EU is a one-line DSN swap (same SDK + protocol, zero lock-in).
+- **Arming:** stand up GlitchTip (or point at Sentry EU), create a project, then set **`SENTRY_DSN`** in the
+  deploy env — it is already wired into the `api` container (Slice A), so nothing else is needed (it is a
+  write-only **ingest** key, not a read credential, so env is fine; `SENTRY_RELEASE` defaults to `IMAGE_TAG`).
+  The mounted-file form (`SENTRY_DSN_FILE` → an `argus-sentry-dsn` Key Vault secret) lands with the GlitchTip
+  service in Slice B. Nothing emits until the DSN is set.
