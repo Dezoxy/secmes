@@ -120,6 +120,45 @@ test('security recovery keeps the recovery-file import path available', async ({
   await expect(dialog.getByRole('button', { name: 'Replace this device' })).toBeVisible();
 });
 
+test('security recovery reminder is local and dismissible', async ({ page }) => {
+  await page.goto('/chat');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Security & Recovery' }).click();
+
+  const reminder = dialog.getByText('Set up recovery before you rely on this device');
+  await expect(reminder).toBeVisible();
+
+  await dialog.getByRole('button', { name: 'Dismiss reminder' }).click();
+  await expect(reminder).toBeHidden();
+
+  await dialog.getByRole('button', { name: 'Privacy' }).click();
+  await dialog.getByRole('button', { name: 'Security & Recovery' }).click();
+  await expect(reminder).toBeHidden();
+});
+
+test('security recovery shows passphrase strength while creating backup', async ({ page }) => {
+  await page.goto('/chat');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Security & Recovery' }).click();
+
+  const strength = dialog.getByRole('meter', { name: 'Recovery passphrase strength' });
+  await expect(strength).toHaveAttribute('aria-valuenow', '0');
+
+  const passphrase = dialog.getByLabel('Recovery passphrase', { exact: true });
+
+  await passphrase.fill('short');
+  await expect(strength).toHaveAttribute('aria-valuenow', '1');
+  await expect(dialog.getByText('Weak', { exact: true })).toBeVisible();
+
+  await passphrase.fill('longer-Passphrase-42!');
+  await expect(strength).toHaveAttribute('aria-valuenow', '4');
+  await expect(dialog.getByText('Strong', { exact: true })).toBeVisible();
+});
+
 test('settings sections preserve defaults after component split', async ({ page }) => {
   await page.goto('/chat');
   await page.getByRole('button', { name: 'Open settings' }).click();
