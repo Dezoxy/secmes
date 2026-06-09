@@ -673,9 +673,9 @@ git commit -m "feat(web): restrict pwa caching"
 - Create: `apps/web/src/lib/telemetry.ts`
 - Create: `apps/web/src/lib/telemetry.spec.ts`
 
-- [ ] Add privacy-safe telemetry helpers for event names and technical metadata only.
-- [ ] Add tests that reject message content, tokens, keys, passphrases, presigned URLs, and full authorization headers.
-- [ ] Do not send telemetry anywhere in this step; define the local safety boundary first.
+- [x] Add privacy-safe telemetry helpers for event names and technical metadata only.
+- [x] Add tests that reject message content, tokens, keys, passphrases, presigned URLs, and full authorization headers.
+- [x] Do not send telemetry anywhere in this step; define the local safety boundary first.
 
 **Verification:**
 
