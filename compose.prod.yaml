@@ -505,9 +505,13 @@ secrets:
   # Sourced from ${ARGUS_SECRETS_DIR} — local dev uses the gitignored ./secrets; prod points it at the tmpfs
   # dir that argus-secrets.service fills from Key Vault via the Managed Identity (Slice 3:
   # ARGUS_SECRETS_DIR=/run/argus/secrets). Either way the values are credential FILES, never committed/env.
-  # NOTE: the on-disk files are 0400 root:root, but Docker Compose v2 (non-swarm) CHOWNS each mounted secret
-  # at /run/secrets/<name> to the consuming container's effective UID — so the NON-root services read them
-  # fine (api uid 1000, postgres uid 999, grafana uid 472, …). Empirically verified; do NOT widen to 0444.
+  # NOTE: the on-disk files are root-owned mode 0444 (NOT 0400). File-based Compose secrets are bind-mounted
+  # into the container with the host owner/mode UNCHANGED on Linux — there is NO uid/gid remapping (that only
+  # happens on macOS Docker Desktop's file-sharing layer, which is why a Mac test of 0400 misleadingly passes).
+  # Our services run NON-root (api/node uid 1000, postgres uid 999, grafana uid 472, redis uid 999), so a
+  # root-owned 0400 file would be unreadable and the stack would fail to start on the real VM. 0444 lets the
+  # container user read it; confinement is the 0700 root tmpfs SECRETS_DIR (host non-root users can't traverse
+  # it; the root daemon mounts the file in), NOT the file mode. Set by fetch-keyvault-secrets.sh / deploy.sh.
   postgres_password:
     file: ${ARGUS_SECRETS_DIR:-./secrets}/postgres_password
   database_url:

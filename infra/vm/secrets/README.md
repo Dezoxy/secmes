@@ -11,12 +11,14 @@ backup/cleanup units already reference. Threat model: [`docs/threat-models/vm-se
 
 ```
 boot ─▶ argus-secrets.service ─▶ fetch-keyvault-secrets.sh
-          IMDS (Managed Identity) → token → Key Vault REST → /run/argus/secrets/<file>  (tmpfs, 0400 root)
+          IMDS (Managed Identity) → token → Key Vault REST → /run/argus/secrets/<file>  (tmpfs, 0444 root, in a 0700 dir)
 ```
 
 `fetch-keyvault-secrets.sh` gets a Managed-Identity token from IMDS (`169.254.169.254`), reads each secret
-from `https://<vault>.vault.azure.net`, and writes it atomically to `/run/argus/secrets/` (tmpfs, `0400`
-root). It logs secret **names + status only**, never values, and **fails closed** (any error exits non-zero;
+from `https://<vault>.vault.azure.net`, and writes it atomically to `/run/argus/secrets/` (tmpfs, `0444`
+root inside a `0700` root dir — `0444` so the non-root container users can read the bind-mounted Compose
+secrets; the `0700` dir is the confinement boundary). It logs secret **names + status only**, never values,
+and **fails closed** (any error exits non-zero;
 consumers `Requires=` this unit, so they don't start on a missing secret).
 
 ## Secrets it delivers
@@ -127,7 +129,7 @@ docker compose -f /opt/argus/compose.prod.yaml up -d
 systemctl restart argus-secrets          # re-fetch on demand — RESTART, not start: the oneshot is
                                          # RemainAfterExit=yes, so `start` is a no-op once it's active
 journalctl -u argus-secrets --no-pager   # names + status only — never a value
-ls -l /run/argus/secrets                 # 0400 root:root, on tmpfs
+ls -l /run/argus/secrets                 # 0444 root:root files in a 0700 root dir, on tmpfs
 ```
 
 Rotation: update the value in Key Vault, `systemctl restart argus-secrets` (re-runs the fetch, atomic

@@ -108,8 +108,10 @@ export ARGUS_SECRETS_DIR="$SECRETS_DIR"
 #        inspect` / the daemon's at-rest config):
 #          • redis.conf  → redis-server `requirepass` (config-file AUTH, never a `--requirepass` argv leak)
 #          • redis_url   → the api's REDIS_URL_FILE (ioredis parses `redis://:<pw>@redis:6379`)
-#        Both are 0400 tmpfs Docker-secret files. The raw redis_password file (already fetched) is mounted into
-#        redis so its healthcheck reads REDISCLI_AUTH from a file too. So NO Redis credential ever lands in env.
+#        Both are 0444 tmpfs Docker-secret files (0444 not 0400 — file-secrets are bind-mounted root-owned and
+#        must be readable by the non-root container users; see the chmod note below). The raw redis_password
+#        file (already fetched) is mounted into redis so its healthcheck reads REDISCLI_AUTH from a file too.
+#        So NO Redis credential ever lands in env.
 #        These must exist before the first `up -d ... redis` — generating them in step 6 (after redis already
 #        started) fails the first deploy because the `redis_conf` secret source would be absent. ---
 [ -s "$SECRETS_DIR/redis_password" ] || {
@@ -128,9 +130,13 @@ case "$_redispw" in
   ;;
 esac
 printf 'save ""\nappendonly no\nrequirepass %s\n' "$_redispw" >"$SECRETS_DIR/redis.conf"
-chmod 0400 "$SECRETS_DIR/redis.conf"
 printf 'redis://:%s@redis:6379' "$_redispw" >"$SECRETS_DIR/redis_url"
-chmod 0400 "$SECRETS_DIR/redis_url"
+# Mode 0444, NOT 0400: file-based Compose secrets are bind-mounted, and the host file's owner/mode carry
+# through to the container UNCHANGED on Linux (no uid/gid remapping — that only happens on macOS Docker
+# Desktop's file-sharing layer, which is why a Mac test misleadingly "passes"). These files are root-owned,
+# so a 0400 file is unreadable by the non-root consumers (redis uid 999, api/node uid 1000) and the rollout
+# fails. 0444 lets the container user read them; confinement is the 0700 root tmpfs SECRETS_DIR, not the mode.
+chmod 0444 "$SECRETS_DIR/redis.conf" "$SECRETS_DIR/redis_url"
 _redispw=""
 
 # --- 4. Bring up data services first; wait for Postgres to be healthy before migrating. (redis comes up

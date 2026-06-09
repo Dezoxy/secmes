@@ -108,7 +108,9 @@ hostnames are configured in the Cloudflare Zero Trust dashboard, not in this rep
 ## Secrets (Key Vault → credential files — Slice 3)
 
 No secret values live in the repo. `argus-secrets.service` fetches them from Azure Key Vault via the VM's
-Managed Identity into `/run/argus/secrets/` (tmpfs, `0400` root) at boot — see
+Managed Identity into `/run/argus/secrets/` (tmpfs, `0444` root files inside a `0700` root dir — `0444` so the
+non-root container users can read the bind-mounted Compose secrets, since Docker does not remap the file owner
+on Linux; the `0700` dir is the confinement boundary) at boot — see
 [`infra/vm/secrets/`](../infra/vm/secrets/README.md). The stack consumes them as **mounted credential files**
 (Docker secrets at `/run/secrets/*`), which the app reads via `*_FILE` env vars (invariant #5 — never the
 value in env). Compose's secret sources point at `${ARGUS_SECRETS_DIR}` (`/run/argus/secrets` in prod,
