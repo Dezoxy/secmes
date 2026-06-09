@@ -5,6 +5,11 @@
 #   - Availability: the metrics target is up (a proxy for the API process being alive).
 #   - Errors:       server-error (5xx) ratio < 1% (warn) / < 5% (page) over 10m.
 #   - Latency:      p95 request latency < 1s over 10m.
+#
+# The 5xx ratio is intentionally NOT denominator-clamped (no `clamp_min(..., 1)`): clamping to 1 req/s would
+# hide low-traffic incidents (e.g. 1 failure out of 1 request reads as ~0.3% instead of 100%). 5xx ⊆ total, so
+# the numerator can't exceed the denominator → no real divide-by-zero; at genuine zero traffic the ratio is
+# 0/0 = NaN and `NaN > threshold` is false, so it correctly does not fire.
 groups:
   - name: argus-api
     rules:
@@ -20,7 +25,7 @@ groups:
       - alert: ArgusApiHighServerErrorRate
         expr: |
           sum(rate(argus_api_http_requests_total{status=~"5.."}[5m]))
-            / clamp_min(sum(rate(argus_api_http_requests_total[5m])), 1)
+            / sum(rate(argus_api_http_requests_total[5m]))
             > 0.05
         for: 10m
         labels:
@@ -32,7 +37,7 @@ groups:
       - alert: ArgusApiElevatedServerErrorRate
         expr: |
           sum(rate(argus_api_http_requests_total{status=~"5.."}[5m]))
-            / clamp_min(sum(rate(argus_api_http_requests_total[5m])), 1)
+            / sum(rate(argus_api_http_requests_total[5m]))
             > 0.01
         for: 15m
         labels:

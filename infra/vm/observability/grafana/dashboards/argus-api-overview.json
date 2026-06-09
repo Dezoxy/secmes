@@ -38,7 +38,7 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
-          "expr": "sum(rate(argus_api_http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(argus_api_http_requests_total[5m])), 1)",
+          "expr": "sum(rate(argus_api_http_requests_total{status=~\"5..\"}[5m])) / sum(rate(argus_api_http_requests_total[5m]))",
           "legendFormat": "5xx ratio"
         }
       ]
