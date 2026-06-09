@@ -1,16 +1,31 @@
-<svg width="180" height="180" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <g clip-path="url(#clip0_7960_43945)">
-    <rect width="180" height="180" rx="37" fill="#A33BFF" />
-    <g transform="translate(4.5 4.5) scale(0.95)">
-      <path fill="#FFFFFF"
-        d="M101.141 53H136.632C151.023 53 162.689 64.6662 162.689 79.0573V112.904H148.112V79.0573C148.112 78.7105 148.098 78.3662 148.072 78.0251L112.581 112.898C112.701 112.902 112.821 112.904 112.941 112.904H148.112V126.672H112.941C98.5504 126.672 86.5638 114.891 86.5638 100.5V66.7434H101.141V100.5C101.141 101.15 101.191 101.792 101.289 102.422L137.56 66.7816C137.255 66.7563 136.945 66.7434 136.632 66.7434H101.141V53Z" />
-      <path fill="#FFFFFF"
-        d="M65.2926 124.136L14 66.7372H34.6355L64.7495 100.436V66.7372H80.1365V118.47C80.1365 126.278 70.4953 129.958 65.2926 124.136Z" />
-    </g>
-  </g>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1024" height="1024" fill="url(#base)" />
+  <circle cx="344" cy="372" r="312" fill="#6F20ED" fill-opacity="0.42" />
+  <circle cx="634" cy="350" r="300" fill="#7B2CF3" fill-opacity="0.42" />
+  <circle cx="308" cy="650" r="290" fill="#5010C8" fill-opacity="0.36" />
+  <circle cx="712" cy="650" r="292" fill="#5D1AD8" fill-opacity="0.34" />
+  <circle cx="512" cy="512" r="390" fill="#4110B8" fill-opacity="0.24" />
+  <circle cx="512" cy="512" r="284" fill="url(#centerGlow)" fill-opacity="0.72" />
+  <path
+    d="M513 272C655 272 770 367 770 485C770 603 655 698 513 698C462 698 414 686 374 664L250 704L292 590C269 558 256 522 256 485C256 367 371 272 513 272Z"
+    fill="url(#bubbleFill)"
+    stroke="white"
+    stroke-width="58"
+    stroke-linejoin="round"
+  />
   <defs>
-    <clipPath id="clip0_7960_43945">
-      <rect width="180" height="180" fill="white" />
-    </clipPath>
+    <linearGradient id="base" x1="96" y1="78" x2="900" y2="930" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#BE61FF" />
+      <stop offset="0.46" stop-color="#7A24F2" />
+      <stop offset="1" stop-color="#8E45F7" />
+    </linearGradient>
+    <radialGradient id="centerGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(512 480) rotate(90) scale(356)">
+      <stop stop-color="#8F35FF" />
+      <stop offset="1" stop-color="#3E0FAE" />
+    </radialGradient>
+    <linearGradient id="bubbleFill" x1="388" y1="306" x2="664" y2="684" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#781EFF" />
+      <stop offset="1" stop-color="#3D0DCA" />
+    </linearGradient>
   </defs>
 </svg>

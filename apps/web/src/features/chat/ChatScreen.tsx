@@ -5,6 +5,7 @@ import { ConversationManager, type ConversationSession } from '../../lib/convers
 import type { MessagingDeps } from '../../lib/messaging';
 import { getMlsSession } from '../../lib/mls';
 import { useAuth } from '../auth/AuthContext';
+import { ArgusAppIcon } from '../brand/ArgusAppIcon';
 import { useDevice } from '../device/DeviceContext';
 import { usePwaUpdate } from '../pwa/PwaUpdateContext';
 import { ConversationList } from './ConversationList';
@@ -334,9 +335,7 @@ export default function ChatScreen() {
         >
           <div className="border-b border-white/5 p-4">
             <div className="flex items-center justify-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-500">
-                <MessageCircle className="h-4 w-4 text-white" />
-              </div>
+              <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />
               <span className="text-xl font-bold tracking-wider">
                 <span className="bg-gradient-to-r from-purple-400 to-purple-600 bg-clip-text text-transparent">
                   ARGUS

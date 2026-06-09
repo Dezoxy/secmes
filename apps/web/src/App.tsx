@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { Fingerprint, MessageCircle, RefreshCw } from 'lucide-react';
+import { Fingerprint, RefreshCw } from 'lucide-react';
 import { useAuth } from './features/auth/AuthContext';
+import { ArgusAppIcon } from './features/brand/ArgusAppIcon';
 import { usePwaUpdate } from './features/pwa/PwaUpdateContext';
 import AuthCallbackRoute from './routes/AuthCallbackRoute';
 import ChatRoute from './routes/ChatRoute';
@@ -69,9 +70,7 @@ function LandingRoute() {
             }`}
           >
             <div className="text-white text-xl font-bold tracking-wider flex items-center gap-2">
-              <div className="w-8 h-8 bg-purple-500 rounded-lg flex items-center justify-center">
-                <MessageCircle className="w-4 h-4 text-white" />
-              </div>
+              <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />
               <span className="bg-gradient-to-r from-purple-400 to-purple-600 bg-clip-text text-transparent">
                 ARGUS
               </span>

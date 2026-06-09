@@ -11,9 +11,21 @@ describe('PWA installability policy', () => {
     expect(argusPwaManifest.lang).toBe('en');
     expect(argusPwaManifest.display).toBe('standalone');
     expect(argusPwaManifest.icons).toEqual([
-      { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' },
-      { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
-      { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+      { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+      { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+      {
+        src: '/maskable-icon-192.png',
+        sizes: '192x192',
+        type: 'image/png',
+        purpose: 'maskable',
+      },
+      {
+        src: '/maskable-icon-512.png',
+        sizes: '512x512',
+        type: 'image/png',
+        purpose: 'maskable',
+      },
     ]);
   });
 
@@ -35,6 +47,7 @@ describe('PWA installability policy', () => {
       'Manifest needs at least one local icon.',
       'Manifest needs a local 192x192 PNG icon.',
       'Manifest needs a local 512x512 PNG icon.',
+      'Manifest needs a local 512x512 maskable PNG icon.',
       'Manifest display must be installable.',
     ]);
   });

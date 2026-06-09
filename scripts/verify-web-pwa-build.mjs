@@ -32,8 +32,13 @@ for (const file of [
   'manifest.webmanifest',
   'robots.txt',
   'sw.js',
+  'favicon-16.png',
+  'favicon-32.png',
+  'apple-touch-icon.png',
   'icon-192.png',
   'icon-512.png',
+  'maskable-icon-192.png',
+  'maskable-icon-512.png',
 ]) {
   assert(existsSync(distPath(file)), `missing ${file}`);
 }
@@ -44,6 +49,14 @@ assert(
   indexHtml.includes('name="description"') &&
     indexHtml.includes('privacy-first, end-to-end-encrypted messaging PWA'),
   'index.html does not include the Lighthouse-visible app description',
+);
+assert(
+  indexHtml.includes('rel="apple-touch-icon"'),
+  'index.html does not link the Apple touch icon',
+);
+assert(
+  indexHtml.includes('apple-mobile-web-app-title'),
+  'index.html does not include the iOS Home Screen title',
 );
 assert(indexHtml.includes('type="module"'), 'index.html does not load the app module');
 
@@ -87,13 +100,15 @@ assert(
         icon.src === '/icon.svg' &&
         icon.sizes === 'any' &&
         icon.type === 'image/svg+xml' &&
-        icon.purpose === 'any maskable',
+        icon.purpose === 'any',
     ),
-  'manifest does not include the local maskable SVG icon',
+  'manifest does not include the local SVG icon',
 );
-for (const [src, sizes] of [
-  ['/icon-192.png', '192x192'],
-  ['/icon-512.png', '512x512'],
+for (const [src, sizes, purpose] of [
+  ['/icon-192.png', '192x192', 'any'],
+  ['/icon-512.png', '512x512', 'any'],
+  ['/maskable-icon-192.png', '192x192', 'maskable'],
+  ['/maskable-icon-512.png', '512x512', 'maskable'],
 ]) {
   assert(
     manifest.icons.some(
@@ -101,9 +116,9 @@ for (const [src, sizes] of [
         icon.src === src &&
         icon.sizes === sizes &&
         icon.type === 'image/png' &&
-        icon.purpose === 'any maskable',
+        icon.purpose === purpose,
     ),
-    `manifest does not include the local ${sizes} PNG icon`,
+    `manifest does not include the local ${sizes} ${purpose} PNG icon`,
   );
 }
 
