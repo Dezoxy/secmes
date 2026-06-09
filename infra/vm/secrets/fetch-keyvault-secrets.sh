@@ -9,8 +9,13 @@
 # Security model:
 #   - NO static credentials. The access token is minted by the VM's Managed Identity via IMDS
 #     (169.254.169.254) — link-local, on-box only — and is scoped to vault.azure.net (read).
-#   - Secret VALUES are written to tmpfs (/run, never disk-backed) at mode 0400 owned by root: read by the
-#     Docker daemon and by systemd LoadCredential (both root). Values are written ATOMICALLY (temp + mv) and
+#   - Secret VALUES are written to tmpfs (/run, never disk-backed) at mode 0444 owned by root. The files MUST
+#     be mode 0444, not 0400: file-based Compose secrets are bind-mounted into the container with the host
+#     owner/mode UNCHANGED on Linux (no uid/gid remapping — that only happens on macOS Docker Desktop's
+#     file-sharing layer), and the consuming services run as NON-root (api/node uid 1000, postgres uid 999,
+#     grafana uid 472, redis uid 999), so a root-owned 0400 file would be unreadable and the stack would fail
+#     to start. Confinement is the 0700 root tmpfs SECRETS_DIR (host non-root users can't traverse it; the
+#     Docker daemon mounts as root), NOT the file mode. Values are written ATOMICALLY (temp + mv) and
 #     are NEVER exported to the environment (so not in /proc/<pid>/environ, not inherited by children) nor
 #     placed in argv. Logs carry secret NAMES + HTTP status ONLY — never a value (invariant #2/#5).
 #   - FAIL CLOSED: any failed fetch or empty value exits non-zero. The stack/backup units declare
@@ -39,6 +44,7 @@ SECRETS=(
   "argus-postgres-owner-password=postgres_password"
   "argus-database-url=database_url"
   "argus-s3-secret-access-key=s3_secret_access_key"
+  "argus-redis-password=redis_password"
   "argus-tunnel-token=tunnel_token"
   "argus-zitadel-masterkey=zitadel_masterkey"
   "argus-zitadel-db-password=zitadel_db_password"
@@ -50,7 +56,7 @@ SECRETS=(
 )
 
 # OPTIONAL secrets — may be ABSENT on a first boot (provisioned later). Unlike the mandatory set, an absent
-# value is NOT fatal: we seed an EMPTY 0400 file so the compose secret mount still resolves, and the consumer
+# value is NOT fatal: we seed an EMPTY 0444 file so the compose secret mount still resolves, and the consumer
 # runs degraded until the value is provisioned. Used for the Zitadel Login V2 service-user PAT, which Zitadel
 # only mints AFTER first init — the operator stores it in Key Vault during arming (see vm-zitadel.md).
 OPTIONAL_SECRETS=(
@@ -64,8 +70,9 @@ trap cleanup EXIT
 
 # Under the systemd unit, `RuntimeDirectory=argus/secrets` already created this dir (root:root 0700) before
 # ExecStart — surviving a reboot that wipes /run. This install -d is just a fallback for a MANUAL run outside
-# systemd; root:root 0700 with NO chgrp (the unit's empty CapabilityBoundingSet drops CAP_CHOWN, and the
-# secret files are 0400 read by root consumers anyway, so the `argus` group was never needed).
+# systemd; root:root 0700 with NO chgrp (the unit's empty CapabilityBoundingSet drops CAP_CHOWN). The 0700
+# dir is the real confinement boundary — host non-root users can't traverse it; the root Docker daemon can,
+# so it bind-mounts the 0444 secret files into containers where the non-root service users read them.
 install -d -m 0700 "$SECRETS_DIR"
 umask 0077
 
@@ -82,7 +89,8 @@ token_json=""
   exit 1
 }
 
-# --- 2. Fetch each secret → atomic 0400 root file. Fail closed on the first error. ---
+# --- 2. Fetch each secret → atomic 0444 root file (see header: non-root containers must read it via bind
+#        mount). Fail closed on the first error. ---
 for entry in "${SECRETS[@]}"; do
   kv_name="${entry%%=*}"
   file="${entry##*=}"
@@ -110,13 +118,13 @@ EOF
 
   printf '%s' "$value" >"$tmp"
   value=""
-  chmod 0400 "$tmp"
+  chmod 0444 "$tmp"
   mv -f "$tmp" "$dest" # atomic replace (rotation-safe)
   log "delivered ${kv_name} -> ${file}"
 done
 
 # --- 3. Optional secrets: a value that hasn't been provisioned YET (HTTP 404) is OK on a first boot — seed an
-#        empty 0400 file so the compose mount resolves (the consumer runs degraded until provisioned). But
+#        empty 0444 file so the compose mount resolves (the consumer runs degraded until provisioned). But
 #        distinguish that from a transient/permission error: branch on the HTTP status (no `-f`, capture
 #        `%{http_code}`) so a 5xx/403/connection failure FAILS CLOSED rather than silently overwriting an
 #        already-provisioned secret with an empty file (which would degrade the consumer while reporting OK). ---
@@ -144,7 +152,7 @@ EOF
     }
     printf '%s' "$value" >"$tmp"
     value=""
-    chmod 0400 "$tmp"
+    chmod 0444 "$tmp"
     mv -f "$tmp" "$dest"
     log "delivered ${kv_name} -> ${file}"
     ;;
@@ -157,7 +165,7 @@ EOF
       log "WARN ${kv_name} now 404s but ${file} is already populated — KEEPING the existing value; restore the Key Vault secret"
     else
       : >"$tmp" # genuinely not provisioned yet → seed EMPTY so the mount resolves (consumer degraded)
-      chmod 0400 "$tmp"
+      chmod 0444 "$tmp"
       mv -f "$tmp" "$dest"
       log "optional ${kv_name} not provisioned (404) — seeded EMPTY ${file} (consumer degraded until set)"
     fi

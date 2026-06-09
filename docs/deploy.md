@@ -108,7 +108,9 @@ hostnames are configured in the Cloudflare Zero Trust dashboard, not in this rep
 ## Secrets (Key Vault → credential files — Slice 3)
 
 No secret values live in the repo. `argus-secrets.service` fetches them from Azure Key Vault via the VM's
-Managed Identity into `/run/argus/secrets/` (tmpfs, `0400` root) at boot — see
+Managed Identity into `/run/argus/secrets/` (tmpfs, `0444` root files inside a `0700` root dir — `0444` so the
+non-root container users can read the bind-mounted Compose secrets, since Docker does not remap the file owner
+on Linux; the `0700` dir is the confinement boundary) at boot — see
 [`infra/vm/secrets/`](../infra/vm/secrets/README.md). The stack consumes them as **mounted credential files**
 (Docker secrets at `/run/secrets/*`), which the app reads via `*_FILE` env vars (invariant #5 — never the
 value in env). Compose's secret sources point at `${ARGUS_SECRETS_DIR}` (`/run/argus/secrets` in prod,
@@ -122,6 +124,11 @@ value in env). Compose's secret sources point at `${ARGUS_SECRETS_DIR}` (`/run/a
   grants `argus_app` LOGIN + a Key Vault password (migration 0001 creates it NOLOGIN); the owner credential
   stays separate, used only for migrations (Slice 4 `MIGRATION_DATABASE_URL`).
 - `secrets/s3_secret_access_key` → the api reads it via `S3_SECRET_ACCESS_KEY_FILE` (the B2 key secret).
+- `secrets/redis_password` → `deploy.sh` generates two credential **files** from it: `redis.conf`
+  (`requirepass`, config-file AUTH — never a `--requirepass` argv) for the server, and `redis_url`
+  (`redis://:<pw>@redis:6379`) which the api reads via `REDIS_URL_FILE`. The redis healthcheck reads this
+  `redis_password` file directly for `REDISCLI_AUTH`. No Redis credential ever rides env / `docker inspect`.
+  URL-safe (`openssl rand -hex 32`).
 - `secrets/zitadel_masterkey` → `zitadel` reads it via `--masterkeyFile` (32-byte instance masterkey).
 - `secrets/zitadel_db_password` → `zitadel-db` reads it via `POSTGRES_PASSWORD_FILE`; `zitadel` reads the
   **same value** as the runtime `${ZITADEL_DB_PASSWORD}` (Zitadel has no `_FILE` env form for it).

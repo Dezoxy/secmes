@@ -103,9 +103,68 @@ export ARGUS_API_IMAGE="$api_digest"
 export ARGUS_INGRESS_IMAGE="$ingress_digest"
 export ARGUS_SECRETS_DIR="$SECRETS_DIR"
 
-# --- 4. Bring up data services first; wait for Postgres to be healthy before migrating. ---
+# --- 3b. Redis AUTH prep — MUST run before step 4 starts redis. From the Key Vault redis_password, generate
+#        two credential FILES (never env — invariant #5: a password in container env surfaces via `docker
+#        inspect` / the daemon's at-rest config):
+#          • redis.conf  → redis-server `requirepass` (config-file AUTH, never a `--requirepass` argv leak)
+#          • redis_url   → the api's REDIS_URL_FILE (ioredis parses `redis://:<pw>@redis:6379`)
+#        Both are 0444 tmpfs Docker-secret files (0444 not 0400 — file-secrets are bind-mounted root-owned and
+#        must be readable by the non-root container users; see the chmod note below). The raw redis_password
+#        file (already fetched) is mounted into redis so its healthcheck reads REDISCLI_AUTH from a file too.
+#        So NO Redis credential ever lands in env.
+#        These must exist before the first `up -d ... redis` — generating them in step 6 (after redis already
+#        started) fails the first deploy because the `redis_conf` secret source would be absent. ---
+[ -s "$SECRETS_DIR/redis_password" ] || {
+  log "FATAL: missing/empty runtime secret file: redis_password"
+  exit 1
+}
+_redispw="$(cat "$SECRETS_DIR/redis_password")"
+# Enforce the documented contract: the password rides UNQUOTED in redis.conf's `requirepass` and in redis_url's
+# userinfo, so a value with a space / `#` / `@` / `:` / `"` would be silently truncated or mis-parsed. Reject
+# anything outside the URL-unreserved set (a comment isn't enforcement) — `openssl rand -hex 32` satisfies it.
+# Loud FATAL beats a half-set password or a wrong-password api at runtime.
+case "$_redispw" in
+*[!A-Za-z0-9._~-]*)
+  log "FATAL: argus-redis-password must be URL-safe (A-Za-z0-9._~- only — e.g. openssl rand -hex 32)"
+  exit 1
+  ;;
+esac
+_redis_conf="$(printf 'save ""\nappendonly no\nrequirepass %s' "$_redispw")"
+# Detect whether the redis password/conf CHANGED since the last deploy so step 4 can force-recreate redis only
+# when it must (see there). `up -d` recreates a container on a config/image change but NOT when a mounted
+# secret FILE's *content* changes — so a rotated redis password wouldn't reach the running redis without this.
+REDIS_CONF_CHANGED=1
+if [ -f "$SECRETS_DIR/redis.conf" ] && [ "$_redis_conf" = "$(cat "$SECRETS_DIR/redis.conf")" ]; then
+  REDIS_CONF_CHANGED=0
+fi
+printf '%s\n' "$_redis_conf" >"$SECRETS_DIR/redis.conf"
+printf 'redis://:%s@redis:6379' "$_redispw" >"$SECRETS_DIR/redis_url"
+# Mode 0444, NOT 0400: file-based Compose secrets are bind-mounted, and the host file's owner/mode carry
+# through to the container UNCHANGED on Linux (no uid/gid remapping — that only happens on macOS Docker
+# Desktop's file-sharing layer, which is why a Mac test misleadingly "passes"). These files are root-owned,
+# so a 0400 file is unreadable by the non-root consumers (redis uid 999, api/node uid 1000) and the rollout
+# fails. 0444 lets the container user read them; confinement is the 0700 root tmpfs SECRETS_DIR, not the mode.
+chmod 0444 "$SECRETS_DIR/redis.conf" "$SECRETS_DIR/redis_url"
+_redispw=""
+_redis_conf=""
+
+# --- 4. Bring up data services first; wait for Postgres to be healthy before migrating. (redis comes up
+#        authenticated — its redis.conf + redis_url credential files were generated in step 3b above; the
+#        password is never passed via env.) ---
 log "starting data services"
-docker compose -f "$COMPOSE" up -d postgres redis
+docker compose -f "$COMPOSE" up -d postgres
+# Redis loads `requirepass` from redis.conf ONCE at startup. On a password ROTATION the conf file changed but
+# `up -d` won't recreate the already-running redis (only a config/image change triggers that, not a mounted
+# secret's new content), so it would keep the OLD password while the new-image api reads the NEW redis_url →
+# auth fails. Force-recreate redis when its conf changed (step 3b — also true on a first deploy, where it just
+# creates the container); a routine unchanged deploy leaves the running redis alone so the realtime backplane
+# isn't needlessly bounced. Postgres is never force-recreated here (durable state).
+if [ "${REDIS_CONF_CHANGED:-1}" = 1 ]; then
+  log "redis conf is new/changed — (re)creating redis to load the current password"
+  docker compose -f "$COMPOSE" up -d --force-recreate --no-deps redis
+else
+  docker compose -f "$COMPOSE" up -d --no-deps redis
+fi
 pg_cid="$(docker compose -f "$COMPOSE" ps -q postgres)"
 for _ in $(seq 1 60); do
   [ "$(docker inspect -f '{{.State.Health.Status}}' "$pg_cid" 2>/dev/null)" = "healthy" ] && break
@@ -164,10 +223,22 @@ for _f in tunnel_token zitadel_db_password zitadel_admin_password; do
     exit 1
   }
 done
+# Redis AUTH credential files (redis.conf + redis_url) were generated in step 3b and redis is already up and
+# authenticated; this `up -d` only adds the remaining services. No Redis credential rides env — it's all files.
 TUNNEL_TOKEN="$(cat "$SECRETS_DIR/tunnel_token")" \
   ZITADEL_DB_PASSWORD="$(cat "$SECRETS_DIR/zitadel_db_password")" \
   ZITADEL_ADMIN_PASSWORD="$(cat "$SECRETS_DIR/zitadel_admin_password")" \
   docker compose -f "$COMPOSE" up -d
+# The api reads REDIS_URL_FILE ONCE at module construction and holds a persistent ioredis connection. On a
+# redis password ROTATION the `up -d` above won't recreate the api when the image/config is unchanged (a
+# same-IMAGE_TAG/secret-only redeploy) — it would keep authenticating with the OLD password against the
+# now-rotated redis and break the realtime backplane. So when the conf changed (step 3b), force-recreate the
+# api too — symmetric with the redis recreate in step 4. A normal new-image deploy already recreates it (and
+# REDIS_CONF_CHANGED is 0 when the password didn't change), so this only fires on an actual rotation.
+if [ "${REDIS_CONF_CHANGED:-1}" = 1 ]; then
+  log "redis conf is new/changed — force-recreating api so it reconnects with the current password"
+  docker compose -f "$COMPOSE" up -d --force-recreate --no-deps api
+fi
 
 # --- 6b. Gate on the new app containers becoming HEALTHY — `up -d` returns before they're ready, so without
 #         this a crash-looping rollout would report success. A timeout/unhealthy fails the deploy (set -e),
