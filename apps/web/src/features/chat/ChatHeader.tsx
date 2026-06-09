@@ -45,6 +45,7 @@ function MenuItem({
   value,
   danger = false,
   disabled = false,
+  tabIndex,
   onClick,
 }: {
   icon: LucideIcon;
@@ -52,6 +53,7 @@ function MenuItem({
   value?: string;
   danger?: boolean;
   disabled?: boolean;
+  tabIndex?: number;
   onClick?: () => void;
 }) {
   return (
@@ -59,6 +61,7 @@ function MenuItem({
       type="button"
       onClick={onClick}
       disabled={disabled}
+      tabIndex={tabIndex}
       className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
         danger
           ? 'text-red-300 hover:bg-red-500/10 hover:text-red-200'
@@ -115,6 +118,7 @@ export function ChatHeader({ conversation, onBack, verified, onVerify }: ChatHea
       : isOnline
         ? 'Online'
         : 'Offline';
+  const menuTabIndex = menuOpen ? 0 : -1;
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -245,28 +249,38 @@ export function ChatHeader({ conversation, onBack, verified, onVerify }: ChatHea
             )}`}
             role="menu"
             aria-label="Conversation actions"
+            aria-hidden={!menuOpen}
           >
-            <MenuItem icon={Info} label="Conversation info" onClick={() => openPanel('info')} />
+            <MenuItem
+              icon={Info}
+              label="Conversation info"
+              tabIndex={menuTabIndex}
+              onClick={() => openPanel('info')}
+            />
             <MenuItem
               icon={Users}
               label={conversation.type === 'group' ? 'Members' : 'Contact details'}
               value={`${conversation.participants.length}`}
+              tabIndex={menuTabIndex}
               onClick={() => openPanel('members')}
             />
             <MenuItem
               icon={Search}
               label="Search in conversation"
+              tabIndex={menuTabIndex}
               onClick={() => openPanel('search')}
             />
             <MenuItem
               icon={ImageIcon}
               label="Media, files, links"
               value={`${attachments.length}`}
+              tabIndex={menuTabIndex}
               onClick={() => openPanel('media')}
             />
             <MenuItem
               icon={muted ? Bell : BellOff}
               label={muted ? 'Unmute notifications' : 'Mute notifications'}
+              tabIndex={menuTabIndex}
               onClick={() => {
                 setMuted((value) => !value);
                 setMenuOpen(false);
@@ -275,12 +289,14 @@ export function ChatHeader({ conversation, onBack, verified, onVerify }: ChatHea
             <MenuItem
               icon={LockKeyhole}
               label="Security details"
+              tabIndex={menuTabIndex}
               onClick={() => openPanel('security')}
             />
             {onVerify && (
               <MenuItem
                 icon={verified ? ShieldCheck : Shield}
                 label={verified ? 'Review safety number' : 'Verify safety number'}
+                tabIndex={menuTabIndex}
                 onClick={() => {
                   setMenuOpen(false);
                   onVerify();

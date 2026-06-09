@@ -57,7 +57,13 @@ export function MessageList({ conversation, onImageClick }: MessageListProps) {
     senderId === currentUser.id ? currentUser : users.find((u) => u.id === senderId);
 
   return (
-    <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+    <div
+      ref={scrollRef}
+      role="region"
+      aria-label="Message thread"
+      aria-live="polite"
+      className="flex-1 overflow-y-auto px-4 py-4 space-y-3"
+    >
       {conversation.messages.map((message, index) => {
         const isOwn = message.senderId === currentUser.id;
         const sender = getSender(message.senderId);

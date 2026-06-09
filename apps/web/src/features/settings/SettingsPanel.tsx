@@ -266,7 +266,7 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
             <X className="h-5 w-5" />
           </IconButton>
         </div>
-        <div className="space-y-1">
+        <nav className="space-y-1" aria-label="Settings sections">
           {sections.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -287,7 +287,7 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
               <ChevronRight className="ml-auto h-4 w-4 text-white/25 sm:hidden" />
             </button>
           ))}
-        </div>
+        </nav>
       </aside>
 
       <main

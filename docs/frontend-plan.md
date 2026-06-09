@@ -741,6 +741,58 @@ Best first implementation batch after review:
 - Step 6: Adopt UI Primitives Mechanically
 - Step 8: Settings Section Split
 
+## Frontend-Only Follow-up Roadmap
+
+These follow-ups stay inside `apps/web` and frontend docs unless a later step explicitly says a backend
+contract is ready. Do not add server routes, database tables, cloud config, or auth-provider policy work in
+this roadmap.
+
+### F1: A11y and Responsive Pass
+
+**Purpose:** Improve keyboard, screen-reader, and viewport behavior for the existing app surfaces.
+
+- [x] F1A: Add baseline Playwright coverage for chat/settings landmarks, keyboard focus return, hidden menu
+      tab stops, and mobile chat/sidebar navigation.
+- [ ] F1B: Sweep focus states, accessible names, `aria-expanded`/`aria-current` usage, and modal focus entry.
+- [ ] F1C: Run desktop and mobile browser QA for chat, settings, profile, composer, and route shells.
+
+**Verification:** `pnpm frontend:verify`, plus browser QA on desktop and one mobile viewport.
+
+### F2: Local Lighthouse PWA Pass
+
+**Purpose:** Run Lighthouse against the locally built PWA and fix frontend-owned installability, performance,
+and accessibility warnings.
+
+- [ ] Keep this frontend-only: no deploy-header or Cloudflare changes.
+- [ ] Preserve the static-only service-worker policy.
+- [ ] Keep auth/API/WS/presigned URLs out of runtime caches.
+- [ ] Document any remaining iOS installed-PWA proof as user/device work.
+
+### F3: Key-loss UX Polish
+
+**Purpose:** Improve recovery guidance without adding the backend backup upload path yet.
+
+- [ ] Add a first-run recovery reminder that stays local and dismissible.
+- [ ] Add a client-only passphrase strength meter for recovery backup creation.
+- [ ] Keep recovery copy clear that identity recovery does not restore past message history.
+- [ ] Do not upload backups or add backend endpoints in this follow-up.
+
+### F4: UI Consistency Sweep
+
+**Purpose:** Smooth existing chat/settings surfaces after the structural refactor.
+
+- [ ] Normalize spacing, icon sizing, menu animations, modal entry, and mobile edge spacing.
+- [ ] Preserve the current dark-only product direction and accent-color system.
+- [ ] Add or update Playwright coverage for any interaction changed.
+
+### F5: Bundle-size Follow-up
+
+**Purpose:** Reduce initial frontend payload where it is low-risk.
+
+- [ ] Use the existing bundle visibility output as the measurement source.
+- [ ] Prefer lazy-loading non-chat routes, settings sections, and recovery panels before touching crypto paths.
+- [ ] Do not split code in a way that complicates chat startup or the passkey/auth callback path.
+
 ## Standard Verification Before Each PR
 
 Preferred single command after Step 2 exists:

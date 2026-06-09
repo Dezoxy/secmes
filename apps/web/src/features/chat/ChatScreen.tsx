@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { MessageCircle } from 'lucide-react';
 import type { UserSummary } from '../../lib/api';
 import { ConversationManager, type ConversationSession } from '../../lib/conversations';
@@ -81,6 +81,7 @@ export default function ChatScreen() {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   const [verifyOpen, setVerifyOpen] = useState(false);
   // Each direct conversation has its own MLS session, so its own safety number (#20).
   const [numbersByConv, setNumbersByConv] = useState<Record<string, string>>({});
@@ -245,6 +246,16 @@ export default function ChatScreen() {
     if (window.innerWidth < 1024) setShowSidebar(false);
   };
 
+  const openSettings = (trigger: HTMLButtonElement) => {
+    settingsReturnFocusRef.current = trigger;
+    setSettingsOpen(true);
+  };
+
+  const closeSettings = () => {
+    setSettingsOpen(false);
+    window.requestAnimationFrame(() => settingsReturnFocusRef.current?.focus());
+  };
+
   return (
     <div className="min-h-screen bg-[#1a1a24] flex items-center justify-center p-4">
       <div
@@ -253,7 +264,8 @@ export default function ChatScreen() {
         }`}
       >
         {/* Sidebar */}
-        <div
+        <aside
+          aria-label="Conversations"
           className={`${
             showSidebar ? 'flex' : 'hidden lg:flex'
           } w-full lg:w-80 shrink-0 flex-col bg-[#0f0f16] border-r border-white/5 transition-all duration-500 ${
@@ -278,13 +290,15 @@ export default function ChatScreen() {
             selectedId={selectedId}
             onSelect={handleSelect}
             currentUserProfile={currentUserProfile}
-            onSettings={() => setSettingsOpen(true)}
+            onSettings={openSettings}
             onNewConversation={manager ? () => setStartOpen(true) : undefined}
           />
-        </div>
+        </aside>
 
         {/* Main */}
         <div
+          role="main"
+          aria-label="Chat"
           className={`${
             !showSidebar ? 'flex' : 'hidden lg:flex'
           } flex-1 flex-col transition-all duration-500 delay-100 ${
@@ -331,7 +345,7 @@ export default function ChatScreen() {
           profile={anonymousProfile}
           deviceId={deviceId}
           onProfileChange={handleProfileChange}
-          onClose={() => setSettingsOpen(false)}
+          onClose={closeSettings}
         />
       )}
       {startOpen && manager && (
