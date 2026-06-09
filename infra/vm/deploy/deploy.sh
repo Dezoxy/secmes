@@ -103,19 +103,21 @@ export ARGUS_API_IMAGE="$api_digest"
 export ARGUS_INGRESS_IMAGE="$ingress_digest"
 export ARGUS_SECRETS_DIR="$SECRETS_DIR"
 
-# --- 3b. Redis AUTH prep — MUST run before step 4 starts redis. Generate redis.conf from the Key Vault
-#        password: config-file `requirepass`, NEVER a `--requirepass` CLI arg (which would leak the password
-#        into the process list). redis mounts it as the `redis_conf` Docker secret, so the file has to exist
-#        before the first `up -d ... redis` — generating it in step 6 (after redis already started) fails the
-#        first deploy. REDIS_PASSWORD feeds redis-cli's REDISCLI_AUTH for the healthcheck; REDIS_URL carries the
-#        password for the api (ioredis parses it). Both are exported here — runtime values (the TUNNEL_TOKEN-style
-#        exception, never an on-disk env file) — so steps 4–6 inherit them. ---
+# --- 3b. Redis AUTH prep — MUST run before step 4 starts redis. From the Key Vault redis_password, generate
+#        two credential FILES (never env — invariant #5: a password in container env surfaces via `docker
+#        inspect` / the daemon's at-rest config):
+#          • redis.conf  → redis-server `requirepass` (config-file AUTH, never a `--requirepass` argv leak)
+#          • redis_url   → the api's REDIS_URL_FILE (ioredis parses `redis://:<pw>@redis:6379`)
+#        Both are 0400 tmpfs Docker-secret files. The raw redis_password file (already fetched) is mounted into
+#        redis so its healthcheck reads REDISCLI_AUTH from a file too. So NO Redis credential ever lands in env.
+#        These must exist before the first `up -d ... redis` — generating them in step 6 (after redis already
+#        started) fails the first deploy because the `redis_conf` secret source would be absent. ---
 [ -s "$SECRETS_DIR/redis_password" ] || {
   log "FATAL: missing/empty runtime secret file: redis_password"
   exit 1
 }
 _redispw="$(cat "$SECRETS_DIR/redis_password")"
-# Enforce the documented contract: the password rides UNQUOTED in redis.conf's `requirepass` and in REDIS_URL's
+# Enforce the documented contract: the password rides UNQUOTED in redis.conf's `requirepass` and in redis_url's
 # userinfo, so a value with a space / `#` / `@` / `:` / `"` would be silently truncated or mis-parsed. Reject
 # anything outside the URL-unreserved set (a comment isn't enforcement) — `openssl rand -hex 32` satisfies it.
 # Loud FATAL beats a half-set password or a wrong-password api at runtime.
@@ -127,12 +129,13 @@ case "$_redispw" in
 esac
 printf 'save ""\nappendonly no\nrequirepass %s\n' "$_redispw" >"$SECRETS_DIR/redis.conf"
 chmod 0400 "$SECRETS_DIR/redis.conf"
-export REDIS_PASSWORD="$_redispw"
-export REDIS_URL="redis://:${_redispw}@redis:6379"
+printf 'redis://:%s@redis:6379' "$_redispw" >"$SECRETS_DIR/redis_url"
+chmod 0400 "$SECRETS_DIR/redis_url"
 _redispw=""
 
 # --- 4. Bring up data services first; wait for Postgres to be healthy before migrating. (redis comes up
-#        authenticated — its redis.conf + REDIS_PASSWORD/REDIS_URL were prepared in step 3b above.) ---
+#        authenticated — its redis.conf + redis_url credential files were generated in step 3b above; the
+#        password is never passed via env.) ---
 log "starting data services"
 docker compose -f "$COMPOSE" up -d postgres redis
 pg_cid="$(docker compose -f "$COMPOSE" ps -q postgres)"
@@ -193,8 +196,8 @@ for _f in tunnel_token zitadel_db_password zitadel_admin_password; do
     exit 1
   }
 done
-# Redis AUTH (redis.conf + REDIS_PASSWORD/REDIS_URL) was prepared and exported in step 3b — redis is already
-# up and authenticated by now; this `up -d` only adds the remaining services and inherits those exports.
+# Redis AUTH credential files (redis.conf + redis_url) were generated in step 3b and redis is already up and
+# authenticated; this `up -d` only adds the remaining services. No Redis credential rides env — it's all files.
 TUNNEL_TOKEN="$(cat "$SECRETS_DIR/tunnel_token")" \
   ZITADEL_DB_PASSWORD="$(cat "$SECRETS_DIR/zitadel_db_password")" \
   ZITADEL_ADMIN_PASSWORD="$(cat "$SECRETS_DIR/zitadel_admin_password")" \

@@ -54,7 +54,10 @@ the API are crypto-blind (server stores/forwards ciphertext only; invariant #1).
 - **Info-disclosure of secrets.** A leaked DB/B2/Zitadel/tunnel secret compromises the stack. → No secret
   values live in `compose.prod.yaml` or the image. Data-plane secrets are **mounted credential files**
   (Docker secrets) the app reads via `*_FILE` (`POSTGRES_PASSWORD_FILE`, `DATABASE_URL_FILE`,
-  `S3_SECRET_ACCESS_KEY_FILE`) — never the value in env. The cloudflared `TUNNEL_TOKEN` is a
+  `S3_SECRET_ACCESS_KEY_FILE`, `REDIS_URL_FILE`) — never the value in env (a password in container env would
+  surface via `docker inspect` / the daemon's at-rest config). The redis `requirepass` rides a deploy-generated
+  `redis.conf` (also a file), and the redis healthcheck reads its password from the mounted `redis_password`
+  file too — no Redis credential touches env. The cloudflared `TUNNEL_TOKEN` is a
   **runtime-fetched value** (the image has no shell/`--token-file`), injected from the deploy environment, not
   an on-disk env file. All are populated out-of-band (Slice 3: Key Vault via Managed Identity).
   `.env.prod.example` carries placeholders only. Non-secret config (B2 access-key-**id**, region, bucket,

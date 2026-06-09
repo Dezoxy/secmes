@@ -122,8 +122,11 @@ value in env). Compose's secret sources point at `${ARGUS_SECRETS_DIR}` (`/run/a
   grants `argus_app` LOGIN + a Key Vault password (migration 0001 creates it NOLOGIN); the owner credential
   stays separate, used only for migrations (Slice 4 `MIGRATION_DATABASE_URL`).
 - `secrets/s3_secret_access_key` → the api reads it via `S3_SECRET_ACCESS_KEY_FILE` (the B2 key secret).
-- `secrets/redis_password` → `deploy.sh` generates `redis.conf` (`requirepass`, config-file AUTH — never a
-  `--requirepass` argv) and injects `REDIS_URL`/`REDISCLI_AUTH` at `up`. URL-safe (`openssl rand -hex 32`).
+- `secrets/redis_password` → `deploy.sh` generates two credential **files** from it: `redis.conf`
+  (`requirepass`, config-file AUTH — never a `--requirepass` argv) for the server, and `redis_url`
+  (`redis://:<pw>@redis:6379`) which the api reads via `REDIS_URL_FILE`. The redis healthcheck reads this
+  `redis_password` file directly for `REDISCLI_AUTH`. No Redis credential ever rides env / `docker inspect`.
+  URL-safe (`openssl rand -hex 32`).
 - `secrets/zitadel_masterkey` → `zitadel` reads it via `--masterkeyFile` (32-byte instance masterkey).
 - `secrets/zitadel_db_password` → `zitadel-db` reads it via `POSTGRES_PASSWORD_FILE`; `zitadel` reads the
   **same value** as the runtime `${ZITADEL_DB_PASSWORD}` (Zitadel has no `_FILE` env form for it).
