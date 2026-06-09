@@ -135,6 +135,24 @@ test('chat shows the sidebar update action in local preview mode only', async ({
   await expect(page).not.toHaveURL(/previewPwaUpdate=1/);
 });
 
+test('mobile chat keeps the update action reachable in an open thread', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/chat?previewPwaUpdate=1');
+
+  await page.getByRole('button', { name: /Open conversation with Sarah Chen/i }).click();
+
+  await expect(page.getByRole('main', { name: 'Chat' })).toBeVisible();
+  await expect(page.getByRole('complementary', { name: 'Conversations' })).toHaveCount(0);
+
+  const updateButton = page.getByRole('button', { name: 'Update Argus' });
+  await expect(updateButton).toBeVisible();
+
+  await updateButton.click();
+
+  await expect(updateButton).toHaveCount(0);
+  await expect(page).not.toHaveURL(/previewPwaUpdate=1/);
+});
+
 test('non-chat routes keep a reachable PWA update action', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/settings?previewPwaUpdate=1');

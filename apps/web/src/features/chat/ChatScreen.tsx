@@ -377,6 +377,8 @@ export default function ChatScreen() {
                 onBack={handleBackToConversations}
                 verified={verified}
                 onVerify={isDirect && currentNumber ? () => setVerifyOpen(true) : undefined}
+                updateReady={updateReady}
+                onApplyUpdate={applyUpdate}
               />
               {selectedIsLive && (
                 <ReconnectBanner status={connectionStatus} className="mx-4 mt-3" />
