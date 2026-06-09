@@ -700,10 +700,10 @@ git commit -m "feat(web): add privacy-safe telemetry boundary"
 - Modify: `apps/web/vite.config.ts`
 - Create: `docs/threat-models/frontend-observability.md`
 
-- [ ] Add bundle size visibility.
-- [ ] Keep route-level lazy loading where it reduces initial load without complicating chat startup.
-- [ ] Document target hosting headers: `Content-Security-Policy`, `Referrer-Policy`, `Permissions-Policy`, `X-Content-Type-Options`, `frame-ancestors`, `base-uri`, and optional COOP/COEP later if needed.
-- [ ] Add a threat-model note for frontend telemetry, browser persistence, PWA caching, and hosting headers.
+- [x] Add bundle size visibility.
+- [x] Keep route-level lazy loading where it reduces initial load without complicating chat startup.
+- [x] Document target hosting headers: `Content-Security-Policy`, `Referrer-Policy`, `Permissions-Policy`, `X-Content-Type-Options`, `frame-ancestors`, `base-uri`, and optional COOP/COEP later if needed.
+- [x] Add a threat-model note for frontend telemetry, browser persistence, PWA caching, and hosting headers.
 
 **Verification:**
 
