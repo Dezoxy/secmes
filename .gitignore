@@ -60,6 +60,8 @@ override.tf.json
 coverage/
 apps/web/playwright-report/
 apps/web/test-results/
+# browser-automation (Playwright-MCP) session snapshots/console logs at the repo root — never committed
+.playwright-mcp/
 .vscode/
 .idea/
 
