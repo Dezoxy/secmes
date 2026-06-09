@@ -92,3 +92,7 @@ behind Cloudflare Access; admin/receiver secrets from Key Vault; dashboards + SL
   If it ever must be exposed beyond the host network, add scrape auth (bearer/mTLS) first.
 - **Dashboards / SLOs / alert thresholds** can only be tuned against real traffic — finalized post-arming.
 - **Per-tenant SLO breakdown** deferred (cardinality + isolation). Acceptable for this phase.
+- **read-only root FS untested on the prom/grafana images** — prod is the first place they run read-only-root
+  (data goes to named volumes that inherit the image's runtime-user ownership on first init; only `/tmp` is a
+  tmpfs). A write outside those would crash-loop, which the deploy's `wait_running` gates catch loudly (fails
+  closed). Smoke-test in a scratch env before arming; drop `read_only` for a service that can't tolerate it.

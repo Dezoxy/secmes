@@ -1,0 +1,60 @@
+# Alert rules + the API SLOs (checkpoint 47). Thresholds are starting points — tune against real traffic after
+# arming. All expressions are over the content-blind argus_api_* series (no message content involved).
+#
+# SLOs (argus API):
+#   - Availability: the metrics target is up (a proxy for the API process being alive).
+#   - Errors:       server-error (5xx) ratio < 1% (warn) / < 5% (page) over 10m.
+#   - Latency:      p95 request latency < 1s over 10m.
+#
+# The 5xx ratio is intentionally NOT denominator-clamped (no `clamp_min(..., 1)`): clamping to 1 req/s would
+# hide low-traffic incidents (e.g. 1 failure out of 1 request reads as ~0.3% instead of 100%). 5xx ⊆ total, so
+# the numerator can't exceed the denominator → no real divide-by-zero; at genuine zero traffic the ratio is
+# 0/0 = NaN and `NaN > threshold` is false, so it correctly does not fire.
+groups:
+  - name: argus-api
+    rules:
+      - alert: ArgusApiTargetDown
+        expr: up{job="argus-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'argus API metrics target is down'
+          description: 'Prometheus cannot scrape api:9090 for >2m — the API may be down or unhealthy.'
+
+      - alert: ArgusApiHighServerErrorRate
+        expr: |
+          sum(rate(argus_api_http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(argus_api_http_requests_total[5m]))
+            > 0.05
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'argus API 5xx ratio > 5% (10m)'
+          description: 'Server-error ratio has exceeded the 5% SLO budget for 10m.'
+
+      - alert: ArgusApiElevatedServerErrorRate
+        expr: |
+          sum(rate(argus_api_http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(argus_api_http_requests_total[5m]))
+            > 0.01
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'argus API 5xx ratio > 1% (15m)'
+          description: 'Server-error ratio is above the 1% warning threshold.'
+
+      - alert: ArgusApiHighLatencyP95
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(argus_api_http_request_duration_seconds_bucket[5m])) by (le)
+          ) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'argus API p95 latency > 1s (10m)'
+          description: 'p95 request latency has breached the 1s SLO for 10m.'

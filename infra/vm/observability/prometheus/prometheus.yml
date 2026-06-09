@@ -1,0 +1,29 @@
+# Prometheus config for the argus VM (checkpoint 47, Slice B). Scrapes the API's content-blind metrics
+# endpoint over the INTERNAL Docker network (api:9090 — never published, never via Caddy; see
+# docs/threat-models/observability.md). Prometheus + its data are internal-only; ops view them through Grafana
+# (behind Cloudflare Access). NO secrets in this file.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: argus-prod
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  # The API exposes argus_api_* on its separate internal metrics port (Slice A). Content-blind: counts +
+  # latencies + process stats only.
+  - job_name: argus-api
+    static_configs:
+      - targets: ['api:9090']
+
+  # Prometheus self-monitoring (its own /metrics).
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']

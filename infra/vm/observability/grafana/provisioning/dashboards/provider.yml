@@ -1,0 +1,12 @@
+# Grafana dashboard provisioning (checkpoint 47): loads JSON dashboards from disk (read-only).
+apiVersion: 1
+providers:
+  - name: argus
+    orgId: 1
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: false

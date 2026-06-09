@@ -43,6 +43,7 @@ SECRETS=(
   "argus-zitadel-masterkey=zitadel_masterkey"
   "argus-zitadel-db-password=zitadel_db_password"
   "argus-zitadel-admin-password=zitadel_admin_password"
+  "argus-grafana-admin-password=grafana_admin_password"
   "argus-backup-db-password=backup-db-password"
   "argus-cleanup-db-password=cleanup-db-password"
   "argus-b2-app-key=b2-app-key"

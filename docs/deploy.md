@@ -31,10 +31,11 @@ on a non-privileged port over the internal Docker network only. Threat model:
 ## The stack (`compose.prod.yaml`)
 
 Standalone prod stack — **not** layered over `compose.yaml` (that file is local-dev only). Services:
-`postgres`, `redis`, `api`, `caddy` (PWA + router), `cloudflared`, and the self-hosted identity provider
-`zitadel` + `zitadel-db` + `zitadel-login` (roadmap #9). No `minio` (prod uses Backblaze B2). No service
-publishes a host port. Every service runs hardened (non-root where the image allows, `no-new-privileges`,
-`cap_drop: [ALL]`, resource limits).
+`postgres`, `redis`, `api`, `caddy` (PWA + router), `cloudflared`, the self-hosted identity provider
+`zitadel` + `zitadel-db` + `zitadel-login` (roadmap #9), and the observability stack `prometheus` + `grafana`
++ `alertmanager` (roadmap #47). No `minio` (prod uses Backblaze B2). No service publishes a host port. Every
+service runs hardened (non-root where the image allows, `no-new-privileges`, `cap_drop: [ALL]`, resource
+limits).
 
 > **Zitadel** (roadmap #9) is the OIDC issuer at `https://auth.4rgus.com` — a **public** login surface (end
 > users authenticate against it; it is NOT behind Cloudflare Access, which would be circular for end-user
@@ -100,6 +101,8 @@ hostnames are configured in the Cloudflare Zero Trust dashboard, not in this rep
 - `4rgus.com` → `http://caddy:8080`  (the app — PWA + `/api` + `/ws`, all same-origin)
 - `auth.4rgus.com` → `http://caddy:8080`  (self-hosted Zitadel — Caddy host-splits this domain to
   `zitadel`/`zitadel-login`; **public**, NOT behind Access — it's the end-user login surface)
+- `grafana.4rgus.com` → `http://caddy:8080`  (observability dashboards — Caddy host-splits to `grafana:3000`,
+  **gated by Cloudflare Access** + Grafana's own login; Prometheus + Alertmanager stay internal-only)
 - other admin subdomains (e.g. ops) → their service, **gated by Cloudflare Access** (identity at the edge)
 
 ## Secrets (Key Vault → credential files — Slice 3)
@@ -194,4 +197,26 @@ the local provisioner's `OIDC_AUDIENCE=$PROJECT_ID`) and the **SPA client id** a
 re-cut the release so the PWA build embeds them.
 
 > **Footprint.** Zitadel adds ~1.8 GB of memory limits (`zitadel` 768m + `zitadel-db` 768m + `zitadel-login`
-> 256m) on top of the app stack (~4 GB) — size the VM for ~6 GB+ before arming.
+> 256m) on top of the app stack (~4 GB); the observability stack (below) adds ~1.4 GB (`prometheus` 768m +
+> `grafana` 512m + `alertmanager` 128m) — size the VM for **~8 GB+** before arming.
+
+## Observability (Prometheus + Grafana + Alertmanager — roadmap #47)
+
+The API exposes content-blind Prometheus metrics on an internal `:9090` (Slice A, merged). Slice B adds the
+stack: **Prometheus** scrapes `api:9090` over the internal network, **Grafana** visualises it, **Alertmanager**
+routes alerts. Config lives in `infra/vm/observability/` (`deploy.sh` stages it to `/opt/argus`; the services
+bind-mount it read-only). Threat model: `docs/threat-models/observability.md`. **Built as code; armed with the
+rest of the deploy.**
+
+- **Exposure:** only **Grafana** has ingress — `grafana.4rgus.com` via Caddy, **behind Cloudflare Access** +
+  Grafana's own login. Prometheus + Alertmanager have no published ports and aren't routed; view them through
+  Grafana (or a one-off port-forward during ops). `/metrics` stays internal (Slice A).
+- **Secret:** Grafana's admin password is a Key-Vault credential file (`argus-grafana-admin-password` →
+  `GF_SECURITY_ADMIN_PASSWORD__FILE`). Set it in Key Vault before the first deploy.
+- **SLOs** (in `prometheus/rules/argus-api.yml`, tune against real traffic): availability (scrape target up),
+  5xx ratio < 1% (warn) / 5% (page), p95 latency < 1s.
+- **Alert delivery:** Alertmanager ships with a **null receiver** (alerts visible in its UI). Add a real
+  receiver — webhook/email/Slack, its secret from Key Vault, content-free — when you want notifications.
+- **Arming:** add the `grafana.4rgus.com` Cloudflare Access app + tunnel hostname; set the Grafana admin
+  password in Key Vault; pin/refresh the `prom/*` + `grafana/grafana` image tags. Smoke-test the read-only FS
+  on the three images in a scratch env (prod is the first place they run read-only-root).

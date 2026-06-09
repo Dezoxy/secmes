@@ -1,0 +1,22 @@
+# Alertmanager config (checkpoint 47). Routes alerts from Prometheus. v1 has NO external notification channel
+# wired — alerts collect in the Alertmanager UI (reachable internally / via Grafana) until a receiver
+# (webhook/email/Slack) is added during arming, with its secret delivered from Key Vault (never committed
+# here). Whatever receiver is added MUST stay content-free: alert labels/annotations carry alert names,
+# severity, and metric context only — never message content (invariant #2; see observability.md).
+route:
+  receiver: 'default'
+  group_by: ['alertname', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  # No notification integration yet — a null receiver. Alerts are still recorded + visible; add a real
+  # receiver (e.g. a `webhook_configs:` whose URL/token comes from Key Vault) when arming.
+  - name: 'default'
+
+inhibit_rules:
+  # A firing critical for an alertname silences the matching warning, to cut duplicate noise.
+  - source_matchers: [severity = 'critical']
+    target_matchers: [severity = 'warning']
+    equal: ['alertname']
