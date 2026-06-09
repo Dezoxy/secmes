@@ -21,7 +21,7 @@ services:
       retries: 12
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     ports: ['6379:6379']
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
@@ -81,7 +81,7 @@ services:
   # One-shot: named volumes are created root-owned, but Zitadel runs as the non-root `zitadel` user
   # and must write its bootstrap PAT into /bootstrap. Make it writable before Zitadel starts.
   zitadel-bootstrap-perms:
-    image: alpine:3.20
+    image: alpine:3.22
     command: ['sh', '-c', 'chmod 0777 /bootstrap']
     volumes: ['zitadel-bootstrap:/bootstrap']
 
@@ -139,7 +139,7 @@ services:
   # project, the SPA OIDC app, and the tenant-claim Action via the bootstrap PAT, then writes the
   # generated ids to the shared volume for the Makefile to place in .env.local. Idempotent.
   zitadel-provision:
-    image: alpine:3.20
+    image: alpine:3.22
     profiles: ['tools']
     depends_on:
       zitadel:

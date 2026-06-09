@@ -72,7 +72,7 @@ services:
           cpus: '1.5'
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     restart: unless-stopped
     # Persistence off by default (cache/pubsub only). Internal network, no published port.
     command: ['redis-server', '--save', '', '--appendonly', 'no']
@@ -194,7 +194,7 @@ services:
     # Outbound tunnel to the Cloudflare edge — the ONLY ingress. No published ports. Ingress hostnames
     # (4rgus.com → http://caddy:8080, admin.* behind Cloudflare Access) are dashboard-managed (token tunnel).
     # Pin: verify/refresh the tag before first deploy (Dependabot tracks it). cloudflared is date-versioned.
-    image: cloudflare/cloudflared:2024.12.2
+    image: cloudflare/cloudflared:2025.6.1
     restart: unless-stopped
     command: ['tunnel', '--no-autoupdate', 'run']
     # TUNNEL_TOKEN is the one secret that can't be a mounted file: the cloudflared image has no shell and no
@@ -410,7 +410,7 @@ services:
   # repo tree deploy.sh stages into /opt/argus. NO published ports — only Grafana is reachable, via Caddy +
   # Access. Threat model: docs/threat-models/observability.md.
   prometheus:
-    image: prom/prometheus:v2.55.1
+    image: prom/prometheus:v3.6.0
     restart: unless-stopped
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -433,7 +433,7 @@ services:
           cpus: '0.75'
 
   alertmanager:
-    image: prom/alertmanager:v0.28.1
+    image: prom/alertmanager:v0.29.0
     restart: unless-stopped
     command:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
@@ -458,7 +458,7 @@ services:
   # Cloudflare Access). Admin password is a Key-Vault credential FILE via Grafana's native `__FILE` support
   # (invariant #5 — never an env value at rest). Anonymous + sign-up disabled; phone-home off.
   grafana:
-    image: grafana/grafana:11.4.0
+    image: grafana/grafana:12.1.1
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
