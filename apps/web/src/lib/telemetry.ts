@@ -49,6 +49,23 @@ const sensitiveMetadataKeyMarkers = [
   'awsaccesskeyid',
 ];
 
+const technicalStringMetadataKeys = new Set([
+  'action',
+  'component',
+  'errorKind',
+  'eventSource',
+  'failureKind',
+  'field',
+  'mode',
+  'reasonCode',
+  'routeName',
+  'section',
+  'status',
+  'step',
+  'storageRegion',
+  'surface',
+]);
+
 const sensitiveMetadataValuePatterns = [
   /authorization\s*:/i,
   /bearer\s+[A-Za-z0-9._~+/-]+=*/i,
@@ -168,6 +185,26 @@ function isSensitiveStringValue(value: string): boolean {
   );
 }
 
+function isTechnicalStringValue(value: string): boolean {
+  if (value.length === 0 || value.length > 80) return false;
+
+  for (const char of value) {
+    if (
+      !isUpperAsciiLetter(char) &&
+      !isLowerAsciiLetter(char) &&
+      !isAsciiDigit(char) &&
+      char !== '.' &&
+      char !== '_' &&
+      char !== '-' &&
+      char !== ':'
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 function isTelemetryMetadataValue(value: unknown): value is TelemetryMetadataValue {
   return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
 }
@@ -186,6 +223,12 @@ export function createTelemetryEvent(
     if (!isTelemetryMetadataValue(value)) return validationError('unsupported-metadata');
     if (typeof value === 'string' && isSensitiveStringValue(value)) {
       return validationError('sensitive-metadata');
+    }
+    if (
+      typeof value === 'string' &&
+      (!technicalStringMetadataKeys.has(key) || !isTechnicalStringValue(value))
+    ) {
+      return validationError('unsupported-metadata');
     }
     safeMetadata[key] = value;
   }

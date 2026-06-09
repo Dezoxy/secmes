@@ -69,6 +69,24 @@ describe('privacy-safe telemetry boundary', () => {
     }
   });
 
+  it('rejects free-form string metadata under innocuous keys', () => {
+    const freeForm = createTelemetryEvent('chat.send_failed', {
+      reason: 'meet me at 5 by the gate',
+    });
+    const enumLike = createTelemetryEvent('chat.send_failed', {
+      failureKind: 'network_timeout',
+    });
+
+    expect(freeForm).toMatchObject({
+      ok: false,
+      error: { kind: 'unsupported-metadata' },
+    });
+    expect(enumLike).toMatchObject({
+      ok: true,
+      event: { metadata: { failureKind: 'network_timeout' } },
+    });
+  });
+
   it('rejects presigned attachment URLs', () => {
     const result = createTelemetryEvent('attachment.upload_failed', {
       storageRegion: 'eu-central-003',
