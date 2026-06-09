@@ -785,6 +785,7 @@ Home Screen app.
 - [x] Add a manual update check under About.
 - [x] Show an in-app update prompt when a new service worker is ready.
 - [x] Reload only after the user chooses to restart into the new app shell.
+- [x] Add `workbox-window` because `virtual:pwa-register` imports it at runtime.
 - [x] Keep this frontend-only: no runtime caches for auth, API, WebSocket, or attachments.
 - [x] Document that iOS Home Screen metadata such as icon/name may still require reinstalling.
 

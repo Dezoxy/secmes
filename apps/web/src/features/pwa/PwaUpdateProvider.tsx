@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+// VitePWA's virtual register dynamically imports workbox-window for prompt-mode updates.
 import { registerSW } from 'virtual:pwa-register';
 import {
   PwaUpdateContextProvider,
