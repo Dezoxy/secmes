@@ -17,6 +17,7 @@
 .gitignore
 
 # Secrets & local config — must NEVER enter an image layer or the build context.
+# argus-secret-excludes >>> keep this block byte-identical across all *dockerignore (CI: dockerignore-guard)
 secrets/
 .secrets/
 **/.env
@@ -27,6 +28,7 @@ secrets/
 **/.terraform
 *.pem
 *.key
+# argus-secret-excludes <<<
 
 # Tests, coverage, reports.
 **/coverage
