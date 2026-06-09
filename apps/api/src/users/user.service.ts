@@ -65,9 +65,9 @@ export class UserService {
    *
    * Identity is PSEUDONYMOUS (roadmap #44b): a NEW user is assigned a random "Adjective Animal" handle as their
    * display name — the IdP `name` claim is intentionally NOT used (no real-name leak into the directory; see
-   * pseudonymous-identity.md). An EXISTING user keeps their handle (a legacy NULL handle — e.g. one NULLed by
-   * 0016's de-dup backfill — is healed to a generated one); `email` is refreshed. Per-tenant uniqueness is
-   * DB-enforced (unique (tenant_id, display_name)) with regenerate-on-collision.
+   * pseudonymous-identity.md). An EXISTING user keeps their handle (a legacy NULL handle — incl. every legacy
+   * name reset to NULL by migration 0016 — is healed to a generated one on next login); `email` is refreshed.
+   * Per-tenant uniqueness is DB-enforced (unique (tenant_id, display_name)) with regenerate-on-collision.
    *
    * `generate` is an injection seam so the collision-retry path is deterministically testable; production
    * always uses the CSPRNG-backed default.
@@ -97,9 +97,9 @@ export class UserService {
             .onConflictDoUpdate({
               target: [schema.users.tenantId, schema.users.externalIdentityId],
               // EXISTING user: refresh email; KEEP their handle if they have one (coalesce returns the existing
-              // value, the candidate is discarded so it never reaches the display_name index). A legacy NULL
-              // display_name (e.g. a row NULLed by 0016's de-dup backfill) is HEALED to the candidate handle —
-              // which IS then checked against the unique index, so a collision still triggers a regenerate.
+              // value, the candidate is discarded so it never reaches the display_name index). A NULL
+              // display_name (every legacy name was reset to NULL by migration 0016) is HEALED to the candidate
+              // handle — which IS then checked against the unique index, so a collision still regenerates.
               set: {
                 email,
                 displayName: sql`coalesce(${schema.users.displayName}, excluded.display_name)`,
