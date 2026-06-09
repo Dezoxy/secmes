@@ -3,12 +3,12 @@ import { Link, useLocation } from 'react-router-dom';
 import {
   Database,
   HardDrive,
-  MessageCircle,
   MessageSquare,
   Settings,
   Shield,
   type LucideIcon,
 } from 'lucide-react';
+import { ArgusAppIcon } from '../features/brand/ArgusAppIcon';
 import { AuthenticatedRouteBoundary } from './AuthenticatedRouteBoundary';
 
 interface RoutePageShellProps {
@@ -46,9 +46,7 @@ export function RoutePageShell({
         <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-5 sm:px-6 lg:px-8">
           <header className="flex flex-col gap-4 border-b border-white/5 pb-5 sm:flex-row sm:items-center sm:justify-between">
             <Link to="/chat" className="flex items-center gap-3" aria-label="Open chat">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-500 text-white shadow-lg shadow-purple-500/20">
-                <MessageCircle className="h-5 w-5" />
-              </span>
+              <ArgusAppIcon className="h-10 w-10 rounded-xl shadow-lg shadow-purple-500/20" />
               <span className="text-xl font-bold tracking-[0.08em] text-purple-300">ARGUS</span>
             </Link>
 

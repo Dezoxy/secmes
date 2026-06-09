@@ -33,9 +33,21 @@ export const argusPwaManifest = {
   background_color: '#1a1a24',
   display: 'standalone',
   icons: [
-    { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' },
-    { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
-    { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+    { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+    { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+    { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+    {
+      src: '/maskable-icon-192.png',
+      sizes: '192x192',
+      type: 'image/png',
+      purpose: 'maskable',
+    },
+    {
+      src: '/maskable-icon-512.png',
+      sizes: '512x512',
+      type: 'image/png',
+      purpose: 'maskable',
+    },
   ],
 } as const satisfies PwaManifestCandidate;
 
@@ -64,6 +76,18 @@ function hasSizedPngIcon(icons: readonly PwaManifestIcon[] | undefined, size: st
   );
 }
 
+function hasMaskablePngIcon(icons: readonly PwaManifestIcon[] | undefined, size: string): boolean {
+  return (
+    icons?.some(
+      (icon) =>
+        icon.src?.startsWith('/') === true &&
+        icon.sizes === size &&
+        icon.type === 'image/png' &&
+        icon.purpose?.split(/\s+/).includes('maskable') === true,
+    ) ?? false
+  );
+}
+
 export function getPwaInstallabilityIssues(manifest: PwaManifestCandidate): string[] {
   const issues: string[] = [];
 
@@ -81,6 +105,9 @@ export function getPwaInstallabilityIssues(manifest: PwaManifestCandidate): stri
   }
   if (!hasSizedPngIcon(manifest.icons, '512x512')) {
     issues.push('Manifest needs a local 512x512 PNG icon.');
+  }
+  if (!hasMaskablePngIcon(manifest.icons, '512x512')) {
+    issues.push('Manifest needs a local 512x512 maskable PNG icon.');
   }
   if (!manifest.display || !installableDisplayModes.has(manifest.display)) {
     issues.push('Manifest display must be installable.');

@@ -21,8 +21,9 @@ Scores after the F2 pass:
 - SEO: 100
 
 Lighthouse 12.6.1 no longer reports the old standalone PWA category for this local run, so PWA
-installability stays covered by `scripts/verify-web-pwa-build.mjs`: manifest, local icons, service
-worker registration, navigation fallback, `robots.txt`, and static-only precache policy.
+installability stays covered by `scripts/verify-web-pwa-build.mjs`: manifest, local icons,
+Apple touch icon metadata, maskable launcher icons, service worker registration, navigation fallback,
+`robots.txt`, and static-only precache policy.
 
 ## Fixed In This Pass
 
