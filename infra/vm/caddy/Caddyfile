@@ -102,15 +102,18 @@ http://grafana.4rgus.com:8080 {
 	}
 
 	# --- Code-delivery cache policy (#43 service-worker pinning) ------------------------------------------
-	# The service worker, web manifest, HTML entry, and published bundle manifest have STABLE names but change
-	# per deploy, so they MUST always revalidate against the origin — a stale cached copy could otherwise pin a
-	# client to an old (or tampered) build, and the SW is the one script SRI cannot protect. The content-hashed
-	# assets (/assets/* and workbox-<hash>.js) are immutable, so cache them for a year. `no-cache` means
-	# "revalidate" (ETag 304s), not "don't store" — the SW still precaches the offline shell.
-	@revalidate path / /index.html /sw.js /manifest.webmanifest /bundle-manifest.json
-	header @revalidate Cache-Control "no-cache"
+	# Only the content-hashed assets (/assets/* and workbox-<hash>.js) are immutable — cache them for a year.
+	# EVERYTHING else this origin serves must always revalidate: the HTML entry AND every SPA deep-link route
+	# (/chat, /settings/…, /rooms/123, …) that the static handler's try_files rewrites to index.html, plus
+	# sw.js / manifest.webmanifest / bundle-manifest.json. `header` is evaluated against the ORIGINAL request
+	# path (before try_files rewrites to /index.html), so we match by EXCLUSION — anything that is not an
+	# immutable asset or a proxied /api|/ws path — rather than an allowlist that would miss deep-link
+	# navigations and let a stale (or tampered) app shell pin the client. `no-cache` means "revalidate"
+	# (ETag 304s), not "don't store" — the SW still precaches the offline shell.
 	@immutable path /assets/* /workbox-*.js
 	header @immutable Cache-Control "public, max-age=31536000, immutable"
+	@revalidate not path /assets/* /workbox-*.js /api/* /ws /ws/*
+	header @revalidate Cache-Control "no-cache"
 
 	# --- API (REST) --------------------------------------------------------------------------------------
 	# Strip the /api prefix: the API mounts its routes at the root, and the browser calls /api/* same-origin
