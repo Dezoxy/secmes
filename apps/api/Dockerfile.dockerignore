@@ -1,0 +1,51 @@
+# Build context for apps/api/Dockerfile (BuildKit uses a <dockerfile>.dockerignore INSTEAD OF the root
+# .dockerignore, so this must be self-complete — it mirrors the root excludes and adds the apps/web exclusion).
+# The api image is built from the repo root (cd.yml: context=.) because it needs the pnpm workspace + packages/*,
+# but the api RUNTIME does not include the PWA. Excluding apps/web SOURCE keeps the api image's layers
+# cache-stable across frontend changes → identical digests → no needless VM re-pull on a frontend-only release.
+
+# Dependencies & build outputs — reinstalled/rebuilt inside the image.
+**/node_modules
+**/dist
+**/build
+**/.turbo
+**/*.tsbuildinfo
+
+# VCS & CI
+.git
+.github
+.gitignore
+
+# Secrets & local config — must NEVER enter an image layer or the build context.
+secrets/
+.secrets/
+**/.env
+**/.env.*
+**/*.tfvars
+**/*.tfstate
+**/*.tfstate.*
+**/.terraform
+*.pem
+*.key
+
+# Tests, coverage, reports.
+**/coverage
+**/playwright-report
+**/test-results
+**/*.spec.ts
+**/*.test.ts
+**/__tests__
+
+# Editor / OS cruft.
+.vscode
+.idea
+**/.DS_Store
+
+# Docs & infra not needed to build the api.
+docs
+infra
+
+# The PWA is NOT a dependency of the api — exclude its source so a frontend change doesn't invalidate the api
+# image. Keep apps/web/package.json so `pnpm install --frozen-lockfile` still sees the full workspace.
+apps/web/**
+!apps/web/package.json
