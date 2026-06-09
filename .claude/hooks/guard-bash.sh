@@ -34,7 +34,7 @@ shopt -s nocasematch
   decide ask "az vm run-command runs a script as root on the VM (the deploy path) — confirm target VM."
 [[ "$cmd" =~ docker[[:space:]].*push ]] && \
   decide ask "Pushing an image to a registry — confirm tag/registry."
-[[ "$cmd" =~ git[[:space:]]+push ]] && \
-  decide ask "Pushing to a remote — confirm branch/remote."
+# NOTE: plain `git push` is intentionally NOT gated here — force-push is denied above + in settings.json,
+# which is the only push that AGENTS.md requires confirming. Normal pushes run without a prompt.
 
 exit 0
