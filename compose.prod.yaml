@@ -100,6 +100,10 @@ services:
   api:
     # Image is built + scanned + signed by cd.yml and pulled by tag here (CD sets ARGUS_API_IMAGE to the
     # registry digest/tag). No build stanza in prod — the VM pulls a known-good image, it does not build.
+    # The API also listens on :9090 (METRICS_PORT) for the Prometheus scrape (checkpoint 47). NO published
+    # port for it — /metrics is UNAUTHENTICATED by design and its entire authz story is "internal network
+    # only": never add a `9090:` host-port mapping here, and never route it through Caddy. Prometheus (Slice B)
+    # scrapes api:9090 over the internal network. See docs/threat-models/observability.md.
     image: ${ARGUS_API_IMAGE:-argus-api:local}
     restart: unless-stopped
     environment:
