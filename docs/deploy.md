@@ -225,8 +225,27 @@ rest of the deploy.**
 - **Alert delivery:** Alertmanager ships with a **null receiver** (alerts visible in its UI). Add a real
   receiver — webhook/email/Slack, its secret from Key Vault, content-free — when you want notifications.
 - **Arming:** add the `grafana.4rgus.com` Cloudflare Access app + tunnel hostname; set the Grafana admin
-  password in Key Vault; pin/refresh the `prom/*` + `grafana/grafana` image tags. Smoke-test the read-only FS
-  on the three images in a scratch env (prod is the first place they run read-only-root).
+  password in Key Vault; pin/refresh the `prom/*` + `grafana/grafana` + `grafana/loki` + `grafana/alloy` image
+  tags. Smoke-test the read-only FS on the images in a scratch env (prod is the first place they run
+  read-only-root).
+
+### Centralized logs (Loki + Alloy — roadmap #47b)
+
+Added to the stack (built; deploys at arming): **Loki** (log store — filesystem, 7-day retention, no auth,
+**internal only / no published port**) and **Alloy** (collector). Logs are queried in the **same Grafana** via
+a provisioned **Loki** datasource. App logs are **IDs/metadata only** by discipline (Semgrep-gated); Alloy adds
+a scrub stage masking bearer/JWT/presigned-URL shapes as defense-in-depth. Threat model:
+`docs/threat-models/centralized-logs.md`.
+
+- **No Docker socket.** Alloy file-tails `/var/lib/docker/containers` mounted **read-only** — a socket mount is
+  daemon-root-equivalent and is deliberately avoided. Alloy runs as **uid 0** (the only way to read the
+  `root:root 0640` json logs) but with `cap_drop:[ALL]` + read-only rootfs + the read-only log mount, so it can
+  read logs and nothing more.
+- **Exposure:** none — neither Loki nor Alloy publishes a port (the compose-guard CI check enforces it); they
+  are reachable only on the internal Docker network. Grafana stays the only ingress.
+- **Arming:** verify/refresh the `grafana/loki` + `grafana/alloy` image tags; logs flow automatically once the
+  stack is up (no DSN/secret to set). Loki data is transient observability — **not** covered by the nightly B2
+  backup.
 
 ## Error tracking (Sentry/GlitchTip — roadmap #48)
 

@@ -1,0 +1,54 @@
+# Loki — centralized logs store (roadmap #47b). Monolithic (single-binary) mode with filesystem storage on a
+# named volume; INTERNAL ONLY (no published port, no auth — same posture as Prometheus in #47). Grafana
+# queries it over the internal network; Alloy pushes to it. Logs are IDs/metadata only (see
+# docs/threat-models/centralized-logs.md). 7-day retention bounds how long any accidentally-logged sensitive
+# line could persist.
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9095
+  log_level: info
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2020-10-24
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  retention_period: 168h # 7 days
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  # Bound per-tenant ingest so a log storm can't exhaust the VM disk (single internal "tenant").
+  ingestion_rate_mb: 8
+  ingestion_burst_size_mb: 16
+  # Cardinality guards — the classic single-VM Loki footgun (a label explosion bloats the index on the disk
+  # Loki shares with Postgres). Only `stream` is a label today; this caps a future relabel from running away.
+  max_streams_per_user: 5000
+  max_label_names_per_series: 15
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  delete_request_store: filesystem
+
+# No phone-home / usage reporting (privacy-first; matches Grafana/Prometheus analytics-off in #47).
+analytics:
+  reporting_enabled: false
