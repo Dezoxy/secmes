@@ -215,10 +215,16 @@ wait_running cloudflared
 # FirstInstance seed; a bad masterkey/DB password or a stuck init fails the deploy loudly here.
 wait_healthy zitadel-db
 wait_healthy zitadel 150
-# zitadel-login readiness depends on its Key-Vault-delivered service PAT, which is seeded during arming (empty
-# on a first boot) — so gate it on running+not-crash-looping, NOT healthy, or the very first deploy (before
-# the PAT exists) would fail. Its healthcheck still drives restarts; login goes healthy once the PAT lands.
-wait_running zitadel-login
+# zitadel-login readiness depends on its Key-Vault-delivered service PAT. Gate CONDITIONALLY: while the PAT
+# file is still empty (first boot, before arming-time provisioning) require only running+not-crash-looping so
+# the first deploy can succeed; ONCE the PAT is provisioned (file non-empty) require HEALTHY, so a
+# malformed/expired PAT or a broken Login V2 image is caught during the rollout instead of reported healthy.
+if [ -s "$SECRETS_DIR/zitadel_login_pat" ]; then
+  wait_healthy zitadel-login
+else
+  log "zitadel-login: service PAT not yet provisioned (empty) — gating on running only; seed it per docs/deploy.md"
+  wait_running zitadel-login
+fi
 
 # --- 7. Tidy up: drop dangling images (the GHCR login is cleared by the EXIT trap). ---
 docker image prune -f >/dev/null 2>&1 || true
