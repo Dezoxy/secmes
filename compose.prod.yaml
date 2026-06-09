@@ -302,9 +302,9 @@ services:
       ZITADEL_SAML_DEFAULTLOGINURLV2: https://auth.4rgus.com/ui/v2/login/login?samlRequest=
       # FirstInstance (env-only) — runs once on the very first init, skipped on every later boot.
       ZITADEL_FIRSTINSTANCE_ORG_NAME: argus
-      # First-boot PAT lands in the container-local tmpfs (NOT a shared/persisted volume). The operator reads
-      # it once during arming (`docker compose exec zitadel cat /tmp/login-client.pat`) and stores it in Key
-      # Vault as argus-zitadel-login-pat; from then on it's delivered to zitadel-login as a credential file.
+      # First-boot PAT lands in the container-local tmpfs (NOT a shared/persisted volume). The operator copies
+      # it out once during arming (host-side `docker cp`, since this image has no shell — see docs/deploy.md)
+      # and stores it in Key Vault as argus-zitadel-login-pat; thereafter it's delivered as a credential file.
       ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH: /tmp/login-client.pat
       ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAME: login-client
       ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_NAME: Login Client
