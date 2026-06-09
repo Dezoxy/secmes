@@ -772,10 +772,10 @@ and accessibility warnings.
 
 **Purpose:** Improve recovery guidance without adding the backend backup upload path yet.
 
-- [ ] Add a first-run recovery reminder that stays local and dismissible.
-- [ ] Add a client-only passphrase strength meter for recovery backup creation.
-- [ ] Keep recovery copy clear that identity recovery does not restore past message history.
-- [ ] Do not upload backups or add backend endpoints in this follow-up.
+- [x] Add a first-run recovery reminder that stays local and dismissible.
+- [x] Add a client-only passphrase strength meter for recovery backup creation.
+- [x] Keep recovery copy clear that identity recovery does not restore past message history.
+- [x] Do not upload backups or add backend endpoints in this follow-up.
 
 ### F4: UI Consistency Sweep
 

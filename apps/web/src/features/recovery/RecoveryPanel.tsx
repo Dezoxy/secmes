@@ -10,11 +10,19 @@ import {
 } from '../../lib/recovery';
 import { useAuth } from '../auth/AuthContext';
 import { useDevice } from '../device/DeviceContext';
+import {
+  MIN_RECOVERY_PASSPHRASE_LENGTH,
+  getRecoveryPassphraseStrength,
+  readRecoveryReminderDismissed,
+  writeRecoveryReminderDismissed,
+  type RecoveryPassphraseStrength,
+} from './recovery-ux';
 
 const INPUT =
   'w-full rounded-xl border border-white/5 bg-[#1a1a26] px-4 py-2.5 text-sm text-white placeholder-white/30 transition-all focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20';
 const PRIMARY =
   'flex w-full items-center justify-center gap-2 rounded-xl bg-purple-500 py-2.5 text-sm font-medium text-white shadow-lg shadow-purple-500/25 transition-all hover:bg-purple-400 disabled:cursor-not-allowed disabled:bg-purple-500/50 disabled:shadow-none';
+const RECOVERY_STRENGTH_STEPS = [1, 2, 3, 4] as const;
 
 /** Save a string as a downloaded file (the sealed recovery artifact — opaque, the server never sees it). */
 function downloadFile(name: string, content: string): void {
@@ -25,6 +33,48 @@ function downloadFile(name: string, content: string): void {
   anchor.download = name;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+function recoveryStrengthSegmentClass(
+  active: boolean,
+  score: RecoveryPassphraseStrength['score'],
+): string {
+  if (!active) return 'bg-white/10';
+  if (score <= 1) return 'bg-red-400';
+  if (score === 2) return 'bg-amber-400';
+  if (score === 3) return 'bg-sky-400';
+  return 'bg-green-400';
+}
+
+function PassphraseStrengthMeter({ strength }: { strength: RecoveryPassphraseStrength }) {
+  return (
+    <div className="rounded-xl border border-white/5 bg-white/[0.025] p-3">
+      <div className="mb-2 flex items-center justify-between gap-3 text-xs">
+        <span className="font-medium text-white/60">Passphrase strength</span>
+        <span className="text-white/45">{strength.label}</span>
+      </div>
+      <div
+        role="meter"
+        aria-label="Recovery passphrase strength"
+        aria-valuemin={0}
+        aria-valuemax={4}
+        aria-valuenow={strength.score}
+        aria-valuetext={`${strength.label}. ${strength.hint}`}
+        className="grid grid-cols-4 gap-1.5"
+      >
+        {RECOVERY_STRENGTH_STEPS.map((step) => (
+          <span
+            key={step}
+            className={`h-1.5 rounded-full transition-colors ${recoveryStrengthSegmentClass(
+              step <= strength.score,
+              strength.score,
+            )}`}
+          />
+        ))}
+      </div>
+      <p className="mt-2 text-xs leading-relaxed text-white/35">{strength.hint}</p>
+    </div>
+  );
 }
 
 interface RecoveryPanelProps {
@@ -47,6 +97,8 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  const [reminderDismissed, setReminderDismissed] = useState(() => readRecoveryReminderDismissed());
+  const passphraseStrength = getRecoveryPassphraseStrength(passphrase);
 
   useEffect(() => {
     void recoveryIsSetUp()
@@ -57,8 +109,8 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
   const backUp = async () => {
     setError(null);
     setDone(null);
-    if (passphrase.length < 8) {
-      setError('Use a passphrase of at least 8 characters.');
+    if (passphrase.length < MIN_RECOVERY_PASSPHRASE_LENGTH) {
+      setError(`Use a passphrase of at least ${MIN_RECOVERY_PASSPHRASE_LENGTH} characters.`);
       return;
     }
     if (setUp !== true && passphrase !== confirm) {
@@ -74,7 +126,7 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
       downloadFile('argus-recovery.json', artifact);
       setSetUp(true);
       setDone(
-        'Recovery file downloaded. Store it somewhere safe — you need it and this passphrase to recover.',
+        'Recovery file downloaded. Store it somewhere safe. It restores your messaging identity for future messages only, not past message history.',
       );
       setPassphrase('');
       setConfirm('');
@@ -92,8 +144,8 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
       setError('Choose your recovery file.');
       return;
     }
-    if (importPassphrase.length < 8) {
-      setError('Use a passphrase of at least 8 characters.');
+    if (importPassphrase.length < MIN_RECOVERY_PASSPHRASE_LENGTH) {
+      setError(`Use a passphrase of at least ${MIN_RECOVERY_PASSPHRASE_LENGTH} characters.`);
       return;
     }
     setBusy(true);
@@ -120,6 +172,13 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
     }
   };
 
+  const dismissReminder = () => {
+    writeRecoveryReminderDismissed(true);
+    setReminderDismissed(true);
+  };
+
+  const showRecoveryReminder = setUp === false && !reminderDismissed;
+
   const content = (
     <>
       <div className="mb-4 flex items-center justify-between">
@@ -144,10 +203,35 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
       <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-200/80">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
         <span>
-          Your messages are end-to-end encrypted. If you lose this device <strong>without</strong> a
-          recovery file and its passphrase, your account cannot be recovered — not even by us.
+          Argus recovery restores the encrypted messaging identity for future messages only. It does
+          not restore past message history. If you lose this device <strong>without</strong> a
+          recovery file and its passphrase, we cannot recover that messaging identity for you.
         </span>
       </div>
+
+      {showRecoveryReminder && (
+        <div className="mb-4 rounded-xl border border-purple-500/20 bg-purple-500/10 p-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-purple-300" />
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-white">
+                Set up recovery before you rely on this device
+              </h3>
+              <p className="mt-1 text-xs leading-relaxed text-white/55">
+                Zitadel can restore sign-in only. This local recovery file restores your encrypted
+                messaging identity for future messages; old message history is not recovered.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={dismissReminder}
+            className="mt-3 rounded-lg border border-white/10 px-3 py-1.5 text-xs font-medium text-white/65 transition-colors hover:border-purple-400/40 hover:text-white"
+          >
+            Dismiss reminder
+          </button>
+        </div>
+      )}
 
       {setUp !== null && (
         <div
@@ -164,15 +248,18 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
           value={passphrase}
           onChange={(e) => setPassphrase(e.target.value)}
           placeholder="Recovery passphrase"
+          aria-label="Recovery passphrase"
           autoComplete="new-password"
           className={INPUT}
         />
+        {setUp !== true && <PassphraseStrengthMeter strength={passphraseStrength} />}
         {setUp !== true && (
           <input
             type="password"
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
             placeholder="Confirm passphrase"
+            aria-label="Confirm recovery passphrase"
             autoComplete="new-password"
             className={INPUT}
           />
@@ -223,13 +310,14 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
               value={importPassphrase}
               onChange={(e) => setImportPassphrase(e.target.value)}
               placeholder="Recovery passphrase"
+              aria-label="Recovery file passphrase"
               autoComplete="off"
               className={INPUT}
             />
             <button
               type="button"
               onClick={() => void importRecoveryFile()}
-              disabled={busy || !file || importPassphrase.length < 8}
+              disabled={busy || !file || importPassphrase.length < MIN_RECOVERY_PASSPHRASE_LENGTH}
               className={PRIMARY}
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
