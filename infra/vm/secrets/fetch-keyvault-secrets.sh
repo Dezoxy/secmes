@@ -29,17 +29,31 @@ VAULT_URL="https://${ARGUS_KEY_VAULT}.vault.azure.net"
 
 # Key Vault secret name -> local credential filename (in $SECRETS_DIR). KV names are kebab-case (Key Vault
 # disallows underscores); local filenames match what each consumer expects:
-#   compose Docker secrets: postgres_password, database_url, s3_secret_access_key
-#   cloudflared runtime value (stack launcher reads it): tunnel_token
+#   compose Docker secrets: postgres_password, database_url, s3_secret_access_key, zitadel_masterkey,
+#                           zitadel_db_password
+#   cloudflared + zitadel runtime values (stack launcher reads them): tunnel_token, zitadel_db_password (also
+#                           a compose secret — postgres reads the file, Zitadel reads the value as env),
+#                           zitadel_admin_password (first-init bootstrap only)
 #   backup/cleanup LoadCredential sources: backup-db-password, cleanup-db-password, b2-app-key
 SECRETS=(
   "argus-postgres-owner-password=postgres_password"
   "argus-database-url=database_url"
   "argus-s3-secret-access-key=s3_secret_access_key"
   "argus-tunnel-token=tunnel_token"
+  "argus-zitadel-masterkey=zitadel_masterkey"
+  "argus-zitadel-db-password=zitadel_db_password"
+  "argus-zitadel-admin-password=zitadel_admin_password"
   "argus-backup-db-password=backup-db-password"
   "argus-cleanup-db-password=cleanup-db-password"
   "argus-b2-app-key=b2-app-key"
+)
+
+# OPTIONAL secrets — may be ABSENT on a first boot (provisioned later). Unlike the mandatory set, an absent
+# value is NOT fatal: we seed an EMPTY 0400 file so the compose secret mount still resolves, and the consumer
+# runs degraded until the value is provisioned. Used for the Zitadel Login V2 service-user PAT, which Zitadel
+# only mints AFTER first init — the operator stores it in Key Vault during arming (see vm-zitadel.md).
+OPTIONAL_SECRETS=(
+  "argus-zitadel-login-pat=zitadel_login_pat"
 )
 
 log() { printf 'argus-secrets: %s\n' "$*" >&2; } # names/status only — NEVER a secret value
@@ -98,6 +112,63 @@ EOF
   chmod 0400 "$tmp"
   mv -f "$tmp" "$dest" # atomic replace (rotation-safe)
   log "delivered ${kv_name} -> ${file}"
+done
+
+# --- 3. Optional secrets: a value that hasn't been provisioned YET (HTTP 404) is OK on a first boot — seed an
+#        empty 0400 file so the compose mount resolves (the consumer runs degraded until provisioned). But
+#        distinguish that from a transient/permission error: branch on the HTTP status (no `-f`, capture
+#        `%{http_code}`) so a 5xx/403/connection failure FAILS CLOSED rather than silently overwriting an
+#        already-provisioned secret with an empty file (which would degrade the consumer while reporting OK). ---
+for entry in "${OPTIONAL_SECRETS[@]}"; do
+  kv_name="${entry%%=*}"
+  file="${entry##*=}"
+  dest="${SECRETS_DIR}/${file}"
+  tmp="${SECRETS_DIR}/.tmp.${file}.$$"
+  body="${SECRETS_DIR}/.tmp.${file}.$$.body"
+  # Token via --config stdin (never argv). `|| true`: on a connection failure curl exits non-zero and writes
+  # "000" to the captured status — handled as a hard error below, not a silent empty.
+  http_code="$(curl -sS --max-time 15 --retry 3 --retry-connrefused --retry-delay 2 \
+    -o "$body" -w '%{http_code}' --config - \
+    "${VAULT_URL}/secrets/${kv_name}?api-version=${KV_API_VERSION}" <<EOF || true
+header = "Authorization: Bearer ${access_token}"
+EOF
+  )"
+  case "$http_code" in
+  200)
+    value="$(jq -r '.value // empty' <"$body")"
+    [ -n "$value" ] || {
+      log "FATAL: '${kv_name}' returned 200 but an empty value"
+      rm -f "$body"
+      exit 1
+    }
+    printf '%s' "$value" >"$tmp"
+    value=""
+    chmod 0400 "$tmp"
+    mv -f "$tmp" "$dest"
+    log "delivered ${kv_name} -> ${file}"
+    ;;
+  404)
+    if [ -s "$dest" ]; then
+      # Already provisioned, but KV now 404s (accidental secret deletion / name mismatch during a restore).
+      # KEEP the existing valid token rather than silently degrading login; surface it loudly so the operator
+      # restores the Key Vault secret. (Deleting the KV copy doesn't invalidate the token — it lives in
+      # Zitadel's DB — so the on-box file is still usable.)
+      log "WARN ${kv_name} now 404s but ${file} is already populated — KEEPING the existing value; restore the Key Vault secret"
+    else
+      : >"$tmp" # genuinely not provisioned yet → seed EMPTY so the mount resolves (consumer degraded)
+      chmod 0400 "$tmp"
+      mv -f "$tmp" "$dest"
+      log "optional ${kv_name} not provisioned (404) — seeded EMPTY ${file} (consumer degraded until set)"
+    fi
+    ;;
+  *)
+    # Transient/permission/connection error — do NOT clobber a possibly-provisioned secret with empty.
+    log "FATAL: optional fetch for '${kv_name}' failed (HTTP ${http_code:-none}); refusing to overwrite ${file}"
+    rm -f "$body" "$tmp"
+    exit 1
+    ;;
+  esac
+  rm -f "$body"
 done
 
 access_token=""

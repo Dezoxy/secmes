@@ -10,14 +10,63 @@
 	auto_https off
 	# Admin API off: nothing on this host should reconfigure Caddy at runtime.
 	admin off
-	# Access log to stdout (collected by Docker). Caddy redacts Authorization + Cookie headers by default,
-	# and request bodies are never logged — so logs stay IDs/metadata only (invariant #2). No URLs carry secrets.
+	# Access log to stdout (collected by Docker). Caddy redacts Authorization + Cookie headers by default and
+	# never logs bodies; on top of that we strip the ENTIRE query string from the logged URI — the OIDC
+	# callback carries `?code=<auth-code>` and some API routes carry `?proof=`, both auth material (invariant
+	# #2). The `filter` encoder's regexp filter replaces everything after `?`, so no query-borne credential
+	# ever lands in Docker logs. Logs stay IDs/metadata + path only.
 	log {
 		output stdout
-		format json
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp "\?.*" "?[redacted]"
+			}
+		}
 	}
 }
 
+# --- Self-hosted Zitadel (OIDC issuer https://auth.4rgus.com) -------------------------------------------
+# This host is matched FIRST (more specific than the catch-all :8080 app site below); cloudflared forwards
+# the original Host header, so Caddy routes by it. Zitadel speaks gRPC (console + APIs) over HTTP/2, so the
+# upstream is dialled h2c (HTTP/2 cleartext) — the documented Zitadel-behind-a-proxy setup. Note: NO
+# X-Frame-Options here — oidc-client-ts silent-renew loads the authorize endpoint in a hidden iframe, and
+# Zitadel sets its own framing/security headers. TLS terminates at Cloudflare; this stays plain HTTP on :8080.
+http://auth.4rgus.com:8080 {
+	# Bare root → the Login V2 UI (mirrors the canonical compose's priority-400 `zitadel-root-rewrite`:
+	# Path(`/`) → replacepath /ui/v2/login/ → login service). Without this, hitting the bare auth domain
+	# falls through to the API server instead of the login page.
+	@root path /
+	handle @root {
+		rewrite * /ui/v2/login/
+		reverse_proxy zitadel-login:3000
+	}
+	# Login V2 UI is a separate container; everything else (OIDC/OAuth/JWKS/console/gRPC) is the main server.
+	@login path /ui/v2/login /ui/v2/login/*
+	handle @login {
+		reverse_proxy zitadel-login:3000
+	}
+	# Zitadel's public API alias under /api/* must have the prefix STRIPPED before it reaches the server (the
+	# console + Login V2 call the API via this alias). `handle_path` strips the matched prefix, mirroring the
+	# canonical v4.15 compose's `zitadel-strip-api` stripprefix — e.g. /api/oauth/v2/keys -> /oauth/v2/keys.
+	handle_path /api/* {
+		reverse_proxy h2c://zitadel:8080 {
+			# Strip TE: trailers before the h2c upstream — Zitadel's official Caddy guide documents that
+			# forwarding it makes error responses hang indefinitely (gRPC-gateway interaction).
+			header_up -TE
+		}
+	}
+	# Everything else (OIDC/OAuth/JWKS/console/gRPC at the root) → the identity server.
+	handle {
+		reverse_proxy h2c://zitadel:8080 {
+			# Strip TE: trailers before the h2c upstream — Zitadel's official Caddy guide documents that
+			# forwarding it makes error responses hang indefinitely (gRPC-gateway interaction).
+			header_up -TE
+		}
+	}
+}
+
+# --- App origin (PWA + /api + /ws) — catch-all :8080 for every other host (4rgus.com, health, direct IP) ---
 :8080 {
 	# Defense-in-depth response headers (the edge adds HSTS and more). CSP is app-managed in the PWA.
 	header {
