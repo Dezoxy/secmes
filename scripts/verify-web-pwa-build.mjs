@@ -50,7 +50,10 @@ assert(
     indexHtml.includes('privacy-first, end-to-end-encrypted messaging PWA'),
   'index.html does not include the Lighthouse-visible app description',
 );
-assert(indexHtml.includes('rel="apple-touch-icon"'), 'index.html does not link the Apple touch icon');
+assert(
+  indexHtml.includes('rel="apple-touch-icon"'),
+  'index.html does not link the Apple touch icon',
+);
 assert(
   indexHtml.includes('apple-mobile-web-app-title'),
   'index.html does not include the iOS Home Screen title',
