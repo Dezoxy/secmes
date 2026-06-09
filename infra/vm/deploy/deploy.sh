@@ -164,14 +164,14 @@ TUNNEL_TOKEN="$(cat "$SECRETS_DIR/tunnel_token")" \
 # --- 6b. Gate on the new app containers becoming HEALTHY — `up -d` returns before they're ready, so without
 #         this a crash-looping rollout would report success. A timeout/unhealthy fails the deploy (set -e),
 #         so the run-command surfaces it instead of silently leaving the old/broken stack. ---
-wait_healthy() { # $1 = compose service
-  local cid
+wait_healthy() { # $1 = compose service ; $2 = optional max attempts @ 2s each (default 60 = 120s)
+  local cid attempts="${2:-60}"
   cid="$(docker compose -f "$COMPOSE" ps -q "$1")"
   [ -n "$cid" ] || {
     log "FATAL: $1 container not found after rollout"
     return 1
   }
-  for _ in $(seq 1 60); do
+  for _ in $(seq 1 "$attempts"); do
     case "$(docker inspect -f '{{.State.Health.Status}}' "$cid" 2>/dev/null)" in
     healthy) return 0 ;;
     unhealthy)
@@ -186,16 +186,14 @@ wait_healthy() { # $1 = compose service
 }
 # cloudflared has no healthcheck (it's the outbound tunnel = the only ingress); require it's up and NOT
 # crash-looping (RestartCount stable across a short window), else the app is unreachable.
-wait_running() { # $1 = compose service without a healthcheck ; $2 = optional initial settle seconds (default 8)
-  local cid r1 r2 settle="${2:-8}"
+wait_running() { # $1 = compose service without a healthcheck
+  local cid r1 r2
   cid="$(docker compose -f "$COMPOSE" ps -q "$1")"
   [ -n "$cid" ] || {
     log "FATAL: $1 container not found after rollout"
     return 1
   }
-  # On a cold FIRST boot Zitadel runs its own schema migration + FirstInstance seed in-process (no crash), so
-  # callers pass a longer settle to avoid sampling RestartCount mid-init; a real crash-loop still trips below.
-  sleep "$settle"
+  sleep 8
   [ "$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null)" = "true" ] || {
     log "FATAL: $1 is not running"
     return 1
@@ -208,15 +206,16 @@ wait_running() { # $1 = compose service without a healthcheck ; $2 = optional in
     return 1
   }
 }
-log "waiting for the rollout to become healthy (api, caddy, zitadel-db) + the tunnel + zitadel to stay up"
+log "waiting for the rollout to become healthy (api, caddy, zitadel-db, zitadel, zitadel-login) + the tunnel"
 wait_healthy api
 wait_healthy caddy
 wait_running cloudflared
-# Zitadel: gate the DB (has a healthcheck) + the server/login containers (Go/Node images with no shell, so no
-# healthcheck — require running + not crash-looping; a bad masterkey/DB password fails the deploy loudly here).
+# Zitadel exposes real readiness probes (zitadel: `zitadel ready`; login: its node healthcheck), so gate on
+# HEALTHY — not just "didn't crash". zitadel gets a longer window (150×2s=300s) for the cold first-init schema
+# migration + FirstInstance seed; a bad masterkey/DB password or a stuck init now fails the deploy loudly here.
 wait_healthy zitadel-db
-wait_running zitadel 30 # longer settle: cold first-init runs Zitadel's schema migration + FirstInstance seed
-wait_running zitadel-login
+wait_healthy zitadel 150
+wait_healthy zitadel-login
 
 # --- 7. Tidy up: drop dangling images (the GHCR login is cleared by the EXIT trap). ---
 docker image prune -f >/dev/null 2>&1 || true

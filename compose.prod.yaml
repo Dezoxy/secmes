@@ -351,6 +351,15 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # The Zitadel binary ships its own readiness probe (`zitadel ready` — verifies the instance + endpoints,
+    # not just "process up"), so the deploy can gate on real readiness even though the image has no /bin/sh.
+    # Values mirror the canonical v4.15 Compose. start_period covers the cold first-init schema migration.
+    healthcheck:
+      test: ['CMD', '/app/zitadel', 'ready']
+      interval: 10s
+      timeout: 30s
+      retries: 12
+      start_period: 20s
     deploy:
       resources:
         limits:
@@ -377,8 +386,9 @@ services:
     volumes:
       - zitadel-bootstrap:/bootstrap:ro
     depends_on:
+      # Wait for the API to be READY (not just started) so the login app can reach it on first boot.
       zitadel:
-        condition: service_started
+        condition: service_healthy
     read_only: true
     tmpfs:
       - /tmp
@@ -386,6 +396,20 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # The login image bundles a Node readiness script + a shell; probe its own /ui/v2/login/healthy endpoint
+    # (under the configured base path). Mirrors the canonical v4.15 Compose healthcheck.
+    healthcheck:
+      test:
+        [
+          'CMD',
+          '/bin/sh',
+          '-c',
+          'node /app/healthcheck.mjs http://localhost:3000/ui/v2/login/healthy',
+        ]
+      interval: 10s
+      timeout: 30s
+      retries: 12
+      start_period: 20s
     deploy:
       resources:
         limits:
