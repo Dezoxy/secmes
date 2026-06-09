@@ -1,0 +1,51 @@
+name: claude
+
+# Manual, MENTION-TRIGGERED ONLY: Claude responds when a maintainer comments `@claude` on a PR or issue.
+# This is deliberately NOT an automatic review on PR open — Claude is a FALLBACK for when the primary code
+# reviewer (the Codex connector) is unavailable. The primary merge gate stays CI + Codex (see AGENTS.md).
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+  issues:
+    types: [opened]
+
+# Least privilege: read the repo + CI results; post the review comment. NO contents:write — Claude must not
+# push commits from a mention. id-token is for the action's OIDC token exchange.
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  actions: read
+  id-token: write
+
+# One in-flight run per PR/issue; don't cancel a review that's already running.
+concurrency:
+  group: claude-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  claude:
+    # Two gates, both required:
+    #   1. the trigger phrase `@claude` is actually present (don't burn a run on every comment), AND
+    #   2. the actor is the repo OWNER. This repo is PUBLIC — without the owner check, ANY GitHub user could
+    #      comment `@claude` and burn the owner's OAuth-token-billed Claude subscription usage. Broaden to
+    #      MEMBER / COLLABORATOR (via *.author_association) if the repo ever gains a team.
+    if: >-
+      github.actor == github.repository_owner &&
+      (contains(github.event.comment.body, '@claude') ||
+       contains(github.event.review.body, '@claude') ||
+       contains(github.event.issue.body, '@claude') ||
+       contains(github.event.issue.title, '@claude'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@11ba60486e4aec9ddfeafcf4bb3f00b028ac2c16 # v1.0.142
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
