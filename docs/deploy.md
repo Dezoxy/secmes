@@ -168,7 +168,10 @@ writes its first PAT to the zitadel container's tmpfs; grab it and store it in K
 
 ```bash
 COMPOSE=/opt/argus/compose.prod.yaml
-PAT="$(docker compose -f "$COMPOSE" exec -T zitadel cat /tmp/login-client.pat)"
+# Copy the PAT out host-side with `docker cp` (daemon-side — needs no shell/cat in the minimal zitadel image,
+# which has neither; `tar -xO` streams the one file to stdout so the token never lands on host disk).
+zid="$(docker compose -f "$COMPOSE" ps -q zitadel)"
+PAT="$(docker cp "$zid:/tmp/login-client.pat" - | tar -xO)"
 az keyvault secret set --vault-name "$KV" --name argus-zitadel-login-pat --value "$PAT"
 sudo systemctl restart argus-secrets.service                 # re-fetch → /run/argus/secrets/zitadel_login_pat
 # --force-recreate: a plain `up -d` won't recreate an unchanged service, so it would keep the OLD (empty)
