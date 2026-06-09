@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createMessageSocket, defaultWsUrl, type IncomingMessage } from './ws';
+import {
+  createMessageSocket,
+  defaultWsUrl,
+  type IncomingMessage,
+  type MessageSocketStatus,
+} from './ws';
 
 // A minimal in-test WebSocket: records sends, lets the test drive open/message/close. jsdom/node have no
 // WebSocket, so the client takes an injectable impl. OPEN/CLOSED match the DOM numeric readyState.
@@ -168,6 +173,30 @@ describe('createMessageSocket', () => {
     last().deliver({ event: 'ready', data: {} });
     expect(onReady).toHaveBeenCalledTimes(2); // connection signal fires on every (re)connect
     expect(parsed(last()).some((f) => f.event === 'subscribe')).toBe(true); // re-subscribed
+    sock.close();
+  });
+
+  it('reports safe connection status transitions without exposing transport details', async () => {
+    const statuses: MessageSocketStatus[] = [];
+    const sock = createMessageSocket({
+      url: 'wss://host/ws?token=never-report',
+      token: async () => 'secret-token',
+      onMessage: () => {},
+      onStatus: (status) => statuses.push(status),
+      WebSocketImpl: Impl,
+      reconnect: { baseMs: 1, maxMs: 5 },
+    });
+
+    expect(statuses).toEqual(['connecting']);
+    last().open();
+    await flush();
+    last().deliver({ event: 'ready', data: {} });
+    expect(statuses).toContain('connected');
+
+    last().close();
+    expect(statuses).toContain('reconnecting');
+    expect(statuses.join(' ')).not.toContain('secret-token');
+    expect(statuses.join(' ')).not.toContain('never-report');
     sock.close();
   });
 

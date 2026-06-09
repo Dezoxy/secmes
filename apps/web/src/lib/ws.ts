@@ -15,6 +15,8 @@ export interface IncomingMessage {
   message: FetchedMessage;
 }
 
+export type MessageSocketStatus = 'connecting' | 'connected' | 'reconnecting' | 'offline';
+
 export interface MessageSocketOptions {
   /** ws(s):// URL of the gateway. Defaults to same-origin `/ws` (dev: Vite proxy; prod: the app origin). */
   url?: string;
@@ -22,6 +24,8 @@ export interface MessageSocketOptions {
   token: () => Promise<string | null>;
   /** A ciphertext envelope was pushed for a subscribed conversation. */
   onMessage: (msg: IncomingMessage) => void;
+  /** Safe connection state for UI banners. Never includes URLs, tokens, payloads, or error objects. */
+  onStatus?: (status: MessageSocketStatus) => void;
   /** (Re)connected + authenticated + re-subscribed. A connection-status signal (catch-up runs per-room). */
   onReady?: () => void;
   /**
@@ -83,6 +87,10 @@ export function createMessageSocket(opts: MessageSocketOptions): MessageSocket {
   let attempt = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
+  const emitStatus = (status: MessageSocketStatus): void => {
+    opts.onStatus?.(status);
+  };
+
   const sendSubscribe = (socket: WebSocket, conversationId: string): void => {
     if (socket.readyState === OPEN) {
       socket.send(JSON.stringify({ event: 'subscribe', data: { conversationId } }));
@@ -93,6 +101,7 @@ export function createMessageSocket(opts: MessageSocketOptions): MessageSocket {
     if (frame.event === 'ready') {
       authed = true;
       attempt = 0; // a successful auth resets the backoff
+      emitStatus('connected');
       for (const id of subs) sendSubscribe(socket, id);
       opts.onReady?.();
       return;
@@ -117,7 +126,12 @@ export function createMessageSocket(opts: MessageSocketOptions): MessageSocket {
   const scheduleReconnect = (): void => {
     ws = null;
     authed = false;
-    if (closed || !WS) return;
+    if (closed) return;
+    if (!WS) {
+      emitStatus('offline');
+      return;
+    }
+    emitStatus('reconnecting');
     // Exponential backoff with a capped exponent (so `2 ** attempt` can't overflow) + ±20% CSPRNG jitter
     // (Math.random is banned — argus-no-insecure-random) to avoid a reconnect thundering herd on a gateway
     // restart. The delay itself is also clamped to `maxMs`.
@@ -128,7 +142,12 @@ export function createMessageSocket(opts: MessageSocketOptions): MessageSocket {
   };
 
   function connect(): void {
-    if (closed || !WS) return;
+    if (closed) return;
+    if (!WS) {
+      emitStatus('offline');
+      return;
+    }
+    emitStatus(attempt === 0 ? 'connecting' : 'reconnecting');
     const socket = new WS(url);
     ws = socket;
     socket.addEventListener('open', () => {

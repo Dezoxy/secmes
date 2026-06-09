@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import { Loader2, Search, UserPlus, X } from 'lucide-react';
+import { Search, UserPlus, X } from 'lucide-react';
 
 import { listUsers, type UserSummary } from '../../lib/api';
 import {
@@ -11,7 +11,8 @@ import {
 import { generatedAvatar } from './seed';
 import { contactDisplayName, contactSearchText } from './user-label';
 import { VerifySecurity } from './VerifySecurity';
-import { Avatar, IconButton, Modal } from '../ui';
+import { Avatar, EmptyState, ErrorState, IconButton, LoadingState, Modal } from '../ui';
+import { createSafeUiError, toSafeUiError, type SafeUiError } from '../../lib/safe-ui-error';
 
 interface StartConversationProps {
   manager: ConversationManager;
@@ -37,12 +38,12 @@ export function StartConversation({
   onClose,
 }: StartConversationProps) {
   const [users, setUsers] = useState<UserSummary[] | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<SafeUiError | null>(null);
   const [filter, setFilter] = useState('');
   const [peer, setPeer] = useState<UserSummary | null>(null);
   const [pending, setPending] = useState<PendingConversation | null>(null);
   const [busy, setBusy] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<SafeUiError | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -51,7 +52,15 @@ export function StartConversation({
         if (active) setUsers(list.filter((u) => u.id !== selfUserId));
       })
       .catch(() => {
-        if (active) setLoadError('could not load contacts');
+        if (active) {
+          setLoadError(
+            createSafeUiError({
+              title: 'Contacts unavailable',
+              message: 'Contacts could not be loaded. Try again in a moment.',
+              kind: 'network',
+            }),
+          );
+        }
       });
     return () => {
       active = false;
@@ -67,7 +76,12 @@ export function StartConversation({
       .prepare(u.id)
       .then((p) => setPending(p))
       .catch((e: unknown) => {
-        setActionError(e instanceof Error ? e.message : 'could not reach this contact');
+        setActionError(
+          toSafeUiError(e, {
+            title: 'Contact unavailable',
+            message: 'Could not reach this contact. Try again in a moment.',
+          }),
+        );
         setPeer(null);
       })
       .finally(() => setBusy(false));
@@ -82,7 +96,12 @@ export function StartConversation({
       .confirm(pending)
       .then((session) => onStarted(session, peer))
       .catch((e: unknown) => {
-        setActionError(e instanceof Error ? e.message : 'could not start the conversation');
+        setActionError(
+          toSafeUiError(e, {
+            title: 'Conversation not started',
+            message: 'Could not start the conversation. Try again in a moment.',
+          }),
+        );
         setBusy(false);
       });
   };
@@ -140,20 +159,24 @@ export function StartConversation({
         />
       </div>
 
-      {busy && <p className="px-1 pb-2 text-xs text-white/40">Claiming a one-time key…</p>}
-      {actionError && <p className="px-1 pb-2 text-xs text-red-400/80">{actionError}</p>}
+      {busy && (
+        <LoadingState title="Claiming key" compact className="mb-3">
+          Claiming a one-time key.
+        </LoadingState>
+      )}
+      {actionError && <ErrorState error={actionError} compact className="mb-3" />}
 
       <div className="max-h-72 space-y-1 overflow-y-auto">
         {users === null && !loadError && (
-          <div className="flex items-center justify-center gap-2 py-8 text-sm text-white/40">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading contacts…
-          </div>
+          <LoadingState title="Loading contacts" compact className="mx-1 my-2" />
         )}
-        {loadError && <p className="py-8 text-center text-sm text-red-400/80">{loadError}</p>}
+        {loadError && <ErrorState error={loadError} compact className="mx-1 my-2" />}
         {users !== null && !loadError && shown.length === 0 && (
-          <p className="py-8 text-center text-sm text-white/40">
-            {users.length === 0 ? 'No other members in your workspace yet.' : 'No matches.'}
-          </p>
+          <EmptyState title={users.length === 0 ? 'No contacts yet' : 'No matches'} compact>
+            {users.length === 0
+              ? 'No other members are available in this workspace yet.'
+              : 'Try another search term.'}
+          </EmptyState>
         )}
         {shown.map((u) => {
           const label = contactDisplayName(u);

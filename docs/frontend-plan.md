@@ -599,13 +599,13 @@ git commit -m "refactor(web): split chat state hooks"
 - Modify: `apps/web/src/features/settings`
 - Modify: `apps/web/src/routes`
 
-- [ ] Add `toSafeUiError(error)` or equivalent.
-- [ ] Do not render raw `error.message` directly if the error may contain request data, response data, URLs, tokens, stack traces, or message content.
-- [ ] UI errors should show only safe metadata and human-readable generic messages.
-- [ ] Add reusable loading state.
-- [ ] Add reusable empty state.
-- [ ] Add reusable error state.
-- [ ] Add reconnect/offline banner for WebSocket loss.
+- [x] Add `toSafeUiError(error)` or equivalent.
+- [x] Do not render raw `error.message` directly if the error may contain request data, response data, URLs, tokens, stack traces, or message content.
+- [x] UI errors should show only safe metadata and human-readable generic messages.
+- [x] Add reusable loading state.
+- [x] Add reusable empty state.
+- [x] Add reusable error state.
+- [x] Add reconnect/offline banner for WebSocket loss.
 
 **Verification:**
 
