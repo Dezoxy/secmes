@@ -1,8 +1,12 @@
 import { Buffer } from 'node:buffer';
+import { createHash } from 'node:crypto';
+import { readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import { sri } from 'vite-plugin-sri3';
 import webPackage from './package.json';
 import {
   pwaNavigateFallback,
@@ -60,6 +64,58 @@ function bundleVisibilityPlugin(): Plugin {
   };
 }
 
+interface BundleManifestFile {
+  file: string;
+  sha384: string;
+  bytes: number;
+}
+
+// Published bundle hash (#43): emit bundle-manifest.json with a sha384 for every built JS/CSS asset (the same
+// value the SRI `integrity="sha384-…"` attrs carry) plus one deterministic build digest. Lets an auditor (and
+// the future security page, roadmap G7) verify "what bytes is my browser running". This is a CHECKSUM over
+// PUBLIC static artifacts — not message/key crypto and not a protocol — so it intentionally lives here, not in
+// `packages/crypto` (see docs/threat-models/code-delivery-integrity.md §4). No secrets enter the manifest;
+// `.json` is outside the PWA precache glob, so it stays network-fetched (always fresh).
+function bundleIntegrityManifestPlugin(): Plugin {
+  return {
+    name: 'argus-bundle-integrity-manifest',
+    apply: 'build',
+    // writeBundle, NOT generateBundle: read each asset back from DISK after Vite has written it, so the sha384
+    // is over the exact bytes the browser receives — and equals the SRI `integrity` value. In generateBundle
+    // the entry + dynamic-import chunks still hold un-rewritten `__VITE_PRELOAD__` markers (vite's internal
+    // import-analysis plugin finalizes them late, which is why sri3 hijacks that plugin); reading from disk
+    // sidesteps that ordering entirely and is order-independent of sri/vite-plugin-pwa.
+    async writeBundle(options, bundle) {
+      const outDir = options.dir ?? 'dist';
+      const files: BundleManifestFile[] = [];
+      for (const name of Object.keys(bundle).sort()) {
+        if (!bundleReportAssetPattern.test(name)) continue;
+        const bytes = await readFile(path.join(outDir, name));
+        files.push({
+          file: name,
+          sha384: createHash('sha384').update(bytes).digest('base64'),
+          bytes: bytes.byteLength,
+        });
+      }
+      if (files.length === 0) return;
+
+      // One fingerprint over the sorted "file sha384" lines — THE per-build identifier (no app version field:
+      // apps/web is unversioned `0.0.0`, so it would imply provenance it can't carry; the digest is the truth).
+      // No timestamp → byte-stable across rebuilds of the same source, so a release's client bytes are
+      // reproducibly verifiable. Covers the Rollup app bundle (JS/CSS); the service worker + Workbox runtime are
+      // pinned separately (Caddy no-cache + content hash).
+      const bundleDigest = createHash('sha384')
+        .update(files.map((entry) => `${entry.file} ${entry.sha384}`).join('\n'))
+        .digest('base64');
+
+      await writeFile(
+        path.join(outDir, 'bundle-manifest.json'),
+        `${JSON.stringify({ algorithm: 'sha384', bundleDigest, files }, null, 2)}\n`,
+      );
+    },
+  };
+}
+
 // React + Vite PWA — the static, crypto-blind-friendly client for argus.
 export default defineConfig({
   define: {
@@ -100,5 +156,21 @@ export default defineConfig({
       },
       manifest: argusPwaManifest,
     }),
+    // Subresource Integrity (#43): inject sha384 `integrity=` onto the built <script>/<link> tags so the
+    // browser refuses to execute a tampered or swapped bundle — defense-in-depth behind the strict
+    // `script-src 'self'` CSP (a same-origin compromise that swaps a JS/CSS asset can't run unnoticed).
+    // sri3 runs in generateBundle with enforce:'post', so the integrity attrs land in index.html BEFORE
+    // vite-plugin-pwa's closeBundle precaches it: the service worker caches the SRI'd HTML and the Workbox
+    // precache revisions stay consistent. Same-origin assets need no `crossorigin` for SRI enforcement.
+    // Keep this LAST in the plugins array (per sri3 docs) so it hashes the final emitted content.
+    // SCOPE: covers the entry <script> + statically-referenced modulepreload <link>s + the stylesheet in
+    // index.html. It does NOT cover dynamically-`import()`ed chunks (the React.lazy routes + ts-mls's internal
+    // crypto chunks) — native dynamic import can't carry an integrity attribute (a browser-platform gap; the
+    // spec's fix is import-map integrity, not yet broadly supported + collides with our inline-script CSP). That
+    // gap is an ACCEPTED residual (Codex #152 P1) — see docs/threat-models/code-delivery-integrity.md §6.
+    sri(),
+    // Published bundle hash (#43): emits dist/bundle-manifest.json. Hashes assets read back from disk in
+    // writeBundle, so it is order-independent of sri / vite-plugin-pwa.
+    bundleIntegrityManifestPlugin(webPackage.version),
   ],
 });

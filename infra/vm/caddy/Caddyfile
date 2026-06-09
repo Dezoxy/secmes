@@ -79,8 +79,10 @@ http://grafana.4rgus.com:8080 {
 	# Code-delivery hardening response headers (#43; the edge adds HSTS). Served HERE at the static origin so
 	# the CSP applies to every response and `frame-ancestors` works (a <meta> CSP ignores it). The directive set
 	# is derived from the PWA's resource graph — UPDATE it when the client adds an external origin; smoke-test
-	# against the live app at arming (CSP violations surface in the browser console). SRI + service-worker
-	# pinning + the published bundle hash are the remaining #43 frontend-build items.
+	# against the live app at arming (CSP violations surface in the browser console). SRI (sha384 integrity on
+	# the built bundles via vite-plugin-sri3) + the published bundle-manifest.json are emitted at build time, and
+	# service-worker pinning is the @revalidate/@immutable cache policy below — the #43 frontend-build slice is
+	# now complete (docs/threat-models/code-delivery-integrity.md).
 	header {
 		# script-src is strict 'self' — no inline scripts (index.html only loads /src/main.tsx as a module) and
 		# ts-mls is pure JS (no wasm-eval), so injected/foreign script can't run to read decrypted content or keys
@@ -98,6 +100,20 @@ http://grafana.4rgus.com:8080 {
 		X-Frame-Options DENY
 		-Server
 	}
+
+	# --- Code-delivery cache policy (#43 service-worker pinning) ------------------------------------------
+	# Only the content-hashed assets (/assets/* and workbox-<hash>.js) are immutable — cache them for a year.
+	# EVERYTHING else this origin serves must always revalidate: the HTML entry AND every SPA deep-link route
+	# (/chat, /settings/…, /rooms/123, …) that the static handler's try_files rewrites to index.html, plus
+	# sw.js / manifest.webmanifest / bundle-manifest.json. `header` is evaluated against the ORIGINAL request
+	# path (before try_files rewrites to /index.html), so we match by EXCLUSION — anything that is not an
+	# immutable asset or a proxied /api|/ws path — rather than an allowlist that would miss deep-link
+	# navigations and let a stale (or tampered) app shell pin the client. `no-cache` means "revalidate"
+	# (ETag 304s), not "don't store" — the SW still precaches the offline shell.
+	@immutable path /assets/* /workbox-*.js
+	header @immutable Cache-Control "public, max-age=31536000, immutable"
+	@revalidate not path /assets/* /workbox-*.js /api/* /ws /ws/*
+	header @revalidate Cache-Control "no-cache"
 
 	# --- API (REST) --------------------------------------------------------------------------------------
 	# Strip the /api prefix: the API mounts its routes at the root, and the browser calls /api/* same-origin
