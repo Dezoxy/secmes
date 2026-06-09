@@ -555,12 +555,12 @@ git commit -m "feat(web): add versioned browser persistence"
 - [x] Step 12A: extract read-only chat state.
 - [x] Step 12B: extract message sending.
 - [x] Step 12C: extract WebSocket/live conversation behavior.
-- [ ] Step 12D: extract backfill/history behavior.
-- [ ] Keep crypto and live WebSocket behavior in hooks with narrow inputs.
-- [ ] Use stable refs, callbacks, and memo boundaries for rapidly changing live state.
-- [ ] Do not add Zustand or another local store unless profiling or real UI lag proves it is needed.
-- [ ] Preserve the current live conversation behavior.
-- [ ] Preserve current-user profile normalization for new and existing conversations.
+- [x] Step 12D: extract backfill/history behavior.
+- [x] Keep crypto and live WebSocket behavior in hooks with narrow inputs.
+- [x] Use stable refs, callbacks, and memo boundaries for rapidly changing live state.
+- [x] Do not add Zustand or another local store unless profiling or real UI lag proves it is needed.
+- [x] Preserve the current live conversation behavior.
+- [x] Preserve current-user profile normalization for new and existing conversations.
 
 **Verification:**
 
