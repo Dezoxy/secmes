@@ -20,7 +20,14 @@ function assert(condition, message) {
   }
 }
 
-for (const file of ['index.html', 'manifest.webmanifest', 'registerSW.js', 'sw.js']) {
+for (const file of [
+  'index.html',
+  'manifest.webmanifest',
+  'registerSW.js',
+  'sw.js',
+  'icon-192.png',
+  'icon-512.png',
+]) {
   assert(existsSync(distPath(file)), `missing ${file}`);
 }
 
@@ -59,6 +66,21 @@ assert(
     ),
   'manifest does not include the local maskable SVG icon',
 );
+for (const [src, sizes] of [
+  ['/icon-192.png', '192x192'],
+  ['/icon-512.png', '512x512'],
+]) {
+  assert(
+    manifest.icons.some(
+      (icon) =>
+        icon.src === src &&
+        icon.sizes === sizes &&
+        icon.type === 'image/png' &&
+        icon.purpose === 'any maskable',
+    ),
+    `manifest does not include the local ${sizes} PNG icon`,
+  );
+}
 
 const serviceWorker = await readDistText('sw.js');
 for (const snippet of [

@@ -32,7 +32,11 @@ export const argusPwaManifest = {
   theme_color: '#1a1a24',
   background_color: '#1a1a24',
   display: 'standalone',
-  icons: [{ src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }],
+  icons: [
+    { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' },
+    { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+    { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+  ],
 } as const satisfies PwaManifestCandidate;
 
 function hasText(value: string | undefined): boolean {
@@ -51,6 +55,15 @@ function hasInstallableIcon(icons: readonly PwaManifestIcon[] | undefined): bool
   );
 }
 
+function hasSizedPngIcon(icons: readonly PwaManifestIcon[] | undefined, size: string): boolean {
+  return (
+    icons?.some(
+      (icon) =>
+        icon.src?.startsWith('/') === true && icon.sizes === size && icon.type === 'image/png',
+    ) ?? false
+  );
+}
+
 export function getPwaInstallabilityIssues(manifest: PwaManifestCandidate): string[] {
   const issues: string[] = [];
 
@@ -63,6 +76,12 @@ export function getPwaInstallabilityIssues(manifest: PwaManifestCandidate): stri
   if (!hasText(manifest.theme_color)) issues.push('Manifest needs a theme_color.');
   if (!hasText(manifest.background_color)) issues.push('Manifest needs a background_color.');
   if (!hasInstallableIcon(manifest.icons)) issues.push('Manifest needs at least one local icon.');
+  if (!hasSizedPngIcon(manifest.icons, '192x192')) {
+    issues.push('Manifest needs a local 192x192 PNG icon.');
+  }
+  if (!hasSizedPngIcon(manifest.icons, '512x512')) {
+    issues.push('Manifest needs a local 512x512 PNG icon.');
+  }
   if (!manifest.display || !installableDisplayModes.has(manifest.display)) {
     issues.push('Manifest display must be installable.');
   }
