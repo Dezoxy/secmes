@@ -26,9 +26,15 @@ export function isErrorTrackingEnabled(): boolean {
 function resolveDsn(): string | undefined {
   const file = process.env.SENTRY_DSN_FILE;
   if (file) {
-    // Operator-set deployment path (SENTRY_DSN_FILE / mounted credential), never user input.
-    // eslint-disable-next-line security/detect-non-literal-fs-filename
-    return readFileSync(file, 'utf8').trim() || undefined;
+    try {
+      // Operator-set deployment path (SENTRY_DSN_FILE / mounted credential), never user input.
+      // eslint-disable-next-line security/detect-non-literal-fs-filename
+      return readFileSync(file, 'utf8').trim() || undefined;
+    } catch {
+      // Error tracking is OPTIONAL telemetry — a missing/unreadable DSN file disables it (fail-open to
+      // disabled), never crashes the API at boot the way a missing DATABASE_URL_FILE deliberately would.
+      return undefined;
+    }
   }
   return process.env.SENTRY_DSN?.trim() || undefined;
 }
@@ -55,7 +61,7 @@ export function initErrorTracking(log?: (msg: string) => void): boolean {
 // --- Default-deny scrubbing -------------------------------------------------------------------------------
 // A key whose NAME implies a credential / secret / session material → its value is dropped wholesale.
 const SENSITIVE_KEY =
-  /(authorization|cookie|set-cookie|x-amz-|amz-sdk|token|secret|passphrase|password|api[-_]?key|apikey|dsn|signature|credential|private|session)/i;
+  /(authorization|cookie|set-cookie|x-amz-|amz-sdk|token|secret|passphrase|password|pwd|key|dsn|signature|credential|private|session)/i;
 // A string whose VALUE looks like a credential / signed URL → only the matched span is replaced.
 const SENSITIVE_VALUE: RegExp[] = [
   // Signed/presigned URLs — redact the WHOLE URL atomically (scheme + host + object-path + every param), so the

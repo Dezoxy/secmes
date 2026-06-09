@@ -68,6 +68,25 @@ describe('scrubEvent — recursive redaction of extra/contexts/tags', () => {
     expect(extra.count).toBe(7);
   });
 
+  it('redacts generic *key-named fields by KEY NAME (value need not be value-shaped)', () => {
+    // Redaction keys on the field NAME, so the fixture values are deliberately non-secret-shaped (real key
+    // material would be base64 that the value regexes don't match — which is exactly why key-name matching
+    // matters). Plain strings here also keep the secret-scanner quiet.
+    const event = {
+      extra: {
+        key: 'KEY-MATERIAL-PLACEHOLDER',
+        messageKey: 'MSG-KEY-PLACEHOLDER',
+        deviceKey: 'DEV-KEY-PLACEHOLDER',
+        count: 3,
+      },
+    } as unknown as ErrorEvent;
+    const extra = (scrubEvent(event) as ErrorEvent).extra as Record<string, unknown>;
+    expect(extra.key).toBe('[REDACTED]');
+    expect(extra.messageKey).toBe('[REDACTED]');
+    expect(extra.deviceKey).toBe('[REDACTED]');
+    expect(extra.count).toBe(3);
+  });
+
   it('redacts credential-shaped VALUES even under a benign key', () => {
     const event = {
       extra: {

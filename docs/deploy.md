@@ -240,7 +240,8 @@ skipped), via a non-invasive interceptor that observes + rethrows — the respon
 
 - **Backend:** self-hosted **GlitchTip** (Sentry-API-compatible) as a gated Compose service is **Slice B** (not
   yet in the tree); SaaS Sentry EU is a one-line DSN swap (same SDK + protocol, zero lock-in).
-- **Arming:** stand up GlitchTip (or point at Sentry EU), create a project, then set its DSN — either
-  `SENTRY_DSN` in the deploy env or, for parity with the other secrets, `argus-sentry-dsn` in Key Vault
-  delivered as `SENTRY_DSN_FILE` (it is a write-only **ingest** key, not a read credential). `SENTRY_RELEASE`
-  defaults to `IMAGE_TAG`. Nothing emits until the DSN is set.
+- **Arming:** stand up GlitchTip (or point at Sentry EU), create a project, then set **`SENTRY_DSN`** in the
+  deploy env — it is already wired into the `api` container (Slice A), so nothing else is needed (it is a
+  write-only **ingest** key, not a read credential, so env is fine; `SENTRY_RELEASE` defaults to `IMAGE_TAG`).
+  The mounted-file form (`SENTRY_DSN_FILE` → an `argus-sentry-dsn` Key Vault secret) lands with the GlitchTip
+  service in Slice B. Nothing emits until the DSN is set.
