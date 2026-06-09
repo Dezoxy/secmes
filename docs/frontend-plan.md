@@ -629,36 +629,28 @@ git add apps/web/src/lib/safe-ui-error.ts apps/web/src/lib/safe-ui-error.spec.ts
 git commit -m "feat(web): add safe frontend async states"
 ```
 
-### Step 14: PWA, Security Headers, Performance, and Privacy-Safe Observability
+### Step 14A: PWA Caching Safety
 
-**Purpose:** Make production frontend behavior predictable without collecting or caching sensitive content.
+**Purpose:** Make PWA caching explicit and static-only before adding any runtime cache.
 
 **Files:**
 
 - Modify: `apps/web/vite.config.ts`
-- Modify: `apps/web/src/lib/ws.ts`
-- Create: `apps/web/src/lib/telemetry.ts`
-- Create: `apps/web/src/lib/telemetry.spec.ts`
-- Create: `docs/threat-models/frontend-observability.md`
+- Create: `apps/web/src/lib/pwa-cache-policy.ts`
+- Create: `apps/web/src/lib/pwa-cache-policy.spec.ts`
 
-- [ ] Prefer static asset caching only at first.
-- [ ] Do not cache `/auth/callback`.
-- [ ] Do not cache authorization-bearing requests.
-- [ ] Do not cache presigned attachment URLs.
-- [ ] Do not cache API responses containing sensitive user-specific data unless intentionally designed.
-- [ ] Do not cache decrypted content.
-- [ ] Keep runtime caching explicit and narrow.
-- [ ] Add bundle size visibility.
-- [ ] Keep route-level lazy loading where it reduces initial load without complicating chat startup.
-- [ ] Add privacy-safe telemetry helpers for event names and technical metadata only.
-- [ ] Add tests that reject message content, tokens, keys, passphrases, presigned URLs, and full authorization headers.
-- [ ] Document target hosting headers: `Content-Security-Policy`, `Referrer-Policy`, `Permissions-Policy`, `X-Content-Type-Options`, `frame-ancestors`, `base-uri`, and optional COOP/COEP later if needed.
-- [ ] Add a threat-model note for frontend telemetry, browser persistence, PWA caching, and hosting headers.
+- [x] Prefer static asset caching only at first.
+- [x] Do not cache `/auth/callback`.
+- [x] Do not cache authorization-bearing requests.
+- [x] Do not cache presigned attachment URLs.
+- [x] Do not cache API responses containing sensitive user-specific data unless intentionally designed.
+- [x] Do not cache decrypted content.
+- [x] Keep runtime caching explicit and narrow.
 
 **Verification:**
 
 ```bash
-pnpm --filter @argus/web test -- telemetry.spec.ts
+pnpm --filter @argus/web test -- pwa-cache-policy.spec.ts
 pnpm --filter @argus/web typecheck
 pnpm --filter @argus/web build
 ```
@@ -668,8 +660,63 @@ Expected: tests, typecheck, and production build pass.
 **Commit:**
 
 ```bash
-git add apps/web/vite.config.ts apps/web/src/lib/ws.ts apps/web/src/lib/telemetry.ts apps/web/src/lib/telemetry.spec.ts docs/threat-models/frontend-observability.md
-git commit -m "feat(web): add privacy-safe frontend observability"
+git add apps/web/vite.config.ts apps/web/src/lib/pwa-cache-policy.ts apps/web/src/lib/pwa-cache-policy.spec.ts docs/frontend-plan.md
+git commit -m "feat(web): restrict pwa caching"
+```
+
+### Step 14B: Privacy-Safe Telemetry Helper
+
+**Purpose:** Add a frontend telemetry boundary that cannot carry sensitive content.
+
+**Files:**
+
+- Create: `apps/web/src/lib/telemetry.ts`
+- Create: `apps/web/src/lib/telemetry.spec.ts`
+
+- [ ] Add privacy-safe telemetry helpers for event names and technical metadata only.
+- [ ] Add tests that reject message content, tokens, keys, passphrases, presigned URLs, and full authorization headers.
+- [ ] Do not send telemetry anywhere in this step; define the local safety boundary first.
+
+**Verification:**
+
+```bash
+pnpm --filter @argus/web test -- telemetry.spec.ts
+pnpm --filter @argus/web typecheck
+```
+
+**Commit:**
+
+```bash
+git add apps/web/src/lib/telemetry.ts apps/web/src/lib/telemetry.spec.ts docs/frontend-plan.md
+git commit -m "feat(web): add privacy-safe telemetry boundary"
+```
+
+### Step 14C: Headers, Bundle Visibility, and Threat Model
+
+**Purpose:** Document production hosting expectations and add low-risk performance visibility.
+
+**Files:**
+
+- Modify: `apps/web/vite.config.ts`
+- Create: `docs/threat-models/frontend-observability.md`
+
+- [ ] Add bundle size visibility.
+- [ ] Keep route-level lazy loading where it reduces initial load without complicating chat startup.
+- [ ] Document target hosting headers: `Content-Security-Policy`, `Referrer-Policy`, `Permissions-Policy`, `X-Content-Type-Options`, `frame-ancestors`, `base-uri`, and optional COOP/COEP later if needed.
+- [ ] Add a threat-model note for frontend telemetry, browser persistence, PWA caching, and hosting headers.
+
+**Verification:**
+
+```bash
+pnpm --filter @argus/web typecheck
+pnpm --filter @argus/web build
+```
+
+**Commit:**
+
+```bash
+git add apps/web/vite.config.ts docs/threat-models/frontend-observability.md docs/frontend-plan.md
+git commit -m "docs(web): document frontend hosting safety"
 ```
 
 ## Review Guidance

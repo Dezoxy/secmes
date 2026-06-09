@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import webPackage from './package.json';
+import { pwaNavigateFallbackDenylist, pwaPrecacheGlobPatterns } from './src/lib/pwa-cache-policy';
 
 // React + Vite PWA — the static, crypto-blind-friendly client for argus.
 export default defineConfig({
@@ -32,6 +33,15 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      workbox: {
+        cleanupOutdatedCaches: true,
+        globPatterns: [...pwaPrecacheGlobPatterns],
+        navigateFallback: '/index.html',
+        navigateFallbackDenylist: [...pwaNavigateFallbackDenylist],
+        // Static precache only. API, auth, WebSocket, attachment, and authorization-bearing requests must
+        // remain network-only until a threat-modeled runtime cache is intentionally added.
+        runtimeCaching: [],
+      },
       manifest: {
         name: 'argus',
         short_name: 'argus',
