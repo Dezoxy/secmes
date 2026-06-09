@@ -801,9 +801,14 @@ Home Screen app.
 
 **Purpose:** Reduce initial frontend payload where it is low-risk.
 
-- [ ] Use the existing bundle visibility output as the measurement source.
-- [ ] Prefer lazy-loading non-chat routes, settings sections, and recovery panels before touching crypto paths.
-- [ ] Do not split code in a way that complicates chat startup or the passkey/auth callback path.
+- [x] Use the existing bundle visibility output as the measurement source.
+- [x] Prefer lazy-loading non-chat routes, settings sections, and recovery panels before touching crypto paths.
+- [x] Do not split code in a way that complicates chat startup or the passkey/auth callback path.
+
+Result: the first F6 pass lazy-loads non-chat route shells, the chat-owned settings modal, and the
+recovery panel inside Security settings. The Vite bundle report moved the main JS chunk from
+`739.2 KiB` / `224.8 KiB gzip` to `697.1 KiB` / `212.9 KiB gzip`. The remaining large main chunk is
+intentional for now because chat, auth callback, and crypto startup stayed eager.
 
 ## Standard Verification Before Each PR
 

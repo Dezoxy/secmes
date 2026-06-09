@@ -37,8 +37,7 @@ Apple touch icon metadata, maskable launcher icons, service worker registration,
 
 - Public production source maps are not enabled here. Code-delivery hardening and published bundle
   hash work should decide source-map policy together.
-- Initial bundle splitting is deferred to F5. The remaining Lighthouse unused-JS warning is the known
-  chat bundle payload and should be handled with route/settings/recovery lazy loading, not by touching
-  crypto startup paths in this pass.
+- Initial bundle splitting is tracked in F6. The first pass lazy-loads route/settings/recovery surfaces
+  while leaving chat and crypto startup paths eager.
 - iOS installed-PWA proof remains user/device work. It needs a real iPhone Safari install test because
   desktop Lighthouse cannot prove iOS storage, install, or launch behavior.
