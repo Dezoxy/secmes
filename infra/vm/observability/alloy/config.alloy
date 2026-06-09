@@ -19,10 +19,14 @@ local.file_match "containers" {
 loki.source.file "containers" {
   targets    = local.file_match.containers.targets
   forward_to = [loki.process.scrub.receiver]
-  // On first run (no positions file yet — e.g. fresh arming on a VM with existing containers) start at EOF
-  // instead of replaying every existing json log. Avoids backfilling a large pre-existing backlog into Loki
-  // and centralizing lines that predate this collector. After the first run, the positions file resumes.
-  tail_from_end = true
+  // tail_from_end = false (the default, set explicitly + documented because it's a real trade-off): read each
+  // NEW container file from the START. Docker creates a fresh *-json.log per container on every deploy/restart,
+  // so tail_from_end=true would skip the boot/crash-loop lines written before Alloy's next discovery — i.e.
+  // exactly the startup logs needed to debug a failed rollout, lost on EVERY deploy. Capturing those
+  // (recurring, high value) outweighs avoiding a ONE-TIME first-arming backfill of pre-existing logs — and
+  // that backfill is already bounded by Loki's reject_old_samples (7d) + retention (7d) + the ingestion rate
+  // limit, and is small on a freshly-provisioned VM. See docs/threat-models/centralized-logs.md §6.
+  tail_from_end = false
 }
 
 loki.process "scrub" {

@@ -102,6 +102,13 @@ Semgrep. Enables nothing — deploys at arming alongside #47.
 - **Lossy label enrichment** — without the socket, logs are labeled by container id / filename, not a friendly
   compose service name. → Acceptable for a first slice (queryable by id/content/time); friendly-name relabel
   is a follow-up.
+- **First-run backfill of pre-existing container logs.** Alloy reads each new `*-json.log` from the start
+  (`tail_from_end = false`) so per-deploy boot/crash-loop startup lines — the highest-value logs for debugging
+  a failed rollout — are captured every deploy (the alternative, `tail_from_end = true`, would skip them, since
+  Docker creates a fresh log path per container). The cost is a one-time backfill of pre-existing logs on first
+  arming. → Bounded: Loki's `reject_old_samples` (7d) + retention (7d) drop anything older than the window, the
+  ingestion rate limit throttles the burst, and a freshly-provisioned VM has little history. Accepted; capturing
+  startup logs every deploy outweighs avoiding a one-time, self-expiring backfill.
 - **Single-VM failure domain** — Loki shares the host it observes; a VM-down event loses recent logs not yet
   externalized. Accepted for this phase (multi-host is the B4 enterprise path); the nightly B2 backup does not
   cover Loki (logs are transient observability, not durable data). Note the "what happened just before a
