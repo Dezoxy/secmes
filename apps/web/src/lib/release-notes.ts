@@ -14,6 +14,7 @@ export const releaseNotes: ReleaseNote[] = [
       'Backend status is shown as Online or Offline.',
       'The app version sits at the bottom of About.',
       'Release notes now have a dedicated scrollable area.',
+      'About includes a manual PWA update check for installed app shells.',
     ],
   },
 ];

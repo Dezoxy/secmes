@@ -777,7 +777,18 @@ and accessibility warnings.
 - [x] Keep recovery copy clear that identity recovery does not restore past message history.
 - [x] Do not upload backups or add backend endpoints in this follow-up.
 
-### F4: UI Consistency Sweep
+### F4: PWA Update Prompt
+
+**Purpose:** Let installed PWAs pick up frontend releases without removing and re-adding the
+Home Screen app.
+
+- [x] Add a manual update check under About.
+- [x] Show an in-app update prompt when a new service worker is ready.
+- [x] Reload only after the user chooses to restart into the new app shell.
+- [x] Keep this frontend-only: no runtime caches for auth, API, WebSocket, or attachments.
+- [x] Document that iOS Home Screen metadata such as icon/name may still require reinstalling.
+
+### F5: UI Consistency Sweep
 
 **Purpose:** Smooth existing chat/settings surfaces after the structural refactor.
 
@@ -785,7 +796,7 @@ and accessibility warnings.
 - [ ] Preserve the current dark-only product direction and accent-color system.
 - [ ] Add or update Playwright coverage for any interaction changed.
 
-### F5: Bundle-size Follow-up
+### F6: Bundle-size Follow-up
 
 **Purpose:** Reduce initial frontend payload where it is low-risk.
 

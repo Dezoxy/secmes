@@ -192,3 +192,18 @@ test('settings sections preserve defaults after component split', async ({ page 
   await expect(dialog.getByRole('heading', { name: 'Devices' })).toBeVisible();
   await expect(dialog.getByText('Current device')).toBeVisible();
 });
+
+test('about exposes manual PWA update status without changing iPhone metadata expectations', async ({
+  page,
+}) => {
+  await page.goto('/chat');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'About' }).click();
+
+  await expect(dialog.getByRole('heading', { name: 'About' })).toBeVisible();
+  await expect(dialog.getByText('App update')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Check' })).toBeVisible();
+  await expect(dialog.getByText('Home Screen name changes may still require')).toBeVisible();
+});
