@@ -58,3 +58,12 @@ jobs:
             exit 1
           fi
           echo "compose.prod.yaml: no published host ports OK"
+
+  dockerignore-guard:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - name: Assert the secret-exclude block is identical across all *dockerignore
+        run: bash scripts/check-dockerignore-secret-sync.sh

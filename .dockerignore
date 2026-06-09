@@ -20,6 +20,7 @@
 # Secrets & local config — must NEVER enter an image layer or the build context.
 # `secrets/` holds the mounted credential files (DB URL, B2 key) compose.prod.yaml delivers at runtime; a
 # repo-root `COPY . .` would otherwise pull them into the daemon context + intermediate layers.
+# argus-secret-excludes >>> keep this block byte-identical across all *dockerignore (CI: dockerignore-guard)
 secrets/
 .secrets/
 **/.env
@@ -30,6 +31,7 @@ secrets/
 **/.terraform
 *.pem
 *.key
+# argus-secret-excludes <<<
 
 # Tests, coverage, reports — not needed to build the PWA.
 **/coverage
