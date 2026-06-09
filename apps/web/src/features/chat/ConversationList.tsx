@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Search, Plus, Users, Settings } from 'lucide-react';
+import { Search, Plus, Users, Settings, RefreshCw } from 'lucide-react';
 import type { Conversation, User } from './seed';
 import {
   currentUser,
@@ -19,6 +19,10 @@ interface ConversationListProps {
   onSettings?: (trigger: HTMLButtonElement) => void;
   /** Starts the claim → verify → create flow. Absent in demo mode (no unlocked device) → button hidden. */
   onNewConversation?: () => void;
+  /** Shows the installed-app update action when a newer PWA shell is waiting. */
+  updateReady?: boolean;
+  /** Applies the waiting PWA shell update and reloads the app. */
+  onApplyUpdate?: () => void | Promise<void>;
 }
 
 export function ConversationList({
@@ -28,14 +32,24 @@ export function ConversationList({
   currentUserProfile = currentUser,
   onSettings,
   onNewConversation,
+  updateReady = false,
+  onApplyUpdate,
 }: ConversationListProps) {
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const touchStartY = useRef<number | null>(null);
+  const searchTouchStartY = useRef<number | null>(null);
+  const sidebarTouchStartY = useRef<number | null>(null);
 
   const revealSearch = () => setSearchVisible(true);
+
+  const hideSearch = () => {
+    searchInputRef.current?.blur();
+    setSearchFocused(false);
+    setSearchVisible(false);
+  };
 
   const hideSearchIfIdle = () => {
     if (!searchFocused) setSearchVisible(false);
@@ -44,11 +58,33 @@ export function ConversationList({
   const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
     const scrollTop = listRef.current?.scrollTop ?? 0;
     if (event.deltaY < -12 && scrollTop <= 2) revealSearch();
-    if (event.deltaY > 12 && scrollTop > 12) hideSearchIfIdle();
+    if (event.deltaY > 12) {
+      if (searchVisible) hideSearch();
+      else if (scrollTop > 12) hideSearchIfIdle();
+    }
+  };
+
+  const handleSidebarWheelCapture = (event: React.WheelEvent<HTMLDivElement>) => {
+    if (searchVisible && event.deltaY > 12) hideSearch();
+  };
+
+  const handleSidebarTouchStartCapture = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (searchVisible) sidebarTouchStartY.current = event.touches[0]?.clientY ?? null;
+  };
+
+  const handleSidebarTouchMoveCapture = (event: React.TouchEvent<HTMLDivElement>) => {
+    const startY = sidebarTouchStartY.current;
+    const currentY = event.touches[0]?.clientY;
+    if (startY === null || currentY === undefined) return;
+    if (currentY - startY < -28) hideSearch();
+  };
+
+  const handleSidebarTouchEndCapture = () => {
+    sidebarTouchStartY.current = null;
   };
 
   const handleTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
-    if ((listRef.current?.scrollTop ?? 0) <= 2) {
+    if (searchVisible || (listRef.current?.scrollTop ?? 0) <= 2) {
       touchStartY.current = event.touches[0]?.clientY ?? null;
     }
   };
@@ -60,10 +96,32 @@ export function ConversationList({
     if (currentY - startY > 28 && (listRef.current?.scrollTop ?? 0) <= 2) {
       revealSearch();
     }
+    if (currentY - startY < -28 && searchVisible) {
+      hideSearch();
+    }
   };
 
   const handleTouchEnd = () => {
     touchStartY.current = null;
+  };
+
+  const handleSearchWheel = (event: React.WheelEvent<HTMLElement>) => {
+    if (event.deltaY > 12) hideSearch();
+  };
+
+  const handleSearchTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    searchTouchStartY.current = event.touches[0]?.clientY ?? null;
+  };
+
+  const handleSearchTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    const startY = searchTouchStartY.current;
+    const currentY = event.touches[0]?.clientY;
+    if (startY === null || currentY === undefined) return;
+    if (currentY - startY < -28) hideSearch();
+  };
+
+  const handleSearchTouchEnd = () => {
+    searchTouchStartY.current = null;
   };
 
   const focusSearch = () => {
@@ -72,7 +130,13 @@ export function ConversationList({
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div
+      className="flex h-full flex-col"
+      onWheelCapture={handleSidebarWheelCapture}
+      onTouchStartCapture={handleSidebarTouchStartCapture}
+      onTouchMoveCapture={handleSidebarTouchMoveCapture}
+      onTouchEndCapture={handleSidebarTouchEndCapture}
+    >
       {/* User Profile Section */}
       <div className="p-4 border-b border-white/5">
         <button
@@ -119,6 +183,10 @@ export function ConversationList({
 
       {/* Pull-down Search */}
       <div
+        onWheel={handleSearchWheel}
+        onTouchStart={handleSearchTouchStart}
+        onTouchMove={handleSearchTouchMove}
+        onTouchEnd={handleSearchTouchEnd}
         className={`overflow-hidden transition-all duration-300 ease-out ${
           searchVisible
             ? 'max-h-20 translate-y-0 opacity-100'
@@ -135,6 +203,10 @@ export function ConversationList({
               aria-label="Search conversations"
               tabIndex={searchVisible ? undefined : -1}
               placeholder="Search conversations..."
+              onWheel={handleSearchWheel}
+              onTouchStart={handleSearchTouchStart}
+              onTouchMove={handleSearchTouchMove}
+              onTouchEnd={handleSearchTouchEnd}
               onFocus={() => {
                 setSearchFocused(true);
                 revealSearch();
@@ -251,6 +323,24 @@ export function ConversationList({
           );
         })}
       </div>
+
+      {updateReady && onApplyUpdate && (
+        <div
+          className="relative shrink-0 bg-[#0f0f16] px-4 pb-4 pt-3 before:absolute before:left-0 before:right-[-1px] before:top-0 before:h-px before:bg-white/5"
+          role="status"
+          aria-live="polite"
+        >
+          <button
+            type="button"
+            onClick={() => void onApplyUpdate()}
+            aria-label="Update Argus"
+            className="mx-auto flex h-9 items-center gap-2 rounded-full border border-purple-400/30 bg-purple-500/15 px-4 text-sm font-semibold text-purple-100 shadow-lg shadow-purple-950/25 transition-all duration-300 hover:-translate-y-0.5 hover:border-purple-300/50 hover:bg-purple-500/25 active:translate-y-0"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Update
+          </button>
+        </div>
+      )}
     </div>
   );
 }

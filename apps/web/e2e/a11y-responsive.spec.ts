@@ -24,7 +24,8 @@ test('chat exposes landmarks and named composer controls', async ({ page }) => {
   await expect(page.getByRole('menuitem', { name: 'Conversation info' })).toBeVisible();
 });
 
-test('settings closes back to the trigger and exposes section navigation', async ({ page }) => {
+test('settings close button animates out and returns focus to the trigger', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.goto('/chat');
 
   const settingsTrigger = page.getByRole('button', { name: 'Open settings' });
@@ -34,7 +35,8 @@ test('settings closes back to the trigger and exposes section navigation', async
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('navigation', { name: 'Settings sections' })).toBeVisible();
 
-  await page.keyboard.press('Escape');
+  await dialog.getByRole('button', { name: 'Close settings' }).click();
+  await expect(await dialog.getAttribute('class')).toContain('argus-overlay-exit');
   await expect(dialog).toHaveCount(0);
   await expect(settingsTrigger).toBeFocused();
 });
@@ -74,13 +76,17 @@ test('mobile settings sections expose current state and focus section content', 
   const settingsPanel = dialog.locator(':scope > div');
   await expect
     .poll(async () => (await settingsPanel.boundingBox())?.x ?? 999)
-    .toBeLessThanOrEqual(9);
+    .toBeLessThanOrEqual(17);
 
   const panelBox = await settingsPanel.boundingBox();
   expect(panelBox).not.toBeNull();
-  expect(panelBox!.x).toBeGreaterThanOrEqual(7);
-  expect(panelBox!.x).toBeLessThanOrEqual(9);
-  expect(panelBox!.width).toBeLessThanOrEqual(376);
+  expect(panelBox!.x).toBeGreaterThanOrEqual(15);
+  expect(panelBox!.x).toBeLessThanOrEqual(17);
+  expect(panelBox!.y).toBeGreaterThanOrEqual(41);
+  expect(panelBox!.y).toBeLessThanOrEqual(43);
+  expect(panelBox!.width).toBeLessThanOrEqual(358);
+  expect(panelBox!.height).toBeGreaterThanOrEqual(759);
+  expect(panelBox!.height).toBeLessThanOrEqual(761);
 
   const securitySection = dialog.getByRole('button', { name: 'Security & Recovery' });
 
@@ -106,9 +112,51 @@ test('mobile chat switches between conversation list and active thread landmarks
   await expect(page.getByRole('main', { name: 'Chat' })).toHaveCount(0);
 
   await page.getByRole('button', { name: /Open conversation with Sarah Chen/i }).click();
-  await expect(page.getByRole('main', { name: 'Chat' })).toBeVisible();
+  const chatMain = page.getByRole('main', { name: 'Chat' });
+  await expect(chatMain).toBeVisible();
   await expect(page.getByRole('complementary', { name: 'Conversations' })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Back to conversations' }).click();
+  await expect(chatMain).toHaveClass(/argus-pane-back-exit/);
   await expect(page.getByRole('complementary', { name: 'Conversations' })).toBeVisible();
+});
+
+test('chat shows the sidebar update action in local preview mode only', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/chat?previewPwaUpdate=1');
+
+  const updateButton = page.getByRole('button', { name: 'Update Argus' });
+  await expect(updateButton).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Dismiss update prompt' })).toHaveCount(0);
+
+  await updateButton.click();
+
+  await expect(updateButton).toHaveCount(0);
+  await expect(page).not.toHaveURL(/previewPwaUpdate=1/);
+});
+
+test('mobile conversation search collapses when scrolling back down', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/chat');
+
+  const revealSearch = page.getByRole('button', { name: 'Reveal conversation search' });
+  await revealSearch.click();
+
+  const searchInput = page.getByRole('textbox', { name: 'Search conversations' });
+  const searchField = page.locator('input[aria-label="Search conversations"]');
+  await expect(searchInput).toBeVisible();
+  await expect(searchInput).toBeFocused();
+  await page.waitForTimeout(350);
+
+  const searchBox = await searchInput.boundingBox();
+  expect(searchBox).not.toBeNull();
+
+  await page.mouse.move(searchBox!.x + searchBox!.width / 2, searchBox!.y + searchBox!.height / 2);
+  await searchField.evaluate((input) => {
+    input.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 160 }));
+  });
+
+  await expect(searchField).toHaveAttribute('tabindex', '-1');
+  await expect(searchField).not.toBeFocused();
+  await expect(revealSearch).toBeVisible();
 });

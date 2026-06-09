@@ -19,7 +19,11 @@ export const floatingMenuItemClass =
   'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors';
 
 export const modalBackdropEnterMotion = 'argus-overlay-enter';
+export const modalBackdropExitMotion = 'argus-overlay-exit';
 export const modalPanelEnterMotion = 'argus-modal-enter';
+export const modalPanelExitMotion = 'argus-modal-exit';
 export const conversationEnterMotion = 'argus-pane-enter';
+export const paneBackEnterMotion = 'argus-pane-back-enter';
+export const paneBackExitMotion = 'argus-pane-back-exit';
 export const sentMessageEnterMotion = 'argus-message-send-enter';
 export const surfaceEnterMotion = 'argus-surface-enter';

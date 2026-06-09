@@ -1,7 +1,6 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { APP_VERSION_TAG } from '../../lib/app-version';
 import { releaseNotes } from '../../lib/release-notes';
 import {
   PwaUpdateContextProvider,
@@ -25,20 +24,22 @@ function renderAbout(value: Partial<PwaUpdateContextValue> = {}): string {
 }
 
 describe('AboutSettings', () => {
-  it('shows backend status, a quiet version footer, and release notes', () => {
+  it('shows backend status and release notes without a standalone version footer', () => {
     const html = renderAbout();
 
     expect(html).toContain('Backend status');
     expect(html).toContain('Offline');
-    expect(html).toContain(APP_VERSION_TAG);
     expect(html).toContain('Release notes');
+    expect(html).toContain(releaseNotes[0]!.version);
     expect(html).toContain(releaseNotes[0]!.title);
+    expect(html).toContain(releaseNotes.at(-1)!.version);
+    expect(html).not.toContain('v0.0.0');
     expect(html).not.toContain('Argus secure messaging');
     expect(html).not.toContain('Safe diagnostic export');
     expect(html).not.toContain('Diagnostics menu reserved');
   });
 
-  it('shows a manual PWA update check and iPhone metadata limitation', () => {
+  it('shows a manual PWA update check and platform install note', () => {
     const html = renderAbout({
       canCheckForUpdate: true,
       status: 'idle',
@@ -46,7 +47,7 @@ describe('AboutSettings', () => {
 
     expect(html).toContain('App update');
     expect(html).toContain('Check');
-    expect(html).toContain('Home Screen name changes may still require');
+    expect(html).toContain('Android, iOS, iPadOS, macOS, and desktop browsers can install Argus');
   });
 
   it('shows restart copy when an app shell update is ready', () => {

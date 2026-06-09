@@ -19,6 +19,8 @@ function FontSizePicker({
   accent: AccentOption;
   onChange: (value: number) => void;
 }) {
+  const previewSizeRem = 1 + value * 0.075;
+
   return (
     <div className="rounded-xl border border-white/5 bg-white/[0.03] p-4">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -26,7 +28,11 @@ function FontSizePicker({
           <p className="text-sm font-medium text-white">Font size</p>
           <p className="mt-0.5 text-xs text-white/40">Level {value} of 10</p>
         </div>
-        <span className="text-lg font-semibold text-white" style={{ color: accent.hex }}>
+        <span
+          className="flex h-9 min-w-12 items-center justify-end font-semibold text-white transition-colors duration-150"
+          style={{ color: accent.hex, fontSize: `${previewSizeRem}rem`, lineHeight: 1 }}
+          aria-label={`Font size preview level ${value}`}
+        >
           Aa
         </span>
       </div>
@@ -37,23 +43,12 @@ function FontSizePicker({
         max={10}
         step={1}
         value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
+        onInput={(event) => onChange(Number(event.currentTarget.value))}
+        onChange={(event) => onChange(Number(event.currentTarget.value))}
         aria-label="Font size"
         className="h-6 w-full cursor-pointer"
         style={{ accentColor: accent.hex }}
       />
-
-      <div className="px-1">
-        <div className="grid grid-cols-10 gap-1">
-          {FONT_SIZE_LEVELS.map((level) => (
-            <span
-              key={level}
-              className="mx-auto h-1.5 w-1.5 rounded-full"
-              style={{ backgroundColor: level <= value ? accent.hex : 'rgba(255,255,255,0.2)' }}
-            />
-          ))}
-        </div>
-      </div>
 
       <div className="mt-1 flex justify-between text-[11px] font-medium uppercase tracking-[0.08em] text-white/35">
         <span>Minimum</span>
