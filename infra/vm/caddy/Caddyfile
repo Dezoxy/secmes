@@ -18,6 +18,24 @@
 	}
 }
 
+# --- Self-hosted Zitadel (OIDC issuer https://auth.4rgus.com) -------------------------------------------
+# This host is matched FIRST (more specific than the catch-all :8080 app site below); cloudflared forwards
+# the original Host header, so Caddy routes by it. Zitadel speaks gRPC (console + APIs) over HTTP/2, so the
+# upstream is dialled h2c (HTTP/2 cleartext) — the documented Zitadel-behind-a-proxy setup. Note: NO
+# X-Frame-Options here — oidc-client-ts silent-renew loads the authorize endpoint in a hidden iframe, and
+# Zitadel sets its own framing/security headers. TLS terminates at Cloudflare; this stays plain HTTP on :8080.
+http://auth.4rgus.com:8080 {
+	# Login V2 UI is a separate container; everything else (OIDC/OAuth/JWKS/console/APIs) is the main server.
+	@login path /ui/v2/login /ui/v2/login/*
+	handle @login {
+		reverse_proxy zitadel-login:3000
+	}
+	handle {
+		reverse_proxy h2c://zitadel:8080
+	}
+}
+
+# --- App origin (PWA + /api + /ws) — catch-all :8080 for every other host (4rgus.com, health, direct IP) ---
 :8080 {
 	# Defense-in-depth response headers (the edge adds HSTS and more). CSP is app-managed in the PWA.
 	header {

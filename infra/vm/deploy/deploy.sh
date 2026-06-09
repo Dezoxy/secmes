@@ -141,9 +141,24 @@ if ! docker compose -f "$COMPOSE" run --rm --no-deps --user 0 \
 fi
 shred -u "$_migfile" 2>/dev/null || rm -f "$_migfile" # best-effort on tmpfs; the rm is the real cleanup
 
-# --- 6. Bring up the full stack. cloudflared's TUNNEL_TOKEN is a runtime value from the delivered file. ---
-log "starting api + caddy + cloudflared"
+# --- 6. Bring up the full stack. cloudflared's TUNNEL_TOKEN + Zitadel's DB/admin passwords are RUNTIME values
+#        read from the delivered Key Vault files (the accepted env exception — never a committed/on-disk env
+#        file; see vm-zitadel.md §4). ZITADEL_DB_PASSWORD also backs zitadel-db's POSTGRES_PASSWORD_FILE (same
+#        file, two consumers). ZITADEL_ADMIN_PASSWORD is read by FirstInstance on the FIRST init only — ignored
+#        on every later boot (the instance already exists). ---
+log "starting api + caddy + cloudflared + zitadel"
+# Guard: these runtime-value files must exist + be non-empty before we `cat` them into the `up` env — else
+# `set -e` aborts on a bare `cat: No such file` instead of a legible FATAL. fetch-keyvault-secrets.sh (same
+# bundled SHA) already fails closed first, so this is belt-and-suspenders for a stale/partial secret set.
+for _f in tunnel_token zitadel_db_password zitadel_admin_password; do
+  [ -s "$SECRETS_DIR/$_f" ] || {
+    log "FATAL: missing/empty runtime secret file: $_f"
+    exit 1
+  }
+done
 TUNNEL_TOKEN="$(cat "$SECRETS_DIR/tunnel_token")" \
+  ZITADEL_DB_PASSWORD="$(cat "$SECRETS_DIR/zitadel_db_password")" \
+  ZITADEL_ADMIN_PASSWORD="$(cat "$SECRETS_DIR/zitadel_admin_password")" \
   docker compose -f "$COMPOSE" up -d
 
 # --- 6b. Gate on the new app containers becoming HEALTHY — `up -d` returns before they're ready, so without
@@ -171,14 +186,16 @@ wait_healthy() { # $1 = compose service
 }
 # cloudflared has no healthcheck (it's the outbound tunnel = the only ingress); require it's up and NOT
 # crash-looping (RestartCount stable across a short window), else the app is unreachable.
-wait_running() { # $1 = compose service without a healthcheck
-  local cid r1 r2
+wait_running() { # $1 = compose service without a healthcheck ; $2 = optional initial settle seconds (default 8)
+  local cid r1 r2 settle="${2:-8}"
   cid="$(docker compose -f "$COMPOSE" ps -q "$1")"
   [ -n "$cid" ] || {
     log "FATAL: $1 container not found after rollout"
     return 1
   }
-  sleep 8
+  # On a cold FIRST boot Zitadel runs its own schema migration + FirstInstance seed in-process (no crash), so
+  # callers pass a longer settle to avoid sampling RestartCount mid-init; a real crash-loop still trips below.
+  sleep "$settle"
   [ "$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null)" = "true" ] || {
     log "FATAL: $1 is not running"
     return 1
@@ -191,10 +208,15 @@ wait_running() { # $1 = compose service without a healthcheck
     return 1
   }
 }
-log "waiting for the rollout to become healthy (api, caddy) + the tunnel to stay up (cloudflared)"
+log "waiting for the rollout to become healthy (api, caddy, zitadel-db) + the tunnel + zitadel to stay up"
 wait_healthy api
 wait_healthy caddy
 wait_running cloudflared
+# Zitadel: gate the DB (has a healthcheck) + the server/login containers (Go/Node images with no shell, so no
+# healthcheck — require running + not crash-looping; a bad masterkey/DB password fails the deploy loudly here).
+wait_healthy zitadel-db
+wait_running zitadel 30 # longer settle: cold first-init runs Zitadel's schema migration + FirstInstance seed
+wait_running zitadel-login
 
 # --- 7. Tidy up: drop dangling images (the GHCR login is cleared by the EXIT trap). ---
 docker image prune -f >/dev/null 2>&1 || true

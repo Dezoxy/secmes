@@ -29,14 +29,20 @@ VAULT_URL="https://${ARGUS_KEY_VAULT}.vault.azure.net"
 
 # Key Vault secret name -> local credential filename (in $SECRETS_DIR). KV names are kebab-case (Key Vault
 # disallows underscores); local filenames match what each consumer expects:
-#   compose Docker secrets: postgres_password, database_url, s3_secret_access_key
-#   cloudflared runtime value (stack launcher reads it): tunnel_token
+#   compose Docker secrets: postgres_password, database_url, s3_secret_access_key, zitadel_masterkey,
+#                           zitadel_db_password
+#   cloudflared + zitadel runtime values (stack launcher reads them): tunnel_token, zitadel_db_password (also
+#                           a compose secret — postgres reads the file, Zitadel reads the value as env),
+#                           zitadel_admin_password (first-init bootstrap only)
 #   backup/cleanup LoadCredential sources: backup-db-password, cleanup-db-password, b2-app-key
 SECRETS=(
   "argus-postgres-owner-password=postgres_password"
   "argus-database-url=database_url"
   "argus-s3-secret-access-key=s3_secret_access_key"
   "argus-tunnel-token=tunnel_token"
+  "argus-zitadel-masterkey=zitadel_masterkey"
+  "argus-zitadel-db-password=zitadel_db_password"
+  "argus-zitadel-admin-password=zitadel_admin_password"
   "argus-backup-db-password=backup-db-password"
   "argus-cleanup-db-password=cleanup-db-password"
   "argus-b2-app-key=b2-app-key"
