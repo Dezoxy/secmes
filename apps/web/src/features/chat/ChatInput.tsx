@@ -182,10 +182,12 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
             )}`}
             role="menu"
             aria-label="Message actions"
+            aria-hidden={!actionMenuOpen}
           >
             <button
               type="button"
               onClick={openFilePicker}
+              tabIndex={actionMenuOpen ? 0 : -1}
               className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-white/65 transition-colors hover:bg-white/[0.05] hover:text-white"
               role="menuitem"
             >
@@ -195,6 +197,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
             <button
               type="button"
               onClick={openImagePicker}
+              tabIndex={actionMenuOpen ? 0 : -1}
               className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-white/65 transition-colors hover:bg-white/[0.05] hover:text-white"
               role="menuitem"
             >
@@ -204,6 +207,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
             <button
               type="button"
               onClick={insertEmoji}
+              tabIndex={actionMenuOpen ? 0 : -1}
               className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-white/65 transition-colors hover:bg-white/[0.05] hover:text-white"
               role="menuitem"
             >
@@ -218,6 +222,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
+            aria-label="Message"
             placeholder="Type a message..."
             rows={1}
             className={`${COMPOSER_CONTROL} block w-full resize-none overflow-hidden bg-[#1a1a26] px-3.5 py-2.5 text-sm leading-5 text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20`}

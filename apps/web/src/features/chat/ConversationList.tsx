@@ -16,7 +16,7 @@ interface ConversationListProps {
   onSelect: (id: string) => void;
   currentUserProfile?: User;
   /** Opens account settings. */
-  onSettings?: () => void;
+  onSettings?: (trigger: HTMLButtonElement) => void;
   /** Starts the claim → verify → create flow. Absent in demo mode (no unlocked device) → button hidden. */
   onNewConversation?: () => void;
 }
@@ -77,7 +77,7 @@ export function ConversationList({
       <div className="p-4 border-b border-white/5">
         <button
           type="button"
-          onClick={onSettings}
+          onClick={(event) => onSettings?.(event.currentTarget)}
           aria-label="Open settings"
           className="w-full flex items-center gap-3 p-2 rounded-xl hover:bg-[#1a1a26] transition-all duration-300 group"
         >
@@ -132,6 +132,8 @@ export function ConversationList({
             <input
               ref={searchInputRef}
               type="text"
+              aria-label="Search conversations"
+              tabIndex={searchVisible ? undefined : -1}
               placeholder="Search conversations..."
               onFocus={() => {
                 setSearchFocused(true);
@@ -186,6 +188,8 @@ export function ConversationList({
               type="button"
               key={conversation.id}
               onClick={() => onSelect(conversation.id)}
+              aria-label={`Open conversation with ${displayName}`}
+              aria-pressed={isSelected}
               className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all duration-300 group ${
                 isSelected
                   ? 'bg-purple-500/20 border border-purple-500/30'
