@@ -56,30 +56,36 @@ function LandingRoute() {
   if (ready && configured && user) return <Navigate to="/chat" replace />;
 
   return (
-    <div className="min-h-screen bg-[#1a1a24] flex items-center justify-center p-4">
-      <div
-        className={`w-full max-w-4xl bg-[#12121a] rounded-3xl overflow-hidden flex flex-col lg:flex-row shadow-2xl shadow-black/50 transition-all duration-700 ease-out ${
+    <main
+      aria-label="Argus sign-in"
+      className="flex min-h-screen items-center justify-center bg-[#1a1a24] p-4"
+    >
+      <section
+        aria-label="Passkey sign-in"
+        className={`flex h-[90vh] max-h-[900px] w-full max-w-[430px] flex-col overflow-hidden rounded-3xl bg-[#12121a] shadow-2xl shadow-black/50 transition-all duration-700 ease-out ${
           mounted ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
         }`}
       >
-        {/* Left Panel */}
-        <div className="lg:w-[45%] bg-[#0f0f16] p-5 flex flex-col">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-[#0f0f16] p-5 sm:p-6">
           <div
-            className={`flex items-center justify-between mb-4 transition-all duration-500 delay-200 ${
+            className={`mb-5 flex items-center justify-center text-center transition-all duration-500 delay-200 ${
               mounted ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'
             }`}
           >
-            <div className="text-white text-xl font-bold tracking-wider flex items-center gap-2">
-              <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />
-              <span className="bg-gradient-to-r from-purple-400 to-purple-600 bg-clip-text text-transparent">
+            <div
+              role="group"
+              aria-label="Argus brand"
+              className="flex items-center justify-center gap-3 text-3xl font-bold tracking-[0.12em] text-white"
+            >
+              <ArgusAppIcon className="h-12 w-12 rounded-2xl shadow-lg shadow-purple-500/25" />
+              <span className="bg-gradient-to-r from-purple-300 to-purple-600 bg-clip-text text-transparent">
                 ARGUS
               </span>
             </div>
           </div>
 
-          {/* Image Carousel */}
           <div
-            className={`flex-1 relative rounded-2xl overflow-hidden min-h-[260px] transition-all duration-700 delay-300 ${
+            className={`relative aspect-[3/2] shrink-0 overflow-hidden rounded-2xl transition-all duration-700 delay-300 ${
               mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
             }`}
           >
@@ -106,7 +112,7 @@ function LandingRoute() {
                 mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
               }`}
             >
-              <h2 className="text-white text-xl font-semibold leading-tight tracking-tight">
+              <h2 className="text-xl font-semibold leading-tight tracking-tight text-white">
                 {currentSlide.title}
                 <br />
                 {currentSlide.subtitle}
@@ -114,7 +120,6 @@ function LandingRoute() {
             </div>
           </div>
 
-          {/* Carousel Dots */}
           <div
             className={`flex items-center justify-center gap-1.5 mt-4 transition-all duration-500 delay-[600ms] ${
               mounted ? 'opacity-100' : 'opacity-0'
@@ -131,26 +136,23 @@ function LandingRoute() {
               />
             ))}
           </div>
-        </div>
 
-        {/* Right Panel - Sign-in Options */}
-        <div className="lg:w-[55%] p-6 lg:p-8 flex flex-col justify-center">
-          <h1
-            className={`text-white text-2xl lg:text-3xl font-bold mb-2 tracking-tight transition-all duration-500 delay-300 ${
-              mounted ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-8'
-            }`}
-          >
-            Welcome to Argus
-          </h1>
-          <p
-            className={`text-white/40 text-sm mb-8 transition-all duration-500 delay-[350ms] ${
-              mounted ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-8'
-            }`}
-          >
-            Use your device passkey to open secure messaging
-          </p>
+          <div className="flex flex-1 flex-col justify-center py-6 text-center">
+            <h1
+              className={`mb-3 text-3xl font-bold tracking-tight text-white transition-all duration-500 delay-300 ${
+                mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
+              }`}
+            >
+              Welcome to Argus
+            </h1>
+            <p
+              className={`mx-auto mb-8 max-w-[18rem] text-base leading-relaxed text-white/40 transition-all duration-500 delay-[350ms] ${
+                mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
+              }`}
+            >
+              Use your device passkey to open secure messaging
+            </p>
 
-          <div>
             <div
               className={`transition-all duration-500 delay-[400ms] ${
                 mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
@@ -164,31 +166,31 @@ function LandingRoute() {
                 Continue with passkey
               </button>
             </div>
-          </div>
 
-          <p
-            className={`text-white/30 text-xs text-center mt-8 transition-all duration-500 delay-[600ms] ${
-              mounted ? 'opacity-100' : 'opacity-0'
-            }`}
-          >
-            By continuing, you agree to our{' '}
-            <a
-              href="#"
-              className="text-purple-400 underline underline-offset-2 hover:text-purple-300 transition-colors duration-300"
+            <p
+              className={`mt-8 text-center text-xs text-white/30 transition-all duration-500 delay-[600ms] ${
+                mounted ? 'opacity-100' : 'opacity-0'
+              }`}
             >
-              Terms of Service
-            </a>{' '}
-            and{' '}
-            <a
-              href="#"
-              className="text-purple-400 underline underline-offset-2 hover:text-purple-300 transition-colors duration-300"
-            >
-              Privacy Policy
-            </a>
-          </p>
+              By continuing, you agree to our{' '}
+              <a
+                href="#"
+                className="text-purple-400 underline underline-offset-2 transition-colors duration-300 hover:text-purple-300"
+              >
+                Terms of Service
+              </a>{' '}
+              and{' '}
+              <a
+                href="#"
+                className="text-purple-400 underline underline-offset-2 transition-colors duration-300 hover:text-purple-300"
+              >
+                Privacy Policy
+              </a>
+            </p>
+          </div>
         </div>
-      </div>
-    </div>
+      </section>
+    </main>
   );
 }
 

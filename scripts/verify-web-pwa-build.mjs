@@ -82,6 +82,7 @@ const expectedManifest = {
   start_url: '/',
   scope: '/',
   display: 'standalone',
+  orientation: 'portrait',
   theme_color: '#1a1a24',
   background_color: '#1a1a24',
 };
