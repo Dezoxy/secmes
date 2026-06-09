@@ -7,7 +7,7 @@
 # See infra/vm/caddy/Caddyfile and docs/threat-models/vm-ingress.md.
 
 # ---- web build (pnpm workspace) ----
-FROM node:24-alpine AS web-build
+FROM node:26-alpine AS web-build
 ENV CI=true
 # Don't pull Playwright browsers during install (web's devDeps include @playwright/test; e2e isn't built here).
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
