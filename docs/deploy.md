@@ -167,10 +167,15 @@ credential file, empty until you provision it (so the login UI is degraded until
 writes its first PAT to the zitadel container's tmpfs; grab it and store it in Key Vault, then re-deliver:
 
 ```bash
-PAT="$(docker compose -f compose.prod.yaml exec -T zitadel cat /tmp/login-client.pat)"
+COMPOSE=/opt/argus/compose.prod.yaml
+PAT="$(docker compose -f "$COMPOSE" exec -T zitadel cat /tmp/login-client.pat)"
 az keyvault secret set --vault-name "$KV" --name argus-zitadel-login-pat --value "$PAT"
 sudo systemctl restart argus-secrets.service                 # re-fetch → /run/argus/secrets/zitadel_login_pat
-docker compose -f compose.prod.yaml up -d zitadel-login      # pick up the now-populated secret
+# --force-recreate: a plain `up -d` won't recreate an unchanged service, so it would keep the OLD (empty)
+# secret file mounted; force a recreate so the now-populated PAT is re-mounted. ARGUS_SECRETS_DIR points
+# compose's secret source at the tmpfs the fetch wrote to (matches what deploy.sh exports).
+ARGUS_SECRETS_DIR=/run/argus/secrets \
+  docker compose -f "$COMPOSE" up -d --force-recreate --no-deps zitadel-login
 ```
 
 From here on `argus-secrets.service` re-delivers it on every boot (reboot-safe). If `/tmp/login-client.pat` is
