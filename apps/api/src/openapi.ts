@@ -182,6 +182,16 @@ export function createOpenApiDocument(app: INestApplication): OpenAPIObject {
           existing.content = errorContent;
         }
       }
+      // Also type any controller-declared error response that's NOT in the standard set (e.g. the 413 on
+      // /attachments/download-url) but carries a description and no body — every 4xx/5xx must have the typed
+      // ErrorResponse schema, else 42Crunch flags v3-response-schema-undefined.
+      for (const existing of Object.entries(op.responses)
+        .filter(([code]) => /^[45]\d\d$/.test(code))
+        .map(([, resp]) => resp)) {
+        if (!('$ref' in existing) && !existing.content) {
+          existing.content = errorContent;
+        }
+      }
     }
   }
 
