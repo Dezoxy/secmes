@@ -148,10 +148,18 @@ EOF
     log "delivered ${kv_name} -> ${file}"
     ;;
   404)
-    : >"$tmp" # genuinely not provisioned yet → seed EMPTY so the mount resolves (consumer degraded)
-    chmod 0400 "$tmp"
-    mv -f "$tmp" "$dest"
-    log "optional ${kv_name} not provisioned (404) — seeded EMPTY ${file} (consumer degraded until set)"
+    if [ -s "$dest" ]; then
+      # Already provisioned, but KV now 404s (accidental secret deletion / name mismatch during a restore).
+      # KEEP the existing valid token rather than silently degrading login; surface it loudly so the operator
+      # restores the Key Vault secret. (Deleting the KV copy doesn't invalidate the token — it lives in
+      # Zitadel's DB — so the on-box file is still usable.)
+      log "WARN ${kv_name} now 404s but ${file} is already populated — KEEPING the existing value; restore the Key Vault secret"
+    else
+      : >"$tmp" # genuinely not provisioned yet → seed EMPTY so the mount resolves (consumer degraded)
+      chmod 0400 "$tmp"
+      mv -f "$tmp" "$dest"
+      log "optional ${kv_name} not provisioned (404) — seeded EMPTY ${file} (consumer degraded until set)"
+    fi
     ;;
   *)
     # Transient/permission/connection error — do NOT clobber a possibly-provisioned secret with empty.
