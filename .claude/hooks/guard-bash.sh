@@ -20,10 +20,14 @@ shopt -s nocasematch
   decide deny "Recursive force-delete of a sensitive path. Run it yourself if truly intended."
 [[ "$cmd" =~ terraform[[:space:]].*destroy ]] && \
   decide deny "terraform destroy is destructive — run manually after confirming workspace/target."
-# Match any force form: --force* (incl. --force-with-lease/-if-includes) OR a short flag cluster containing
-# `f` (-f, -uf, -fu, …). The leading [[:space:]] keeps it from matching a hyphen inside a branch name (bug-fix).
-[[ "$cmd" =~ git[[:space:]]+push[[:space:]].*(--force|[[:space:]]-[a-zA-Z]*f) ]] && \
-  decide deny "Force-push (any --force* or bundled -f) can rewrite shared history. Run it manually if you must."
+# Deny any force form of `git push`, whether the force token is the first arg or later:
+#   --force*  (incl. --force-with-lease / --force-if-includes)
+#   a short-flag cluster containing f  (-f, -uf, -fu, …)
+#   a +-prefixed force refspec  (+main, +HEAD:refs/heads/main)
+# `([[:space:]].*)?[[:space:]]` matches the token's leading space (which may be the one right after `push`);
+# requiring that leading space avoids matching a hyphen inside a branch name (bug-fix) or `pushfoo`.
+[[ "$cmd" =~ git[[:space:]]+push([[:space:]].*)?[[:space:]](--force|-[a-zA-Z]*f|[+]) ]] && \
+  decide deny "Force-push (--force*, bundled -f, or +refspec) can rewrite shared history. Run it manually if you must."
 [[ "$cmd" =~ (cat|less|bat|more|head|tail|echo|printf|xxd|base64|strings)[[:space:]].*(\.env($|[^.a-zA-Z])|\.tfvars($|[^.])|\.pem($|[^a-zA-Z])|id_rsa|id_ed25519|kubeconfig|\.kube/config) ]] && \
   decide deny "That would print secret material to the transcript (.env/tfvars/keys/kubeconfig)."
 [[ "$cmd" =~ az[[:space:]].*(group|keyvault|postgres|vm)[[:space:]].*delete ]] && \
