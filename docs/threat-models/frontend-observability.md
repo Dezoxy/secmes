@@ -75,22 +75,32 @@ the VM/static edge layer. It does not add a telemetry transport and does not cha
 - Add a dependency-free Vite build plugin that reports the largest generated JS/CSS assets by byte size.
 - Keep route imports unchanged in this slice; chat startup stays eager until bundle visibility justifies a
   concrete lazy split.
-- Target hosting headers for the VM/static edge:
-  - `Content-Security-Policy` with restrictive defaults, `base-uri 'none'`, `object-src 'none'`, and
-    `frame-ancestors 'none'`.
-  - `Referrer-Policy: no-referrer`.
-  - `Permissions-Policy` denying unused browser capabilities.
-  - `X-Content-Type-Options: nosniff`.
+- Hosting headers — **now served by Caddy** at the app origin (#43; `infra/vm/caddy/Caddyfile`), `caddy validate`
+  clean, smoke-test the CSP against the live app at arming:
+  - `Content-Security-Policy` with restrictive defaults — `script-src 'self'` (no inline scripts; ts-mls is
+    pure JS so no `wasm-eval`), `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`, and
+    `connect-src` scoped to same-origin (REST/WS) + the Zitadel issuer + the B2 presigned-URL bucket subdomain
+    (`*.s3.<region>.backblazeb2.com`, virtual-host style); `img-src 'self' data: blob:` for generated avatars +
+    decrypted attachment object URLs.
+  - `Referrer-Policy: no-referrer` (tightened from `strict-origin-when-cross-origin`).
+  - `Permissions-Policy` denying unused sensor/hardware capabilities.
+  - `X-Content-Type-Options: nosniff` + `X-Frame-Options: DENY` (defense-in-depth alongside `frame-ancestors`).
   - Optional COOP/COEP later only after checking Zitadel, service-worker, and attachment-origin behavior.
+  - **Remaining #43 (frontend build):** SRI on the built bundles, service-worker pinning, published bundle hash.
 - Gates: `pnpm --filter @argus/web typecheck`, `pnpm --filter @argus/web build`, full frontend PR gate, CI,
   and Codex review.
 
 ## 6. Residual risk
 
-- **Headers are documented, not yet enforced in deployment config.** The VM/static edge must wire these into
-  its actual response headers before production hardening is complete.
-- **CSP needs environment-specific origins.** Zitadel, API/WebSocket, and B2 origins must be pinned per
-  deployment; a too-wide `connect-src` would weaken the protection.
+- **Headers are wired (#43) but the CSP isn't runtime-verified yet.** They are served by Caddy
+  (`infra/vm/caddy/Caddyfile`, `caddy validate` clean), but nothing has loaded the app *through* Caddy with the
+  CSP enforced — smoke-test against the live app at arming and watch the browser console for violations
+  (eyeball the B2 presigned upload/download + the silent-renew XHR specifically). The genuine open #43 items
+  are SRI on the built bundles, service-worker pinning, and a published bundle hash.
+- **CSP `connect-src` is pinned to the single-origin VM topology.** Zitadel + B2 are pinned; same-origin
+  REST/WS rely on `'self'`. A **split deployment** (`VITE_API_URL`/`VITE_WS_URL` on a different host) would
+  silently break live delivery until `connect-src` is extended with that explicit origin — a too-wide
+  `connect-src` would also weaken the protection.
 - **No telemetry sender exists yet.** When one is added, it needs a separate PR and threat-model update that
   covers retention, EU data residency, opt-in/default behavior, and failure handling.
 - **Bundle visibility is not a budget.** It reports size but does not fail CI. A hard budget can be added

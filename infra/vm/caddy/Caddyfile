@@ -76,10 +76,24 @@ http://grafana.4rgus.com:8080 {
 
 # --- App origin (PWA + /api + /ws) — catch-all :8080 for every other host (4rgus.com, health, direct IP) ---
 :8080 {
-	# Defense-in-depth response headers (the edge adds HSTS and more). CSP is app-managed in the PWA.
+	# Code-delivery hardening response headers (#43; the edge adds HSTS). Served HERE at the static origin so
+	# the CSP applies to every response and `frame-ancestors` works (a <meta> CSP ignores it). The directive set
+	# is derived from the PWA's resource graph — UPDATE it when the client adds an external origin; smoke-test
+	# against the live app at arming (CSP violations surface in the browser console). SRI + service-worker
+	# pinning + the published bundle hash are the remaining #43 frontend-build items.
 	header {
+		# script-src is strict 'self' — no inline scripts (index.html only loads /src/main.tsx as a module) and
+		# ts-mls is pure JS (no wasm-eval), so injected/foreign script can't run to read decrypted content or keys
+		# (the core control). connect-src: same-origin REST+WS ('self' covers wss), the Zitadel OIDC issuer
+		# (discovery/JWKS/token + refresh-token silent renew — no iframe, so no frame-src needed), and B2 presigned
+		# upload/download (virtual-host bucket SUBDOMAIN — S3_FORCE_PATH_STYLE=false). img data:/blob: = generated
+		# avatars + decrypted attachment object URLs. style 'unsafe-inline' for React/Tailwind inline styles.
+		# NOTE: same-origin REST/WS rely on 'self' — a SPLIT deploy (VITE_API_URL/VITE_WS_URL on another host)
+		# must extend connect-src with that explicit origin or live delivery silently fails.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://auth.4rgus.com https://s3.eu-central-003.backblazeb2.com https://*.s3.eu-central-003.backblazeb2.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests"
+		Permissions-Policy "accelerometer=(), autoplay=(), bluetooth=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()"
+		Referrer-Policy no-referrer
 		X-Content-Type-Options nosniff
-		Referrer-Policy strict-origin-when-cross-origin
 		X-Frame-Options DENY
 		-Server
 	}
