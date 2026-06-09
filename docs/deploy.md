@@ -167,8 +167,9 @@ FirstInstance is skipped (the admin password is ignored).
 already wired from step 2), **change the admin password + enable MFA** immediately, then create the project /
 SPA OIDC app / tenant-claim Action. The local provisioner (`infra/local/zitadel/provision.sh`) is the
 reference for those API calls; the **multi-tenant org→`tenant_id` mapping** (the local Action hardcodes a
-single dev UUID) is the deferred **G1** work. Set the resulting client id as `OIDC_AUDIENCE` +
-`VITE_OIDC_CLIENT_ID` in the deploy environment and re-cut the release so the PWA build embeds them.
+single dev UUID) is the deferred **G1** work. Set the **project id** as `OIDC_AUDIENCE` (the API's token
+audience — what Zitadel puts in the access-token `aud`, per the local provisioner's `OIDC_AUDIENCE=$PROJECT_ID`)
+and the **SPA client id** as `VITE_OIDC_CLIENT_ID`, then re-cut the release so the PWA build embeds them.
 
 > **Footprint.** Zitadel adds ~1.8 GB of memory limits (`zitadel` 768m + `zitadel-db` 768m + `zitadel-login`
 > 256m) on top of the app stack (~4 GB) — size the VM for ~6 GB+ before arming.
