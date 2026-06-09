@@ -10,7 +10,7 @@ import type { Conversation as MlsGroup, DeviceKeys } from '@argus/crypto';
 import { accessToken } from '../../lib/auth';
 import { joinPendingConversations } from '../../lib/join';
 import { receiveLiveMessage, type DecryptedMessage, type MessagingDeps } from '../../lib/messaging';
-import { createMessageSocket, type MessageSocket } from '../../lib/ws';
+import { createMessageSocket, type MessageSocket, type MessageSocketStatus } from '../../lib/ws';
 import type { Conversation, User } from './seed';
 import { generatedAvatar } from './seed';
 
@@ -34,6 +34,7 @@ interface UseLiveConversationsResult {
   liveIds: Set<string>;
   liveGroups: { current: Map<string, MlsGroup> };
   addLive: (conversationId: string, conversation: MlsGroup) => void;
+  connectionStatus: MessageSocketStatus;
 }
 
 export function liveConversationShell(conversationId: string, selfUser: User): Conversation {
@@ -79,6 +80,7 @@ export function useLiveConversations({
   setConversations,
 }: UseLiveConversationsOptions): UseLiveConversationsResult {
   const [liveIds, setLiveIds] = useState<Set<string>>(() => new Set());
+  const [connectionStatus, setConnectionStatus] = useState<MessageSocketStatus>('offline');
   const liveGroups = useRef(new Map<string, MlsGroup>());
   const socketRef = useRef<MessageSocket | null>(null);
   const joinRanRef = useRef(false);
@@ -112,10 +114,15 @@ export function useLiveConversations({
 
   // Realtime push (Slice 5C): one reconnecting WebSocket authenticated in the first frame.
   useEffect(() => {
-    if (!messagingDeps || !selfUserId) return;
+    if (!messagingDeps || !selfUserId) {
+      setConnectionStatus('offline');
+      return;
+    }
+    setConnectionStatus('connecting');
     const deps = messagingDeps;
     const socket = createMessageSocket({
       token: accessToken,
+      onStatus: setConnectionStatus,
       onMessage: ({ conversationId, message }) => {
         const group = liveGroups.current.get(conversationId);
         if (!group) return;
@@ -145,5 +152,5 @@ export function useLiveConversations({
     };
   }, [backfillInto, mergeIncoming, messagingDeps, selfUserId]);
 
-  return { liveIds, liveGroups, addLive };
+  return { liveIds, liveGroups, addLive, connectionStatus };
 }

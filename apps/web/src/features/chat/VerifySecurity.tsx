@@ -1,5 +1,6 @@
 import { Shield, ShieldCheck, X } from 'lucide-react';
-import { Button, IconButton, Modal } from '../ui';
+import { Button, ErrorState, IconButton, Modal } from '../ui';
+import type { SafeUiError } from '../../lib/safe-ui-error';
 
 /**
  * Out-of-band safety-number verification (checkpoint 20) — the MITM defense. The number is derived from
@@ -16,7 +17,7 @@ interface VerifySecurityProps {
   /** 'live' = a real remote peer (gates a new conversation); 'demo' = the local loopback peer. */
   mode?: 'demo' | 'live';
   /** Optional inline error (e.g. a failed conversation create) shown above the action. */
-  error?: string | null;
+  error?: SafeUiError | null;
 }
 
 export function VerifySecurity({
@@ -75,7 +76,7 @@ export function VerifySecurity({
         </div>
       )}
 
-      {error && <p className="mb-3 text-center text-xs text-red-400/80">{error}</p>}
+      {error && <ErrorState error={error} compact className="mb-3" />}
 
       {verified ? (
         <div className="space-y-3">

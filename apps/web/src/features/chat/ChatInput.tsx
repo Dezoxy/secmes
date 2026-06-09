@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Send, Paperclip, Image as ImageIcon, Plus, Smile, X } from 'lucide-react';
-import { IconButton, floatingMenuMotion } from '../ui';
+import { EmptyState, IconButton, floatingMenuMotion } from '../ui';
 
 interface ChatInputProps {
   onSend: (content: string, attachments?: File[]) => void;
@@ -100,9 +100,9 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
   if (disabled) {
     return (
       <div className="border-t border-white/5 bg-[#0f0f16] p-4">
-        <p className="text-center text-xs leading-relaxed text-white/40">
+        <EmptyState title="Messaging unavailable" compact>
           {disabledNotice ?? 'Messaging is not available here yet.'}
-        </p>
+        </EmptyState>
       </div>
     );
   }

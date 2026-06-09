@@ -3,7 +3,7 @@ export { Button } from './Button';
 export { IconButton } from './IconButton';
 export { Modal } from './Modal';
 export { SettingsRow } from './SettingsRow';
-export { StateBlock } from './StateBlock';
+export { EmptyState, ErrorState, LoadingState, ReconnectBanner, StateBlock } from './StateBlock';
 export {
   conversationEnterMotion,
   floatingMenuMotion,

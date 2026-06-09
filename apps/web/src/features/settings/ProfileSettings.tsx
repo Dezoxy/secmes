@@ -1,7 +1,8 @@
 import { useState, type ChangeEvent } from 'react';
 import { Check, Copy, Image, RefreshCw } from 'lucide-react';
 import { generatedAvatar, MAX_AVATAR_DATA_URI_LENGTH } from '../chat/seed';
-import { Avatar, Button } from '../ui';
+import { Avatar, Button, ErrorState } from '../ui';
+import { createSafeUiError } from '../../lib/safe-ui-error';
 
 export interface AnonymousProfile {
   id: string;
@@ -167,7 +168,12 @@ export function ProfileSettings({
       </div>
 
       <p className="text-xs text-white/35">Changes save automatically on this device.</p>
-      {profileError && <p className="text-sm text-rose-300">{profileError}</p>}
+      {profileError && (
+        <ErrorState
+          error={createSafeUiError({ title: 'Profile not saved', message: profileError })}
+          compact
+        />
+      )}
     </div>
   );
 }

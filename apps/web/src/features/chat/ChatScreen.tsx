@@ -24,7 +24,7 @@ import { useLiveConversations } from './useLiveConversations';
 import { useMessageSending } from './useMessageSending';
 import { loadArgusProfile, saveArgusProfile } from '../settings/argus-profile';
 import { SettingsPanel, type AnonymousProfile } from '../settings/SettingsPanel';
-import { conversationEnterMotion } from '../ui';
+import { ReconnectBanner, conversationEnterMotion } from '../ui';
 import type { Conversation, User } from './seed';
 import {
   conversations as initialConversations,
@@ -123,7 +123,7 @@ export default function ChatScreen() {
     setConversations,
   });
 
-  const { liveIds, liveGroups, addLive } = useLiveConversations({
+  const { liveIds, liveGroups, addLive, connectionStatus } = useLiveConversations({
     device,
     pool,
     deviceId,
@@ -302,6 +302,9 @@ export default function ChatScreen() {
                 verified={verified}
                 onVerify={isDirect && currentNumber ? () => setVerifyOpen(true) : undefined}
               />
+              {selectedIsLive && (
+                <ReconnectBanner status={connectionStatus} className="mx-4 mt-3" />
+              )}
               <MessageList conversation={selectedConversation} onImageClick={setPreviewImage} />
               <ChatInput onSend={handleSend} />
             </div>

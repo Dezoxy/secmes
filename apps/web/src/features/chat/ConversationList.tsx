@@ -8,7 +8,7 @@ import {
   getOtherParticipant,
   formatMessageTime,
 } from './seed';
-import { Avatar, Button } from '../ui';
+import { Avatar, Button, EmptyState } from '../ui';
 
 interface ConversationListProps {
   conversations: Conversation[];
@@ -167,6 +167,12 @@ export function ConversationList({
         onTouchEnd={handleTouchEnd}
         className="flex-1 overflow-y-auto px-2 space-y-1"
       >
+        {conversations.length === 0 && (
+          <EmptyState title="No conversations yet" icon={Users} compact className="mx-2 mt-4">
+            Start a secure conversation when another member is available.
+          </EmptyState>
+        )}
+
         {conversations.map((conversation) => {
           const displayName = getConversationDisplayName(conversation, currentUser.id);
           const avatar = getConversationAvatar(conversation, currentUser.id);
