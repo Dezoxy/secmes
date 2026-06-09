@@ -9,6 +9,7 @@ export const pwaPrecacheFileExtensions = [
 ] as const;
 
 export const pwaPrecacheGlobPatterns = [`**/*.{${pwaPrecacheFileExtensions.join(',')}}`] as const;
+export const pwaNavigateFallback = '/index.html';
 
 export const pwaNavigateFallbackDenylist = [
   /^\/auth\/callback(?:[/?#]|$)/,
@@ -38,6 +39,10 @@ export function isPresignedAttachmentUrl(url: URL): boolean {
 
 export function isPwaNavigationFallbackAllowed(pathnameWithSearch: string): boolean {
   return !pwaNavigateFallbackDenylist.some((pattern) => pattern.test(pathnameWithSearch));
+}
+
+export function isPwaOfflineShellAsset(pathname: string): boolean {
+  return pathname === pwaNavigateFallback;
 }
 
 export function isPwaStaticPrecacheCandidate(pathname: string): boolean {
