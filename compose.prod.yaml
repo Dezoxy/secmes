@@ -351,11 +351,17 @@ services:
   # serves OIDC/API/JWKS/console; this renders the browser login screens at /ui/v2/login (Caddy routes that
   # path here). It authenticates to the Zitadel API with the Login V2 service-user PAT FirstInstance wrote to
   # the shared volume. The public base URI (https://auth.4rgus.com/ui/v2/login) is set during provisioning (G1).
+  # NEXT_PUBLIC_BASE_PATH tells the Next.js app it's mounted under /ui/v2/login (Caddy forwards that prefix
+  # unchanged) — without it the prefixed routes/assets 404 even though the container stays up. CUSTOM_REQUEST_HEADERS
+  # makes its server-side calls to the Zitadel API carry the real external Host + scheme behind the TLS-terminating
+  # proxy. Both mirror Zitadel's canonical v4.15 Compose example (zitadel/zitadel deploy/compose).
   zitadel-login:
     image: ghcr.io/zitadel/zitadel-login:v4.15.0
     restart: unless-stopped
     environment:
       ZITADEL_API_URL: http://zitadel:8080
+      NEXT_PUBLIC_BASE_PATH: /ui/v2/login
+      CUSTOM_REQUEST_HEADERS: Host:auth.4rgus.com,X-Forwarded-Proto:https
       ZITADEL_SERVICE_USER_TOKEN_FILE: /bootstrap/login-client.pat
     volumes:
       - zitadel-bootstrap:/bootstrap:ro
