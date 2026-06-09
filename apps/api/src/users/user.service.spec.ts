@@ -3,7 +3,17 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { getDb } from '../db/index.js';
+import { HANDLE_ADJECTIVES, HANDLE_ANIMALS } from './handle-words.js';
 import { UserService } from './user.service.js';
+
+/** Assert a value is a valid generated "Adjective Animal" handle (both words from the curated lists). */
+function expectValidHandle(handle: string | null): void {
+  expect(handle).toBeTruthy();
+  const parts = (handle ?? '').split(' ');
+  expect(parts).toHaveLength(2);
+  expect(HANDLE_ADJECTIVES as readonly string[]).toContain(parts[0]);
+  expect(HANDLE_ANIMALS as readonly string[]).toContain(parts[1]);
+}
 
 // Integration — JIT provisioning under RLS (roadmap 15). Auto-skips without DATABASE_URL.
 const DB_URL = process.env.DATABASE_URL;
@@ -27,23 +37,21 @@ describe.skipIf(!DB_URL)('UserService (JIT provisioning)', () => {
     }
   });
 
-  it('provisions a new user from verified claims, readable back via getByAuth', async () => {
+  it('provisions a new user with a generated pseudonymous handle (NOT the IdP name)', async () => {
     const auth: VerifiedAuth = {
       sub: 'sub-new',
       tenantId: tenantA,
       email: 'new@a.test',
-      name: 'New User',
+      name: 'Real McName', // IdP name claim — must NOT become the display name
     };
     const created = await users.provisionFromToken(auth);
-    expect(created).toEqual({
-      id: expect.any(String),
-      email: 'new@a.test',
-      displayName: 'New User',
-    });
+    expect(created.email).toBe('new@a.test');
+    expect(created.displayName).not.toBe('Real McName'); // no real-name leak
+    expectValidHandle(created.displayName); // a random "Adjective Animal"
     expect((await users.getByAuth(auth))?.id).toBe(created.id);
   });
 
-  it('is idempotent and refreshes the profile on repeat (same row, updated name)', async () => {
+  it('keeps the handle on repeat login and refreshes email (same row, stable handle)', async () => {
     const first = await users.provisionFromToken({
       sub: 'sub-rep',
       tenantId: tenantA,
@@ -53,26 +61,37 @@ describe.skipIf(!DB_URL)('UserService (JIT provisioning)', () => {
     const second = await users.provisionFromToken({
       sub: 'sub-rep',
       tenantId: tenantA,
-      email: 'rep@a.test',
+      email: 'rep2@a.test', // email changed at the IdP
       name: 'Second',
     });
     expect(second.id).toBe(first.id); // same row, not a duplicate
-    expect(second.displayName).toBe('Second'); // profile refreshed
+    expect(second.displayName).toBe(first.displayName); // handle is STABLE, never overwritten
+    expect(second.email).toBe('rep2@a.test'); // email refreshed
   });
 
-  it('does not blank a known display name when a later token omits the name claim', async () => {
-    await users.provisionFromToken({
-      sub: 'sub-keep',
-      tenantId: tenantA,
-      email: 'k@a.test',
-      name: 'Keep Me',
-    });
-    const after = await users.provisionFromToken({
-      sub: 'sub-keep',
-      tenantId: tenantA,
-      email: 'k@a.test',
-    }); // no name claim this time
-    expect(after.displayName).toBe('Keep Me');
+  it('regenerates on a handle collision so handles are unique within a tenant', async () => {
+    // Inject deterministic, NON-pool handles so they can't clash with other tests' random handles.
+    const taken = 'Zzz Taken';
+    const u1 = await users.provisionFromToken(
+      { sub: 'sub-c1', tenantId: tenantA, email: 'c1@a.test' },
+      () => taken,
+    );
+    expect(u1.displayName).toBe(taken);
+
+    // u2's generator yields the TAKEN handle first (real 23505 against the unique index) then a free one —
+    // the service must detect the collision and retry to the free handle.
+    const free = 'Zzz Free';
+    let calls = 0;
+    const u2 = await users.provisionFromToken(
+      { sub: 'sub-c2', tenantId: tenantA, email: 'c2@a.test' },
+      () => {
+        calls += 1;
+        return calls === 1 ? taken : free;
+      },
+    );
+    expect(calls).toBeGreaterThanOrEqual(2); // it retried past the collision
+    expect(u2.displayName).toBe(free);
+    expect(u2.id).not.toBe(u1.id);
   });
 
   it('rejects provisioning without a verified email claim', async () => {
