@@ -109,4 +109,22 @@ describe('privacy-safe telemetry boundary', () => {
       error: { kind: 'unsupported-metadata' },
     });
   });
+
+  it('rejects non-finite numeric metadata', () => {
+    const nonFiniteValues = [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY];
+
+    for (const value of nonFiniteValues) {
+      const result = createTelemetryEvent('settings.section_opened', { durationMs: value });
+
+      expect(result).toMatchObject({
+        ok: false,
+        error: { kind: 'unsupported-metadata' },
+      });
+    }
+
+    expect(createTelemetryEvent('settings.section_opened', { durationMs: 42 })).toMatchObject({
+      ok: true,
+      event: { metadata: { durationMs: 42 } },
+    });
+  });
 });

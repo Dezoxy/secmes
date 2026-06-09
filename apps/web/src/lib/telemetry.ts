@@ -206,7 +206,11 @@ function isTechnicalStringValue(value: string): boolean {
 }
 
 function isTelemetryMetadataValue(value: unknown): value is TelemetryMetadataValue {
-  return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean';
+  return (
+    typeof value === 'string' ||
+    (typeof value === 'number' && Number.isFinite(value)) ||
+    typeof value === 'boolean'
+  );
 }
 
 export function createTelemetryEvent(
