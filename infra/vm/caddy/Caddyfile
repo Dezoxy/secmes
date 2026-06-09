@@ -79,8 +79,10 @@ http://grafana.4rgus.com:8080 {
 	# Code-delivery hardening response headers (#43; the edge adds HSTS). Served HERE at the static origin so
 	# the CSP applies to every response and `frame-ancestors` works (a <meta> CSP ignores it). The directive set
 	# is derived from the PWA's resource graph — UPDATE it when the client adds an external origin; smoke-test
-	# against the live app at arming (CSP violations surface in the browser console). SRI + service-worker
-	# pinning + the published bundle hash are the remaining #43 frontend-build items.
+	# against the live app at arming (CSP violations surface in the browser console). SRI (sha384 integrity on
+	# the built bundles via vite-plugin-sri3) + the published bundle-manifest.json are emitted at build time, and
+	# service-worker pinning is the @revalidate/@immutable cache policy below — the #43 frontend-build slice is
+	# now complete (docs/threat-models/code-delivery-integrity.md).
 	header {
 		# script-src is strict 'self' — no inline scripts (index.html only loads /src/main.tsx as a module) and
 		# ts-mls is pure JS (no wasm-eval), so injected/foreign script can't run to read decrypted content or keys
@@ -98,6 +100,17 @@ http://grafana.4rgus.com:8080 {
 		X-Frame-Options DENY
 		-Server
 	}
+
+	# --- Code-delivery cache policy (#43 service-worker pinning) ------------------------------------------
+	# The service worker, web manifest, HTML entry, and published bundle manifest have STABLE names but change
+	# per deploy, so they MUST always revalidate against the origin — a stale cached copy could otherwise pin a
+	# client to an old (or tampered) build, and the SW is the one script SRI cannot protect. The content-hashed
+	# assets (/assets/* and workbox-<hash>.js) are immutable, so cache them for a year. `no-cache` means
+	# "revalidate" (ETag 304s), not "don't store" — the SW still precaches the offline shell.
+	@revalidate path / /index.html /sw.js /manifest.webmanifest /bundle-manifest.json
+	header @revalidate Cache-Control "no-cache"
+	@immutable path /assets/* /workbox-*.js
+	header @immutable Cache-Control "public, max-age=31536000, immutable"
 
 	# --- API (REST) --------------------------------------------------------------------------------------
 	# Strip the /api prefix: the API mounts its routes at the root, and the browser calls /api/* same-origin

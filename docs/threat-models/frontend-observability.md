@@ -86,7 +86,9 @@ the VM/static edge layer. It does not add a telemetry transport and does not cha
   - `Permissions-Policy` denying unused sensor/hardware capabilities.
   - `X-Content-Type-Options: nosniff` + `X-Frame-Options: DENY` (defense-in-depth alongside `frame-ancestors`).
   - Optional COOP/COEP later only after checking Zitadel, service-worker, and attachment-origin behavior.
-  - **Remaining #43 (frontend build):** SRI on the built bundles, service-worker pinning, published bundle hash.
+  - **#43 (frontend build) DONE:** SRI on the built bundles (`vite-plugin-sri3`), service-worker pinning (Caddy
+    `no-cache`/`immutable` cache policy), and a published bundle hash (`bundle-manifest.json`) — see
+    `code-delivery-integrity.md`.
 - Gates: `pnpm --filter @argus/web typecheck`, `pnpm --filter @argus/web build`, full frontend PR gate, CI,
   and Codex review.
 
@@ -95,8 +97,8 @@ the VM/static edge layer. It does not add a telemetry transport and does not cha
 - **Headers are wired (#43) but the CSP isn't runtime-verified yet.** They are served by Caddy
   (`infra/vm/caddy/Caddyfile`, `caddy validate` clean), but nothing has loaded the app *through* Caddy with the
   CSP enforced — smoke-test against the live app at arming and watch the browser console for violations
-  (eyeball the B2 presigned upload/download + the silent-renew XHR specifically). The genuine open #43 items
-  are SRI on the built bundles, service-worker pinning, and a published bundle hash.
+  (eyeball the B2 presigned upload/download + the silent-renew XHR specifically). The other #43 frontend-build
+  items (SRI, service-worker pinning, published bundle hash) have since shipped — see `code-delivery-integrity.md`.
 - **CSP `connect-src` is pinned to the single-origin VM topology.** Zitadel + B2 are pinned; same-origin
   REST/WS rely on `'self'`. A **split deployment** (`VITE_API_URL`/`VITE_WS_URL` on a different host) would
   silently break live delivery until `connect-src` is extended with that explicit origin — a too-wide
