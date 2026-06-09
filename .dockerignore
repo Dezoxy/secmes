@@ -1,6 +1,9 @@
-# Build context hygiene for repo-root image builds (infra/vm/caddy/Dockerfile).
-# NOTE: scoped to builds whose context is the repo root. The apps/api image builds with context
-# ./apps/api and is unaffected by this file.
+# Build context hygiene for repo-root image builds (fallback). BOTH production images build from the repo
+# root (cd.yml: context=.) — apps/api/Dockerfile and infra/vm/caddy/Dockerfile. Each has its OWN
+# `<dockerfile>.dockerignore` (apps/api/Dockerfile.dockerignore, infra/vm/caddy/Dockerfile.dockerignore) that
+# BuildKit uses INSTEAD OF this file, additionally excluding the OTHER app's source so a change to one app
+# doesn't invalidate the other image's cached layers. This root file is the fallback for any other context=.
+# build; keep the three in sync.
 
 # Dependencies & build outputs — reinstalled/rebuilt inside the image.
 **/node_modules

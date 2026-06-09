@@ -46,7 +46,13 @@ jobs:
         env:
           OWNER: ${{ github.repository_owner }}
           NAME: ${{ matrix.name }}
-        run: echo "IMAGE=${REGISTRY}/$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')/argus-${NAME}:${IMAGE_TAG}" >>"$GITHUB_ENV"
+        run: |
+          REPO_PATH="${REGISTRY}/$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')/argus-${NAME}"
+          echo "IMAGE=${REPO_PATH}:${IMAGE_TAG}" >>"$GITHUB_ENV"
+          # Durable per-image build cache (registry, not GHA — releases are infrequent so GHA's ~7d eviction
+          # would leave every release cold). Lets an UNCHANGED image reuse identical layer digests → the VM's
+          # `docker pull` is an "already exists" no-op (a frontend-only release doesn't re-pull the api).
+          echo "CACHE=${REPO_PATH}:buildcache" >>"$GITHUB_ENV"
 
       - name: GHCR login
         uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
@@ -62,6 +68,11 @@ jobs:
           file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ env.IMAGE }}
+          # Reuse unchanged layers across releases (mode=max also caches the multi-stage build layers). Paired
+          # with each image's per-Dockerfile .dockerignore (which excludes the OTHER app's source), a change to
+          # one app keeps the other image's layers cache-stable → identical digests → no VM re-download.
+          cache-from: type=registry,ref=${{ env.CACHE }}
+          cache-to: type=registry,ref=${{ env.CACHE }},mode=max
           # The PWA's OIDC config is build-time (Vite VITE_*); empty for the api. Repo vars, non-secret.
           build-args: |
             VITE_OIDC_ISSUER=${{ vars.VITE_OIDC_ISSUER }}
