@@ -88,9 +88,10 @@ http://grafana.4rgus.com:8080 {
 		# (discovery/JWKS/token + refresh-token silent renew — no iframe, so no frame-src needed), and B2 presigned
 		# upload/download (virtual-host bucket SUBDOMAIN — S3_FORCE_PATH_STYLE=false). img data:/blob: = generated
 		# avatars + decrypted attachment object URLs. style 'unsafe-inline' for React/Tailwind inline styles.
-		# NOTE: same-origin REST/WS rely on 'self' — a SPLIT deploy (VITE_API_URL/VITE_WS_URL on another host)
-		# must extend connect-src with that explicit origin or live delivery silently fails.
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' https://auth.4rgus.com https://s3.eu-central-003.backblazeb2.com https://*.s3.eu-central-003.backblazeb2.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests"
+		# connect-src lists the same-origin WS origin (wss://4rgus.com) EXPLICITLY, not just 'self': only CSP
+		# Level 3 browsers resolve 'self' to ws(s) schemes, so older ones would block the live socket (silent
+		# delivery failure). A SPLIT deploy (VITE_API_URL/VITE_WS_URL on another host) must add that origin too.
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' wss://4rgus.com https://auth.4rgus.com https://s3.eu-central-003.backblazeb2.com https://*.s3.eu-central-003.backblazeb2.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests"
 		Permissions-Policy "accelerometer=(), autoplay=(), bluetooth=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()"
 		Referrer-Policy no-referrer
 		X-Content-Type-Options nosniff
