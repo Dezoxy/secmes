@@ -2,6 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { APP_VERSION_TAG } from '../../lib/app-version';
+import { releaseNotes } from '../../lib/release-notes';
 
 vi.mock('../../lib/auth', () => ({ accessToken: vi.fn(async () => null) }));
 
@@ -10,12 +11,14 @@ import { AboutSettings, fetchBackendStatus } from './AboutSettings';
 const serviceInfo = { service: 'argus-api', version: '0.0.0', status: 'ok' };
 
 describe('AboutSettings', () => {
-  it('shows only backend status content and a quiet version footer', () => {
+  it('shows backend status, a quiet version footer, and release notes', () => {
     const html = renderToStaticMarkup(createElement(AboutSettings));
 
     expect(html).toContain('Backend status');
     expect(html).toContain('Offline');
     expect(html).toContain(APP_VERSION_TAG);
+    expect(html).toContain('Release notes');
+    expect(html).toContain(releaseNotes[0]!.title);
     expect(html).not.toContain('Argus secure messaging');
     expect(html).not.toContain('Safe diagnostic export');
     expect(html).not.toContain('Diagnostics menu reserved');

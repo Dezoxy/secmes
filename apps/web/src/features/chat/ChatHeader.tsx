@@ -27,7 +27,7 @@ import {
   getConversationAvatar,
   getOtherParticipant,
 } from './seed';
-import { Avatar, Button, IconButton, Modal } from '../ui';
+import { Avatar, Button, IconButton, Modal, floatingMenuMotion } from '../ui';
 
 interface ChatHeaderProps {
   conversation: Conversation;
@@ -239,11 +239,10 @@ export function ChatHeader({ conversation, onBack, verified, onVerify }: ChatHea
           </IconButton>
 
           <div
-            className={`absolute right-0 top-full z-30 mt-3 w-72 origin-top-right rounded-2xl border border-white/10 bg-[#151520] p-2 shadow-2xl shadow-black/50 transition-all duration-200 ease-out motion-reduce:transition-none ${
-              menuOpen
-                ? 'translate-y-0 scale-100 opacity-100'
-                : 'pointer-events-none -translate-y-2 scale-95 opacity-0'
-            }`}
+            className={`absolute right-0 top-full z-30 mt-3 w-72 origin-top-right rounded-2xl border border-white/10 bg-[#151520] p-2 shadow-2xl shadow-black/50 ${floatingMenuMotion(
+              menuOpen,
+              'top',
+            )}`}
             role="menu"
             aria-label="Conversation actions"
           >

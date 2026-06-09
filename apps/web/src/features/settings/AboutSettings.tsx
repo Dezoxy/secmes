@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ServiceInfoSchema } from '@argus/contracts';
 import { APP_VERSION_TAG } from '../../lib/app-version';
 import { requestJson, type ApiResult } from '../../lib/api-client';
+import { releaseNotes } from '../../lib/release-notes';
 
 type BackendStatus = 'online' | 'offline';
 
@@ -49,6 +50,30 @@ export function AboutSettings() {
           {statusLabel(backendStatus)}
         </span>
       </div>
+
+      <section
+        aria-label="Release notes"
+        className="mt-3 max-h-44 w-full overflow-y-auto rounded-xl border border-white/5 bg-white/[0.025] px-4 py-3"
+      >
+        <h4 className="text-sm font-medium text-white/75">Release notes</h4>
+        <div className="mt-3 space-y-4">
+          {releaseNotes.map((note) => (
+            <article key={`${note.version}-${note.title}`} className="space-y-2">
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="text-xs font-medium text-white/65">{note.version}</p>
+                <p className="truncate text-xs text-white/35">{note.title}</p>
+              </div>
+              <ul className="space-y-1 pl-4 text-xs leading-5 text-white/45">
+                {note.items.map((item) => (
+                  <li key={item} className="list-disc">
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </article>
+          ))}
+        </div>
+      </section>
 
       <p className="mt-auto pb-1 pt-10 text-center text-xs font-medium text-white/30">
         {APP_VERSION_TAG}

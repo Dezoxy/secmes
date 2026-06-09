@@ -1,5 +1,99 @@
 @import 'tailwindcss';
 
+@keyframes argus-surface-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes argus-modal-enter {
+  from {
+    opacity: 0;
+    transform: translateY(1rem) scale(0.94);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes argus-overlay-enter {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes argus-pane-enter {
+  from {
+    opacity: 0;
+    transform: translateX(1rem) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes argus-message-send-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.875rem) scale(0.985);
+  }
+
+  70% {
+    opacity: 1;
+    transform: translateY(-0.125rem) scale(1);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.argus-surface-enter {
+  animation: argus-surface-enter 220ms ease-out both;
+}
+
+.argus-modal-enter {
+  animation: argus-modal-enter 240ms ease-out both;
+}
+
+.argus-overlay-enter {
+  animation: argus-overlay-enter 180ms ease-out both;
+}
+
+.argus-pane-enter {
+  animation: argus-pane-enter 240ms ease-out both;
+}
+
+.argus-message-send-enter {
+  animation: argus-message-send-enter 260ms ease-out both;
+  will-change: opacity, transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .argus-surface-enter,
+  .argus-modal-enter,
+  .argus-overlay-enter,
+  .argus-pane-enter,
+  .argus-message-send-enter {
+    animation: none;
+  }
+}
+
 :root {
   color-scheme: dark;
   --argus-color-app-bg: #1a1a24;

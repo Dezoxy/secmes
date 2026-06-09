@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import {
   Bell,
   Brush,
@@ -16,7 +16,10 @@ import {
 import {
   IconButton,
   Modal,
+  modalBackdropEnterMotion,
+  modalPanelEnterMotion,
   defaultAccentId,
+  surfaceEnterMotion,
   getAccentById,
   isAccentId,
   type AccentId,
@@ -35,7 +38,11 @@ import { AppearanceSettings, FONT_SIZE_LEVELS } from './AppearanceSettings';
 import { DataStorageSettings } from './DataStorageSettings';
 import { DeviceSettings } from './DeviceSettings';
 import { NotificationSettings } from './NotificationSettings';
-import { PrivacySettings } from './PrivacySettings';
+import {
+  DEFAULT_PRIVACY_SETTINGS,
+  PrivacySettings,
+  type PrivacySettingsRecord,
+} from './PrivacySettings';
 import { ProfileSettings, type AnonymousProfile } from './ProfileSettings';
 import { SecuritySettings } from './SecuritySettings';
 
@@ -70,6 +77,7 @@ const sections: Array<{ id: SectionId; label: string; icon: LucideIcon }> = [
 ];
 
 const DEVICE_SETTINGS_STORAGE_KEY = versionedStorageKey('settings', 'device');
+const PRIVACY_SETTINGS_STORAGE_KEY = versionedStorageKey('settings', 'privacy');
 
 interface DeviceSettingsRecord {
   accentId: AccentId;
@@ -121,6 +129,47 @@ function writeStoredDeviceSettings(settings: DeviceSettingsRecord): void {
   });
 }
 
+function decodePrivacySettingsRecord(value: unknown): PrivacySettingsRecord | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const record = value as Record<string, unknown>;
+
+  return {
+    readReceipts:
+      typeof record.readReceipts === 'boolean'
+        ? record.readReceipts
+        : DEFAULT_PRIVACY_SETTINGS.readReceipts,
+    typingIndicators:
+      typeof record.typingIndicators === 'boolean'
+        ? record.typingIndicators
+        : DEFAULT_PRIVACY_SETTINGS.typingIndicators,
+    linkPreviews:
+      typeof record.linkPreviews === 'boolean'
+        ? record.linkPreviews
+        : DEFAULT_PRIVACY_SETTINGS.linkPreviews,
+  };
+}
+
+function readStoredPrivacySettings(): PrivacySettingsRecord {
+  if (typeof window === 'undefined') return DEFAULT_PRIVACY_SETTINGS;
+
+  const stored = readVersionedRecord({
+    storage: browserLocalStorage(),
+    key: PRIVACY_SETTINGS_STORAGE_KEY,
+    decode: decodePrivacySettingsRecord,
+  });
+
+  return stored.status === 'ok' ? stored.value : DEFAULT_PRIVACY_SETTINGS;
+}
+
+function writeStoredPrivacySettings(settings: PrivacySettingsRecord): void {
+  if (typeof window === 'undefined') return;
+  writeVersionedRecord({
+    storage: browserLocalStorage(),
+    key: PRIVACY_SETTINGS_STORAGE_KEY,
+    value: settings,
+  });
+}
+
 function readStoredAccent(): AccentId {
   return readStoredDeviceSettings().accentId;
 }
@@ -134,6 +183,9 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
   const [mobileSectionOpen, setMobileSectionOpen] = useState(false);
   const [accentId, setAccentId] = useState<AccentId>(() => readStoredAccent());
   const [fontSizeLevel, setFontSizeLevel] = useState(() => readStoredFontSize());
+  const [privacySettings, setPrivacySettings] = useState<PrivacySettingsRecord>(() =>
+    readStoredPrivacySettings(),
+  );
   const [username, setUsername] = useState(profile.username);
   const [avatar, setAvatar] = useState(profile.avatar);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -142,42 +194,65 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
     setUsername(profile.username);
     setAvatar(profile.avatar);
     setProfileError(null);
-  }, [profile]);
+  }, [profile.avatar, profile.id, profile.username]);
 
   useEffect(() => {
     writeStoredDeviceSettings({ accentId, fontSizeLevel });
   }, [accentId, fontSizeLevel]);
 
+  useEffect(() => {
+    writeStoredPrivacySettings(privacySettings);
+  }, [privacySettings]);
+
   const activeSection = sections.find((section) => section.id === active) ?? sections[0]!;
   const ActiveIcon = activeSection.icon;
   const accent = getAccentById(accentId);
-  const primaryButtonStyle = {
-    backgroundColor: accent.hex,
-    boxShadow: `0 18px 34px ${accent.soft}`,
-  };
   const accentVariables = {
     '--settings-accent': accent.hex,
     '--settings-accent-soft': accent.soft,
   } as CSSProperties;
 
-  const saveProfile = () => {
-    const clean = username.trim() || profile.id.slice(0, 12);
-    const safeAvatar = safeAvatarSrc(avatar, clean);
-    if (onProfileChange({ ...profile, username: clean, avatar: safeAvatar })) {
-      setUsername(clean);
-      setAvatar(safeAvatar);
-      setProfileError(null);
-      return;
-    }
-    setProfileError('Profile could not be saved on this device. Use a smaller avatar.');
-  };
+  const saveProfileDraft = useCallback(
+    (draftUsername: string, draftAvatar: string): boolean => {
+      const clean = draftUsername.trim();
+      const safeAvatar = safeAvatarSrc(draftAvatar, clean || profile.id);
+
+      if (profile.username === clean && profile.avatar === safeAvatar) {
+        setProfileError(null);
+        return true;
+      }
+
+      if (onProfileChange({ id: profile.id, username: clean, avatar: safeAvatar })) {
+        setProfileError(null);
+        if (safeAvatar !== draftAvatar) setAvatar(safeAvatar);
+        return true;
+      }
+
+      setProfileError('Profile could not be saved on this device. Use a smaller avatar.');
+      return false;
+    },
+    [onProfileChange, profile.avatar, profile.id, profile.username],
+  );
+
+  const closeSettings = useCallback(() => {
+    saveProfileDraft(username, avatar);
+    onClose();
+  }, [avatar, onClose, saveProfileDraft, username]);
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      saveProfileDraft(username, avatar);
+    }, 300);
+
+    return () => window.clearTimeout(handle);
+  }, [avatar, saveProfileDraft, username]);
 
   return (
     <Modal
       ariaLabel="Settings"
-      onClose={onClose}
-      className="items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
-      contentClassName="flex h-[90vh] w-full max-w-4xl overflow-hidden rounded-2xl border border-white/5 bg-[#12121a] shadow-2xl shadow-black/50 sm:h-[82vh]"
+      onClose={closeSettings}
+      className={`items-center justify-center bg-black/80 p-4 backdrop-blur-sm ${modalBackdropEnterMotion}`}
+      contentClassName={`flex h-[90vh] w-full max-w-4xl overflow-hidden rounded-2xl border border-white/5 bg-[#12121a] shadow-2xl shadow-black/50 sm:h-[82vh] ${modalPanelEnterMotion}`}
       style={accentVariables}
     >
       <aside
@@ -187,7 +262,7 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">Settings</h2>
-          <IconButton onClick={onClose} size="sm" aria-label="Close settings">
+          <IconButton onClick={closeSettings} size="sm" aria-label="Close settings">
             <X className="h-5 w-5" />
           </IconButton>
         </div>
@@ -220,63 +295,69 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
           mobileSectionOpen ? 'block' : 'hidden'
         } flex-1 overflow-y-auto p-4 sm:block sm:p-6`}
       >
-        <div className="mb-6 flex items-center gap-3">
-          <IconButton
-            onClick={() => setMobileSectionOpen(false)}
-            className="sm:hidden"
-            aria-label="Back to settings menu"
-          >
-            <ChevronLeft className="h-5 w-5" />
-          </IconButton>
-          <div
-            className="flex h-10 w-10 items-center justify-center rounded-xl"
-            style={{ backgroundColor: accent.soft }}
-          >
-            <ActiveIcon className="h-5 w-5" style={{ color: accent.hex }} />
+        <div key={active} className={surfaceEnterMotion}>
+          <div className="mb-6 flex items-center gap-3">
+            <IconButton
+              onClick={() => setMobileSectionOpen(false)}
+              className="sm:hidden"
+              aria-label="Back to settings menu"
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </IconButton>
+            <div
+              className="flex h-10 w-10 items-center justify-center rounded-xl"
+              style={{ backgroundColor: accent.soft }}
+            >
+              <ActiveIcon className="h-5 w-5" style={{ color: accent.hex }} />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-xl font-semibold text-white">{activeSection.label}</h3>
+              <p className="text-sm text-white/40">Anonymous account settings</p>
+            </div>
+            <IconButton
+              onClick={closeSettings}
+              className="ml-auto sm:hidden"
+              aria-label="Close settings"
+            >
+              <X className="h-5 w-5" />
+            </IconButton>
           </div>
-          <div className="min-w-0">
-            <h3 className="text-xl font-semibold text-white">{activeSection.label}</h3>
-            <p className="text-sm text-white/40">Anonymous account settings</p>
-          </div>
-          <IconButton onClick={onClose} className="ml-auto sm:hidden" aria-label="Close settings">
-            <X className="h-5 w-5" />
-          </IconButton>
+
+          {active === 'profile' && (
+            <ProfileSettings
+              profile={profile}
+              username={username}
+              avatar={avatar}
+              profileError={profileError}
+              onUsernameChange={setUsername}
+              onAvatarChange={setAvatar}
+              onProfileErrorChange={setProfileError}
+            />
+          )}
+
+          {active === 'security' && <SecuritySettings />}
+
+          {active === 'privacy' && (
+            <PrivacySettings settings={privacySettings} onSettingsChange={setPrivacySettings} />
+          )}
+
+          {active === 'notifications' && <NotificationSettings />}
+
+          {active === 'appearance' && (
+            <AppearanceSettings
+              accentId={accentId}
+              fontSizeLevel={fontSizeLevel}
+              onAccentIdChange={setAccentId}
+              onFontSizeLevelChange={setFontSizeLevel}
+            />
+          )}
+
+          {active === 'storage' && <DataStorageSettings />}
+
+          {active === 'devices' && <DeviceSettings deviceId={deviceId} />}
+
+          {active === 'about' && <AboutSettings />}
         </div>
-
-        {active === 'profile' && (
-          <ProfileSettings
-            profile={profile}
-            username={username}
-            avatar={avatar}
-            profileError={profileError}
-            primaryButtonStyle={primaryButtonStyle}
-            onUsernameChange={setUsername}
-            onAvatarChange={setAvatar}
-            onProfileErrorChange={setProfileError}
-            onProfileSave={saveProfile}
-          />
-        )}
-
-        {active === 'security' && <SecuritySettings />}
-
-        {active === 'privacy' && <PrivacySettings />}
-
-        {active === 'notifications' && <NotificationSettings />}
-
-        {active === 'appearance' && (
-          <AppearanceSettings
-            accentId={accentId}
-            fontSizeLevel={fontSizeLevel}
-            onAccentIdChange={setAccentId}
-            onFontSizeLevelChange={setFontSizeLevel}
-          />
-        )}
-
-        {active === 'storage' && <DataStorageSettings />}
-
-        {active === 'devices' && <DeviceSettings deviceId={deviceId} />}
-
-        {active === 'about' && <AboutSettings />}
       </main>
     </Modal>
   );

@@ -35,13 +35,14 @@ interface RecoveryPanelProps {
 export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps) {
   const { profile } = useAuth();
   const device = useDevice();
-  // Back up / restore the SIGNED-IN account's device (the same identity the unlock gate sealed it under),
-  // so recovery and unlock share one device. RECOVERY_IDENTITY is only the demo fallback (no real account).
+  // Back up the SIGNED-IN account's device under the same identity the unlock gate sealed it with.
+  // RECOVERY_IDENTITY is only the demo fallback when there is no real account.
   const identity = profile?.userId ?? RECOVERY_IDENTITY;
   const [setUp, setSetUp] = useState<boolean | null>(null);
-  const [tab, setTab] = useState<'backup' | 'restore'>('backup');
+  const [importOpen, setImportOpen] = useState(false);
   const [passphrase, setPassphrase] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [importPassphrase, setImportPassphrase] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,12 +53,6 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
       .then(setSetUp)
       .catch(() => setSetUp(false));
   }, []);
-
-  const switchTab = (t: 'backup' | 'restore') => {
-    setTab(t);
-    setError(null);
-    setDone(null);
-  };
 
   const backUp = async () => {
     setError(null);
@@ -90,36 +85,32 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
     }
   };
 
-  const restore = async () => {
+  const importRecoveryFile = async () => {
     setError(null);
     setDone(null);
     if (!file) {
       setError('Choose your recovery file.');
       return;
     }
+    if (importPassphrase.length < 8) {
+      setError('Use a passphrase of at least 8 characters.');
+      return;
+    }
     setBusy(true);
     try {
       if (device.keystore) {
-        // Real account: restore on the ACTIVE keystore (its caches reset with the cleared stores), then
-        // RELOAD so the live session re-initializes with the restored device + fresh pool (the Welcome
-        // drain re-runs). On FAILURE the catch below shows the error and the existing ready session is left
-        // untouched — restore fails closed before clearing, and we never flip the gate, so no lock-out (#20).
-        await restoreAndProvision(device.keystore, identity, await file.text(), passphrase);
+        await restoreAndProvision(device.keystore, identity, await file.text(), importPassphrase);
         setDone('Device restored — reloading…');
         window.location.reload();
       } else {
-        // Demo (no signed-in account / no directory): a local-only restore.
-        await restoreFromArtifact(identity, await file.text(), passphrase);
+        await restoreFromArtifact(identity, await file.text(), importPassphrase);
         setSetUp(true);
         setDone('This device was restored from your recovery file.');
         setFile(null);
-        setPassphrase('');
+        setImportPassphrase('');
       }
     } catch (e) {
       if (e instanceof RestoreCommittedError) {
-        // The artifact WAS applied (the active stores are already replaced) — the live session is now stale.
-        // Reload to re-initialize rather than show a "preserved" session whose stores were cleared (the
-        // failed publish self-heals on the next login). Only a PRE-clear failure (below) keeps the session.
         window.location.reload();
         return;
       }
@@ -167,79 +158,86 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
         </div>
       )}
 
-      <div className="mb-4 flex gap-1 rounded-xl bg-[#1a1a26] p-1 text-sm">
-        <button
-          type="button"
-          onClick={() => switchTab('backup')}
-          className={`flex-1 rounded-lg py-2 font-medium transition-colors ${tab === 'backup' ? 'bg-purple-500 text-white' : 'text-white/50 hover:text-white/80'}`}
-        >
-          Back up
-        </button>
-        <button
-          type="button"
-          onClick={() => switchTab('restore')}
-          className={`flex-1 rounded-lg py-2 font-medium transition-colors ${tab === 'restore' ? 'bg-purple-500 text-white' : 'text-white/50 hover:text-white/80'}`}
-        >
-          Restore
-        </button>
-      </div>
-
-      {tab === 'backup' ? (
-        <div className="space-y-3">
+      <div className="space-y-3">
+        <input
+          type="password"
+          value={passphrase}
+          onChange={(e) => setPassphrase(e.target.value)}
+          placeholder="Recovery passphrase"
+          autoComplete="new-password"
+          className={INPUT}
+        />
+        {setUp !== true && (
           <input
             type="password"
-            value={passphrase}
-            onChange={(e) => setPassphrase(e.target.value)}
-            placeholder="Recovery passphrase"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            placeholder="Confirm passphrase"
             autoComplete="new-password"
             className={INPUT}
           />
-          {setUp !== true && (
+        )}
+        <button type="button" onClick={() => void backUp()} disabled={busy} className={PRIMARY}>
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+          {setUp === true ? 'Download recovery file' : 'Create & download recovery file'}
+        </button>
+      </div>
+
+      <div className="mt-3 rounded-xl border border-white/5 bg-white/[0.025] p-3">
+        <button
+          type="button"
+          onClick={() => {
+            setImportOpen((open) => !open);
+            setError(null);
+            setDone(null);
+          }}
+          className="flex w-full items-center justify-between gap-3 text-left text-sm font-medium text-white/75 transition-colors hover:text-white"
+          aria-expanded={importOpen}
+        >
+          <span className="inline-flex items-center gap-2">
+            <Upload className="h-4 w-4 text-white/45" />
+            Import recovery file
+          </span>
+          <span className="text-xs text-white/35">{importOpen ? 'Hide' : 'Advanced'}</span>
+        </button>
+
+        {importOpen && (
+          <div className="mt-3 space-y-3">
+            <p className="text-xs leading-relaxed text-white/40">
+              Zitadel restores account access. This recovery file replaces this browser&apos;s
+              encrypted device state for future messages only; past message history is not
+              recovered.
+            </p>
+            <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-white/10 bg-[#1a1a26] px-4 py-3 text-sm text-white/60 transition-colors hover:border-purple-500/40">
+              <Upload className="h-4 w-4 shrink-0 text-white/40" />
+              <span className="truncate">{file ? file.name : 'Choose your recovery file'}</span>
+              <input
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              />
+            </label>
             <input
               type="password"
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              placeholder="Confirm passphrase"
-              autoComplete="new-password"
+              value={importPassphrase}
+              onChange={(e) => setImportPassphrase(e.target.value)}
+              placeholder="Recovery passphrase"
+              autoComplete="off"
               className={INPUT}
             />
-          )}
-          <button type="button" onClick={() => void backUp()} disabled={busy} className={PRIMARY}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            {setUp === true ? 'Download recovery file' : 'Create & download recovery file'}
-          </button>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <p className="text-xs leading-relaxed text-white/40">
-            Restoring brings back your <strong>account</strong> on this device —{' '}
-            <strong>not</strong> your past messages. For forward secrecy, earlier messages cannot be
-            decrypted by a recovered device; you re-join conversations for new messages.
-          </p>
-          <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-white/10 bg-[#1a1a26] px-4 py-3 text-sm text-white/60 transition-colors hover:border-purple-500/40">
-            <Upload className="h-4 w-4 shrink-0 text-white/40" />
-            <span className="truncate">{file ? file.name : 'Choose your recovery file…'}</span>
-            <input
-              type="file"
-              accept="application/json,.json"
-              className="hidden"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            />
-          </label>
-          <input
-            type="password"
-            value={passphrase}
-            onChange={(e) => setPassphrase(e.target.value)}
-            placeholder="Recovery passphrase"
-            autoComplete="off"
-            className={INPUT}
-          />
-          <button type="button" onClick={() => void restore()} disabled={busy} className={PRIMARY}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-            Restore this device
-          </button>
-        </div>
-      )}
+            <button
+              type="button"
+              onClick={() => void importRecoveryFile()}
+              disabled={busy || !file || importPassphrase.length < 8}
+              className={PRIMARY}
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              Replace this device
+            </button>
+          </div>
+        )}
+      </div>
 
       {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
       {done && <p className="mt-3 text-sm text-green-400">{done}</p>}

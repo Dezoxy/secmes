@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type ChangeEvent } from 'react';
+import { useState, type ChangeEvent } from 'react';
 import { Check, Copy, Image, RefreshCw } from 'lucide-react';
 import { generatedAvatar, MAX_AVATAR_DATA_URI_LENGTH } from '../chat/seed';
 import { Avatar, Button } from '../ui';
@@ -14,11 +14,9 @@ interface ProfileSettingsProps {
   username: string;
   avatar: string;
   profileError: string | null;
-  primaryButtonStyle: CSSProperties;
   onUsernameChange: (username: string) => void;
   onAvatarChange: (avatar: string) => void;
   onProfileErrorChange: (message: string | null) => void;
-  onProfileSave: () => void;
 }
 
 const INPUT =
@@ -83,11 +81,9 @@ export function ProfileSettings({
   username,
   avatar,
   profileError,
-  primaryButtonStyle,
   onUsernameChange,
   onAvatarChange,
   onProfileErrorChange,
-  onProfileSave,
 }: ProfileSettingsProps) {
   const [copied, setCopied] = useState(false);
 
@@ -170,9 +166,7 @@ export function ProfileSettings({
         </div>
       </div>
 
-      <Button onClick={onProfileSave} style={primaryButtonStyle}>
-        Save profile
-      </Button>
+      <p className="text-xs text-white/35">Changes save automatically on this device.</p>
       {profileError && <p className="text-sm text-rose-300">{profileError}</p>}
     </div>
   );

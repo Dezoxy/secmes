@@ -26,38 +26,32 @@ function FontSizePicker({
           <p className="text-sm font-medium text-white">Font size</p>
           <p className="mt-0.5 text-xs text-white/40">Level {value} of 10</p>
         </div>
-        <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-white/60">
-          {value}
+        <span className="text-lg font-semibold text-white" style={{ color: accent.hex }}>
+          Aa
         </span>
       </div>
 
-      <div className="relative px-1 pb-1 pt-2">
-        <div className="absolute left-4 right-4 top-1/2 h-px bg-white/10" />
-        <div className="relative grid grid-cols-10 gap-1">
-          {FONT_SIZE_LEVELS.map((level) => {
-            const selected = level === value;
-            const markerSize = 10 + level;
-            return (
-              <button
-                key={level}
-                type="button"
-                onClick={() => onChange(level)}
-                className="flex h-10 items-center justify-center rounded-lg transition-colors hover:bg-white/[0.04]"
-                aria-label={`Font size ${level}`}
-                aria-pressed={selected}
-              >
-                <span
-                  className="rounded-full ring-1 ring-white/15 transition-all"
-                  style={{
-                    width: markerSize,
-                    height: markerSize,
-                    backgroundColor: selected ? accent.hex : 'rgba(255,255,255,0.22)',
-                    boxShadow: selected ? `0 0 18px ${accent.soft}` : 'none',
-                  }}
-                />
-              </button>
-            );
-          })}
+      <input
+        type="range"
+        min={1}
+        max={10}
+        step={1}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        aria-label="Font size"
+        className="h-6 w-full cursor-pointer"
+        style={{ accentColor: accent.hex }}
+      />
+
+      <div className="px-1">
+        <div className="grid grid-cols-10 gap-1">
+          {FONT_SIZE_LEVELS.map((level) => (
+            <span
+              key={level}
+              className="mx-auto h-1.5 w-1.5 rounded-full"
+              style={{ backgroundColor: level <= value ? accent.hex : 'rgba(255,255,255,0.2)' }}
+            />
+          ))}
         </div>
       </div>
 

@@ -5,6 +5,14 @@ export { Modal } from './Modal';
 export { SettingsRow } from './SettingsRow';
 export { StateBlock } from './StateBlock';
 export {
+  conversationEnterMotion,
+  floatingMenuMotion,
+  modalBackdropEnterMotion,
+  modalPanelEnterMotion,
+  sentMessageEnterMotion,
+  surfaceEnterMotion,
+} from './motion';
+export {
   accentOptions,
   argusColorTokens,
   argusRadiusTokens,
