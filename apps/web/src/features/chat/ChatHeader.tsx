@@ -101,6 +101,7 @@ export function ChatHeader({ conversation, onBack, verified, onVerify }: ChatHea
   const [muted, setMuted] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const displayName = getConversationDisplayName(conversation, currentUser.id);
   const avatar = getConversationAvatar(conversation, currentUser.id);
   const otherUser = getOtherParticipant(conversation, currentUser.id);
@@ -144,6 +145,11 @@ export function ChatHeader({ conversation, onBack, verified, onVerify }: ChatHea
   const openPanel = (panel: HeaderPanel) => {
     setActivePanel(panel);
     setMenuOpen(false);
+  };
+
+  const closePanel = () => {
+    setActivePanel(null);
+    window.requestAnimationFrame(() => menuButtonRef.current?.focus({ preventScroll: true }));
   };
 
   const panelTitle =
@@ -230,7 +236,10 @@ export function ChatHeader({ conversation, onBack, verified, onVerify }: ChatHea
         </IconButton>
         <div ref={menuRef} className="relative">
           <IconButton
-            onClick={() => setMenuOpen((open) => !open)}
+            onClick={(event) => {
+              menuButtonRef.current = event.currentTarget;
+              setMenuOpen((open) => !open);
+            }}
             size="lg"
             className={`rounded-xl text-white/40 hover:bg-[#1a1a26] hover:text-white/70 ${
               menuOpen ? 'bg-[#1a1a26] text-white/80' : ''
@@ -319,7 +328,7 @@ export function ChatHeader({ conversation, onBack, verified, onVerify }: ChatHea
       {activePanel && (
         <Modal
           ariaLabel={panelTitle}
-          onClose={() => setActivePanel(null)}
+          onClose={closePanel}
           className="items-end justify-center bg-black/75 p-0 backdrop-blur-sm sm:items-center sm:p-4"
           contentClassName="max-h-[86vh] w-full overflow-hidden rounded-t-2xl border border-white/5 bg-[#12121a] shadow-2xl shadow-black/50 sm:max-w-lg sm:rounded-2xl"
         >
@@ -328,11 +337,7 @@ export function ChatHeader({ conversation, onBack, verified, onVerify }: ChatHea
               <h3 className="text-base font-semibold text-white">{panelTitle}</h3>
               <p className="text-xs text-white/40">{displayName}</p>
             </div>
-            <IconButton
-              onClick={() => setActivePanel(null)}
-              className="text-white/45"
-              aria-label="Close panel"
-            >
+            <IconButton onClick={closePanel} className="text-white/45" aria-label="Close panel">
               <X className="h-5 w-5" />
             </IconButton>
           </div>

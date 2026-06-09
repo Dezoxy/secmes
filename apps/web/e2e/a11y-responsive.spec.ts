@@ -35,6 +35,51 @@ test('settings closes back to the trigger and exposes section navigation', async
   await expect(settingsTrigger).toBeFocused();
 });
 
+test('conversation actions expose expanded state and return focus after panel close', async ({
+  page,
+}) => {
+  await page.goto('/chat');
+
+  const actionsTrigger = page.getByRole('button', { name: 'Open conversation actions' });
+  await expect(actionsTrigger).toHaveAttribute('aria-expanded', 'false');
+
+  await actionsTrigger.click();
+  await expect(actionsTrigger).toHaveAttribute('aria-expanded', 'true');
+
+  await page.getByRole('menuitem', { name: 'Conversation info' }).click();
+
+  const panel = page.getByRole('dialog', { name: 'Conversation info' });
+  await expect(panel).toBeVisible();
+  await expect(panel).toBeFocused();
+
+  await page.getByRole('button', { name: 'Close panel' }).click();
+  await expect(panel).toHaveCount(0);
+  await expect(actionsTrigger).toBeFocused();
+});
+
+test('mobile settings sections expose current state and focus section content', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/chat');
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  const securitySection = dialog.getByRole('button', { name: 'Security & Recovery' });
+
+  await securitySection.click();
+
+  const securityContent = dialog.getByRole('region', { name: 'Security & Recovery settings' });
+  await expect(securityContent).toBeVisible();
+  await expect(securityContent).toBeFocused();
+
+  await dialog.getByRole('button', { name: 'Back to settings menu' }).click();
+  await expect(securitySection).toBeVisible();
+  await expect(securitySection).toHaveAttribute('aria-current', 'page');
+  await expect(securitySection).toBeFocused();
+});
+
 test('mobile chat switches between conversation list and active thread landmarks', async ({
   page,
 }) => {
