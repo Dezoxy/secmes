@@ -148,7 +148,7 @@ test('security recovery shows passphrase strength while creating backup', async 
   const strength = dialog.getByRole('meter', { name: 'Recovery passphrase strength' });
   await expect(strength).toHaveAttribute('aria-valuenow', '0');
 
-  const passphrase = dialog.getByRole('textbox', { name: 'Recovery passphrase', exact: true });
+  const passphrase = dialog.getByLabel('Recovery passphrase', { exact: true });
 
   await passphrase.fill('short');
   await expect(strength).toHaveAttribute('aria-valuenow', '1');
