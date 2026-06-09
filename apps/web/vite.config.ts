@@ -163,6 +163,11 @@ export default defineConfig({
     // vite-plugin-pwa's closeBundle precaches it: the service worker caches the SRI'd HTML and the Workbox
     // precache revisions stay consistent. Same-origin assets need no `crossorigin` for SRI enforcement.
     // Keep this LAST in the plugins array (per sri3 docs) so it hashes the final emitted content.
+    // SCOPE: covers the entry <script> + statically-referenced modulepreload <link>s + the stylesheet in
+    // index.html. It does NOT cover dynamically-`import()`ed chunks (the React.lazy routes + ts-mls's internal
+    // crypto chunks) — native dynamic import can't carry an integrity attribute (a browser-platform gap; the
+    // spec's fix is import-map integrity, not yet broadly supported + collides with our inline-script CSP). That
+    // gap is an ACCEPTED residual (Codex #152 P1) — see docs/threat-models/code-delivery-integrity.md §6.
     sri(),
     // Published bundle hash (#43): emits dist/bundle-manifest.json. Hashes assets read back from disk in
     // writeBundle, so it is order-independent of sri / vite-plugin-pwa.

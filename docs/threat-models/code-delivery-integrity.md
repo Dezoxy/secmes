@@ -42,10 +42,12 @@ and ciphertext.
 ## 3. Threats (STRIDE-lite)
 
 - **Tampering — swapped/altered JS or CSS bundle** (compromised edge cache, MITM beneath TLS, malicious origin
-  write). → sha384 SRI on every script/modulepreload/stylesheet; the browser rejects mismatched bytes. Workbox
-  precache revisions are a second check for cached assets (verified: content-hashed `/assets/*` precache with
-  `revision:null`, so Workbox refuses bytes that don't match the filename hash). Strict CSP `script-src 'self'`
-  blocks foreign/inline script regardless.
+  write). → sha384 SRI on the entry `<script>` + every `modulepreload`/stylesheet `<link>` in `index.html`; the
+  browser rejects mismatched bytes. Workbox precache revisions are a second check for cached assets (verified:
+  content-hashed `/assets/*` precache with `revision:null`, so Workbox refuses bytes that don't match the
+  filename hash). Strict CSP `script-src 'self'` blocks foreign/inline script regardless. **Caveat:** SRI
+  attributes cover the entry + statically-referenced chunks + CSS, **not** dynamically-`import()`ed chunks (lazy
+  routes + ts-mls's internal crypto chunks) — a browser-platform gap — see §6.
 - **Tampering — swapped `index.html`** (the SRI bootstrap itself). `index.html` carries the integrity attrs, so
   a swapped `index.html` could strip them — SRI cannot self-protect the document that declares it. → Mitigated
   by edge TLS (HTTPS), CSP `base-uri 'none'` / `frame-ancestors 'none'`, and the SW: an installed client
@@ -110,6 +112,20 @@ revision consistent; manifest sha384 == SRI integrity).
   updates, the SW pinning a known-good `index.html` for returning/installed users, and the published bundle hash
   as a detective control. Accepted for this phase; a signed-SW / signed-index transparency scheme and the G7
   security page surfacing the bundle hash are the next step.
+- **SRI covers the entry script + CSS, not dynamically-`import()`ed chunks.** The `integrity` attribute lives on
+  the `<script>`/`<link>` tags in `index.html`, so it robustly protects the entry bundle and stylesheet. The lazy
+  route chunks (`React.lazy` → Settings / Security / **Recovery** / Devices) and ts-mls's internal crypto chunks
+  load via native dynamic `import()`, which **cannot carry an integrity attribute** — a browser-platform gap, not
+  a config miss. (The spec's fix is import-map `integrity`, shipped only in recent Chrome/Safari — not Firefox —
+  and an inline import map collides with our `script-src 'self'` CSP.) So a same-origin/edge **cache-poisoning
+  swap of a route or crypto chunk** would execute unverified. Partially mitigated: `script-src 'self'` blocks
+  foreign script; immutable content-hashed filenames + the SW precache narrow the window for installed users; and
+  the published `bundle-manifest.json` is the detective control (an auditor / the G7 page can diff served chunk
+  hashes against it). **Decision (2026-06-09, with the maintainer): accept this residual** rather than (a)
+  `inlineDynamicImports` into one SRI-covered entry — which reverts the deliberate route/crypto code-splitting
+  and bloats the unauthenticated load — or (b) import-map integrity (partial browser support + a build↔Caddy-CSP
+  coupling). Revisit when import-map integrity is broadly supported, or fold it into the G7 signed-transparency
+  work. (Codex #152 P1.)
 - **The bundle manifest is detective, not preventive** — it lets an auditor or the future security page detect a
   divergent build but does not itself block a tampered load. Acceptable: it pairs with SRI (the preventive
   control) on the assets that *can* carry integrity.
