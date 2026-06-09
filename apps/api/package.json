@@ -25,6 +25,7 @@
     "@nestjs/swagger": "^11.4.4",
     "@nestjs/throttler": "^6.5.0",
     "@nestjs/websockets": "^11",
+    "@sentry/node": "^10.57.0",
     "drizzle-orm": "^0.45.2",
     "ioredis": "^5.11.1",
     "jose": "^6.2.3",

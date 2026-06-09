@@ -6,11 +6,22 @@ import { WsAdapter } from '@nestjs/platform-ws';
 import { SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module.js';
 import { createOpenApiDocument } from './openapi.js';
+import { initErrorTracking } from './observability/error-tracking.js';
+import { ErrorTrackingInterceptor } from './observability/error-tracking.interceptor.js';
 import { metricsMiddleware } from './observability/metrics.middleware.js';
 import { startMetricsServer } from './observability/metrics-server.js';
 
 async function bootstrap(): Promise<void> {
+  // Error tracking (checkpoint 48) — init as early as possible so captures cover the whole app. DSN-GATED:
+  // a complete no-op when SENTRY_DSN is unset (the default until arming). Events are default-deny scrubbed
+  // (no content/keys/tokens/headers/presigned URLs ever leave — see observability/error-tracking.ts).
+  initErrorTracking((msg) => Logger.log(msg, 'ErrorTracking'));
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: false });
+
+  // Report unhandled/5xx errors to Sentry/GlitchTip without altering the response (observe + rethrow). No-op
+  // when error tracking is disabled. Captures method + route-template + opaque ids only.
+  app.useGlobalInterceptors(new ErrorTrackingInterceptor());
 
   // Content-blind HTTP metrics (checkpoint 47): records count + latency per {method, route-template, status}
   // on the main server. The metrics themselves are exposed on a SEPARATE internal port below, not here.
