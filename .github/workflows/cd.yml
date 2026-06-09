@@ -157,6 +157,16 @@ jobs:
           RG: ${{ vars.AZURE_RESOURCE_GROUP }}
           VM: ${{ vars.AZURE_VM_NAME }}
         run: |
-          az vm run-command invoke \
+          set -euo pipefail
+          # `az vm run-command invoke` exits 0 for the API call even if the in-VM script FAILED — so inspect
+          # the captured output and require deploy.sh's final success sentinel (it only prints this as its last
+          # line, after the rollout is healthy; any earlier `set -e` failure exits before it).
+          out="$(az vm run-command invoke \
             --resource-group "$RG" --name "$VM" \
-            --command-id RunShellScript --scripts @runcmd.sh
+            --command-id RunShellScript --scripts @runcmd.sh -o json)"
+          printf '%s\n' "$out" | jq -r '.value[].message'
+          printf '%s\n' "$out" | jq -r '.value[].message' \
+            | grep -q 'argus-deploy: deploy complete + healthy' || {
+              echo '::error::VM rollout failed — deploy.sh did not reach the healthy-complete sentinel'
+              exit 1
+            }
