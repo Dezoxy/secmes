@@ -19,6 +19,10 @@ local.file_match "containers" {
 loki.source.file "containers" {
   targets    = local.file_match.containers.targets
   forward_to = [loki.process.scrub.receiver]
+  // On first run (no positions file yet — e.g. fresh arming on a VM with existing containers) start at EOF
+  // instead of replaying every existing json log. Avoids backfilling a large pre-existing backlog into Loki
+  // and centralizing lines that predate this collector. After the first run, the positions file resumes.
+  tail_from_end = true
 }
 
 loki.process "scrub" {
