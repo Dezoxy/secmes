@@ -27,7 +27,17 @@ import {
   getConversationAvatar,
   getOtherParticipant,
 } from './seed';
-import { Avatar, Button, IconButton, Modal, floatingMenuMotion } from '../ui';
+import {
+  Avatar,
+  Button,
+  IconButton,
+  Modal,
+  floatingMenuItemClass,
+  floatingMenuMotion,
+  floatingMenuSurfaceClass,
+  modalBackdropEnterMotion,
+  modalPanelEnterMotion,
+} from '../ui';
 
 interface ChatHeaderProps {
   conversation: Conversation;
@@ -62,7 +72,7 @@ function MenuItem({
       onClick={onClick}
       disabled={disabled}
       tabIndex={tabIndex}
-      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
+      className={`${floatingMenuItemClass} ${
         danger
           ? 'text-red-300 hover:bg-red-500/10 hover:text-red-200'
           : 'text-white/65 hover:bg-white/[0.05] hover:text-white'
@@ -252,7 +262,7 @@ export function ChatHeader({ conversation, onBack, verified, onVerify }: ChatHea
           </IconButton>
 
           <div
-            className={`absolute right-0 top-full z-30 mt-3 w-72 origin-top-right rounded-2xl border border-white/10 bg-[#151520] p-2 shadow-2xl shadow-black/50 ${floatingMenuMotion(
+            className={`absolute right-0 top-full z-30 mt-3 w-72 origin-top-right ${floatingMenuSurfaceClass} ${floatingMenuMotion(
               menuOpen,
               'top',
             )}`}
@@ -329,8 +339,8 @@ export function ChatHeader({ conversation, onBack, verified, onVerify }: ChatHea
         <Modal
           ariaLabel={panelTitle}
           onClose={closePanel}
-          className="items-end justify-center bg-black/75 p-0 backdrop-blur-sm sm:items-center sm:p-4"
-          contentClassName="max-h-[86vh] w-full overflow-hidden rounded-t-2xl border border-white/5 bg-[#12121a] shadow-2xl shadow-black/50 sm:max-w-lg sm:rounded-2xl"
+          className={`items-end justify-center bg-black/75 p-0 backdrop-blur-sm sm:items-center sm:p-4 ${modalBackdropEnterMotion}`}
+          contentClassName={`max-h-[86vh] w-full overflow-hidden rounded-t-2xl border border-white/5 bg-[#12121a] shadow-2xl shadow-black/50 sm:max-w-lg sm:rounded-2xl ${modalPanelEnterMotion}`}
         >
           <div className="flex items-center justify-between border-b border-white/5 px-5 py-4">
             <div>

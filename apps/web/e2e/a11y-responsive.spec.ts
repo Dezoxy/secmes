@@ -11,12 +11,16 @@ test('chat exposes landmarks and named composer controls', async ({ page }) => {
   await expect(page.getByRole('menu', { name: 'Conversation actions' })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Open message actions' }).click();
-  await expect(page.getByRole('menu', { name: 'Message actions' })).toBeVisible();
+  const messageActions = page.getByRole('menu', { name: 'Message actions' });
+  await expect(messageActions).toBeVisible();
+  await expect(messageActions).toHaveAttribute('aria-hidden', 'false');
   await expect(page.getByRole('menuitem', { name: 'Attach file' })).toBeVisible();
 
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Open conversation actions' }).click();
-  await expect(page.getByRole('menu', { name: 'Conversation actions' })).toBeVisible();
+  const conversationActions = page.getByRole('menu', { name: 'Conversation actions' });
+  await expect(conversationActions).toBeVisible();
+  await expect(conversationActions).toHaveAttribute('aria-hidden', 'false');
   await expect(page.getByRole('menuitem', { name: 'Conversation info' })).toBeVisible();
 });
 
@@ -51,6 +55,7 @@ test('conversation actions expose expanded state and return focus after panel cl
   const panel = page.getByRole('dialog', { name: 'Conversation info' });
   await expect(panel).toBeVisible();
   await expect(panel).toBeFocused();
+  await expect(panel).toHaveClass(/argus-overlay-enter/);
 
   await page.getByRole('button', { name: 'Close panel' }).click();
   await expect(panel).toHaveCount(0);
@@ -66,6 +71,17 @@ test('mobile settings sections expose current state and focus section content', 
   await page.getByRole('button', { name: 'Open settings' }).click();
 
   const dialog = page.getByRole('dialog', { name: 'Settings' });
+  const settingsPanel = dialog.locator(':scope > div');
+  await expect
+    .poll(async () => (await settingsPanel.boundingBox())?.x ?? 999)
+    .toBeLessThanOrEqual(9);
+
+  const panelBox = await settingsPanel.boundingBox();
+  expect(panelBox).not.toBeNull();
+  expect(panelBox!.x).toBeGreaterThanOrEqual(7);
+  expect(panelBox!.x).toBeLessThanOrEqual(9);
+  expect(panelBox!.width).toBeLessThanOrEqual(376);
+
   const securitySection = dialog.getByRole('button', { name: 'Security & Recovery' });
 
   await securitySection.click();
