@@ -78,10 +78,10 @@ export function ConversationList({
         <button
           type="button"
           onClick={(event) => onSettings?.(event.currentTarget)}
-          aria-label="Open settings"
           className="w-full flex items-center gap-3 p-2 rounded-xl hover:bg-[#1a1a26] transition-all duration-300 group"
         >
-          <div className="relative shrink-0">
+          <span className="sr-only">Open settings</span>
+          <div className="relative shrink-0" aria-hidden="true">
             <Avatar
               src={currentUserProfile.avatar}
               name={currentUserProfile.name}
@@ -93,7 +93,7 @@ export function ConversationList({
           </div>
           <div className="flex-1 min-w-0 text-left">
             <p className="text-white font-medium text-sm truncate">{currentUserProfile.name}</p>
-            <p className="text-white/40 text-xs truncate">Online</p>
+            <p className="text-white/55 text-xs truncate">Online</p>
           </div>
           <div className="flex items-center gap-1">
             <span className="p-1.5 rounded-lg text-white/40 group-hover:text-white/80 transition-all duration-300">
@@ -148,15 +148,17 @@ export function ConversationList({
 
       <div
         className={`overflow-hidden px-4 transition-all duration-300 ${
-          searchVisible ? 'max-h-0 py-0 opacity-0' : 'max-h-5 py-2 opacity-100'
+          searchVisible ? 'max-h-0 py-0 opacity-0' : 'max-h-9 py-1 opacity-100'
         }`}
       >
         <button
           type="button"
           onClick={focusSearch}
-          className="mx-auto block h-1 w-10 rounded-full bg-white/10 transition-all duration-300 hover:bg-white/20"
+          className="group mx-auto flex h-7 w-12 items-center justify-center rounded-full transition-colors duration-300 hover:bg-white/[0.03]"
           aria-label="Reveal conversation search"
-        />
+        >
+          <span className="block h-1 w-10 rounded-full bg-white/15 transition-colors duration-300 group-hover:bg-white/25" />
+        </button>
       </div>
 
       {/* List */}
@@ -188,7 +190,6 @@ export function ConversationList({
               type="button"
               key={conversation.id}
               onClick={() => onSelect(conversation.id)}
-              aria-label={`Open conversation with ${displayName}`}
               aria-pressed={isSelected}
               className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all duration-300 group ${
                 isSelected
@@ -196,7 +197,8 @@ export function ConversationList({
                   : 'hover:bg-[#1a1a26] border border-transparent'
               }`}
             >
-              <div className="relative shrink-0">
+              <span className="sr-only">Open conversation with</span>
+              <div className="relative shrink-0" aria-hidden="true">
                 <Avatar
                   src={avatar}
                   name={displayName}
@@ -222,16 +224,16 @@ export function ConversationList({
                     {displayName}
                   </span>
                   {lastMessage && (
-                    <span className="text-xs text-white/40 shrink-0">
+                    <span className="text-xs text-white/55 shrink-0">
                       {formatMessageTime(lastMessage.timestamp)}
                     </span>
                   )}
                 </div>
                 {lastMessage && (
                   <div className="flex items-center gap-2 mt-0.5">
-                    <p className="text-sm text-white/50 truncate">
+                    <p className="text-sm text-white/60 truncate">
                       {lastMessage.senderId === currentUser.id && (
-                        <span className="text-white/30">You: </span>
+                        <span className="text-white/60">You: </span>
                       )}
                       {lastMessage.attachments?.length
                         ? `Sent ${lastMessage.attachments[0]?.type === 'image' ? 'an image' : 'a file'}`

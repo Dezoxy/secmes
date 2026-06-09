@@ -24,6 +24,7 @@ for (const file of [
   'index.html',
   'manifest.webmanifest',
   'registerSW.js',
+  'robots.txt',
   'sw.js',
   'icon-192.png',
   'icon-512.png',
@@ -34,6 +35,15 @@ for (const file of [
 const indexHtml = await readDistText('index.html');
 assert(indexHtml.includes('rel="manifest"'), 'index.html does not link the web manifest');
 assert(indexHtml.includes('/registerSW.js'), 'index.html does not register the service worker');
+assert(
+  indexHtml.includes('name="description"') &&
+    indexHtml.includes('privacy-first, end-to-end-encrypted messaging PWA'),
+  'index.html does not include the Lighthouse-visible app description',
+);
+
+const robotsTxt = await readDistText('robots.txt');
+assert(robotsTxt.includes('User-agent: *'), 'robots.txt does not declare a user agent');
+assert(robotsTxt.includes('Allow: /'), 'robots.txt does not allow the static app shell');
 
 const manifest = JSON.parse(await readDistText('manifest.webmanifest'));
 const expectedManifest = {
