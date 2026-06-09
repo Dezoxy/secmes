@@ -1,5 +1,7 @@
 # Frontend Upgrade Implementation Plan (`apps/web`)
 
+> **Status:** all 14 steps + F1–F6 follow-ups are **complete** and merged (PRs #87–#146). This document stays the **canonical detail + standing rules** for `apps/web`; it is anchored in the roadmap as checkpoint **`#44a`** (`docs/roadmap.md`, Phase 5). Update both together.
+
 > **For agentic workers:** Implement this plan task-by-task using the repo's agent instructions and the tools available in your environment. Steps use checkbox (`- [ ]`) syntax for tracking. Keep each task in its own commit unless the user asks to batch changes.
 
 **Goal:** Make the Argus frontend easier to extend without weakening the E2EE, passkey-first, pseudonymous product direction.
@@ -119,11 +121,11 @@ Embedded surface ownership before refactoring:
 | --- | --- | --- | --- |
 | Auth session | `apps/web/src/features/auth/AuthContext.tsx`, `apps/web/src/lib/auth.ts`, `apps/web/src/lib/api.ts` | Real | OIDC tokens remain memory-only; `/auth/session` and `/me` are used when the API is reachable. |
 | Callback | `apps/web/src/routes/Callback.tsx` | Real | No blocker; keep isolated from chat rendering. |
-| Chat shell | `apps/web/src/features/chat/ChatScreen.tsx` | Real but too broad | Coordinates conversation state, live MLS groups, WebSocket catch-up, settings modal, start-conversation, verification, and image preview. Step 9 owns decomposition. |
+| Chat shell | `apps/web/src/features/chat/ChatScreen.tsx` | Real but too broad | Coordinates conversation state, live MLS groups, WebSocket catch-up, settings modal, start-conversation, verification, and image preview. Step 12 owns decomposition. |
 | Conversation list | `apps/web/src/features/chat/ConversationList.tsx` | Real | Uses seed conversations plus live conversation state from `ChatScreen`; mobile behavior remains chat-owned. |
 | Message view and composer | `apps/web/src/features/chat/MessageList.tsx`, `apps/web/src/features/chat/MessageBubble.tsx`, `apps/web/src/features/chat/ChatInput.tsx` | Real | Demo sends use local MLS loopback; live sends need an unlocked device and server conversation membership. |
 | Attachments | `apps/web/src/features/chat/ChatInput.tsx`, `apps/web/src/features/chat/AttachmentImage.tsx`, `apps/web/src/features/chat/ImagePreviewModal.tsx`, `apps/web/src/lib/attachments.ts` | Real with capability-aware fallback | Live attachments use encrypted upload/download grants. Seed/demo attachments stay local data URIs. UI must keep presigned URLs out of logs and storage. |
-| Settings | `apps/web/src/features/settings/SettingsPanel.tsx` | Real modal, not route-owned | Profile, security, privacy, notifications, appearance, storage, devices, and about sections live in one component. Step 5 owns section split. |
+| Settings | `apps/web/src/features/settings/SettingsPanel.tsx` | Real modal, not route-owned | Profile, security, privacy, notifications, appearance, storage, devices, and about sections live in one component. Step 8 owns section split. |
 | Recovery | `apps/web/src/features/recovery/RecoveryPanel.tsx`, `apps/web/src/features/device/UnlockGate.tsx`, `apps/web/src/lib/recovery.ts`, `apps/web/src/lib/device-restore.ts` | Real embedded flow | Recovery stays under Security & Recovery and the unlock gate. No standalone recover route or app-side username/password recovery path. |
 | Devices | `apps/web/src/features/device/DeviceContext.tsx`, `apps/web/src/features/device/UnlockGate.tsx`, `apps/web/src/features/settings/SettingsPanel.tsx` | Mixed | Current device provisioning/unlock is real. Trusted-device listing and revoke UI are placeholders until backend contracts are ready. |
 | Storage | `apps/web/src/features/settings/SettingsPanel.tsx`, `apps/web/src/lib/keystore.ts` | Mixed | Encrypted local device/group/message storage is real. User-facing cache management is placeholder until confirmation and cleanup flows are designed. |
