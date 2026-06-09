@@ -21,16 +21,20 @@ function collectPageIssues(page: Page): Array<string> {
 }
 
 async function expectComposerAligned(page: Page): Promise<void> {
-  const actionsBox = await page.getByRole('button', { name: 'Open message actions' }).boundingBox();
-  const messageBox = await page.getByRole('textbox', { name: 'Message' }).boundingBox();
-  const sendBox = await page.getByRole('button', { name: 'Send message' }).boundingBox();
+  await expect
+    .poll(async () => {
+      const actionsBox = await page
+        .getByRole('button', { name: 'Open message actions' })
+        .boundingBox();
+      const messageBox = await page.getByRole('textbox', { name: 'Message' }).boundingBox();
+      const sendBox = await page.getByRole('button', { name: 'Send message' }).boundingBox();
 
-  expect(actionsBox).not.toBeNull();
-  expect(messageBox).not.toBeNull();
-  expect(sendBox).not.toBeNull();
+      if (!actionsBox || !messageBox || !sendBox) return Number.POSITIVE_INFINITY;
 
-  const centers = [actionsBox!, messageBox!, sendBox!].map((box) => box.y + box.height / 2);
-  expect(Math.max(...centers) - Math.min(...centers)).toBeLessThanOrEqual(4);
+      const centers = [actionsBox, messageBox, sendBox].map((box) => box.y + box.height / 2);
+      return Math.max(...centers) - Math.min(...centers);
+    })
+    .toBeLessThanOrEqual(4);
 }
 
 test('F1C desktop chat and composer QA flow stays usable', async ({ page }) => {

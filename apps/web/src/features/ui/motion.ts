@@ -13,6 +13,11 @@ export function floatingMenuMotion(open: boolean, origin: FloatingMenuOrigin): s
   }`;
 }
 
+export const floatingMenuSurfaceClass =
+  'rounded-xl border border-white/10 bg-[#151520]/95 p-2 shadow-2xl shadow-black/50 backdrop-blur-xl';
+export const floatingMenuItemClass =
+  'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors';
+
 export const modalBackdropEnterMotion = 'argus-overlay-enter';
 export const modalPanelEnterMotion = 'argus-modal-enter';
 export const conversationEnterMotion = 'argus-pane-enter';

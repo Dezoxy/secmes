@@ -6,7 +6,9 @@ export { SettingsRow } from './SettingsRow';
 export { EmptyState, ErrorState, LoadingState, ReconnectBanner, StateBlock } from './StateBlock';
 export {
   conversationEnterMotion,
+  floatingMenuItemClass,
   floatingMenuMotion,
+  floatingMenuSurfaceClass,
   modalBackdropEnterMotion,
   modalPanelEnterMotion,
   sentMessageEnterMotion,

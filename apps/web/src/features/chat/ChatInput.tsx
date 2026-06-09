@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Send, Paperclip, Image as ImageIcon, Plus, Smile, X } from 'lucide-react';
-import { EmptyState, IconButton, floatingMenuMotion } from '../ui';
+import {
+  EmptyState,
+  IconButton,
+  floatingMenuItemClass,
+  floatingMenuMotion,
+  floatingMenuSurfaceClass,
+} from '../ui';
 
 interface ChatInputProps {
   onSend: (content: string, attachments?: File[]) => void;
@@ -176,7 +182,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
           </IconButton>
 
           <div
-            className={`absolute bottom-full left-0 z-20 mb-3 w-48 origin-bottom-left rounded-2xl border border-white/10 bg-[#151520] p-2 shadow-2xl shadow-black/40 ${floatingMenuMotion(
+            className={`absolute bottom-full left-0 z-20 mb-3 w-48 origin-bottom-left ${floatingMenuSurfaceClass} ${floatingMenuMotion(
               actionMenuOpen,
               'bottom',
             )}`}
@@ -188,7 +194,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
               type="button"
               onClick={openFilePicker}
               tabIndex={actionMenuOpen ? 0 : -1}
-              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-white/65 transition-colors hover:bg-white/[0.05] hover:text-white"
+              className={`${floatingMenuItemClass} text-white/65 hover:bg-white/[0.05] hover:text-white`}
               role="menuitem"
             >
               <Paperclip className="h-4 w-4" />
@@ -198,7 +204,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
               type="button"
               onClick={openImagePicker}
               tabIndex={actionMenuOpen ? 0 : -1}
-              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-white/65 transition-colors hover:bg-white/[0.05] hover:text-white"
+              className={`${floatingMenuItemClass} text-white/65 hover:bg-white/[0.05] hover:text-white`}
               role="menuitem"
             >
               <ImageIcon className="h-4 w-4" />
@@ -208,7 +214,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
               type="button"
               onClick={insertEmoji}
               tabIndex={actionMenuOpen ? 0 : -1}
-              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-white/65 transition-colors hover:bg-white/[0.05] hover:text-white"
+              className={`${floatingMenuItemClass} text-white/65 hover:bg-white/[0.05] hover:text-white`}
               role="menuitem"
             >
               <Smile className="h-4 w-4" />

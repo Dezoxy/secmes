@@ -279,14 +279,14 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
     <Modal
       ariaLabel="Settings"
       onClose={closeSettings}
-      className={`items-center justify-center bg-black/80 p-4 backdrop-blur-sm ${modalBackdropEnterMotion}`}
-      contentClassName={`flex h-[90vh] w-full max-w-4xl overflow-hidden rounded-2xl border border-white/5 bg-[#12121a] shadow-2xl shadow-black/50 sm:h-[82vh] ${modalPanelEnterMotion}`}
+      className={`items-center justify-center bg-black/80 p-2 backdrop-blur-sm sm:p-4 ${modalBackdropEnterMotion}`}
+      contentClassName={`flex h-[calc(100dvh-1rem)] w-full max-w-4xl overflow-hidden rounded-xl border border-white/5 bg-[#12121a] shadow-2xl shadow-black/50 sm:h-[82vh] sm:rounded-2xl ${modalPanelEnterMotion}`}
       style={accentVariables}
     >
       <aside
         className={`${
           mobileSectionOpen ? 'hidden' : 'flex'
-        } w-full flex-col bg-[#0f0f16] p-4 sm:flex sm:w-64 sm:shrink-0 sm:border-r sm:border-white/5`}
+        } w-full flex-col bg-[#0f0f16] p-3 sm:flex sm:w-64 sm:shrink-0 sm:border-r sm:border-white/5 sm:p-4`}
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-white">Settings</h2>
@@ -327,10 +327,10 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
         tabIndex={-1}
         className={`${
           mobileSectionOpen ? 'block' : 'hidden'
-        } flex-1 overflow-y-auto p-4 focus:outline-none sm:block sm:p-6`}
+        } flex-1 overflow-y-auto p-3 focus:outline-none sm:block sm:p-6`}
       >
         <div key={active} className={surfaceEnterMotion}>
-          <div className="mb-6 flex items-center gap-3">
+          <div className="mb-4 flex items-center gap-3 sm:mb-6">
             <IconButton
               onClick={returnToSettingsMenu}
               className="sm:hidden"

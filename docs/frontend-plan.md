@@ -793,9 +793,9 @@ Home Screen app.
 
 **Purpose:** Smooth existing chat/settings surfaces after the structural refactor.
 
-- [ ] Normalize spacing, icon sizing, menu animations, modal entry, and mobile edge spacing.
-- [ ] Preserve the current dark-only product direction and accent-color system.
-- [ ] Add or update Playwright coverage for any interaction changed.
+- [x] Normalize spacing, icon sizing, menu animations, modal entry, and mobile edge spacing.
+- [x] Preserve the current dark-only product direction and accent-color system.
+- [x] Add or update Playwright coverage for any interaction changed.
 
 ### F6: Bundle-size Follow-up
 
