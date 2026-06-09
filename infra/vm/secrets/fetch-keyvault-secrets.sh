@@ -114,33 +114,53 @@ EOF
   log "delivered ${kv_name} -> ${file}"
 done
 
-# --- 3. Optional secrets: absent-on-first-boot is OK. Seed an empty 0400 file so the compose mount resolves;
-#        the consumer runs degraded until provisioned. A genuine fetch error also seeds empty + logs (the
-#        consumer notices) — only the MANDATORY set above fails closed. ---
+# --- 3. Optional secrets: a value that hasn't been provisioned YET (HTTP 404) is OK on a first boot — seed an
+#        empty 0400 file so the compose mount resolves (the consumer runs degraded until provisioned). But
+#        distinguish that from a transient/permission error: branch on the HTTP status (no `-f`, capture
+#        `%{http_code}`) so a 5xx/403/connection failure FAILS CLOSED rather than silently overwriting an
+#        already-provisioned secret with an empty file (which would degrade the consumer while reporting OK). ---
 for entry in "${OPTIONAL_SECRETS[@]}"; do
   kv_name="${entry%%=*}"
   file="${entry##*=}"
   dest="${SECRETS_DIR}/${file}"
   tmp="${SECRETS_DIR}/.tmp.${file}.$$"
-  value=""
-  # Don't fail closed: capture the fetch in an `if` so a 404/error doesn't trip `set -e`.
-  if resp="$(curl -fsS --max-time 15 --retry 2 --retry-connrefused --retry-delay 2 --config - \
-    "${VAULT_URL}/secrets/${kv_name}?api-version=${KV_API_VERSION}" <<EOF
+  body="${SECRETS_DIR}/.tmp.${file}.$$.body"
+  # Token via --config stdin (never argv). `|| true`: on a connection failure curl exits non-zero and writes
+  # "000" to the captured status — handled as a hard error below, not a silent empty.
+  http_code="$(curl -sS --max-time 15 --retry 3 --retry-connrefused --retry-delay 2 \
+    -o "$body" -w '%{http_code}' --config - \
+    "${VAULT_URL}/secrets/${kv_name}?api-version=${KV_API_VERSION}" <<EOF || true
 header = "Authorization: Bearer ${access_token}"
 EOF
-  )"; then
-    value="$(printf '%s' "$resp" | jq -r '.value // empty')"
-    resp=""
-  fi
-  printf '%s' "$value" >"$tmp" # empty when absent — the mount still resolves
-  chmod 0400 "$tmp"
-  mv -f "$tmp" "$dest"
-  if [ -s "$dest" ]; then
+  )"
+  case "$http_code" in
+  200)
+    value="$(jq -r '.value // empty' <"$body")"
+    [ -n "$value" ] || {
+      log "FATAL: '${kv_name}' returned 200 but an empty value"
+      rm -f "$body"
+      exit 1
+    }
+    printf '%s' "$value" >"$tmp"
+    value=""
+    chmod 0400 "$tmp"
+    mv -f "$tmp" "$dest"
     log "delivered ${kv_name} -> ${file}"
-  else
-    log "optional ${kv_name} absent — seeded EMPTY ${file} (consumer degraded until provisioned)"
-  fi
-  value=""
+    ;;
+  404)
+    : >"$tmp" # genuinely not provisioned yet → seed EMPTY so the mount resolves (consumer degraded)
+    chmod 0400 "$tmp"
+    mv -f "$tmp" "$dest"
+    log "optional ${kv_name} not provisioned (404) — seeded EMPTY ${file} (consumer degraded until set)"
+    ;;
+  *)
+    # Transient/permission/connection error — do NOT clobber a possibly-provisioned secret with empty.
+    log "FATAL: optional fetch for '${kv_name}' failed (HTTP ${http_code:-none}); refusing to overwrite ${file}"
+    rm -f "$body" "$tmp"
+    exit 1
+    ;;
+  esac
+  rm -f "$body"
 done
 
 access_token=""
