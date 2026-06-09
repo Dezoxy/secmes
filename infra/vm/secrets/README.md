@@ -26,6 +26,7 @@ consumers `Requires=` this unit, so they don't start on a missing secret).
 | `argus-postgres-owner-password` | `postgres_password`                | `postgres` (`POSTGRES_PASSWORD_FILE`) — owner/init  |
 | `argus-database-url`            | `database_url`                     | `api` (`DATABASE_URL_FILE`) — **`argus_app` DSN**   |
 | `argus-s3-secret-access-key`    | `s3_secret_access_key`             | `api` (`S3_SECRET_ACCESS_KEY_FILE`) — B2 attachments|
+| `argus-redis-password`          | `redis_password`                   | `redis` (`requirepass`, via the deploy-generated `redis.conf`) + `api` (`REDIS_URL` runtime value) — must be URL-safe (e.g. `openssl rand -hex 32`) |
 | `argus-tunnel-token`            | `tunnel_token`                     | `cloudflared` (`TUNNEL_TOKEN`, runtime value)       |
 | `argus-zitadel-masterkey`       | `zitadel_masterkey`                | `zitadel` (`--masterkeyFile`) — 32-byte instance masterkey |
 | `argus-zitadel-db-password`     | `zitadel_db_password`              | `zitadel-db` (`POSTGRES_PASSWORD_FILE`) + `zitadel` (`ZITADEL_DB_PASSWORD` runtime value — same file) |
@@ -73,6 +74,8 @@ KV="$(terraform -chdir=infra/vm/terraform output -raw key_vault_name)"
 az keyvault secret set --vault-name "$KV" --name argus-postgres-owner-password --value '<owner-pw>'
 az keyvault secret set --vault-name "$KV" --name argus-database-url           --value 'postgres://argus_app:<pw>@postgres:5432/argus'
 az keyvault secret set --vault-name "$KV" --name argus-s3-secret-access-key   --value '<b2-attachment-key-secret>'
+# Redis AUTH — URL-safe (it rides in REDIS_URL `redis://:<pw>@redis:6379` + a redis.conf requirepass line).
+az keyvault secret set --vault-name "$KV" --name argus-redis-password        --value "$(openssl rand -hex 32)"
 az keyvault secret set --vault-name "$KV" --name argus-tunnel-token           --value '<cloudflare-tunnel-token>'
 # Self-hosted Zitadel (#9). Masterkey MUST be exactly 32 bytes; generate it once and never rotate casually.
 az keyvault secret set --vault-name "$KV" --name argus-zitadel-masterkey      --value "$(openssl rand -base64 32 | head -c 32)"

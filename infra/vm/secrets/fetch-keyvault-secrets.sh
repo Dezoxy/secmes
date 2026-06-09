@@ -39,6 +39,7 @@ SECRETS=(
   "argus-postgres-owner-password=postgres_password"
   "argus-database-url=database_url"
   "argus-s3-secret-access-key=s3_secret_access_key"
+  "argus-redis-password=redis_password"
   "argus-tunnel-token=tunnel_token"
   "argus-zitadel-masterkey=zitadel_masterkey"
   "argus-zitadel-db-password=zitadel_db_password"

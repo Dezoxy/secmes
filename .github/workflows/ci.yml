@@ -35,3 +35,26 @@ jobs:
         with:
           name: openapi
           path: apps/api/openapi.json
+
+  # Invariant #3 guard: the prod stack must publish NO host ports — cloudflared's outbound tunnel is the only
+  # ingress, and every data service (postgres/redis/api/zitadel*/prometheus/grafana/alertmanager) stays on the
+  # internal Docker network. A stray `ports:` mapping (e.g. exposing redis or /metrics) would breach it; this
+  # fails the build mechanically (see docs/threat-models/observability.md + vm-ingress.md).
+  compose-guard:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - name: Assert compose.prod.yaml publishes no host ports
+        run: |
+          set -euo pipefail
+          published=$(docker compose -f compose.prod.yaml config --format json \
+            | jq '[.services[].ports // []] | add // [] | length')
+          if [ "$published" -ne 0 ]; then
+            echo "::error::compose.prod.yaml publishes $published host port mapping(s) — invariant #3: data services must stay internal (cloudflared is the only ingress)."
+            docker compose -f compose.prod.yaml config --format json \
+              | jq -r '.services | to_entries[] | select((.value.ports // []) | length > 0) | "  offending service: \(.key)"'
+            exit 1
+          fi
+          echo "compose.prod.yaml: no published host ports OK"

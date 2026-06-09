@@ -158,16 +158,37 @@ log "starting api + caddy + cloudflared + zitadel"
 # Guard: these runtime-value files must exist + be non-empty before we `cat` them into the `up` env — else
 # `set -e` aborts on a bare `cat: No such file` instead of a legible FATAL. fetch-keyvault-secrets.sh (same
 # bundled SHA) already fails closed first, so this is belt-and-suspenders for a stale/partial secret set.
-for _f in tunnel_token zitadel_db_password zitadel_admin_password; do
+for _f in tunnel_token zitadel_db_password zitadel_admin_password redis_password; do
   [ -s "$SECRETS_DIR/$_f" ] || {
     log "FATAL: missing/empty runtime secret file: $_f"
     exit 1
   }
 done
+# Generate redis.conf from the Key Vault password — config-file AUTH (`requirepass`), NEVER a `--requirepass`
+# CLI arg (which would leak the password into the process list). Mounted into redis as the redis_conf secret.
+# (The redis password must be URL-safe + conf-safe — e.g. `openssl rand -hex 32`; see docs/deploy.md.)
+_redispw="$(cat "$SECRETS_DIR/redis_password")"
+# Enforce the documented contract: the redis password rides UNQUOTED in redis.conf's `requirepass` and in
+# REDIS_URL's userinfo, so a value with a space / `#` / `@` / `:` / `"` would be silently truncated or
+# mis-parsed. Reject anything outside the URL-unreserved set (a comment isn't enforcement) — `openssl rand
+# -hex 32` satisfies it. Loud FATAL beats a half-set password or a wrong-password api at runtime.
+case "$_redispw" in
+*[!A-Za-z0-9._~-]*)
+  log "FATAL: argus-redis-password must be URL-safe (A-Za-z0-9._~- only — e.g. openssl rand -hex 32)"
+  exit 1
+  ;;
+esac
+printf 'save ""\nappendonly no\nrequirepass %s\n' "$_redispw" >"$SECRETS_DIR/redis.conf"
+chmod 0400 "$SECRETS_DIR/redis.conf"
+# REDIS_URL carries the password for the api (ioredis parses it); REDIS_PASSWORD feeds redis-cli's
+# REDISCLI_AUTH for the healthcheck. Both runtime values (the TUNNEL_TOKEN-style exception), never a file at rest.
 TUNNEL_TOKEN="$(cat "$SECRETS_DIR/tunnel_token")" \
   ZITADEL_DB_PASSWORD="$(cat "$SECRETS_DIR/zitadel_db_password")" \
   ZITADEL_ADMIN_PASSWORD="$(cat "$SECRETS_DIR/zitadel_admin_password")" \
+  REDIS_PASSWORD="$_redispw" \
+  REDIS_URL="redis://:${_redispw}@redis:6379" \
   docker compose -f "$COMPOSE" up -d
+_redispw=""
 
 # --- 6b. Gate on the new app containers becoming HEALTHY — `up -d` returns before they're ready, so without
 #         this a crash-looping rollout would report success. A timeout/unhealthy fails the deploy (set -e),

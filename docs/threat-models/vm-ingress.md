@@ -37,7 +37,9 @@ the API are crypto-blind (server stores/forwards ciphertext only; invariant #1).
   - internet ↔ Cloudflare edge (TLS, WAF) — Cloudflare is trusted infrastructure.
   - Cloudflare ↔ cloudflared (authenticated tunnel; token-based, remotely-managed).
   - cloudflared ↔ Caddy ↔ api (intra-VM Docker network — a single trust zone on one host).
-  - api ↔ postgres/redis (intra-VM; **not** reachable off-host — no published ports).
+  - api ↔ postgres/redis (intra-VM; **not** reachable off-host — no published ports). Redis additionally
+    requires AUTH (`requirepass` from a Key-Vault-generated `redis.conf`; defense-in-depth vs a compromised
+    neighbour container) — a CI guard asserts the prod stack publishes no host ports at all.
   - admin surfaces (Zitadel console, future ops) ↔ users — gated by **Cloudflare Access** at the edge.
 
 ## 3. Threats (STRIDE-lite)
