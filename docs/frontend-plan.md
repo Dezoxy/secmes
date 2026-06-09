@@ -753,7 +753,7 @@ this roadmap.
 
 - [x] F1A: Add baseline Playwright coverage for chat/settings landmarks, keyboard focus return, hidden menu
       tab stops, and mobile chat/sidebar navigation.
-- [ ] F1B: Sweep focus states, accessible names, `aria-expanded`/`aria-current` usage, and modal focus entry.
+- [x] F1B: Sweep focus states, accessible names, `aria-expanded`/`aria-current` usage, and modal focus entry.
 - [ ] F1C: Run desktop and mobile browser QA for chat, settings, profile, composer, and route shells.
 
 **Verification:** `pnpm frontend:verify`, plus browser QA on desktop and one mobile viewport.

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import {
   Bell,
   Brush,
@@ -170,6 +170,10 @@ function writeStoredPrivacySettings(settings: PrivacySettingsRecord): void {
   });
 }
 
+function isMobileSettingsViewport(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches;
+}
+
 function readStoredAccent(): AccentId {
   return readStoredDeviceSettings().accentId;
 }
@@ -189,6 +193,8 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
   const [username, setUsername] = useState(profile.username);
   const [avatar, setAvatar] = useState(profile.avatar);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const sectionButtonRefs = useRef(new Map<SectionId, HTMLButtonElement>());
+  const sectionContentRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     setUsername(profile.username);
@@ -239,6 +245,18 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
     onClose();
   }, [avatar, onClose, saveProfileDraft, username]);
 
+  const openSection = useCallback((id: SectionId) => {
+    setActive(id);
+    if (isMobileSettingsViewport()) setMobileSectionOpen(true);
+  }, []);
+
+  const returnToSettingsMenu = useCallback(() => {
+    setMobileSectionOpen(false);
+    window.requestAnimationFrame(() => {
+      sectionButtonRefs.current.get(active)?.focus({ preventScroll: true });
+    });
+  }, [active]);
+
   useEffect(() => {
     const handle = window.setTimeout(() => {
       saveProfileDraft(username, avatar);
@@ -246,6 +264,16 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
 
     return () => window.clearTimeout(handle);
   }, [avatar, saveProfileDraft, username]);
+
+  useEffect(() => {
+    if (!mobileSectionOpen || !isMobileSettingsViewport()) return undefined;
+
+    const animationFrame = window.requestAnimationFrame(() => {
+      sectionContentRef.current?.focus({ preventScroll: true });
+    });
+
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [active, mobileSectionOpen]);
 
   return (
     <Modal
@@ -270,11 +298,13 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
           {sections.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
-              type="button"
-              onClick={() => {
-                setActive(id);
-                setMobileSectionOpen(true);
+              ref={(node) => {
+                if (node) sectionButtonRefs.current.set(id, node);
+                else sectionButtonRefs.current.delete(id);
               }}
+              type="button"
+              onClick={() => openSection(id)}
+              aria-current={active === id ? 'page' : undefined}
               className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
                 active === id
                   ? 'text-white'
@@ -290,15 +320,19 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
         </nav>
       </aside>
 
-      <main
+      <section
+        ref={sectionContentRef}
+        role="region"
+        aria-label={`${activeSection.label} settings`}
+        tabIndex={-1}
         className={`${
           mobileSectionOpen ? 'block' : 'hidden'
-        } flex-1 overflow-y-auto p-4 sm:block sm:p-6`}
+        } flex-1 overflow-y-auto p-4 focus:outline-none sm:block sm:p-6`}
       >
         <div key={active} className={surfaceEnterMotion}>
           <div className="mb-6 flex items-center gap-3">
             <IconButton
-              onClick={() => setMobileSectionOpen(false)}
+              onClick={returnToSettingsMenu}
               className="sm:hidden"
               aria-label="Back to settings menu"
             >
@@ -358,7 +392,7 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
 
           {active === 'about' && <AboutSettings />}
         </div>
-      </main>
+      </section>
     </Modal>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 
 interface ModalProps {
   ariaLabel: string;
@@ -23,6 +23,16 @@ export function Modal({
   closeOnBackdrop = false,
   style,
 }: ModalProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const animationFrame = window.requestAnimationFrame(() => {
+      dialogRef.current?.focus({ preventScroll: true });
+    });
+
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, []);
+
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -34,10 +44,12 @@ export function Modal({
 
   return (
     <div
+      ref={dialogRef}
       className={joinClasses('fixed inset-0 z-50 flex', className)}
       role="dialog"
       aria-modal="true"
       aria-label={ariaLabel}
+      tabIndex={-1}
       onClick={(event) => {
         if (closeOnBackdrop && event.target === event.currentTarget) onClose();
       }}
