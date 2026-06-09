@@ -42,11 +42,19 @@ http://auth.4rgus.com:8080 {
 	# console + Login V2 call the API via this alias). `handle_path` strips the matched prefix, mirroring the
 	# canonical v4.15 compose's `zitadel-strip-api` stripprefix — e.g. /api/oauth/v2/keys -> /oauth/v2/keys.
 	handle_path /api/* {
-		reverse_proxy h2c://zitadel:8080
+		reverse_proxy h2c://zitadel:8080 {
+			# Strip TE: trailers before the h2c upstream — Zitadel's official Caddy guide documents that
+			# forwarding it makes error responses hang indefinitely (gRPC-gateway interaction).
+			header_up -TE
+		}
 	}
 	# Everything else (OIDC/OAuth/JWKS/console/gRPC at the root) → the identity server.
 	handle {
-		reverse_proxy h2c://zitadel:8080
+		reverse_proxy h2c://zitadel:8080 {
+			# Strip TE: trailers before the h2c upstream — Zitadel's official Caddy guide documents that
+			# forwarding it makes error responses hang indefinitely (gRPC-gateway interaction).
+			header_up -TE
+		}
 	}
 }
 
