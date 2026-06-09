@@ -229,6 +229,16 @@ TUNNEL_TOKEN="$(cat "$SECRETS_DIR/tunnel_token")" \
   ZITADEL_DB_PASSWORD="$(cat "$SECRETS_DIR/zitadel_db_password")" \
   ZITADEL_ADMIN_PASSWORD="$(cat "$SECRETS_DIR/zitadel_admin_password")" \
   docker compose -f "$COMPOSE" up -d
+# The api reads REDIS_URL_FILE ONCE at module construction and holds a persistent ioredis connection. On a
+# redis password ROTATION the `up -d` above won't recreate the api when the image/config is unchanged (a
+# same-IMAGE_TAG/secret-only redeploy) — it would keep authenticating with the OLD password against the
+# now-rotated redis and break the realtime backplane. So when the conf changed (step 3b), force-recreate the
+# api too — symmetric with the redis recreate in step 4. A normal new-image deploy already recreates it (and
+# REDIS_CONF_CHANGED is 0 when the password didn't change), so this only fires on an actual rotation.
+if [ "${REDIS_CONF_CHANGED:-1}" = 1 ]; then
+  log "redis conf is new/changed — force-recreating api so it reconnects with the current password"
+  docker compose -f "$COMPOSE" up -d --force-recreate --no-deps api
+fi
 
 # --- 6b. Gate on the new app containers becoming HEALTHY — `up -d` returns before they're ready, so without
 #         this a crash-looping rollout would report success. A timeout/unhealthy fails the deploy (set -e),
