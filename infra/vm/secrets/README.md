@@ -47,8 +47,9 @@ consumers `Requires=` this unit, so they don't start on a missing secret).
 >
 > `argus-zitadel-login-pat` is **optional / set during arming** — Zitadel only mints the Login V2 service PAT
 > after first init, so you can't pre-seed it. The fetch script writes an **empty** file until you provision it
-> (login UI is degraded, the rest of the stack is fine); set it from the value FirstInstance writes
-> (`docker compose -f compose.prod.yaml exec zitadel cat /tmp/login-client.pat`) — see `docs/deploy.md`.
+> (login UI is degraded, the rest of the stack is fine); copy the value FirstInstance writes out **host-side**
+> (`docker cp "$(docker compose -f /opt/argus/compose.prod.yaml ps -q zitadel):/tmp/login-client.pat" - | tar -xO`
+> — the minimal Zitadel image has no shell/`cat`) and store it in Key Vault. Full steps in `docs/deploy.md`.
 
 ### Deploy-time secrets (fetched by `deploy.sh`, NOT delivered to the running stack)
 
