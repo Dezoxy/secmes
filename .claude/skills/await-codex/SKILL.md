@@ -13,7 +13,7 @@ Codex delivers its answer through five channels. Never conclude "no review yet" 
 4. Issue comment "You have reached your Codex usage limits…" → **reviewer unavailable** — fall back to @claude (below)
 5. Nothing → not triggered yet (auto-review skips some PRs)
 
-The newest signal wins: a clean re-review supersedes earlier findings. A verdict older than the head commit covers stale code.
+Within one reviewer the newest signal wins (a clean re-review supersedes earlier findings), but between reviewers Codex is primary: a fallback `VERDICT: PASS` from @claude never overrides fresh Codex findings on the same head. A verdict that predates the current head covers stale code; formal Codex reviews are matched by their exact reviewed SHA.
 
 ## Procedure
 
