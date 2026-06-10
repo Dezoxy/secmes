@@ -32,6 +32,7 @@ Hard rules. A change that violates one is wrong even if it "works".
 ## Definition of done
 
 - `pnpm -r typecheck && pnpm -r test && pnpm lint && pnpm format:check` pass.
+- User-visible web change: Playwright E2E suite passes (`pnpm --filter @argus/web test:e2e`); new user-facing flows get an E2E test. The `e2e` CI job gates merges on this.
 - New API endpoints: in the OpenAPI spec with auth + typed schemas (refresh the spec, run the 42Crunch audit).
 - New tables: `tenant_id` + RLS policy.
 - Security-relevant change: a short threat-model note under `docs/threat-models/`.
@@ -40,7 +41,10 @@ Hard rules. A change that violates one is wrong even if it "works".
 ## Pull request flow
 
 - Every change lands via a PR; `main` is protected.
+- **Every PR description is written for a non-programmer product owner**: a plain-language "what changed and why" plus a **"How to verify by hand"** section with concrete steps (what to click/run, what you should see). The owner reviews behavior, not diffs — this section is how. A PR whose effect can't be explained in product terms is a smell.
 - **Wait for the `chatgpt-codex-connector` (Codex) review before merging — never merge on green CI alone.** Resolve every Codex finding, or reply on the PR with an explicit, recorded justification. Treat its P1/P2 findings like CI failures.
+- **Check the Codex verdict with `scripts/codex-review-status.sh <pr> [--wait]`** — Codex may answer only with a 👍 reaction on the PR body (its no-findings signal), which reviews/comments queries and `gh pr view` do not show. Exit codes: 0 clean, 1 findings, 2 no response, 3 stale (verdict predates the head commit — request a re-review, don't merge on it), 4 Codex over its usage limit, 5 unparseable fallback reply.
+- **When Codex is over its usage limit (exit 4)**, fall back to the `@claude` reviewer (`.github/workflows/claude.yml`): comment `@claude review this PR …` instructing it to apply the AGENTS.md review criteria and end with one line `VERDICT: PASS` or `VERDICT: FINDINGS`, then re-run the script — it parses Claude's verdict too (from bot logins only). If both reviewers fail, a human decides; never merge unreviewed.
 - Merge only when **both** hold: CI green (ci · security · codeql) **and** the Codex review is addressed.
 
 ## Never do
