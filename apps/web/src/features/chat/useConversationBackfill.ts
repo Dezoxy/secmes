@@ -7,6 +7,7 @@ import {
   type DecryptedMessage,
   type MessagingDeps,
 } from '../../lib/messaging';
+import { resolvePeerUser, withPeerNamed } from './peer-naming';
 import { liveConversationShell, prependConversationIfMissing } from './useLiveConversations';
 import type { Attachment, Conversation, Message, User } from './seed';
 
@@ -32,6 +33,8 @@ interface HistoryRehydrationOptions {
   messagingDeps: MessagingDeps | null;
   sessionKey: CryptoKey | null;
   currentUserProfile: User;
+  /** The signed-in user's SERVER id — excludes own history entries when deriving the peer for naming. */
+  selfUserId: string | undefined;
   addLive: (conversationId: string, conversation: MlsGroup) => void;
   setConversations: Dispatch<SetStateAction<Conversation[]>>;
 }
@@ -122,6 +125,9 @@ export function useConversationBackfill({
   const fetchCursors = useRef(new Map<string, string>());
   const backfilling = useRef(new Set<string>());
   const backfillPending = useRef(new Set<string>());
+  // Conversations whose peer naming has been attempted this session (gate, not a guarantee — withPeerNamed
+  // itself no-ops when the conversation was already named by the join/creator path).
+  const peerNamingTried = useRef(new Set<string>());
 
   // Persist messages to the local SEALED history log. Plaintext in -> sealed at rest under the session key.
   const appendHistory = useCallback(
@@ -146,6 +152,15 @@ export function useConversationBackfill({
       if (incoming.length === 0) return;
       setConversations((prev) => mergeIncomingMessages(prev, conversationId, incoming));
       appendHistory(conversationId, incoming.map(decryptedToStoredMessage));
+      // Name a still-placeholder peer from the (server-verified) sender — every incoming DecryptedMessage
+      // is a PEER message (own sends are skipped upstream), so any sender id here identifies the peer.
+      const peerSender = incoming[0]?.senderUserId;
+      if (peerSender && !peerNamingTried.current.has(conversationId)) {
+        peerNamingTried.current.add(conversationId);
+        void resolvePeerUser(peerSender).then((peer) => {
+          if (peer) setConversations((prev) => withPeerNamed(prev, conversationId, peer));
+        });
+      }
     },
     [appendHistory, setConversations],
   );
@@ -205,6 +220,7 @@ export function useConversationHistoryRehydration({
   messagingDeps,
   sessionKey,
   currentUserProfile,
+  selfUserId,
   addLive,
   setConversations,
 }: HistoryRehydrationOptions): void {
@@ -217,22 +233,37 @@ export function useConversationHistoryRehydration({
     const sKey = sessionKey;
     void (async () => {
       try {
-        const restored = await keystore.loadConversations(device, passphrase);
+        const restored = await keystore.loadConversations(device, passphrase, sKey);
         const logs = await keystore.loadAllMessageLogs(device, sKey);
         for (const [conversationId, conversation] of restored) {
           addLive(conversationId, conversation);
-          const history = (logs.get(conversationId) ?? []).map(storedToMessage);
+          const stored = logs.get(conversationId) ?? [];
+          const history = stored.map(storedToMessage);
           setConversations((prev) =>
             prependConversationIfMissing(prev, {
               ...liveConversationShell(conversationId, currentUserProfile),
               messages: history,
             }),
           );
+          // Name the peer from history: try each distinct foreign sender until one resolves in the
+          // directory (own local-echo ids aren't directory ids and simply don't resolve). Best-effort.
+          const senderIds = [
+            ...new Set(stored.map((m) => m.senderId).filter((id) => id && id !== selfUserId)),
+          ].slice(0, 3);
+          void (async () => {
+            for (const senderId of senderIds) {
+              const peer = await resolvePeerUser(senderId);
+              if (peer) {
+                setConversations((prev) => withPeerNamed(prev, conversationId, peer));
+                return;
+              }
+            }
+          })();
         }
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('rehydrate conversations failed', err instanceof Error ? err.message : err);
       }
     })();
-  }, [addLive, currentUserProfile, messagingDeps, sessionKey, setConversations]);
+  }, [addLive, currentUserProfile, messagingDeps, selfUserId, sessionKey, setConversations]);
 }

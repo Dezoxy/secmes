@@ -35,6 +35,12 @@ export interface MessageSocketOptions {
    * would be neither fetched nor pushed. After the ack, anything past the catch-up's cursor is pushed live.
    */
   onSubscribed?: (conversationId: string) => void;
+  /**
+   * A Welcome is waiting for this user (someone added them to a conversation while connected). The caller
+   * should drain pending Welcomes NOW (idempotent join) — otherwise the new conversation stays invisible
+   * until the next reconnect. The frame carries ids only; the sealed join material rides the REST fetch.
+   */
+  onWelcome?: (conversationId: string) => void;
   /** Injectable WebSocket constructor (tests). Defaults to the global. */
   WebSocketImpl?: typeof WebSocket;
   /** Reconnect backoff knobs (tests tune these down). */
@@ -118,6 +124,12 @@ export function createMessageSocket(opts: MessageSocketOptions): MessageSocket {
       // The room join is confirmed — now safe to catch up this conversation (see onSubscribed).
       const id = (frame.data as { conversationId?: unknown } | null)?.conversationId;
       if (typeof id === 'string') opts.onSubscribed?.(id);
+      return;
+    }
+    if (frame.event === 'welcome') {
+      if (!authed) return; // same defence in depth as 'message' — never act on a pre-auth frame
+      const id = (frame.data as { conversationId?: unknown } | null)?.conversationId;
+      if (typeof id === 'string') opts.onWelcome?.(id);
       return;
     }
     // 'error' frames need no client action (membership/authz is server-enforced; the keys gate content).

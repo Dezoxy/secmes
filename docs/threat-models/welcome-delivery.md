@@ -137,6 +137,9 @@ to that device's KeyPackage key). Server stores + forwards opaque base64 only �
   consuming both require a device proof-of-possession** (§3), so a sibling session can neither pull nor delete
   another device's material. Binding the device into the access token (so the server *verifies* it for the
   list too, dropping the per-request proofs) is later hardening, tracked with multi-device session management.
-- **No server-pushed real-time welcome** yet — the recipient polls `GET /welcomes` on connect; a WS push
-  is a later refinement (the receipts/realtime gateway #28 can carry it).
+- **Server-pushed welcome nudge (BUILT — supersedes "no real-time welcome"):** on deliver, the server emits a
+  **post-commit, content-free `welcome` frame** (`{conversationId}` only) over the realtime gateway to the
+  recipient's verified `(tenantId, sub)` sockets. It carries NO join material — the sealed blobs still ride
+  the proof-gated REST fetch — and only *triggers a re-fetch* of `GET /welcomes`, so a lost or duplicated
+  nudge is harmless (best-effort; the connect-time drain remains the durable fallback).
 - **Group / PCS** semantics (N-party adds, post-compromise security) are deferred (B1); v1 is the 1:1 add.

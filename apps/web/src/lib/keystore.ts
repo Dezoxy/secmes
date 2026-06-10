@@ -75,15 +75,19 @@ interface StoredPool {
   sealed: SealedBackup;
 }
 
-// A conversation's sealed MLS group state (Slice 5). The ratchet carries live secret key material, so it's
-// sealed exactly like the device/pool, and bound to the device identity + signature key so a re-created /
-// recovered device (same identity string, different key) can't load a group it can't drive. Keyed by
-// conversationId in the store.
+// A conversation's sealed MLS group state (Slice 5). The ratchet carries live secret key material; it's
+// bound to the device identity + signature key so a re-created / recovered device (same identity string,
+// different key) can't load a group it can't drive. Keyed by conversationId in the store.
+//
+// SEALING: saves seal under the per-unlock SESSION KEY (cheap AES-GCM, like the message log) — the state
+// advances on EVERY send/receive, and a per-save Argon2id pass made each delivered message cost seconds.
+// `sealed` is a union for migration: pre-session-key rows are passphrase-sealed `SealedBackup`s; they open
+// via the legacy path once (on load) and re-seal in the session-key format at the next save.
 interface StoredGroupState {
   identity: string;
   signaturePublicKey: string;
   conversationId: string;
-  sealed: SealedBackup;
+  sealed: SealedBackup | SealedBlob;
   // Monotonic per-conversation version for the cross-instance CAS (see saveConversationState). Bumped on
   // every successful save; a write is only committed if the store still holds the version the writer last saw.
   version: number;
@@ -113,6 +117,15 @@ interface StoredMessageLog {
   // Monotonic version for the cross-tab compare-and-swap (see appendMessagesUnlocked). A lost CAS means
   // another tab appended concurrently — re-read + re-merge + retry, so neither tab's entries are dropped.
   version: number;
+}
+
+/**
+ * AAD for a session-key-sealed GROUP-STATE blob: pins it to its conversation slot AND domain-separates it
+ * from the message log (which binds the bare conversationId) — the same session key seals both stores, so
+ * without the prefix a log blob could be replayed into the group-state slot (and vice versa).
+ */
+function groupStateAad(conversationId: string): Uint8Array {
+  return te.encode(`group-state:${conversationId}`);
 }
 
 /** Shape-check a server-provided sealed blob before storing it (it's still GCM-authenticated on unseal). */
@@ -356,7 +369,7 @@ export class DeviceKeystore {
    *    write commits only if the store still holds the version THIS instance last saw; otherwise a newer
    *    instance got there first and we throw `GroupStateConflict` instead of rolling the durable ratchet
    *    back. The single readwrite tx makes get→check→put atomic (IndexedDB serializes it against the other
-   *    tab's tx); the slow Argon2 seal runs BEFORE the tx so nothing non-IDB is awaited mid-transaction.
+   *    tab's tx); the (async, non-IDB) seal runs BEFORE the tx so nothing non-IDB is awaited mid-transaction.
    *
    * Bound to the device identity + signature key. (CAS keeps the *durable* state monotonic; it does not gate
    * two tabs *sending* concurrently — that needs single-writer send coordination, wired with the send path.)
@@ -365,10 +378,13 @@ export class DeviceKeystore {
     device: DeviceKeys,
     conversationId: string,
     conversation: Conversation,
-    passphrase: string,
+    sessionKey: CryptoKey,
   ): Promise<void> {
     await conversation.persistVia(async (snapshot) => {
-      const sealed = await sealBackup(snapshot, passphrase, this.argon);
+      // Session-key seal (one Argon2id at unlock, cheap AES-GCM per save) — the state advances on every
+      // send/receive, so a per-save KDF here made each delivered message cost seconds. The AAD pins the
+      // blob to its slot AND domain-separates it from the message log (same key, different stores).
+      const sealed = await sealWithKey(sessionKey, snapshot, groupStateAad(conversationId));
       snapshot.fill(0); // wipe the transient unsealed group-state bytes after sealing
 
       const base = this.groupStateVersions.get(conversationId) ?? -1;
@@ -398,6 +414,7 @@ export class DeviceKeystore {
   async loadConversations(
     device: DeviceKeys,
     passphrase: string,
+    sessionKey: CryptoKey,
   ): Promise<Map<string, Conversation>> {
     const identity = deviceIdentity(device);
     const signaturePublicKey = deviceSignaturePublicKeyB64(device);
@@ -409,7 +426,11 @@ export class DeviceKeystore {
       // The decoded group state holds VIEWS into the unsealed bytes, so they must NOT be wiped — those bytes
       // ARE the live in-memory group state (as sensitive as the device keys, and unavoidably resident while
       // the conversation is open), not a transient copy.
-      const opened = await openBackup(rec.sealed, passphrase);
+      // Session-key blobs are the steady state; a passphrase-sealed `SealedBackup` is a pre-migration row
+      // (opened via the legacy Argon2id path once — it re-seals in the session-key format on its next save).
+      const opened = isSealedBackup(rec.sealed)
+        ? await openBackup(rec.sealed, passphrase)
+        : await openWithKey(sessionKey, rec.sealed, groupStateAad(rec.conversationId));
       out.set(rec.conversationId, this.engine.deserializeConversation(opened));
       // Record the loaded version as this instance's CAS base; a later save by another tab bumps the store
       // past it and is caught (see saveConversationState).
@@ -460,9 +481,12 @@ export class DeviceKeystore {
   }
 
   /**
-   * Derive this session's AES-256-GCM message-log key from the passphrase + the stored per-profile salt +
-   * the STORED params (one Argon2id pass). Hold the returned key IN MEMORY ONLY for the session — it
-   * seals/opens the history log cheaply (no per-message KDF). Never persist it.
+   * Derive this session's AES-256-GCM key from the passphrase + the stored per-profile salt + the STORED
+   * params (one Argon2id pass). Hold the returned key IN MEMORY ONLY for the session — it seals/opens the
+   * history log AND the per-send/receive group state cheaply (no per-message KDF). Never persist it.
+   * Nonce budget: sealWithKey uses a fresh CSPRNG 96-bit IV per seal; random-IV AES-GCM is safe to ~2^32
+   * seals per key (NIST SP 800-38D), and the per-unlock key rotation keeps any session's seal count many
+   * orders of magnitude below that even with both stores sealing per message.
    */
   async deriveSessionKey(passphrase: string): Promise<CryptoKey> {
     const { salt, params } = await this.sessionKeyMaterial();

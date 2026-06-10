@@ -122,6 +122,10 @@ export type DeliveredWelcome = z.infer<typeof DeliveredWelcomeSchema>;
 export const PendingWelcomeSchema = z.object({
   id: z.string().uuid(),
   conversationId: z.string().uuid(),
+  // Who added you (the VERIFIED deliverer, set server-side) — lets the client name the new conversation
+  // via the directory. Tells the recipient nothing the first message wouldn't (messages already carry
+  // senderUserId), and the server already stores it on the welcome row. Ids/metadata only.
+  senderUserId: z.string().uuid(),
   createdAt: z.string().datetime(),
 });
 export type PendingWelcome = z.infer<typeof PendingWelcomeSchema>;

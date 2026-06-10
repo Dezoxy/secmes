@@ -11,7 +11,7 @@ import { WebSocket } from 'ws';
 
 import { AuthService, type VerifiedAuth } from '../auth/auth.service.js';
 import { MessagingService } from '../messaging/messaging.service.js';
-import { RealtimeBus, type MessageCreatedEvent } from './realtime-bus.js';
+import { RealtimeBus, type MessageCreatedEvent, type WelcomeCreatedEvent } from './realtime-bus.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const AUTH_DEADLINE_MS = 10_000; // close a socket that doesn't authenticate (first frame) in time
@@ -57,6 +57,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   onModuleInit(): void {
     this.bus.onMessageCreated((event) => this.deliver(event));
+    this.bus.onWelcomeCreated((event) => this.notifyWelcome(event));
   }
 
   handleConnection(client: WebSocket): void {
@@ -176,6 +177,24 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     const data = { conversationId: event.conversationId, message: event.message };
     for (const client of sockets) {
       if (client.readyState === WebSocket.OPEN) this.send(client, 'message', data);
+    }
+  }
+
+  /**
+   * Nudge the recipient's connected sockets that a Welcome is waiting: the client reacts by draining its
+   * pending Welcomes (join) — without this, a freshly-started conversation stays invisible to an
+   * already-connected peer until their next reconnect. Matched on the socket's VERIFIED (tenant, sub) —
+   * never client input — and unlike `deliver` it needs no room: the recipient can't be subscribed to a
+   * conversation it hasn't joined yet. Frame carries the conversationId only (ids/metadata, invariant #2);
+   * the sealed join material still rides the proof-gated REST fetch.
+   */
+  private notifyWelcome(event: WelcomeCreatedEvent): void {
+    for (const [client, state] of this.conns) {
+      if (!state.authed || !state.auth) continue;
+      if (state.auth.tenantId !== event.tenantId || state.auth.sub !== event.recipientSub) continue;
+      if (client.readyState === WebSocket.OPEN) {
+        this.send(client, 'welcome', { conversationId: event.conversationId });
+      }
     }
   }
 

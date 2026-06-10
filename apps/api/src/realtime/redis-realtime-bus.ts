@@ -4,23 +4,28 @@ import { Redis } from 'ioredis';
 import {
   MessageCreatedEventSchema,
   RealtimeBus,
+  WelcomeCreatedEventSchema,
   type MessageCreatedEvent,
+  type WelcomeCreatedEvent,
 } from './realtime-bus.js';
 
 export const CHANNEL = 'argus:realtime:message-created';
+export const WELCOME_CHANNEL = 'argus:realtime:welcome-created';
 
 /**
  * Cross-pod bus (checkpoint 29): each send PUBLISHES the event to a Redis channel, and every gateway
  * pod SUBSCRIBES and fans it out to its own local sockets. So a message sent on pod A reaches a
  * recipient connected to pod B. The same opaque ciphertext envelope crosses Redis — never plaintext or
  * keys; Redis is a private, authenticated dependency (network-isolated; see threat model). The emitting
- * pod also delivers via the Redis round-trip (uniform path), so single-pod works too.
+ * pod also delivers via the Redis round-trip (uniform path), so single-pod works too. Welcome events
+ * ride a second channel with the same posture (ids + the recipient subject only — never the sealed blobs).
  */
 export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
   private readonly pub: Redis;
   private readonly sub: Redis;
   private readonly listeners: Array<(event: MessageCreatedEvent) => void> = [];
-  /** Resolves once the subscription is active — await before relying on receipt (readiness/tests). */
+  private readonly welcomeListeners: Array<(event: WelcomeCreatedEvent) => void> = [];
+  /** Resolves once the subscriptions are active — await before relying on receipt (readiness/tests). */
   readonly ready: Promise<void>;
 
   constructor(url: string) {
@@ -36,20 +41,29 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
     // is in these errors; operational logging/metrics are a later concern.
     this.pub.on('error', () => {});
     this.sub.on('error', () => {});
-    this.sub.on('message', (_channel, payload) => this.onPayload(payload));
-    this.ready = this.sub.subscribe(CHANNEL).then(() => undefined);
+    this.sub.on('message', (channel, payload) => this.onPayload(channel, payload));
+    this.ready = this.sub.subscribe(CHANNEL, WELCOME_CHANNEL).then(() => undefined);
   }
 
-  private onPayload(payload: string): void {
+  private onPayload(channel: string, payload: string): void {
     let raw: unknown;
     try {
       raw = JSON.parse(payload);
     } catch {
       return; // ignore non-JSON
     }
-    const parsed = MessageCreatedEventSchema.safeParse(raw);
-    if (!parsed.success) return; // ignore a malformed/poisoned event rather than crash the gateway
-    for (const listener of this.listeners) listener(parsed.data);
+    // Validate per channel; ignore a malformed/poisoned event rather than crash the gateway.
+    if (channel === CHANNEL) {
+      const parsed = MessageCreatedEventSchema.safeParse(raw);
+      if (!parsed.success) return;
+      for (const listener of this.listeners) listener(parsed.data);
+      return;
+    }
+    if (channel === WELCOME_CHANNEL) {
+      const parsed = WelcomeCreatedEventSchema.safeParse(raw);
+      if (!parsed.success) return;
+      for (const listener of this.welcomeListeners) listener(parsed.data);
+    }
   }
 
   emitMessageCreated(event: MessageCreatedEvent): void {
@@ -60,6 +74,15 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
 
   onMessageCreated(listener: (event: MessageCreatedEvent) => void): void {
     this.listeners.push(listener);
+  }
+
+  emitWelcomeCreated(event: WelcomeCreatedEvent): void {
+    // Same best-effort posture as messages: the Welcome row is durable; join-on-connect is the fallback.
+    this.pub.publish(WELCOME_CHANNEL, JSON.stringify(event)).catch(() => {});
+  }
+
+  onWelcomeCreated(listener: (event: WelcomeCreatedEvent) => void): void {
+    this.welcomeListeners.push(listener);
   }
 
   async onModuleDestroy(): Promise<void> {

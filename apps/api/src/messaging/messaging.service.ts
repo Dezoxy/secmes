@@ -25,6 +25,8 @@ export interface CreatedConversation {
 export interface PendingWelcome {
   id: string;
   conversationId: string;
+  /** The verified member who delivered it (set server-side) — the client names the conversation with it. */
+  senderUserId: string;
   createdAt: string;
 }
 
@@ -190,7 +192,7 @@ export class MessagingService {
     conversationId: string,
     body: DeliverWelcome,
   ): Promise<{ welcomeId: string }> {
-    return withTenant(auth.tenantId, async (tx) => {
+    const { welcomeId, recipientSub } = await withTenant(auth.tenantId, async (tx) => {
       const sender = await requireUser(tx, auth.sub);
       await requireMembership(tx, conversationId, sender);
 
@@ -230,8 +232,27 @@ export class MessagingService {
       }
       const welcome = rows[0];
       if (!welcome) throw new Error('welcome insert returned no row');
-      return { welcomeId: welcome.id };
+
+      // Resolve the recipient's external subject for the post-commit realtime nudge — an authed socket is
+      // keyed by its verified `sub`, not the argus user id. Same-tx read; the FK above already proved the
+      // recipient exists in this tenant.
+      const [recipient] = await tx
+        .select({ sub: schema.users.externalIdentityId })
+        .from(schema.users)
+        .where(
+          and(eq(schema.users.tenantId, auth.tenantId), eq(schema.users.id, body.recipientUserId)),
+        )
+        .limit(1);
+      return { welcomeId: welcome.id, recipientSub: recipient?.sub ?? null };
     });
+
+    // Post-commit (same pattern as sendMessage): the Welcome row is durable BEFORE any client is nudged,
+    // so a recipient that reacts immediately always finds it. Content-free: ids + the recipient subject
+    // only. Best-effort — join-on-connect remains the fallback if the recipient is offline.
+    if (recipientSub) {
+      this.bus.emitWelcomeCreated({ tenantId: auth.tenantId, conversationId, recipientSub });
+    }
+    return { welcomeId };
   }
 
   /**
@@ -255,6 +276,9 @@ export class MessagingService {
         .select({
           id: schema.conversationWelcomes.id,
           conversationId: schema.conversationWelcomes.conversationId,
+          // The VERIFIED deliverer (set server-side at deliver) — lets the recipient name the conversation
+          // via the directory. Nothing new leaks: messages already carry senderUserId to recipients.
+          senderUserId: schema.conversationWelcomes.senderUserId,
           createdAt: schema.conversationWelcomes.createdAt,
         })
         .from(schema.conversationWelcomes)
@@ -269,6 +293,7 @@ export class MessagingService {
       return rows.map((r) => ({
         id: r.id,
         conversationId: r.conversationId,
+        senderUserId: r.senderUserId,
         createdAt: r.createdAt.toISOString(),
       }));
     });

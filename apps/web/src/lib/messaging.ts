@@ -24,8 +24,13 @@ const MAX_BACKFILL_PAGES = 50; // safety cap on the page loop
 export interface MessagingDeps {
   keystore: DeviceKeystore;
   device: DeviceKeys;
-  /** The session passphrase — seals the advanced group state. In memory only; never logged or transmitted. */
+  /** The session passphrase — reseals the KeyPackage pool on join-time prunes. In memory only. */
   passphrase: string;
+  /**
+   * The per-unlock session key — seals the advanced group state on every send/receive (cheap AES-GCM; a
+   * per-message Argon2id pass here was the live-loop's seconds-long delivery latency). Memory only.
+   */
+  sessionKey: CryptoKey;
 }
 
 /** The server's ack for a sent message, plus the clientMessageId we minted (for local correlation). */
@@ -63,7 +68,7 @@ export async function sendLiveMessage(
       deps.device,
       conversationId,
       conversation,
-      deps.passphrase,
+      deps.sessionKey,
     );
     const clientMessageId = crypto.randomUUID();
     const ack = await sendMessage(conversationId, {
@@ -158,7 +163,7 @@ export async function backfillConversation(
         deps.device,
         conversationId,
         conversation,
-        deps.passphrase,
+        deps.sessionKey,
       );
     }
     return { messages, cursor };
@@ -197,7 +202,7 @@ export async function receiveLiveMessage(
       deps.device,
       conversationId,
       conversation,
-      deps.passphrase,
+      deps.sessionKey,
     );
     const env = decodeEnvelope(plaintext);
     return {

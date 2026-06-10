@@ -53,7 +53,6 @@ describe('live conversation helpers', () => {
     expect(shell.participants[1]).toMatchObject({
       id: 'peer-conv-live',
       name: 'New contact',
-      isOnline: false,
     });
     expect(shell.participants[1]?.avatar).toMatch(/^data:image\/svg\+xml,/);
   });

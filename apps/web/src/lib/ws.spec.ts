@@ -200,6 +200,39 @@ describe('createMessageSocket', () => {
     sock.close();
   });
 
+  it('fires onWelcome for a post-auth welcome nudge and ignores a pre-auth one', async () => {
+    const onWelcome = vi.fn();
+    const sock = createMessageSocket({
+      url: 'wss://host/ws',
+      token: async () => 't',
+      onMessage: () => {},
+      onWelcome,
+      WebSocketImpl: Impl,
+    });
+    last().open();
+    await flush();
+
+    // Pre-auth (before `ready`): the frame must be ignored — same defence in depth as 'message'.
+    last().deliver({
+      event: 'welcome',
+      data: { conversationId: 'c0000000-0000-4000-a000-000000000001' },
+    });
+    expect(onWelcome).not.toHaveBeenCalled();
+
+    last().deliver({ event: 'ready', data: {} });
+    last().deliver({
+      event: 'welcome',
+      data: { conversationId: 'c0000000-0000-4000-a000-000000000001' },
+    });
+    expect(onWelcome).toHaveBeenCalledTimes(1);
+    expect(onWelcome).toHaveBeenCalledWith('c0000000-0000-4000-a000-000000000001');
+
+    // A malformed nudge (no conversationId) is dropped, not surfaced.
+    last().deliver({ event: 'welcome', data: {} });
+    expect(onWelcome).toHaveBeenCalledTimes(1);
+    sock.close();
+  });
+
   describe('defaultWsUrl', () => {
     afterEach(() => vi.unstubAllEnvs());
 

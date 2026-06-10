@@ -16,6 +16,13 @@ deliver:   POST /…/messages stores ciphertext (COMMITS) → emits 'message.cre
 
 The gateway only ever forwards the **opaque ciphertext envelope** (the same fields the REST fetch returns: `ciphertext`, `alg`, `epoch`, ids, `createdAt`). It never sees plaintext or keys. The token is sent in the **first application frame**, not the handshake URL/headers, so it can't land in a proxy/access log.
 
+The gateway also fans a **`welcome` nudge frame** (`{conversationId}` only): when a Welcome is delivered, the
+recipient's sockets are told to drain `GET /welcomes` now (else a new conversation stays invisible until the
+next reconnect). Unlike `message` (room/membership-gated), the `welcome` frame is delivered by **verified-identity
+match `(tenantId, sub)` with no room** — the recipient *can't* be subscribed to a conversation it hasn't joined
+yet — so its authz is the token-verified identity, not membership. It carries no join material (the sealed
+blobs still ride the proof-gated REST fetch); a lost/duplicated nudge is harmless (it only triggers a re-fetch).
+
 ## 2. Assets & trust boundaries
 
 - **Assets:** the bearer token (handshake auth); message **ciphertext** in flight (already E2EE — the WS only moves it); the socket↔identity binding; tenant isolation of the fan-out.
@@ -40,7 +47,7 @@ The gateway only ever forwards the **opaque ciphertext envelope** (the same fiel
 - **Native `ws`** (`@nestjs/platform-ws`), not socket.io: browser-native client (no client lib, smaller PWA bundle, no long-poll fallback), and a custom Redis backplane (29) keeps us off socket.io's protocol.
 - **First-frame token auth** (not handshake subprotocol/query) so the token never appears in a URL/header a proxy might log. An **auth deadline** closes silent sockets.
 - **Subscribe = membership-gated** (`MessagingService.isMember`, under RLS). **Delivery = tenant+conversation-keyed** fan-out; the HTTP send path emits on a `RealtimeBus` **after the insert commits** (no phantom delivery / read-your-writes race).
-- **Redis backplane (29):** `RealtimeBus` is abstract — `InProcessRealtimeBus` (single container / dev / tests) or `RedisRealtimeBus` (when `REDIS_URL` is set). The Redis impl **publishes** each event to a channel and every subscriber **subscribes** and fans out to its local sockets. On the single-container VM deploy the in-process bus suffices; the Redis backplane stays as the realtime bus (and the future throttler store), and would also enable cross-instance fan-out if the API ever ran more than one container. **Only the opaque ciphertext envelope crosses Redis** (same `FetchedMessage` as REST) — never plaintext or keys, and the `tenantId`/`conversationId` keying is preserved, so delivery is still tenant- and member-scoped. Incoming events are **Zod-validated** before fan-out (a malformed/poisoned payload is dropped, never crashes the gateway).
+- **Redis backplane (29):** `RealtimeBus` is abstract — `InProcessRealtimeBus` (single container / dev / tests) or `RedisRealtimeBus` (when `REDIS_URL` is set). The Redis impl **publishes** each event to a channel and every subscriber **subscribes** and fans out to its local sockets. On the single-container VM deploy the in-process bus suffices; the Redis backplane stays as the realtime bus (and the future throttler store), and would also enable cross-instance fan-out if the API ever ran more than one container. **Only the opaque ciphertext envelope crosses Redis** (same `FetchedMessage` as REST) — never plaintext or keys, and the `tenantId`/`conversationId` keying is preserved, so delivery is still tenant- and member-scoped. Incoming events are **Zod-validated** before fan-out (a malformed/poisoned payload is dropped, never crashes the gateway). A second channel (`argus:realtime:welcome-created`) carries the welcome nudges — ids plus `recipientSub` (the opaque IdP subject already stored on `users` and present in every JWT) — with the same private/authenticated/Zod-validated posture; never blobs, plaintext, or keys.
 - Gate: **`security-boundary-auditor`** (boundary) + **`infra-reviewer`** (compose/backplane); gateway unit tests prove auth/authz/scoped-delivery deterministically; a live-Redis test proves backplane fan-out + malformed-payload rejection.
 
 ## 6. Residual risk
