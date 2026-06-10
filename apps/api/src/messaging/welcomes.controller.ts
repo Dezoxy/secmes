@@ -82,6 +82,13 @@ class PendingWelcomeDto {
   @ApiProperty({ format: 'uuid', description: 'the conversation to join with this welcome' })
   conversationId!: string;
 
+  @ApiProperty({
+    format: 'uuid',
+    description:
+      'the verified member who added you (set server-side at deliver) — resolve a display name via the directory',
+  })
+  senderUserId!: string;
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
 }

@@ -184,7 +184,14 @@ describe('api client', () => {
 
   it('listWelcomes GETs this device pending welcomes with deviceId + limit', async () => {
     token.mockResolvedValue('tok');
-    const welcomes = [{ id: welcomeId, conversationId, createdAt: '2026-01-01T00:00:00.000Z' }];
+    const welcomes = [
+      {
+        id: welcomeId,
+        conversationId,
+        senderUserId: '6f9619ff-8b86-4d01-b42d-00c04fc964ff',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+    ];
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(new Response(JSON.stringify(welcomes), { status: 200 }));

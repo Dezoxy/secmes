@@ -50,7 +50,12 @@ describe('ConversationManager', () => {
   });
 
   it('prepare() claims + derives the safety number but creates NOTHING server-side (the #20 gate)', async () => {
-    const mgr = new ConversationManager(me, 'me-user', keystore, 'pw');
+    const mgr = new ConversationManager(
+      me,
+      'me-user',
+      keystore,
+      await keystore.deriveSessionKey('pw'),
+    );
     const pending = await mgr.prepare('peer-user');
 
     expect(claim).toHaveBeenCalledWith('peer-user');
@@ -66,7 +71,12 @@ describe('ConversationManager', () => {
   });
 
   it('confirm() creates the conversation and delivers a Welcome the peer can actually join', async () => {
-    const mgr = new ConversationManager(me, 'me-user', keystore, 'pw');
+    const mgr = new ConversationManager(
+      me,
+      'me-user',
+      keystore,
+      await keystore.deriveSessionKey('pw'),
+    );
     const pending = await mgr.prepare('peer-user');
     const session = await mgr.confirm(pending);
 
@@ -98,7 +108,12 @@ describe('ConversationManager', () => {
       persistedDuringDeliver = await keystore.hasConversationState(me, 'conv-1');
       return { welcomeId: 'welcome-1' };
     });
-    const mgr = new ConversationManager(me, 'me-user', keystore, 'pw');
+    const mgr = new ConversationManager(
+      me,
+      'me-user',
+      keystore,
+      await keystore.deriveSessionKey('pw'),
+    );
     await mgr.confirm(await mgr.prepare('peer-user'));
 
     expect(persistedDuringDeliver).toBe(false);
@@ -113,7 +128,9 @@ describe('ConversationManager', () => {
       deserializeInvite({ welcome: body.welcome, ratchetTree: body.ratchetTree }),
     );
     const reopened = await DeviceKeystore.open(engine, FAST);
-    const restored = (await reopened.loadConversations(me, 'pw')).get('conv-1');
+    const restored = (
+      await reopened.loadConversations(me, 'pw', await reopened.deriveSessionKey('pw'))
+    ).get('conv-1');
     if (!restored) throw new Error('expected the started conversation to be persisted');
     expect(await peerConversation.decrypt(await restored.encrypt('after reload'))).toBe(
       'after reload',
@@ -122,12 +139,19 @@ describe('ConversationManager', () => {
 
   it('confirm() persists NOTHING when Welcome delivery fails (no rehydrated phantom conversation)', async () => {
     deliver.mockRejectedValue(new Error('delivery 500'));
-    const mgr = new ConversationManager(me, 'me-user', keystore, 'pw');
+    const mgr = new ConversationManager(
+      me,
+      'me-user',
+      keystore,
+      await keystore.deriveSessionKey('pw'),
+    );
 
     await expect(mgr.confirm(await mgr.prepare('peer-user'))).rejects.toThrow();
 
     // No durable state → the next unlock won't rehydrate a phantom "New contact" whose peer was never added.
     expect(await keystore.hasConversationState(me, 'conv-1')).toBe(false);
-    expect((await keystore.loadConversations(me, 'pw')).size).toBe(0);
+    expect(
+      (await keystore.loadConversations(me, 'pw', await keystore.deriveSessionKey('pw'))).size,
+    ).toBe(0);
   });
 });

@@ -18,6 +18,14 @@ interface StartConversationProps {
   manager: ConversationManager;
   /** The signed-in user's id — excluded from the picker (you can't start a 1:1 with yourself). */
   selfUserId?: string;
+  /**
+   * Look up an already-existing direct conversation with this peer (by their user id). When it returns an
+   * id, picking the contact OPENS that conversation instead of starting a new one — a 1:1 is unique per
+   * peer, and skipping `prepare()` also avoids burning one of the peer's one-time KeyPackages on a dupe.
+   */
+  existingConversationWith: (peerUserId: string) => string | null;
+  /** Open an existing conversation (the dedup path) — select it and close the picker. */
+  onOpenExisting: (conversationId: string) => void;
   onStarted: (session: ConversationSession, peer: UserSummary) => void;
   onClose: () => void;
 }
@@ -34,6 +42,8 @@ const CARD =
 export function StartConversation({
   manager,
   selfUserId,
+  existingConversationWith,
+  onOpenExisting,
   onStarted,
   onClose,
 }: StartConversationProps) {
@@ -69,6 +79,13 @@ export function StartConversation({
 
   // Phase 1: claim the peer's KeyPackage + derive the safety number. Trusts nothing yet.
   const pick = (u: UserSummary): void => {
+    // A 1:1 is unique per peer: if a conversation with this contact already exists, OPEN it — don't mint
+    // another (which would also burn one of their one-time KeyPackages on a duplicate).
+    const existing = existingConversationWith(u.id);
+    if (existing) {
+      onOpenExisting(existing);
+      return;
+    }
     setPeer(u);
     setBusy(true);
     setActionError(null);

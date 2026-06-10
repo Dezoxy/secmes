@@ -11,6 +11,7 @@ import { accessToken } from '../../lib/auth';
 import { joinPendingConversations } from '../../lib/join';
 import { receiveLiveMessage, type DecryptedMessage, type MessagingDeps } from '../../lib/messaging';
 import { createMessageSocket, type MessageSocket, type MessageSocketStatus } from '../../lib/ws';
+import { placeholderPeerId, resolvePeerUser, withPeerNamed } from './peer-naming';
 import type { Conversation, User } from './seed';
 import { generatedAvatar } from './seed';
 
@@ -44,10 +45,12 @@ export function liveConversationShell(conversationId: string, selfUser: User): C
     participants: [
       selfUser,
       {
-        id: `peer-${conversationId}`,
+        // A neutral placeholder until the peer resolves via the directory (see peer-naming.ts — joins name
+        // it from the welcome's senderUserId; history/incoming messages name it from their senderUserId).
+        // No isOnline: presence is UNKNOWN for live peers — never claim Offline without a presence system.
+        id: placeholderPeerId(conversationId),
         name: 'New contact',
         avatar: generatedAvatar(conversationId),
-        isOnline: false,
       },
     ],
     messages: [],
@@ -84,6 +87,12 @@ export function useLiveConversations({
   const liveGroups = useRef(new Map<string, MlsGroup>());
   const socketRef = useRef<MessageSocket | null>(null);
   const joinRanRef = useRef(false);
+  // Serialize drains: joinPendingConversations is idempotent but must not run CONCURRENTLY with itself
+  // (two drains could race the same one-time private). A nudge that lands mid-drain queues exactly one
+  // re-run — the in-flight drain's welcome list may predate the nudge's Welcome.
+  const drainStateRef = useRef({ running: false, queued: false });
+  // Latest drain in a ref so the long-lived socket can call it without being torn down on re-renders.
+  const drainRef = useRef<() => void>(() => {});
 
   const addLive = useCallback((conversationId: string, conversation: MlsGroup): void => {
     liveGroups.current.set(conversationId, conversation);
@@ -91,26 +100,58 @@ export function useLiveConversations({
     socketRef.current?.subscribe(conversationId);
   }, []);
 
-  // Join on connect (Slice 4 + 5B): drain pending Welcomes once the device is unlocked and provisioned.
-  useEffect(() => {
-    if (!device || !pool || !deviceId || !messagingDeps || joinRanRef.current) return;
-    joinRanRef.current = true;
+  // Drain pending Welcomes (Slice 4 + 5B): runs on connect AND whenever the gateway pushes a live
+  // `welcome` nudge (someone added us to a conversation while we're connected — without the nudge the
+  // new conversation would stay invisible until the next reconnect).
+  const drainWelcomes = useCallback((): void => {
+    if (!device || !pool || !deviceId || !messagingDeps) return;
+    const drainState = drainStateRef.current;
+    if (drainState.running) {
+      drainState.queued = true;
+      return;
+    }
+    drainState.running = true;
     joinPendingConversations({
       device,
       pool,
       deviceId,
       keystore: messagingDeps.keystore,
       passphrase: messagingDeps.passphrase,
-      onJoined: ({ conversationId, conversation }) => {
+      sessionKey: messagingDeps.sessionKey,
+      onJoined: ({ conversationId, conversation, senderUserId }) => {
         addLive(conversationId, conversation);
         const shell = liveConversationShell(conversationId, currentUserProfile);
         setConversations((prev) => prependConversationIfMissing(prev, shell));
+        // Name the new conversation after the (verified) member who added us — best-effort, async; the
+        // placeholder stays if the directory lookup misses.
+        void resolvePeerUser(senderUserId).then((peer) => {
+          if (peer) setConversations((prev) => withPeerNamed(prev, conversationId, peer));
+        });
       },
-    }).catch((err: unknown) => {
-      // eslint-disable-next-line no-console
-      console.warn('join-on-connect drain failed', err instanceof Error ? err.message : err);
-    });
+    })
+      .catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.warn('welcome drain failed', err instanceof Error ? err.message : err);
+      })
+      .finally(() => {
+        drainState.running = false;
+        if (drainState.queued) {
+          drainState.queued = false;
+          drainRef.current();
+        }
+      });
   }, [addLive, currentUserProfile, device, deviceId, messagingDeps, pool, setConversations]);
+
+  useEffect(() => {
+    drainRef.current = drainWelcomes;
+  }, [drainWelcomes]);
+
+  // Join on connect: the initial drain once the device is unlocked and provisioned.
+  useEffect(() => {
+    if (!device || !pool || !deviceId || !messagingDeps || joinRanRef.current) return;
+    joinRanRef.current = true;
+    drainWelcomes();
+  }, [device, deviceId, drainWelcomes, messagingDeps, pool]);
 
   // Realtime push (Slice 5C): one reconnecting WebSocket authenticated in the first frame.
   useEffect(() => {
@@ -143,6 +184,9 @@ export function useLiveConversations({
         const group = liveGroups.current.get(conversationId);
         if (group) void backfillInto(conversationId, group, selfUserId);
       },
+      // A Welcome is waiting (added to a conversation while connected): drain now — join → subscribe →
+      // backfill ride the existing onJoined → addLive path, so the conversation + its messages appear live.
+      onWelcome: () => drainRef.current(),
     });
     socketRef.current = socket;
     for (const id of liveGroups.current.keys()) socket.subscribe(id);

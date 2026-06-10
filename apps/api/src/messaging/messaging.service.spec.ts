@@ -436,6 +436,22 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     expect(row?.recipient_device_id).toBe(daveDeviceId);
   });
 
+  it('deliver emits a post-commit welcome nudge — ids + the recipient subject only, never the blobs', async () => {
+    const bus = new InProcessRealtimeBus();
+    const spy = vi.spyOn(bus, 'emitWelcomeCreated');
+    const svc2 = new MessagingService(bus);
+    const conv = await newConversation();
+    await svc2.deliverWelcome(aliceAuth, conv, wel());
+    expect(spy).toHaveBeenCalledTimes(1);
+    // The recipient is matched by their VERIFIED external subject on the gateway; the event must carry
+    // ids/metadata only — the sealed welcome/ratchetTree never cross the bus.
+    expect(spy.mock.calls[0]?.[0]).toEqual({
+      tenantId: tenantA,
+      conversationId: conv,
+      recipientSub: 'm-dave',
+    });
+  });
+
   it('a non-member (same tenant) cannot deliver — 404, no existence leak', async () => {
     const conv = await newConversation(); // dave is not a member
     await expect(

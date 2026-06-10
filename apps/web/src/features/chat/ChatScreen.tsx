@@ -66,9 +66,10 @@ function prefersReducedMotion(): boolean {
  * ciphertext; it needs the key directory + out-of-band fingerprint verification (#20). No plaintext
  * leaves the browser. The settings button opens profile, privacy, and key-recovery controls.
  */
-// The sidebar entry for a LIVE conversation surfaced without a known peer identity (joined on connect, or
-// rehydrated on unlock). The inviter's identity isn't in the welcome/persistence metadata (it would leak the
-// social graph to the server), so we show a neutral placeholder; verification (#20) names it out-of-band.
+// LIVE conversations start as a neutral-placeholder shell and are then NAMED via the directory (see
+// peer-naming.ts): joins resolve the welcome's verified senderUserId; rehydrates/incoming messages resolve
+// their senderUserId. (Membership/sender ids are routing METADATA the server already stores — naming the
+// peer client-side leaks nothing new; out-of-band fingerprint verification (#20) stays the trust step.)
 function currentUserFromProfile(profile: AnonymousProfile): User {
   return {
     ...currentUser,
@@ -149,9 +150,14 @@ export default function ChatScreen() {
     [anonymousProfile],
   );
   // What every live send/receive needs to seal the advanced ratchet at rest (Slice 5). Null in demo mode.
+  // The session key (derived once at unlock) does the per-op group-state sealing; the passphrase stays for
+  // the rare join-time pool reseal.
   const messagingDeps = useMemo<MessagingDeps | null>(
-    () => (device && keystore && passphrase ? { device, keystore, passphrase } : null),
-    [device, keystore, passphrase],
+    () =>
+      device && keystore && passphrase && sessionKey
+        ? { device, keystore, passphrase, sessionKey }
+        : null,
+    [device, keystore, passphrase, sessionKey],
   );
   // A live conversation manager exists only with an unlocked device (not demo mode). New conversations
   // route through it (claim → #20 gate → create + persist + deliver); demo mode keeps the seed/loopback path.
@@ -162,7 +168,7 @@ export default function ChatScreen() {
             messagingDeps.device,
             profile.userId,
             messagingDeps.keystore,
-            messagingDeps.passphrase,
+            messagingDeps.sessionKey,
           )
         : null,
     [messagingDeps, profile],
@@ -241,6 +247,20 @@ export default function ChatScreen() {
     return false;
   };
 
+  // A 1:1 is unique per peer: find an existing direct conversation with this user (the picker opens it
+  // instead of creating a duplicate). Matches on the REAL peer user id, which creator-made conversations
+  // carry from the start and joined/rehydrated ones gain via peer-naming. A still-unnamed placeholder
+  // can't match — the one residual dupe window (creator-no-reply, then a reload) is accepted for now.
+  const findConversationWith = (peerUserId: string): string | null =>
+    conversations.find(
+      (c) => c.type === 'direct' && c.participants.some((p) => p.id === peerUserId),
+    )?.id ?? null;
+
+  const handleOpenExisting = (conversationId: string): void => {
+    setSelectedId(conversationId);
+    setStartOpen(false);
+  };
+
   // Add a freshly-started LIVE conversation to the list: its safety number is the REAL one from the
   // session (not a loopback), and the user just confirmed it out-of-band, so it lands pre-verified.
   const handleStarted = (session: ConversationSession, peer: UserSummary): void => {
@@ -249,7 +269,7 @@ export default function ChatScreen() {
       id: peer.id,
       name,
       avatar: generatedAvatar(`${name} ${peer.id}`),
-      isOnline: false,
+      // No isOnline: presence is unknown for live peers — never claim Offline (see seed.ts User).
     };
     addLive(session.conversationId, session.conversation); // retain its MLS group for live send/fetch
     setConversations((prev) =>
@@ -276,6 +296,7 @@ export default function ChatScreen() {
     messagingDeps,
     sessionKey,
     currentUserProfile,
+    selfUserId: profile?.userId,
     addLive,
     setConversations,
   });
@@ -449,6 +470,8 @@ export default function ChatScreen() {
         <StartConversation
           manager={manager}
           selfUserId={profile?.userId}
+          existingConversationWith={findConversationWith}
+          onOpenExisting={handleOpenExisting}
           onStarted={handleStarted}
           onClose={() => setStartOpen(false)}
         />

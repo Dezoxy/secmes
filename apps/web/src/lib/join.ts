@@ -41,6 +41,8 @@ const MAX_DRAIN_PAGES = 50; // safety cap on the re-list loop (≤ 200 packages/
 export interface JoinedConversation {
   conversationId: string;
   conversation: Conversation;
+  /** The verified member who added us (from the welcome row) — lets the UI name the conversation. */
+  senderUserId: string;
 }
 
 export interface JoinDeps {
@@ -50,8 +52,10 @@ export interface JoinDeps {
   deviceId: string;
   /** The sealed keystore — persists each joined group's state (5A) before its Welcome/private are released. */
   keystore: DeviceKeystore;
-  /** The session passphrase — seals the persisted group state + reseals the pruned pool. In memory only. */
+  /** The session passphrase — reseals the pruned pool. In memory only. */
   passphrase: string;
+  /** The per-unlock session key — seals each joined group's persisted state (cheap AES-GCM). Memory only. */
+  sessionKey: CryptoKey;
   /** Surface a newly joined conversation to the UI. */
   onJoined: (joined: JoinedConversation) => void;
 }
@@ -75,7 +79,7 @@ export interface JoinDeps {
  * owning tab — never consumed without a durable save.
  */
 export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
-  const { device, pool, deviceId, keystore, passphrase, onJoined } = deps;
+  const { device, pool, deviceId, keystore, passphrase, sessionKey, onJoined } = deps;
   const engine = await getEngine();
   const signKey = deviceSignatureSeed(device); // ts-mls' 48-byte PKCS8 key → the bare 32-byte Ed25519 seed
   const workingPool = [...pool]; // shrinks as members are spent — never reuse a one-time private in a drain
@@ -114,9 +118,13 @@ export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
             device,
             w.conversationId,
             joined.conversation,
-            passphrase,
+            sessionKey,
           );
-          onJoined({ conversationId: w.conversationId, conversation: joined.conversation });
+          onJoined({
+            conversationId: w.conversationId,
+            conversation: joined.conversation,
+            senderUserId: w.senderUserId,
+          });
         }
         // Best-effort cleanup AFTER the durable save. Consume the Welcome (forward secrecy — the sealed join
         // material is no longer needed) then prune the spent one-time private from the sealed pool so it can

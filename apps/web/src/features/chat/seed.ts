@@ -14,7 +14,11 @@ export type User = {
   id: string;
   name: string;
   avatar: string;
-  isOnline: boolean;
+  /**
+   * Presence. OPTIONAL — there is no presence system for live remote peers, so a real contact carries
+   * `undefined` (= unknown) and the UI must not claim Online/Offline for them. Seed/demo users set it.
+   */
+  isOnline?: boolean;
 };
 
 // `sending`/`failed` extend the design's 3 states so the real MLS send can reflect progress + failure.

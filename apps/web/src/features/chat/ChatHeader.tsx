@@ -125,7 +125,10 @@ export function ChatHeader({
   const displayName = getConversationDisplayName(conversation, currentUser.id);
   const avatar = getConversationAvatar(conversation, currentUser.id);
   const otherUser = getOtherParticipant(conversation, currentUser.id);
-  const isOnline = conversation.type === 'direct' && otherUser?.isOnline;
+  // Presence is tri-state: true/false for seed/demo users; UNDEFINED for live remote peers (no presence
+  // system) — never claim Online/Offline when it's unknown.
+  const presence = conversation.type === 'direct' ? otherUser?.isOnline : undefined;
+  const isOnline = presence === true;
   const attachments = useMemo(() => collectAttachments(conversation.messages), [conversation]);
   const searchResults = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -136,9 +139,11 @@ export function ChatHeader({
   const statusText =
     conversation.type === 'group'
       ? `${conversation.participants.length} members`
-      : isOnline
-        ? 'Online'
-        : 'Offline';
+      : presence === undefined
+        ? 'End-to-end encrypted' // live peer: presence unknown — say something TRUE instead
+        : presence
+          ? 'Online'
+          : 'Offline';
   const menuTabIndex = menuOpen ? 0 : -1;
 
   useEffect(() => {
@@ -402,9 +407,11 @@ export function ChatHeader({
                       <p className="text-xs text-white/40">
                         {participant.id === currentUser.id
                           ? 'You'
-                          : participant.isOnline
-                            ? 'Online'
-                            : 'Offline'}
+                          : participant.isOnline === undefined
+                            ? 'Member' // live peer: presence unknown — don't claim Online/Offline
+                            : participant.isOnline
+                              ? 'Online'
+                              : 'Offline'}
                       </p>
                     </div>
                   </div>

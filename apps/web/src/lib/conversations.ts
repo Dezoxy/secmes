@@ -62,8 +62,8 @@ export class ConversationManager {
     private readonly selfUserId: string,
     /** The sealed keystore — persists the new group state before the peer can join (see `confirm`). */
     private readonly keystore: DeviceKeystore,
-    /** The session passphrase — seals the persisted group state. In memory only; never logged/transmitted. */
-    private readonly passphrase: string,
+    /** The per-unlock session key — seals the persisted group state (cheap AES-GCM). Memory only. */
+    private readonly sessionKey: CryptoKey,
   ) {}
 
   private engine(): Promise<MlsEngine> {
@@ -118,7 +118,7 @@ export class ConversationManager {
       this.device,
       conversationId,
       conversation,
-      this.passphrase,
+      this.sessionKey,
     );
     const session: ConversationSession = {
       conversationId,

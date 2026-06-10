@@ -376,13 +376,15 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     const peerConv = await engine.joinConversation(peer, await conv.addMember(peer.publicPackage));
     expect(await peerConv.decrypt(await conv.encrypt('hello'))).toBe('hello'); // advance the ratchet
 
-    await ks.saveConversationState(device, 'conv-1', conv, 'pw');
+    await ks.saveConversationState(device, 'conv-1', conv, await ks.deriveSessionKey('pw'));
 
     // Reopen the keystore (as on a reload), reload the device, rehydrate the conversations.
     const reopened = await DeviceKeystore.open(engine, FAST);
     const dev2 = await reopened.loadDevice('alice', 'pw');
     if (!dev2) throw new Error('expected a persisted device');
-    const restored = (await reopened.loadConversations(dev2, 'pw')).get('conv-1');
+    const restored = (
+      await reopened.loadConversations(dev2, 'pw', await reopened.deriveSessionKey('pw'))
+    ).get('conv-1');
     if (!restored) throw new Error('expected a restored conversation');
     // The restored group continues the SAME ratchet (the peer decrypts its next message in order).
     expect(await peerConv.decrypt(await restored.encrypt('after reload'))).toBe('after reload');
@@ -404,7 +406,7 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
       Array.from({ length: 5 }, (_, i) =>
         (async () => {
           const ct = await conv.encrypt(`m${i}`);
-          await ks.saveConversationState(device, 'conv-1', conv, 'pw');
+          await ks.saveConversationState(device, 'conv-1', conv, await ks.deriveSessionKey('pw'));
           return ct;
         })(),
       ),
@@ -418,7 +420,9 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     const reopened = await DeviceKeystore.open(engine, FAST);
     const dev2 = await reopened.loadDevice('alice', 'pw');
     if (!dev2) throw new Error('expected a persisted device');
-    const restored = (await reopened.loadConversations(dev2, 'pw')).get('conv-1');
+    const restored = (
+      await reopened.loadConversations(dev2, 'pw', await reopened.deriveSessionKey('pw'))
+    ).get('conv-1');
     if (!restored) throw new Error('expected a restored conversation');
     expect(await peerConv.decrypt(await restored.encrypt('after'))).toBe('after');
   });
@@ -431,25 +435,27 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     const conv = await engine.createConversation('conv-1', device);
     const peerConv = await engine.joinConversation(peer, await conv.addMember(peer.publicPackage));
     expect(await peerConv.decrypt(await conv.encrypt('hello'))).toBe('hello');
-    await ksA.saveConversationState(device, 'conv-1', conv, 'pw'); // store version 0
+    await ksA.saveConversationState(device, 'conv-1', conv, await ksA.deriveSessionKey('pw')); // store version 0
 
     // A SECOND keystore over the same IndexedDB rehydrates its OWN instance (a second tab / double unlock):
     // independent op queue, so persistVia can't order it against instance A. It loads at version 0.
     const ksB = await DeviceKeystore.open(engine, FAST);
     const devB = await ksB.loadDevice('alice', 'pw');
     if (!devB) throw new Error('expected a persisted device');
-    const convB = (await ksB.loadConversations(devB, 'pw')).get('conv-1');
+    const convB = (await ksB.loadConversations(devB, 'pw', await ksB.deriveSessionKey('pw'))).get(
+      'conv-1',
+    );
     if (!convB) throw new Error('expected a restored conversation');
 
     // Instance A advances + saves again → store version 1. B's CAS base (0) is now stale.
     await peerConv.decrypt(await conv.encrypt('from A'));
-    await ksA.saveConversationState(device, 'conv-1', conv, 'pw'); // store version 1
+    await ksA.saveConversationState(device, 'conv-1', conv, await ksA.deriveSessionKey('pw')); // store version 1
 
     // B advances its OWN (divergent) state and tries to save on the stale base → rejected, NOT applied.
     await convB.encrypt('from B');
-    await expect(ksB.saveConversationState(devB, 'conv-1', convB, 'pw')).rejects.toBeInstanceOf(
-      GroupStateConflict,
-    );
+    await expect(
+      ksB.saveConversationState(devB, 'conv-1', convB, await ksB.deriveSessionKey('pw')),
+    ).rejects.toBeInstanceOf(GroupStateConflict);
 
     // The durable state is still A's newest (no rollback): a fresh reload continues A's ratchet — its next
     // send is a generation the peer has not consumed. Had B's stale write landed, this would replay a used
@@ -457,7 +463,9 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     const ksC = await DeviceKeystore.open(engine, FAST);
     const devC = await ksC.loadDevice('alice', 'pw');
     if (!devC) throw new Error('expected a persisted device');
-    const convC = (await ksC.loadConversations(devC, 'pw')).get('conv-1');
+    const convC = (await ksC.loadConversations(devC, 'pw', await ksC.deriveSessionKey('pw'))).get(
+      'conv-1',
+    );
     if (!convC) throw new Error('expected a restored conversation');
     expect(await peerConv.decrypt(await convC.encrypt('after'))).toBe('after');
   });
@@ -469,11 +477,11 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     const peer = await engine.generateDeviceKeys('peer');
     const conv = await engine.createConversation('conv-1', device);
     await engine.joinConversation(peer, await conv.addMember(peer.publicPackage));
-    await ks.saveConversationState(device, 'conv-1', conv, 'pw');
+    await ks.saveConversationState(device, 'conv-1', conv, await ks.deriveSessionKey('pw'));
 
     // A different device (same identity string, different signature key) must NOT load it.
     const other = await engine.generateDeviceKeys('alice');
-    expect((await ks.loadConversations(other, 'pw')).size).toBe(0);
+    expect((await ks.loadConversations(other, 'pw', await ks.deriveSessionKey('pw'))).size).toBe(0);
   });
 
   it('deleteConversationState removes a persisted conversation; clearDevice clears them all', async () => {
@@ -485,15 +493,19 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     const b = await engine.createConversation('b', device);
     await a.addMember(peer.publicPackage);
     await b.addMember(peer.publicPackage);
-    await ks.saveConversationState(device, 'a', a, 'pw');
-    await ks.saveConversationState(device, 'b', b, 'pw');
+    await ks.saveConversationState(device, 'a', a, await ks.deriveSessionKey('pw'));
+    await ks.saveConversationState(device, 'b', b, await ks.deriveSessionKey('pw'));
 
     await ks.deleteConversationState('a');
-    expect([...(await ks.loadConversations(device, 'pw')).keys()]).toEqual(['b']);
+    expect([
+      ...(await ks.loadConversations(device, 'pw', await ks.deriveSessionKey('pw'))).keys(),
+    ]).toEqual(['b']);
 
     await ks.clearDevice();
     const device2 = await ks.getOrCreateDevice('alice', 'pw');
-    expect((await ks.loadConversations(device2, 'pw')).size).toBe(0);
+    expect((await ks.loadConversations(device2, 'pw', await ks.deriveSessionKey('pw'))).size).toBe(
+      0,
+    );
   });
 
   it('message log: append → reload → re-derive the session key → history round-trips', async () => {
