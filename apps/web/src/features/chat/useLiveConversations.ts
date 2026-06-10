@@ -91,6 +91,12 @@ export function useLiveConversations({
   // (two drains could race the same one-time private). A nudge that lands mid-drain queues exactly one
   // re-run — the in-flight drain's welcome list may predate the nudge's Welcome.
   const drainStateRef = useRef({ running: false, queued: false });
+  // The SESSION's shrinking working pool. The provider's `pool` is set once at unlock and never pruned;
+  // each drain consumes one-time privates and prunes only the sealed keystore — so without a session copy a
+  // later drain would re-pass already-spent packages and could re-open a replayed Welcome (FS break). We
+  // seed from the prop, shrink it via `onSpent`, and re-seed when the provider publishes a new pool.
+  const poolWorkingRef = useRef<DeviceKeys[] | null>(null);
+  const poolSourceRef = useRef<DeviceKeys[] | null>(null);
   // Latest drain in a ref so the long-lived socket can call it without being torn down on re-renders.
   const drainRef = useRef<() => void>(() => {});
 
@@ -110,14 +116,29 @@ export function useLiveConversations({
       drainState.queued = true;
       return;
     }
+    // Seed/re-seed the session working pool only when no drain is in flight, so we never swap the array a
+    // running drain's onSpent is pruning. Stable across the session; re-seeds only on a fresh unlock/restore.
+    if (poolSourceRef.current !== pool) {
+      poolSourceRef.current = pool;
+      poolWorkingRef.current = [...pool];
+    }
+    const sessionPool = poolWorkingRef.current;
+    if (!sessionPool) return; // seeded above whenever `pool` changed — type guard, never hit at runtime
     drainState.running = true;
     joinPendingConversations({
       device,
-      pool,
+      pool: sessionPool,
       deviceId,
       keystore: messagingDeps.keystore,
       passphrase: messagingDeps.passphrase,
       sessionKey: messagingDeps.sessionKey,
+      // A one-time private was just spent: drop it from the SESSION pool so a later live nudge's drain can't
+      // resurrect it (the keystore prune doesn't touch this in-memory pool). `member` is a reference from
+      // sessionPool, so identity-match is exact.
+      onSpent: (member) => {
+        const at = sessionPool.indexOf(member);
+        if (at !== -1) sessionPool.splice(at, 1);
+      },
       onJoined: ({ conversationId, conversation, senderUserId }) => {
         addLive(conversationId, conversation);
         const shell = liveConversationShell(conversationId, currentUserProfile);

@@ -243,6 +243,72 @@ describe('joinPendingConversations', () => {
     expect(consume).toHaveBeenCalledTimes(2);
   });
 
+  it('onSpent lets a caller prune its session pool so a LATER drain never reuses a spent private (cross-call FS)', async () => {
+    // The P1 from PR #159: `pool` is set once at unlock and never pruned; each drain prunes only the sealed
+    // keystore + its in-call workingPool. A second drain (a live `welcome` nudge) re-passing the original
+    // pool would resurrect an already-spent one-time private and re-open a replayed Welcome. The fix: the
+    // caller keeps a SESSION pool pruned via onSpent across drains. This test models exactly that pattern.
+    const engine = await MlsEngine.create();
+    const alice = await engine.generateDeviceKeys('alice');
+    const bob = await engine.generateDeviceKeys('bob');
+    const kpA = await engine.mintKeyPackage(bob);
+    const sessionPool = [bob, kpA]; // the hook's long-lived working pool — NOT re-seeded per drain
+    const onSpent = (member: (typeof sessionPool)[number]): void => {
+      const at = sessionPool.indexOf(member);
+      if (at !== -1) sessionPool.splice(at, 1);
+    };
+    const { keystore, passphrase, sessionKey } = await persistenceDeps(engine);
+
+    // Two welcomes BOTH sealed to kpA, delivered in SEPARATE drains (connect, then a replayed live nudge).
+    const w1mat = serializeInvite(
+      await (await engine.createConversation('g1', alice)).addMember(kpA.publicPackage),
+    );
+    const w2mat = serializeInvite(
+      await (await engine.createConversation('g2', alice)).addMember(kpA.publicPackage),
+    );
+    const joined: JoinedConversation[] = [];
+    list.mockResolvedValue([]); // default: every re-list page is empty (terminates each drain's loop)
+
+    // Drain 1 (connect): joins w1, spends kpA → onSpent prunes it from the session pool.
+    list.mockResolvedValueOnce([
+      { id: 'w1', conversationId: 'c1', senderUserId: 'peer-user', createdAt: 't' },
+    ]);
+    fetchMaterial.mockResolvedValue(w1mat);
+    await joinPendingConversations({
+      device: bob,
+      pool: sessionPool,
+      deviceId: 'dev',
+      keystore,
+      passphrase,
+      sessionKey,
+      onSpent,
+      onJoined: (j) => joined.push(j),
+    });
+    expect(joined.map((j) => j.conversationId)).toEqual(['c1']);
+    expect(sessionPool).toHaveLength(1); // kpA pruned across the call boundary; only `bob` remains
+
+    // Drain 2 (a live `welcome` nudge) replays a Welcome sealed to the now-spent kpA.
+    list.mockResolvedValueOnce([
+      { id: 'w2', conversationId: 'c2', senderUserId: 'peer-user', createdAt: 't' },
+    ]);
+    fetchMaterial.mockResolvedValue(w2mat);
+    await joinPendingConversations({
+      device: bob,
+      pool: sessionPool,
+      deviceId: 'dev',
+      keystore,
+      passphrase,
+      sessionKey,
+      onSpent,
+      onJoined: (j) => joined.push(j),
+    });
+
+    // The replay must NOT rejoin (kpA is gone from the session pool) — it's cleared (NoMatchingPoolMember →
+    // consumed without joining). Pre-fix this returned c2 too, reusing the spent one-time private.
+    expect(joined.map((j) => j.conversationId)).toEqual(['c1']);
+    expect(consume).toHaveBeenCalledWith('w2', 'dev', expect.any(String));
+  });
+
   it('does not overwrite an already-persisted (advanced) conversation when its Welcome is replayed (no rollback)', async () => {
     const engine = await MlsEngine.create();
     const alice = await engine.generateDeviceKeys('alice');

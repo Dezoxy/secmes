@@ -58,6 +58,15 @@ export interface JoinDeps {
   sessionKey: CryptoKey;
   /** Surface a newly joined conversation to the UI. */
   onJoined: (joined: JoinedConversation) => void;
+  /**
+   * A one-time private was just spent (it opened a Welcome). Lets a long-lived caller prune the SAME
+   * member from its session-level working pool, so a LATER drain in the same session (e.g. a live `welcome`
+   * nudge) can't resurrect it — `removePoolMember` updates only the sealed keystore, not the caller's
+   * in-memory pool. The member is a reference from the passed `pool`, so the caller prunes by identity.
+   * Without this, the per-drain `workingPool` guards reuse only WITHIN one call; this extends forward
+   * secrecy ACROSS calls. Best-effort/synchronous; throwing here is the caller's concern.
+   */
+  onSpent?: (member: DeviceKeys) => void;
 }
 
 /**
@@ -79,7 +88,7 @@ export interface JoinDeps {
  * owning tab — never consumed without a durable save.
  */
 export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
-  const { device, pool, deviceId, keystore, passphrase, sessionKey, onJoined } = deps;
+  const { device, pool, deviceId, keystore, passphrase, sessionKey, onJoined, onSpent } = deps;
   const engine = await getEngine();
   const signKey = deviceSignatureSeed(device); // ts-mls' 48-byte PKCS8 key → the bare 32-byte Ed25519 seed
   const workingPool = [...pool]; // shrinks as members are spent — never reuse a one-time private in a drain
@@ -101,9 +110,11 @@ export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
         );
         // A one-time private, once it has opened a Welcome, must NEVER open another (forward secrecy). Drop
         // it from the working pool so a later Welcome in this drain sealed to the same package can't reuse
-        // it — it gets NoMatchingPoolMember and is cleared.
+        // it — it gets NoMatchingPoolMember and is cleared. `onSpent` extends that prune to the caller's
+        // SESSION pool so a later drain (a live nudge) can't resurrect it either.
         const spent = workingPool.indexOf(joined.member);
         if (spent !== -1) workingPool.splice(spent, 1);
+        onSpent?.(joined.member);
         // If this device ALREADY has durable state for this conversation, a prior join persisted it (and
         // advanced it) but its cleanup failed, so the Welcome is being replayed. Re-saving this Welcome's
         // FRESH post-join state would overwrite the advanced ratchet — a rollback the CAS can't catch
