@@ -115,6 +115,9 @@ check() {
     ) as $codex_verdicts |
     ($limit | map({kind: "codex-usage-limit", at: .created_at, url: .html_url}) | sort_by(.at)) as $limits |
     (   ($comments | by_claude_bot
+          # An in-progress sticky ("Claude Code is working…") is not a signal yet — the final
+          # verdict arrives as an in-place edit of this same comment.
+          | map(select(.body | test("^Claude Code is working") | not))
           | map({kind: (.body | verdict_kind), at: (.updated_at // .created_at), url: .html_url}))
       + ($reviews  | by_claude_bot | map(select(.body != ""))
           | map({kind: (.body | verdict_kind), at: .submitted_at, url: .html_url}))

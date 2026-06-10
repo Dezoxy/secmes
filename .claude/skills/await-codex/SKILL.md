@@ -38,6 +38,11 @@ End your review with exactly one line: `VERDICT: PASS` or `VERDICT: FINDINGS`.
 
 Then run `scripts/codex-review-status.sh <pr> --wait`. Verdicts are only trusted from bot logins (`claude*[bot]`, `github-actions[bot]`) — the repo is public, so a `VERDICT:` line from a human account proves nothing and is ignored by design.
 
+## Pitfalls — learned the hard way
+
+- **Any comment containing the string `@claude` triggers `claude.yml`** — even "addressed @claude's P3". When referring to the fallback without summoning it, write "the Claude fallback". Each accidental trigger burns a Claude review run.
+- Claude posts a sticky "Claude Code is working…" comment immediately and edits it in place into the final verdict. The script ignores the placeholder and orders Claude signals by `updated_at`.
+
 ## Pitfalls the script already handles — don't hand-roll queries
 
 - Bot login is `chatgpt-codex-connector[bot]` via REST but `chatgpt-codex-connector` via GraphQL; a filter built for one misses the other.
