@@ -36,6 +36,40 @@ jobs:
           name: openapi
           path: apps/api/openapi.json
 
+  # Behavioral gate: Playwright drives the real app in a browser, so a green run means the
+  # product works as a user would see it — not just that units pass. (playwright.config.ts
+  # boots the Vite dev server itself; no API/DB needed.)
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build web + workspace deps
+        run: pnpm --filter @argus/web... build
+
+      - name: Install Playwright Chromium
+        run: pnpm --filter @argus/web exec playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        run: pnpm --filter @argus/web test:e2e
+
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-traces
+          path: apps/web/test-results/
+          retention-days: 7
+
   # Invariant #3 guard: the prod stack must publish NO host ports — cloudflared's outbound tunnel is the only
   # ingress, and every data service (postgres/redis/api/zitadel*/prometheus/grafana/alertmanager) stays on the
   # internal Docker network. A stray `ports:` mapping (e.g. exposing redis or /metrics) would breach it; this
