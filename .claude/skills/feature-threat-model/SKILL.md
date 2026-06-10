@@ -1,6 +1,8 @@
 ---
 name: feature-threat-model
 description: Produce a short threat-model note before building a security-relevant feature in argus. Use when adding messaging, key, auth, attachment, admin, or tenant features — anything that touches the security boundary — so design risks surface before code.
+model: fable
+effort: high
 ---
 
 # feature-threat-model
