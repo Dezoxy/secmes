@@ -309,6 +309,70 @@ describe('joinPendingConversations', () => {
     expect(consume).toHaveBeenCalledWith('w2', 'dev', expect.any(String));
   });
 
+  it('does NOT prune the session pool when the durable save fails, so a same-session retry re-joins', async () => {
+    // The follow-up P1: onSpent must fire only once the join is DURABLE. If saveConversationState throws
+    // (e.g. an IndexedDB quota/transient failure, not just a cross-tab conflict), the Welcome is left pending
+    // for retry — pruning the session pool then would strand it (a later drain hits NoMatchingPoolMember and
+    // clears the only join material). So the prune is deferred past the save.
+    const engine = await MlsEngine.create();
+    const alice = await engine.generateDeviceKeys('alice');
+    const bob = await engine.generateDeviceKeys('bob');
+    const kpA = await engine.mintKeyPackage(bob);
+    const sessionPool = [bob, kpA];
+    const onSpent = (member: (typeof sessionPool)[number]): void => {
+      const at = sessionPool.indexOf(member);
+      if (at !== -1) sessionPool.splice(at, 1);
+    };
+    const { keystore, passphrase, sessionKey } = await persistenceDeps(engine);
+    const material = serializeInvite(
+      await (await engine.createConversation('g1', alice)).addMember(kpA.publicPackage),
+    );
+    const joined: JoinedConversation[] = [];
+    list.mockResolvedValue([]); // default: every re-list page is empty
+
+    // Drain 1: the durable save FAILS → the Welcome is left pending and the session pool is NOT pruned.
+    const saveSpy = vi
+      .spyOn(keystore, 'saveConversationState')
+      .mockRejectedValueOnce(new Error('quota exceeded'));
+    list.mockResolvedValueOnce([
+      { id: 'w1', conversationId: 'c1', senderUserId: 'peer-user', createdAt: 't' },
+    ]);
+    fetchMaterial.mockResolvedValue(material);
+    await joinPendingConversations({
+      device: bob,
+      pool: sessionPool,
+      deviceId: 'dev',
+      keystore,
+      passphrase,
+      sessionKey,
+      onSpent,
+      onJoined: (j) => joined.push(j),
+    });
+    expect(joined).toHaveLength(0); // nothing surfaced (save threw)
+    expect(sessionPool).toHaveLength(2); // kpA STILL present — the private was not pruned
+    expect(consume).not.toHaveBeenCalled(); // Welcome left pending, not consumed
+    saveSpy.mockRestore();
+
+    // Drain 2 (retry): the SAME still-pending Welcome saves successfully → re-joins with the retained kpA.
+    list.mockResolvedValueOnce([
+      { id: 'w1', conversationId: 'c1', senderUserId: 'peer-user', createdAt: 't' },
+    ]);
+    fetchMaterial.mockResolvedValue(material);
+    await joinPendingConversations({
+      device: bob,
+      pool: sessionPool,
+      deviceId: 'dev',
+      keystore,
+      passphrase,
+      sessionKey,
+      onSpent,
+      onJoined: (j) => joined.push(j),
+    });
+    expect(joined.map((j) => j.conversationId)).toEqual(['c1']); // recovered, not stranded
+    expect(sessionPool).toHaveLength(1); // NOW kpA is pruned — the join is durable
+    expect(consume).toHaveBeenCalledWith('w1', 'dev', expect.any(String)); // and the Welcome consumed
+  });
+
   it('does not overwrite an already-persisted (advanced) conversation when its Welcome is replayed (no rollback)', async () => {
     const engine = await MlsEngine.create();
     const alice = await engine.generateDeviceKeys('alice');

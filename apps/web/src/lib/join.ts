@@ -59,12 +59,14 @@ export interface JoinDeps {
   /** Surface a newly joined conversation to the UI. */
   onJoined: (joined: JoinedConversation) => void;
   /**
-   * A one-time private was just spent (it opened a Welcome). Lets a long-lived caller prune the SAME
-   * member from its session-level working pool, so a LATER drain in the same session (e.g. a live `welcome`
-   * nudge) can't resurrect it — `removePoolMember` updates only the sealed keystore, not the caller's
-   * in-memory pool. The member is a reference from the passed `pool`, so the caller prunes by identity.
-   * Without this, the per-drain `workingPool` guards reuse only WITHIN one call; this extends forward
-   * secrecy ACROSS calls. Best-effort/synchronous; throwing here is the caller's concern.
+   * A one-time private has been spent on a DURABLE join (it opened a Welcome AND the group state was
+   * persisted/already-owned). Lets a long-lived caller prune the SAME member from its session-level working
+   * pool, so a LATER drain in the same session (e.g. a live `welcome` nudge) can't resurrect it —
+   * `removePoolMember` updates only the sealed keystore, not the caller's in-memory pool. The member is a
+   * reference from the passed `pool`, so the caller prunes by identity. Without this, the per-drain
+   * `workingPool` guards reuse only WITHIN one call; this extends forward secrecy ACROSS calls. NOT called
+   * when the persist throws (the Welcome stays pending for retry, so the private must remain available).
+   * Best-effort/synchronous; throwing here is the caller's concern.
    */
   onSpent?: (member: DeviceKeys) => void;
 }
@@ -110,11 +112,11 @@ export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
         );
         // A one-time private, once it has opened a Welcome, must NEVER open another (forward secrecy). Drop
         // it from the working pool so a later Welcome in this drain sealed to the same package can't reuse
-        // it — it gets NoMatchingPoolMember and is cleared. `onSpent` extends that prune to the caller's
-        // SESSION pool so a later drain (a live nudge) can't resurrect it either.
+        // it — it gets NoMatchingPoolMember and is cleared. (The SESSION-pool prune via `onSpent` is deferred
+        // to AFTER the join is durable — see below — so a persist failure leaves the private available for
+        // the retry that re-joins the still-pending Welcome.)
         const spent = workingPool.indexOf(joined.member);
         if (spent !== -1) workingPool.splice(spent, 1);
-        onSpent?.(joined.member);
         // If this device ALREADY has durable state for this conversation, a prior join persisted it (and
         // advanced it) but its cleanup failed, so the Welcome is being replayed. Re-saving this Welcome's
         // FRESH post-join state would overwrite the advanced ratchet — a rollback the CAS can't catch
@@ -137,6 +139,11 @@ export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
             senderUserId: w.senderUserId,
           });
         }
+        // The join is now DURABLE (freshly persisted just above, or already-owned on a replay): only NOW
+        // prune the caller's SESSION pool. Deferring past the save is the safety property — if the save threw
+        // it skipped to the outer catch (Welcome left PENDING), so `onSpent` never ran and a same-session
+        // retry drain still has the private to re-join. Mirrors `removePoolMember` (the durable-pool prune).
+        onSpent?.(joined.member);
         // Best-effort cleanup AFTER the durable save. Consume the Welcome (forward secrecy — the sealed join
         // material is no longer needed) then prune the spent one-time private from the sealed pool so it can
         // never reopen a (replayed) Welcome. Either failing is non-fatal: the persisted group already
