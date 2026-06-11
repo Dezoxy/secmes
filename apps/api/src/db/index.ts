@@ -76,4 +76,19 @@ export async function withTenant<T>(tenantId: string, fn: (tx: Tx) => Promise<T>
   });
 }
 
+/**
+ * Run `fn` in a transaction as `argus_app` WITHOUT setting `app.tenant_id`.
+ *
+ * Use ONLY for pre-tenant lookups on no-RLS tables (`user_tenant_index`, and the
+ * non-sensitive columns of `tenant_invites` during invite-accept). Any accidental
+ * access to an RLS-guarded table inside this callback throws because
+ * `current_setting('app.tenant_id')` is unset — fail-closed by design.
+ */
+export async function withRouting<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+  return getDb().db.transaction(async (tx) => {
+    await tx.execute(dsql`set local role argus_app`);
+    return fn(tx);
+  });
+}
+
 export { schema };

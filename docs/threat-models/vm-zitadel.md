@@ -28,9 +28,10 @@ browser ───HTTPS──▶ Cloudflare edge ──────────�
 
 Login flow: the SPA (`oidc-client-ts`, Authorization-Code + PKCE, public client) redirects the browser to
 `auth.4rgus.com`; the user authenticates against the hosted Login V2 UI; Zitadel returns a code; the SPA
-exchanges it for a **JWT access token** carrying the verified `tenant_id` UUID (+ email/name) asserted by a
-token Action. The API validates that JWT via JWKS (`iss`/`aud`/alg-allowlist/`exp`/`nbf`) and sets
-`app.tenant_id` from the **verified** claim only (`auth-tenant-context.md`). TLS terminates at Cloudflare;
+exchanges it for a **JWT access token** carrying `email`/`name` claims. The API validates that JWT via JWKS
+(`iss`/`aud`/alg-allowlist/`exp`/`nbf`) and looks up the tenant by `sub` in `user_tenant_index`
+(`auth-tenant-context.md`). The `tenant_id` claim and `argusClaims` Action were removed in G1 — tenant
+assignment is now DB-authoritative, not JWT-claim-based. TLS terminates at Cloudflare;
 Caddy→Zitadel and Zitadel→its DB are plain HTTP/TCP on the internal Docker network. Zitadel is configured
 `ExternalSecure=true` + `--tlsMode external` so it emits `https://auth.4rgus.com` issuer URLs while serving
 plain HTTP behind the TLS-terminating edge.
@@ -42,7 +43,7 @@ plain HTTP behind the TLS-terminating edge.
     keys, stored OIDC client secrets, OTP seeds). Compromise → forge tokens / decrypt stored secrets. Loss →
     the instance's encrypted data is unrecoverable.
   - the **zitadel-db password** and the database itself (user records, sessions, the signing keys at rest).
-  - the **issued JWT** integrity (its `tenant_id` claim is the tenant-isolation root for the whole API).
+  - the **issued JWT** integrity (`sub` is the identity anchor; tenant is resolved from `user_tenant_index`).
   - availability of login (an outage blocks all sign-in, but not already-issued sessions until expiry).
 - **Boundaries:**
   - internet ↔ Cloudflare edge (TLS, WAF, edge rate-limit) — Cloudflare is trusted infrastructure.
@@ -64,8 +65,9 @@ plain HTTP behind the TLS-terminating edge.
   - _Phishing a fake `auth.4rgus.com`_ — out of scope here (DNS/TLS via Cloudflare); the real issuer is
     pinned in both the SPA build (`VITE_OIDC_ISSUER`) and the API (`OIDC_ISSUER`).
 - **Tampering:**
-  - _Tenant-claim injection_ — the SPA cannot set `tenant_id`; the Action asserts it from the authenticated
-    user/org. The API casts the **verified** claim to `tenants.id` and never reads tenant from client input.
+  - _Tenant spoofing_ — the `tenant_id` claim and `argusClaims` Action were removed (G1). Tenant assignment
+    is now `user_tenant_index`, written INSERT-only by the app role via two server-controlled paths
+    (create-tenant, accept-invite). The SPA cannot influence either path's `sub` (IdP-signed) or the index.
   - _Image tampering_ — the Zitadel/login/db images are pinned by tag (Dependabot-tracked); they are
     upstream images (not signed by our cosign identity like our own api/ingress). Pin + digest-pull is the
     control; see Residual risk.
@@ -96,8 +98,8 @@ plain HTTP behind the TLS-terminating edge.
    persisted Docker volume** (Zitadel stores only a hash of the PAT, so the file would otherwise be the only
    plaintext copy; persisting it in a volume would breach this invariant). FirstInstance writes its first-boot
    PAT to the container's tmpfs only; the operator stores it in Key Vault during arming. ✔ (noted)
-3. **Tenant isolation** — Zitadel is the **source** of the `tenant_id` claim that drives RLS; the Action sets
-   it server-side, the API trusts only the verified claim. No argus tenant table is added here. ✔
+3. **Tenant isolation** — Zitadel is the **identity source** (`sub`); tenant binding lives in `user_tenant_index`
+   (our DB, not a JWT claim). The `argusClaims` Action and `tenant_id` claim were removed (G1). ✔
 4. **No hand-rolled crypto** — Zitadel is an established IdP; we configure it, we do not implement crypto. ✔
 5. **Secrets via Key Vault + Managed Identity** — masterkey + DB password are new Key Vault secrets fetched by
    the VM's Managed Identity (added to `fetch-keyvault-secrets.sh`). The non-secret issuer/audience/domain are
@@ -124,9 +126,8 @@ and already covered by `auth-tenant-context.md`.
 - **Generate the masterkey once** (32 bytes, CSPRNG), store it in Key Vault, and **never rotate it casually** —
   rotation requires Zitadel's documented key-re-encryption, and loss makes the instance's encrypted data
   unrecoverable. Back it up with the rest of the Key Vault material.
-- **Provisioning** (project / SPA OIDC app / tenant-claim Action) and the **org→`tenant_id`** mapping are a
-  one-time admin step against the live instance — **deferred to G1 (self-serve onboarding)**; today's local
-  Action hardcodes a single dev tenant UUID, which is not the multi-tenant prod model.
+- **Provisioning** (project / SPA OIDC app / email-claim Action) is a one-time admin step against the live
+  instance. Tenant binding happens self-serve via `POST /tenants` and `POST /tenants/invites/accept` (G1).
 
 ## 6. Residual risk
 

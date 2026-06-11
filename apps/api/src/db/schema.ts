@@ -18,6 +18,7 @@ export const users = pgTable('users', {
   email: text('email').notNull(),
   displayName: text('display_name'),
   status: text('status').notNull().default('active'),
+  role: text('role').notNull().default('member'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -140,6 +141,30 @@ export const pushSubscriptions = pgTable('push_subscriptions', {
   auth: text('auth').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// G1: sub→tenant routing index. No RLS — looked up before tenant context exists.
+// argus_app: SELECT + INSERT only (bindings immutable from the app path). See 0018.
+export const userTenantIndex = pgTable('user_tenant_index', {
+  sub: text('sub').primaryKey(),
+  tenantId: uuid('tenant_id').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// G1: admin-issued invite tokens (hash-at-rest). Tenant-scoped + FORCE RLS. See 0018.
+export const tenantInvites = pgTable('tenant_invites', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  createdBy: uuid('created_by').notNull(),
+  tokenHash: text('token_hash').notNull(),
+  inviteeEmail: text('invitee_email'),
+  expiresAt: timestamp('expires_at', { withTimezone: true })
+    .notNull()
+    .$defaultFn(() => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
+  acceptedBy: uuid('accepted_by'),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 // Append-only audit log (IDs + metadata only — never content/secrets). RLS + grants in 0002.

@@ -1,31 +1,17 @@
-import { Controller, Get, NotFoundException } from '@nestjs/common';
+import { Controller, Get } from '@nestjs/common';
 import {
   ApiBearerAuth,
-  ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
-  ApiProperty,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { type Me, MeSchema } from '@argus/contracts';
 
-import type { VerifiedAuth } from '../auth/auth.service.js';
+import { AllowUnbound } from '../auth/allow-unbound.decorator.js';
+import type { MaybeUnboundAuth } from '../auth/auth.service.js';
 import { CurrentAuth } from '../auth/current-auth.decorator.js';
 import { UserService } from './user.service.js';
-
-class MeResponse {
-  @ApiProperty()
-  userId!: string;
-
-  @ApiProperty()
-  tenantId!: string;
-
-  @ApiProperty()
-  email!: string;
-
-  @ApiProperty({ type: String, nullable: true })
-  displayName!: string | null;
-}
 
 @ApiTags('users')
 @ApiBearerAuth()
@@ -33,22 +19,49 @@ class MeResponse {
 export class MeController {
   constructor(private readonly users: UserService) {}
 
-  /** The authenticated user, resolved inside the verified tenant's RLS context. */
+  /** The authenticated user. Returns `{ bound: false }` for unbound users (no tenant yet). */
   @Get('me')
-  @ApiOperation({ summary: 'Current authenticated user', operationId: 'getMe' })
-  @ApiOkResponse({ type: MeResponse })
+  @AllowUnbound()
+  @ApiOperation({ summary: 'Current authenticated user or unbound state', operationId: 'getMe' })
+  @ApiOkResponse({
+    description: 'user profile or unbound state',
+    schema: {
+      oneOf: [
+        {
+          type: 'object',
+          properties: { bound: { type: 'boolean', enum: [false] } },
+          required: ['bound'],
+        },
+        {
+          type: 'object',
+          properties: {
+            bound: { type: 'boolean', enum: [true] },
+            userId: { type: 'string', format: 'uuid' },
+            tenantId: { type: 'string', format: 'uuid' },
+            email: { type: 'string', format: 'email' },
+            displayName: { type: 'string', nullable: true },
+            role: { type: 'string', enum: ['admin', 'member'] },
+          },
+          required: ['bound', 'userId', 'tenantId', 'email', 'displayName', 'role'],
+        },
+      ],
+    },
+  })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
-  @ApiNotFoundResponse({ description: 'authenticated identity not provisioned in this tenant' })
-  async me(@CurrentAuth() auth: VerifiedAuth): Promise<MeResponse> {
-    // tenantId + sub both come from the verified token; getByAuth runs under RLS for that tenant,
-    // so a user only ever resolves within their own tenant. Provisioning happens at login.
-    const user = await this.users.getByAuth(auth);
-    if (!user) throw new NotFoundException('user not provisioned');
-    return {
+  async me(@CurrentAuth() auth: MaybeUnboundAuth): Promise<Me> {
+    // auth.tenantId is null for unbound users (guard allows @AllowUnbound through).
+    if (!auth.tenantId) return MeSchema.parse({ bound: false });
+
+    const user = await this.users.getByAuth(auth as { sub: string; tenantId: string });
+    if (!user) return MeSchema.parse({ bound: false });
+
+    return MeSchema.parse({
+      bound: true,
       userId: user.id,
       tenantId: auth.tenantId,
       email: user.email,
       displayName: user.displayName,
-    };
+      role: user.role,
+    });
   }
 }

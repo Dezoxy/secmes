@@ -35,4 +35,11 @@ export const SENSITIVE_LIMITS = {
   downloadGrant: 60,
   /** Push subscription register/update/delete. Rare in practice; cap prevents registration thrashing. */
   subscribePush: 20,
+  /** Tenant creation — one per identity; 5/min hard cap prevents squatting floods. */
+  createTenant: 5,
+  /** Invite issuance — admin action; low cap prevents harvesting. */
+  createInvite: 20,
+  /** Invite acceptance — unbound user; brute-force protection for token guessing (256-bit entropy makes
+   *  it infeasible, but the cap adds a second layer at negligible cost). */
+  acceptInvite: 10,
 } as const;

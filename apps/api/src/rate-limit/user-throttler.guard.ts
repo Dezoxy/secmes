@@ -1,7 +1,7 @@
 import { type ExecutionContext, Injectable } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
 
-import type { VerifiedAuth } from '../auth/auth.service.js';
+import type { MaybeUnboundAuth } from '../auth/auth.service.js';
 import { IS_PUBLIC_KEY } from '../auth/public.decorator.js';
 
 /**
@@ -20,12 +20,16 @@ import { IS_PUBLIC_KEY } from '../auth/public.decorator.js';
 @Injectable()
 export class UserThrottlerGuard extends ThrottlerGuard {
   protected override getTracker(req: Record<string, unknown>): Promise<string> {
-    const auth = req.auth as VerifiedAuth | undefined;
+    // req.auth is set by JwtAuthGuard. For @AllowUnbound routes, tenantId may be null — use
+    // `unbound:<sub>` so the limit is still identity-scoped (not IP), even before binding.
+    const auth = req.auth as MaybeUnboundAuth | undefined;
     const ip = (req.ip as string | undefined) ?? 'unknown';
-    // Tenant + subject — never client-supplied; the verified token is the only identity source. The `ip:`
-    // branch is a defensive default: for every route this guard runs on, `JwtAuthGuard` has already set
-    // `req.auth`, so it is NOT the pre-auth control (that's the edge — see the class doc).
-    return Promise.resolve(auth ? `u:${auth.tenantId}:${auth.sub}` : `ip:${ip}`);
+    if (auth) {
+      return Promise.resolve(
+        auth.tenantId ? `u:${auth.tenantId}:${auth.sub}` : `unbound:${auth.sub}`,
+      );
+    }
+    return Promise.resolve(`ip:${ip}`);
   }
 
   protected override shouldSkip(context: ExecutionContext): Promise<boolean> {

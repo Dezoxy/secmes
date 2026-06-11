@@ -8,8 +8,8 @@ A client sends `Authorization: Bearer <JWT>` (issued by Zitadel via OIDC Authori
 
 1. Extracts the bearer token (rejects if absent — routes are **deny-by-default**, opt out with `@Public()`).
 2. Verifies it with **`jose`** against the issuer's JWKS: **signature**, **issuer**, **audience**, **expiry/nbf**, and an **asymmetric-algorithm allowlist** (RS256/ES256/EdDSA — never `none`, never HS\*).
-3. Derives identity from **verified claims only**: `sub` → user external identity; a **configurable verified claim** (`OIDC_TENANT_CLAIM`) → `tenant_id` (UUID-validated).
-4. Attaches `{ sub, tenantId }` to the request. All tenant DB access runs inside `withTenant(verifiedTenantId, …)`.
+3. Derives identity from **verified claims only**: `sub` → user external identity.
+4. Looks up `tenantId` from `user_tenant_index` (DB, keyed on `sub`) — `null` if unbound (new user). Attaches `{ sub, tenantId }` to the request. All tenant DB access runs inside `withTenant(verifiedTenantId, …)`; unbound requests are 403 unless the route carries `@AllowUnbound()`.
 
 The server still only ever sees ciphertext + metadata — JWT validation touches no message content.
 
@@ -23,7 +23,7 @@ The server still only ever sees ciphertext + metadata — JWT validation touches
 1. **Forged / unsigned / alg-confusion token (Spoofing).** Attacker submits an unsigned token, `alg:none`, or an HS256 token signed with the *public* key (key-confusion). → Verify signature via JWKS with an **asymmetric-only algorithm allowlist**; reject `none`/HS\*.
 2. **Token from the wrong issuer or audience (Spoofing).** A valid token minted for another app/realm. → Enforce `issuer` **and** `audience`; both from server config, never the token.
 3. **Tenant context from client input (Spoofing / Elevation — the core risk).** Attacker sets `X-Tenant-Id`, a body field, or a query param to act as another tenant. → `tenant_id` is read **only** from the verified claim; all client-supplied tenant hints are ignored entirely. RLS is the backstop if a handler regresses.
-4. **User-settable tenant claim (Confused deputy).** If Zitadel let an end user edit the claim we map to `tenant_id`, they could cross tenants with a *validly signed* token. → **Zitadel-config requirement:** the tenant claim is **IdP-asserted at provisioning** (org-scoped action/metadata), never a user-editable attribute. Documented as a Phase-1 Zitadel wiring gate.
+4. **User-settable tenant claim (Confused deputy).** ~~Superseded by G1.~~ The Zitadel `tenant_id` claim and the `argusClaims` Action have been removed. Tenant assignment now lives in `user_tenant_index` (our DB, not the JWT). The user controls neither their `sub` (IdP-signed) nor the index (INSERT-only by the app role, written by two server-controlled paths: create-tenant and accept-invite). See `tenant-onboarding.md` §5.
 5. **Token / claim disclosure via logs (Information disclosure).** → Never log the `Authorization` header or the raw token (invariant #2). Logs carry `sub`/`tenant_id` **ids** only.
 6. **Expiry / replay (Tampering).** → Enforce `exp`/`nbf` with small clock tolerance; rely on short-lived access tokens. In-window replay is accepted for beta (see §6).
 7. **JWKS fetch / rotation abuse (DoS / Spoofing).** Unknown-`kid` floods or stale keys. → `jose` `createRemoteJWKSet` fetches over **HTTPS** from the configured issuer, caches, and rate-limits `kid` refetch; key rotation is automatic.
@@ -38,7 +38,7 @@ The server still only ever sees ciphertext + metadata — JWT validation touches
 ## 5. Decision & mitigations
 
 - `jose.jwtVerify(token, JWKS, { issuer, audience, algorithms: ['RS256','ES256','EdDSA'] })`; `createRemoteJWKSet(<issuer>/.well-known/jwks)`. Guard is **request-scoped, deny-by-default**.
-- `tenant_id` from `OIDC_TENANT_CLAIM` (configurable so we don't hard-bet Zitadel's claim shape pre-deploy), **UUID-validated** via the same `asTenantId()` the DB layer uses; missing/invalid → 401.
+- `tenantId` from `user_tenant_index` (DB lookup keyed on `sub`, inside `withRouting()`) — not from a JWT claim. Missing binding → unbound state (`tenantId: null`), 403 on non-@AllowUnbound routes.
 - Ignore every client-supplied tenant hint; DB access only via `withTenant(verifiedTenantId)`.
 - **Reviewer:** `security-boundary-auditor`. **Tests gate 13–14:** valid→200; missing / bad-signature / `alg:none` / HS256-with-pubkey / wrong-issuer / wrong-audience / expired → 401; a client `X-Tenant-Id` header is ignored; the tenant claim alone drives isolation.
 - **Zitadel-config gate (when deployed):** the tenant claim must be org-asserted, not user-editable.
@@ -74,5 +74,5 @@ Zitadel + its own PostgreSQL run in `compose.yaml` with **local-only throwaway c
 
 - **JWT access tokens:** the OIDC app is configured to mint **JWT** (not opaque) access tokens so the API validates via JWKS with no introspection round-trip.
 - **Tenant claim is IdP-asserted, not user-editable (closes §3 threat #4):** the API requires the tenant claim to be a **UUID** (it casts to `tenants.id`). Zitadel org ids are numeric snowflakes, so a **fixed dev tenant UUID** is seeded into `tenants`, and an **org-scoped Action** asserts `tenant_id=<that UUID>` into the access token. The end user cannot edit it. The exact Action/claim mechanism is pinned in the bootstrap script and **verified against current Zitadel (v4) docs** at implementation time, not assumed. Multi-org→tenant onboarding is Phase 7 (G1).
-  - **Carry-forward requirement for the Phase-7 production Action** (the local one uses a hardcoded constant, so this doesn't bite yet): when `tenant_id` is derived from real per-org data it MUST (a) read the org→tenant mapping from **IdP-asserted org metadata only** (never a user-writable attribute), and (b) **overwrite** the claim (set-then, not Zitadel's set-if-absent `setClaim`), so a `tenant_id` a user managed to get emitted *earlier* in the token pipeline can never survive and win with a validly-signed token (§3 threat #4).
+  - **The `argusClaims` Action has been removed (G1).** Tenant binding is now DB-authoritative (`user_tenant_index`); no Zitadel Action or Management API is needed. The `email`/`name` claims are still emitted via Zitadel's OIDC scope configuration (not an Action) and used for JIT provisioning.
 - **Reviewers:** `infra-reviewer` (compose + bootstrap) and `security-boundary-auditor` (the auth wiring). **Gate tests** extend §5's: a real login yields a token that the API accepts, provisions the user JIT in the seeded tenant, and a request with no/!expired token fails closed.

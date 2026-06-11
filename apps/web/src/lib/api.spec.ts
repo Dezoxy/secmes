@@ -55,7 +55,14 @@ describe('api client', () => {
 
   it('establishSession POSTs /auth/session then returns the /me profile', async () => {
     token.mockResolvedValue('tok');
-    const me = { userId, tenantId, email: 'alice@example.com', displayName: 'A' };
+    const me = {
+      bound: true,
+      userId,
+      tenantId,
+      email: 'alice@example.com',
+      displayName: 'A',
+      role: 'member',
+    };
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response(null, { status: 204 }))

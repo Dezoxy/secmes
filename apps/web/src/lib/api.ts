@@ -33,6 +33,7 @@ import {
   type DeliverWelcomeRequest,
   type FetchedMessage as ContractFetchedMessage,
   type Me as ContractMe,
+  type MeBound as ContractMeBound,
   type MessagePage as ContractMessagePage,
   type PendingWelcome as ContractPendingWelcome,
   type PublishKeyPackagesResponse,
@@ -49,8 +50,10 @@ import { requestJson, requestStatus, unwrapApiResult } from './api-client';
 
 export { apiFetch } from './api-client';
 
-/** The verified profile the API returns from the token claims (after JIT provisioning). */
+/** The full discriminated-union /me response (bound or unbound). */
 export type Me = ContractMe;
+/** Narrowed /me response for a user already bound to a tenant. */
+export type MeBound = ContractMeBound;
 
 /**
  * Record the login (POST /auth/session → JIT-provisions the user + audits `auth.login`), then fetch

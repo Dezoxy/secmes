@@ -9,7 +9,7 @@ import {
 } from '@nestjs/websockets';
 import { WebSocket } from 'ws';
 
-import { AuthService, type VerifiedAuth } from '../auth/auth.service.js';
+import { AuthService, type MaybeUnboundAuth, type VerifiedAuth } from '../auth/auth.service.js';
 import { MessagingService } from '../messaging/messaging.service.js';
 import {
   RealtimeBus,
@@ -102,15 +102,20 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       client.close(4400, 'auth requires a token');
       return;
     }
-    let auth: VerifiedAuth;
+    let auth: MaybeUnboundAuth;
     try {
       auth = await this.auth.verify(token); // throws on any failure; never logged
     } catch {
       client.close(4401, 'unauthorized');
       return;
     }
+    // Unbound users have no tenant — they cannot subscribe to any conversation room.
+    if (auth.tenantId === null) {
+      client.close(4403, 'not bound to a tenant');
+      return;
+    }
     state.authed = true;
-    state.auth = auth;
+    state.auth = auth as VerifiedAuth;
     if (state.authTimer) clearTimeout(state.authTimer);
     this.send(client, 'ready', { sub: auth.sub });
   }

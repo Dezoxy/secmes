@@ -8,7 +8,7 @@ import {
   logout as oidcLogout,
   profileScopeFromAuth,
 } from '../../lib/auth';
-import { establishSession, type Me } from '../../lib/api';
+import { establishSession, type MeBound } from '../../lib/api';
 
 interface AuthState {
   /** Whether OIDC is configured (VITE_OIDC_*). When false the app runs in demo mode (no real auth). */
@@ -18,8 +18,8 @@ interface AuthState {
   user: User | null;
   /** Stable authenticated subject, used only for storage scoping and auth boundaries. */
   subjectId: string | null;
-  /** Server profile from /me after JIT provisioning (null until fetched / if the API is unreachable). */
-  profile: Me | null;
+  /** Bound server profile from /me (null when unbound, loading, or API unreachable). */
+  profile: MeBound | null;
   login: () => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -28,7 +28,7 @@ const AuthCtx = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
   const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<Me | null>(null);
+  const [profile, setProfile] = useState<MeBound | null>(null);
   const [ready, setReady] = useState(!oidcConfigured);
   const sessionEstablished = useRef(false);
 
@@ -64,7 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
     if (!user || sessionEstablished.current) return;
     sessionEstablished.current = true;
     void establishSession()
-      .then(setProfile)
+      .then((me) => setProfile(me.bound ? me : null))
       .catch(() => {
         /* API unreachable — keep the OIDC session, no server profile yet */
       });
