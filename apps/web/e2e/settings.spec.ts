@@ -115,10 +115,12 @@ test('security recovery keeps the recovery-file import path available', async ({
 
   const dialog = page.getByRole('dialog', { name: 'Settings' });
   await dialog.getByRole('button', { name: 'Security & Recovery' }).click();
-  await dialog.getByRole('button', { name: 'Import recovery file' }).click();
+  await dialog.getByRole('button', { name: 'Restore on this device' }).click();
 
   await expect(dialog.getByText('past message history is not recovered')).toBeVisible();
-  await expect(dialog.getByText('Choose your recovery file')).toBeVisible();
+  // Demo mode has no signed-in profile, so the server-fetch path is hidden and the file picker
+  // (the always-available fallback) is shown.
+  await expect(dialog.getByText('Or choose your recovery file')).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Replace this device' })).toBeVisible();
 });
 
