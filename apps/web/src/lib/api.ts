@@ -2,6 +2,7 @@
 // Zod validation, and safe error classification live in `api-client.ts`.
 
 import {
+  BackupResponseSchema,
   ClaimedKeyPackageSchema,
   CreateConversationRequestSchema,
   CreatedConversationSchema,
@@ -19,6 +20,7 @@ import {
   RevokeKeyPackagesResponseSchema,
   SendConversationMessageRequestSchema,
   SentMessageSchema,
+  StoreBackupRequestSchema,
   UploadGrantSchema,
   WelcomeMaterialSchema,
   type ClaimedKeyPackage as ContractClaimedKeyPackage,
@@ -335,3 +337,41 @@ export async function getAttachmentBlob(url: string): Promise<Uint8Array> {
 // NOTE: cross-conversation catch-up (`GET /sync`) lands with the WebSocket client in 5C (reconnect → /sync →
 // dedup), where its caller lives. 5B back-fills per-conversation on open (fetchMessages), so /sync would be
 // unused dead code here — added in 5C with its consumer + tests.
+
+// --- Key backup (PUT/GET /backups/me) ---------------------------------------------------------------
+// The server holds an opaque copy of the IDENTITY-ONLY recovery artifact (passphrase-sealed client-side
+// before upload). The server never decrypts it — this is a convenience copy, not the source of truth.
+// The local download (RecoveryPanel) is always performed first; the server upload is best-effort.
+
+/**
+ * Upload the identity-only sealed recovery artifact to the server (PUT /backups/me).
+ * Caller must be authenticated; throws on non-OK.
+ */
+export async function storeBackup(artifact: string): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: '/backups/me',
+      method: 'PUT',
+      body: { backup: artifact },
+      requestSchema: StoreBackupRequestSchema,
+    }),
+  );
+}
+
+/**
+ * Fetch the server-stored sealed artifact (GET /backups/me).
+ * Returns null when no backup is stored (404). Throws (classified message) on other non-OK responses.
+ * The returned string is opaque — pass it directly to `restoreFromArtifact`. Mirrors the `claimKeyPackage`
+ * 404 pattern so it reuses requestJson's network-error classification + response validation.
+ */
+export async function fetchBackup(): Promise<string | null> {
+  const result = await requestJson({
+    path: '/backups/me',
+    responseSchema: BackupResponseSchema,
+  });
+  if (!result.ok) {
+    if (result.error.status === 404) return null;
+    return unwrapApiResult(result); // throws a classified message (never reached for 404)
+  }
+  return result.data.backup;
+}

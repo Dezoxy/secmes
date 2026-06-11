@@ -9,6 +9,36 @@ import {
 export const MIN_RECOVERY_PASSPHRASE_LENGTH = 8;
 export const RECOVERY_REMINDER_STORAGE_KEY = versionedStorageKey('recovery-reminder');
 
+// Whether the recovery file was also saved to the user's account (PUT /backups/me):
+//   'saved'      — the server copy was stored
+//   'failed'     — signed in, but the upload failed (network/token); the local file is the only copy
+//   'local-only' — no signed-in profile, so no server copy was attempted (demo / offline session)
+export type BackupUploadOutcome = 'saved' | 'failed' | 'local-only';
+
+const RECOVERY_HISTORY_NOTE =
+  'It restores your messaging identity for future messages only, not past message history.';
+
+/**
+ * Whether to attempt a server backup upload. Gate on the signed-in PROFILE, not just an OIDC session:
+ * the artifact is sealed under `profile.userId`, so with no profile it is sealed under the demo identity
+ * and must NOT be uploaded into the real user's server row (it would fail on restore). See RecoveryPanel.
+ */
+export function shouldUploadBackup(hasProfile: boolean): boolean {
+  return hasProfile;
+}
+
+/** The success message after a recovery-file download, honest about whether the server copy was saved. */
+export function backupDownloadMessage(outcome: BackupUploadOutcome): string {
+  switch (outcome) {
+    case 'saved':
+      return `Recovery file saved to your account and downloaded. Store the file somewhere safe too. ${RECOVERY_HISTORY_NOTE}`;
+    case 'failed':
+      return `Recovery file downloaded, but it could not be saved to your account right now — keep this file safe, it is your only copy. ${RECOVERY_HISTORY_NOTE}`;
+    case 'local-only':
+      return `Recovery file downloaded. Store it somewhere safe. ${RECOVERY_HISTORY_NOTE}`;
+  }
+}
+
 export type RecoveryPassphraseScore = 0 | 1 | 2 | 3 | 4;
 
 export interface RecoveryPassphraseStrength {
