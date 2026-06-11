@@ -1,6 +1,6 @@
 import { useState, type ChangeEvent } from 'react';
-import { Check, Copy, Image, RefreshCw } from 'lucide-react';
-import { generatedAvatar, MAX_AVATAR_DATA_URI_LENGTH } from '../chat/seed';
+import { Check, Copy, Image } from 'lucide-react';
+import { MAX_AVATAR_DATA_URI_LENGTH } from '../chat/seed';
 import { Avatar, Button, ErrorState } from '../ui';
 import { createSafeUiError } from '../../lib/safe-ui-error';
 
@@ -12,10 +12,9 @@ export interface AnonymousProfile {
 
 interface ProfileSettingsProps {
   profile: AnonymousProfile;
-  username: string;
+  displayName: string | null;
   avatar: string;
   profileError: string | null;
-  onUsernameChange: (username: string) => void;
   onAvatarChange: (avatar: string) => void;
   onProfileErrorChange: (message: string | null) => void;
 }
@@ -79,10 +78,9 @@ async function compressAvatar(file: File): Promise<string> {
 
 export function ProfileSettings({
   profile,
-  username,
+  displayName,
   avatar,
   profileError,
-  onUsernameChange,
   onAvatarChange,
   onProfileErrorChange,
 }: ProfileSettingsProps) {
@@ -121,40 +119,31 @@ export function ProfileSettings({
       <div className="flex items-center gap-4">
         <Avatar
           src={avatar}
-          name={username || profile.id}
+          name={displayName ?? profile.id}
           size="xl"
           className="ring-2 ring-purple-500/40"
         />
-        <div className="flex flex-wrap gap-2">
-          <label className={SUBTLE_BUTTON}>
-            <Image className="h-4 w-4" />
-            Upload avatar
-            <input
-              type="file"
-              accept="image/png,image/jpeg,image/webp,image/gif"
-              className="hidden"
-              onChange={(event) => void uploadAvatar(event)}
-            />
-          </label>
-          <Button
-            variant="subtle"
-            onClick={() => onAvatarChange(generatedAvatar(username || profile.id))}
-          >
-            <RefreshCw className="h-4 w-4" />
-            Generate
-          </Button>
-        </div>
+        <label className={SUBTLE_BUTTON}>
+          <Image className="h-4 w-4" />
+          Upload photo
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            className="hidden"
+            onChange={(event) => void uploadAvatar(event)}
+          />
+        </label>
       </div>
 
-      <label className="block">
-        <span className="mb-2 block text-sm font-medium text-white/70">Username</span>
-        <input
-          value={username}
-          onChange={(event) => onUsernameChange(event.target.value)}
-          placeholder="Choose a username"
-          className={INPUT}
-        />
-      </label>
+      <div>
+        <span className="mb-2 block text-sm font-medium text-white/70">Display name</span>
+        <p className="rounded-xl border border-white/5 bg-[#1a1a26] px-4 py-2.5 text-sm text-white">
+          {displayName ?? '—'}
+        </p>
+        <p className="mt-1.5 text-xs text-white/35">
+          Auto-assigned. Unique within your organization.
+        </p>
+      </div>
 
       <div>
         <span className="mb-2 block text-sm font-medium text-white/70">Argus ID</span>

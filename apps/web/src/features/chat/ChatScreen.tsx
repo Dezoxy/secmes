@@ -38,10 +38,11 @@ import {
   paneBackExitMotion,
 } from '../ui';
 import type { Conversation, User } from './seed';
+import { dicebearAvatar, isCustomPhoto } from '../../lib/dicebear';
 import {
   conversations as initialConversations,
   currentUser,
-  generatedAvatar,
+  MAX_AVATAR_DATA_URI_LENGTH,
   getConversationDisplayName,
   safeAvatarSrc,
 } from './seed';
@@ -146,10 +147,16 @@ export default function ChatScreen() {
   const [anonymousProfile, setAnonymousProfile] = useState<AnonymousProfile>(() =>
     loadArgusProfile({ subjectId: profileSubjectId }),
   );
-  const currentUserProfile = useMemo(
-    () => currentUserFromProfile(anonymousProfile),
-    [anonymousProfile],
-  );
+  const serverDisplayName = profile?.displayName ?? null;
+  const serverUserId = profile?.userId ?? null;
+  const currentUserProfile = useMemo(() => {
+    const base = currentUserFromProfile(anonymousProfile);
+    if (!serverUserId) return base;
+    const name = serverDisplayName ?? anonymousProfile.username;
+    const hasPhoto = isCustomPhoto(anonymousProfile.avatar, MAX_AVATAR_DATA_URI_LENGTH);
+    const avatar = hasPhoto ? anonymousProfile.avatar : dicebearAvatar(serverUserId);
+    return { ...base, name, avatar };
+  }, [anonymousProfile, serverDisplayName, serverUserId]);
   // What every live send/receive needs to seal the advanced ratchet at rest (Slice 5). Null in demo mode.
   // The session key (derived once at unlock) does the per-op group-state sealing; the passphrase stays for
   // the rare join-time pool reseal.
@@ -271,7 +278,7 @@ export default function ChatScreen() {
     const peerUser: User = {
       id: peer.id,
       name,
-      avatar: generatedAvatar(`${name} ${peer.id}`),
+      avatar: dicebearAvatar(peer.id),
       // No isOnline: presence is unknown for live peers — never claim Offline (see seed.ts User).
     };
     addLive(session.conversationId, session.conversation); // retain its MLS group for live send/fetch
@@ -464,6 +471,7 @@ export default function ChatScreen() {
           <SettingsPanel
             profile={anonymousProfile}
             deviceId={deviceId}
+            serverHandle={profile?.displayName ?? null}
             onProfileChange={handleProfileChange}
             onClose={closeSettings}
           />

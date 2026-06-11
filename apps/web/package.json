@@ -16,6 +16,8 @@
   "dependencies": {
     "@argus/contracts": "workspace:^",
     "@argus/crypto": "workspace:^",
+    "@dicebear/core": "^9.4.2",
+    "@dicebear/lorelei": "^9.4.2",
     "idb": "^8.0.3",
     "lucide-react": "^1.17.0",
     "oidc-client-ts": "^3.5.0",

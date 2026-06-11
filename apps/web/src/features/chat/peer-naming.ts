@@ -6,7 +6,8 @@
 
 import { listUsers, type UserSummary } from '../../lib/api';
 import { contactDisplayName } from './user-label';
-import { generatedAvatar, type Conversation, type User } from './seed';
+import { dicebearAvatar } from '../../lib/dicebear';
+import type { Conversation, User } from './seed';
 
 /** The placeholder participant id a not-yet-named live conversation carries (see liveConversationShell). */
 export function placeholderPeerId(conversationId: string): string {
@@ -47,7 +48,7 @@ export async function resolvePeerUser(userId: string): Promise<User | null> {
     if (!found) return null;
     const name = contactDisplayName(found);
     // No isOnline: presence is UNKNOWN for live peers (there is no presence system) — never claim Offline.
-    return { id: found.id, name, avatar: generatedAvatar(name) };
+    return { id: found.id, name, avatar: dicebearAvatar(found.id) };
   } catch {
     return null;
   }
