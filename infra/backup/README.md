@@ -80,11 +80,17 @@ ever skipped (defence-in-depth, like the attachment bucket).
 ## Install (on the VM)
 
 ```bash
+# Failure notifier (shared with the cleanup worker — install once for both)
+sudo install -d /opt/argus/notify
+sudo install -m 0755 ../notify/notify-failure.sh /opt/argus/notify/
+sudo cp ../notify/argus-notify-failure@.service /etc/systemd/system/
+
+# Backup worker
 sudo install -d /opt/argus/backup
 sudo install -m 0755 backup-db.sh /opt/argus/backup/
 sudo cp argus-db-backup.{service,timer} /etc/systemd/system/
-# Edit the .service: set PGHOST/.../S3_BUCKET, S3_ACCESS_KEY_ID, AGE_RECIPIENT, RETENTION_DAYS, and the
-# LoadCredential source paths. Ensure `age`, `pg_dump` (postgresql-client), and AWS CLI v2 are installed.
+# Edit argus-db-backup.service: set PGHOST/.../S3_BUCKET, S3_ACCESS_KEY_ID, AGE_RECIPIENT, RETENTION_DAYS,
+# and the LoadCredential source paths. Ensure `age`, `pg_dump` (postgresql-client), and AWS CLI v2 are installed.
 sudo systemctl daemon-reload
 sudo systemctl enable --now argus-db-backup.timer
 # One-off run + logs:
@@ -149,7 +155,7 @@ shred -u age.key backup.dump
   restore**", not just backups.
 - **Remote Postgres:** loopback uses `PGSSLMODE=prefer`. If `PGHOST` ever points off-box, set
   `PGSSLMODE=verify-full` + a CA bundle so the connection can't silently fall back to plaintext.
-- **Alerting is NOT yet wired (follow-up):** the worker exits non-zero on a failed/too-small dump, but no
-  `OnFailure=` consumes that yet. Add an `OnFailure=argus-alert@%n.service` (journal-to-webhook oneshot) or a
-  journal scrape before this is trusted in prod — a silent backup gap is the classic DR trap, and
-  `Persistent=true` will otherwise run nightly into a wall forever.
+- **Alerting:** `OnFailure=argus-notify-failure@%p.service` is wired in the unit. When the backup fails,
+  systemd starts `argus-notify-failure@argus-db-backup.service`, which posts a `fatal`-level Sentry event to
+  GlitchTip (if `sentry_dsn` is provisioned) or logs to the journal only (graceful no-op until armed). Install
+  the notifier once alongside the backup worker (see Install below).

@@ -1,0 +1,52 @@
+# argus — failure alert template. Triggered via OnFailure=argus-notify-failure@%p.service in any worker unit.
+# The instance name (%i) is the failing unit's prefix (e.g. argus-db-backup), passed to the script.
+# Install: copy this dir to /opt/argus/notify, place the unit in /etc/systemd/system, then
+#   systemctl daemon-reload
+# No enable needed — the template is started on-demand by OnFailure=.
+[Unit]
+Description=argus — failure alert for %i
+# DefaultDependencies=no: the default implicit deps include Before=shutdown.target + Requires=basic.target.
+# A unit that fails late in shutdown (after basic.target deactivates) would be refused by systemd, silently
+# swallowing the alert. This is a pure notification oneshot with no ordering requirements beyond After=.
+DefaultDependencies=no
+# After= only (no Requires=): if argus-secrets.service is in a failed state while the credential file still
+# exists on tmpfs, Requires= would suppress the alert. The script no-ops gracefully on a missing/empty file,
+# so After= alone (ordering at boot) is the more robust choice for an alerting path.
+After=argus-secrets.service
+
+[Service]
+Type=oneshot
+User=argus
+Group=argus
+# Alert delivery should be fast; 30 s is generous for a curl POST.
+TimeoutStartSec=30
+
+# sentry_dsn is an OPTIONAL secret (seeded EMPTY by argus-secrets.service until the operator provisions it).
+# The file always EXISTS (empty or non-empty) after boot, so LoadCredential never fails to find the source.
+LoadCredential=sentry-dsn:/run/argus/secrets/sentry_dsn
+
+ExecStart=/opt/argus/notify/notify-failure.sh %i
+
+# --- Hardening: same profile as the backup/cleanup workers. bash + curl + openssl don't JIT, so
+#     MemoryDenyWriteExecute=true is safe here (unlike AWS CLI v2 which is a PyInstaller bundle). ---
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectHostname=true
+ProtectClock=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+UMask=0077
