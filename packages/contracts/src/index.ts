@@ -198,3 +198,13 @@ export const DownloadGrantSchema = z.object({
   url: z.string().url(),
 });
 export type DownloadGrant = z.infer<typeof DownloadGrantSchema>;
+
+// Opaque sealed backup blob — the server stores and returns it verbatim (never parsed, crypto-blind).
+// Size-capped at 64 KiB to match the server enforcement in key-backup.schemas.ts.
+export const StoreBackupRequestSchema = z.object({ backup: z.string().min(1).max(65536) }).strict();
+export type StoreBackupRequest = z.infer<typeof StoreBackupRequestSchema>;
+
+// Cap the response at the same 64 KiB as the request: the fetched blob is JSON.parsed + Argon2id-unsealed
+// client-side, so bounding it stops a misbehaving/compromised server from forcing an oversized parse + KDF.
+export const BackupResponseSchema = z.object({ backup: z.string().min(1).max(65536) });
+export type BackupResponse = z.infer<typeof BackupResponseSchema>;

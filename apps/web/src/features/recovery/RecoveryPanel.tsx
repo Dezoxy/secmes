@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Check, Download, KeyRound, Loader2, Upload, X } from 'lucide-react';
+import { AlertTriangle, Check, Cloud, Download, KeyRound, Loader2, Upload, X } from 'lucide-react';
 import { RestoreCommittedError, restoreAndProvision } from '../../lib/device-restore';
+import { fetchBackup, storeBackup } from '../../lib/api';
 import {
   RECOVERY_IDENTITY,
   exportRecovery,
@@ -12,9 +13,12 @@ import { useAuth } from '../auth/AuthContext';
 import { useDevice } from '../device/DeviceContext';
 import {
   MIN_RECOVERY_PASSPHRASE_LENGTH,
+  backupDownloadMessage,
   getRecoveryPassphraseStrength,
   readRecoveryReminderDismissed,
+  shouldUploadBackup,
   writeRecoveryReminderDismissed,
+  type BackupUploadOutcome,
   type RecoveryPassphraseStrength,
 } from './recovery-ux';
 
@@ -22,6 +26,9 @@ const INPUT =
   'w-full rounded-xl border border-white/5 bg-[#1a1a26] px-4 py-2.5 text-sm text-white placeholder-white/30 transition-all focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20';
 const PRIMARY =
   'flex w-full items-center justify-center gap-2 rounded-xl bg-purple-500 py-2.5 text-sm font-medium text-white shadow-lg shadow-purple-500/25 transition-all hover:bg-purple-400 disabled:cursor-not-allowed disabled:bg-purple-500/50 disabled:shadow-none';
+// Shared across the file-import and server-restore paths — both fail dominantly on a wrong passphrase
+// (the file/blob is already chosen at this point), so one message covers both.
+const RESTORE_FAILED_MESSAGE = 'Could not restore — check your passphrase and try again.';
 const RECOVERY_STRENGTH_STEPS = [1, 2, 3, 4] as const;
 
 /** Save a string as a downloaded file (the sealed recovery artifact — opaque, the server never sees it). */
@@ -94,6 +101,11 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
   const [confirm, setConfirm] = useState('');
   const [importPassphrase, setImportPassphrase] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  // Server-fetched artifact for the "Restore from server" path
+  const [serverArtifact, setServerArtifact] = useState<string | null>(null);
+  const [serverFetchState, setServerFetchState] = useState<
+    'idle' | 'loading' | 'found' | 'not-found'
+  >('idle');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -124,10 +136,19 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
           ? await exportRecovery(identity, passphrase)
           : await setUpRecovery(identity, passphrase);
       downloadFile('argus-recovery.json', artifact);
+      // Server upload is a non-blocking safety-net (the downloaded file is the primary copy), but we
+      // report the outcome honestly: claiming "saved to your account" when the upload failed would
+      // leave the user trusting a server backup that does not exist. Gate on the profile (see
+      // shouldUploadBackup — the artifact is sealed under profile.userId).
+      let outcome: BackupUploadOutcome = 'local-only';
+      if (shouldUploadBackup(Boolean(profile))) {
+        outcome = await storeBackup(artifact).then(
+          () => 'saved' as const,
+          () => 'failed' as const,
+        );
+      }
       setSetUp(true);
-      setDone(
-        'Recovery file downloaded. Store it somewhere safe. It restores your messaging identity for future messages only, not past message history.',
-      );
+      setDone(backupDownloadMessage(outcome));
       setPassphrase('');
       setConfirm('');
     } catch {
@@ -166,7 +187,58 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
         window.location.reload();
         return;
       }
-      setError('Could not restore — check the file and passphrase.');
+      setError(RESTORE_FAILED_MESSAGE);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const fetchFromServer = async () => {
+    setError(null);
+    setDone(null);
+    setServerFetchState('loading');
+    try {
+      const artifact = await fetchBackup();
+      if (artifact === null) {
+        setServerFetchState('not-found');
+      } else {
+        setServerArtifact(artifact);
+        setServerFetchState('found');
+      }
+    } catch {
+      setServerFetchState('idle');
+      setError('Could not reach the server — check your connection and try again.');
+    }
+  };
+
+  const restoreFromServer = async () => {
+    if (!serverArtifact) return;
+    setError(null);
+    setDone(null);
+    if (importPassphrase.length < MIN_RECOVERY_PASSPHRASE_LENGTH) {
+      setError(`Use a passphrase of at least ${MIN_RECOVERY_PASSPHRASE_LENGTH} characters.`);
+      return;
+    }
+    setBusy(true);
+    try {
+      if (device.keystore) {
+        await restoreAndProvision(device.keystore, identity, serverArtifact, importPassphrase);
+        setDone('Device restored — reloading…');
+        window.location.reload();
+      } else {
+        await restoreFromArtifact(identity, serverArtifact, importPassphrase);
+        setSetUp(true);
+        setDone('This device was restored from your server backup.');
+        setServerArtifact(null);
+        setServerFetchState('idle');
+        setImportPassphrase('');
+      }
+    } catch (e) {
+      if (e instanceof RestoreCommittedError) {
+        window.location.reload();
+        return;
+      }
+      setError(RESTORE_FAILED_MESSAGE);
     } finally {
       setBusy(false);
     }
@@ -274,6 +346,12 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
         <button
           type="button"
           onClick={() => {
+            // Collapsing the section discards any fetched server artifact so a stale blob can't linger
+            // into a later reopen (where serverFetchState would no longer be 'found').
+            if (importOpen) {
+              setServerArtifact(null);
+              setServerFetchState('idle');
+            }
             setImportOpen((open) => !open);
             setError(null);
             setDone(null);
@@ -283,7 +361,7 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
         >
           <span className="inline-flex items-center gap-2">
             <Upload className="h-4 w-4 text-white/45" />
-            Import recovery file
+            Restore on this device
           </span>
           <span className="text-xs text-white/35">{importOpen ? 'Hide' : 'Advanced'}</span>
         </button>
@@ -291,20 +369,50 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
         {importOpen && (
           <div className="mt-3 space-y-3">
             <p className="text-xs leading-relaxed text-white/40">
-              Zitadel restores account access. This recovery file replaces this browser&apos;s
-              encrypted device state for future messages only; past message history is not
-              recovered.
+              Zitadel restores account access. This restores this browser&apos;s encrypted device
+              state for future messages only; past message history is not recovered.
             </p>
-            <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-white/10 bg-[#1a1a26] px-4 py-3 text-sm text-white/60 transition-colors hover:border-purple-500/40">
-              <Upload className="h-4 w-4 shrink-0 text-white/40" />
-              <span className="truncate">{file ? file.name : 'Choose your recovery file'}</span>
-              <input
-                type="file"
-                accept="application/json,.json"
-                className="hidden"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              />
-            </label>
+
+            {/* Server restore — only shown when signed in */}
+            {profile && serverFetchState !== 'found' && (
+              <button
+                type="button"
+                onClick={() => void fetchFromServer()}
+                disabled={serverFetchState === 'loading'}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 py-2.5 text-sm font-medium text-white/70 transition-colors hover:border-purple-500/40 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {serverFetchState === 'loading' ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Cloud className="h-4 w-4" />
+                )}
+                {serverFetchState === 'not-found' ? 'No server backup found' : 'Fetch from server'}
+              </button>
+            )}
+
+            {serverFetchState === 'found' && (
+              <div className="flex items-center gap-2 rounded-xl border border-green-500/20 bg-green-500/10 px-3 py-2 text-xs text-green-300">
+                <Check className="h-4 w-4 shrink-0" />
+                Server backup found — enter your passphrase to restore.
+              </div>
+            )}
+
+            {/* File picker — always available as fallback */}
+            {serverFetchState !== 'found' && (
+              <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-white/10 bg-[#1a1a26] px-4 py-3 text-sm text-white/60 transition-colors hover:border-purple-500/40">
+                <Upload className="h-4 w-4 shrink-0 text-white/40" />
+                <span className="truncate">
+                  {file ? file.name : 'Or choose your recovery file'}
+                </span>
+                <input
+                  type="file"
+                  accept="application/json,.json"
+                  className="hidden"
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                />
+              </label>
+            )}
+
             <input
               type="password"
               value={importPassphrase}
@@ -314,15 +422,36 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
               autoComplete="off"
               className={INPUT}
             />
-            <button
-              type="button"
-              onClick={() => void importRecoveryFile()}
-              disabled={busy || !file || importPassphrase.length < MIN_RECOVERY_PASSPHRASE_LENGTH}
-              className={PRIMARY}
-            >
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-              Replace this device
-            </button>
+
+            {serverFetchState === 'found' ? (
+              <button
+                type="button"
+                onClick={() => void restoreFromServer()}
+                disabled={busy || importPassphrase.length < MIN_RECOVERY_PASSPHRASE_LENGTH}
+                className={PRIMARY}
+              >
+                {busy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Cloud className="h-4 w-4" />
+                )}
+                Restore from server
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void importRecoveryFile()}
+                disabled={busy || !file || importPassphrase.length < MIN_RECOVERY_PASSPHRASE_LENGTH}
+                className={PRIMARY}
+              >
+                {busy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Upload className="h-4 w-4" />
+                )}
+                Replace this device
+              </button>
+            )}
           </div>
         )}
       </div>
