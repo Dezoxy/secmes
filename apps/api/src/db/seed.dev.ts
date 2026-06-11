@@ -1,11 +1,10 @@
 /* eslint-disable no-console -- CLI dev-seed runner: console output is the intended UX. */
 import postgres from 'postgres';
 
-// DEV-ONLY seed. Inserts the single local tenant that the local Zitadel instance maps every
-// login into (an org-scoped Action asserts `tenant_id` = DEV_TENANT_ID into the access token;
-// see docs/threat-models/auth-tenant-context.md §9). The API casts that verified claim to
-// `tenants.id`, and JIT provisioning (auth-tenant-context.md §7) creates the user under it — so
-// this row MUST exist before the first login. Idempotent.
+// DEV-ONLY seed. Inserts the single local tenant and backfills user_tenant_index so the dev
+// account is bound on first login. The tenant_id JWT claim and argusClaims Action were removed
+// in G1 — tenant lookup is now DB-authoritative (user_tenant_index keyed by sub). The tenant row
+// MUST exist before the first login. Idempotent.
 //
 // This is NOT a migration: a hardcoded tenant must never land in a real database. Two enforced
 // guards make that true regardless of how it's invoked: it refuses `NODE_ENV=production`, AND it

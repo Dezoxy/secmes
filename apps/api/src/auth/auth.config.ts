@@ -9,8 +9,6 @@ export interface OidcConfig {
   issuer: string;
   audience: string;
   jwksUri: string;
-  /** Verified claim that carries our tenant UUID. Configurable so we don't hard-bet Zitadel's claim shape. */
-  tenantClaim: string;
   configured: boolean;
 }
 
@@ -20,12 +18,10 @@ export function loadOidcConfig(): OidcConfig {
   // Zitadel serves its JWKS at <issuer>/oauth/v2/keys; allow an explicit override.
   const jwksUri =
     process.env.OIDC_JWKS_URI ?? (issuer ? `${issuer.replace(/\/$/, '')}/oauth/v2/keys` : '');
-  const tenantClaim = process.env.OIDC_TENANT_CLAIM ?? 'tenant_id';
   return {
     issuer,
     audience,
     jwksUri,
-    tenantClaim,
     configured: Boolean(issuer && audience && jwksUri),
   };
 }

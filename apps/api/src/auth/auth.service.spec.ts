@@ -7,7 +7,7 @@ import {
   type JWK,
   SignJWT,
 } from 'jose';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { OidcConfig } from './auth.config.js';
 import { AuthService } from './auth.service.js';
@@ -16,6 +16,18 @@ const ISSUER = 'https://idp.test/argus';
 const AUDIENCE = 'argus-api';
 const TENANT = '11111111-1111-1111-1111-111111111111';
 const SUB = 'user-sub-1';
+
+// Mock the DB lookup so tests never need a real database. `withRouting` is called by `verify()` to
+// resolve the sub→tenantId binding from `user_tenant_index`.
+vi.mock('../db/index.js', () => ({
+  withRouting: vi.fn(),
+  schema: {
+    userTenantIndex: { sub: 'sub', tenantId: 'tenant_id' },
+  },
+  eq: vi.fn((a, b) => ({ a, b })),
+}));
+
+import { withRouting } from '../db/index.js';
 
 describe('AuthService.verify', () => {
   let svc: AuthService;
@@ -28,14 +40,11 @@ describe('AuthService.verify', () => {
     iss?: string;
     aud?: string;
     sub?: string;
-    tenant?: string;
-    omitTenant?: boolean;
     expiresInSec?: number;
     notBeforeInSec?: number;
     claims?: Record<string, unknown>;
   }): Promise<string> {
     const payload: Record<string, unknown> = { ...opts.claims };
-    if (!opts.omitTenant) payload.tenant_id = opts.tenant ?? TENANT;
     const now = Math.floor(Date.now() / 1000);
     const jwt = new SignJWT(payload)
       .setProtectedHeader({ alg: opts.alg ?? 'ES256', kid: 'test-key' })
@@ -59,23 +68,31 @@ describe('AuthService.verify', () => {
       issuer: ISSUER,
       audience: AUDIENCE,
       jwksUri: 'local',
-      tenantClaim: 'tenant_id',
       configured: true,
     };
     svc = new AuthService(cfg, jwks);
   });
 
-  it('accepts a valid token and returns verified identity', async () => {
+  it('accepts a valid token and returns tenantId from the DB binding', async () => {
+    vi.mocked(withRouting).mockResolvedValueOnce({ tenantId: TENANT });
     const res = await svc.verify(await mint({}));
-    expect(res).toEqual({ sub: SUB, tenantId: TENANT });
+    expect(res).toMatchObject({ sub: SUB, tenantId: TENANT });
+  });
+
+  it('returns tenantId: null for an unbound user (no binding row)', async () => {
+    vi.mocked(withRouting).mockResolvedValueOnce(undefined);
+    const res = await svc.verify(await mint({}));
+    expect(res).toMatchObject({ sub: SUB, tenantId: null });
   });
 
   it('surfaces verified email/name claims for JIT provisioning', async () => {
+    vi.mocked(withRouting).mockResolvedValueOnce({ tenantId: TENANT });
     const res = await svc.verify(await mint({ claims: { email: 'a@a.test', name: 'Alice' } }));
     expect(res).toMatchObject({ sub: SUB, tenantId: TENANT, email: 'a@a.test', name: 'Alice' });
   });
 
   it('falls back to preferred_username when name is absent', async () => {
+    vi.mocked(withRouting).mockResolvedValueOnce({ tenantId: TENANT });
     const res = await svc.verify(await mint({ claims: { preferred_username: 'alice' } }));
     expect(res.name).toBe('alice');
   });
@@ -111,7 +128,7 @@ describe('AuthService.verify', () => {
   });
 
   it('rejects a disallowed algorithm (HS256 — alg-confusion guard)', async () => {
-    const hs = await new SignJWT({ tenant_id: TENANT })
+    const hs = await new SignJWT({})
       .setProtectedHeader({ alg: 'HS256' })
       .setIssuer(ISSUER)
       .setAudience(AUDIENCE)
@@ -119,18 +136,6 @@ describe('AuthService.verify', () => {
       .setExpirationTime('5m')
       .sign(new TextEncoder().encode('a'.repeat(32)));
     await expect(svc.verify(hs)).rejects.toBeInstanceOf(UnauthorizedException);
-  });
-
-  it('rejects a missing tenant claim', async () => {
-    await expect(svc.verify(await mint({ omitTenant: true }))).rejects.toBeInstanceOf(
-      UnauthorizedException,
-    );
-  });
-
-  it('rejects a non-UUID tenant claim', async () => {
-    await expect(svc.verify(await mint({ tenant: 'not-a-uuid' }))).rejects.toBeInstanceOf(
-      UnauthorizedException,
-    );
   });
 
   it('rejects a malformed token', async () => {

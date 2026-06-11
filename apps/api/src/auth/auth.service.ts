@@ -1,17 +1,23 @@
 import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { eq } from 'drizzle-orm';
 import { jwtVerify, type JWTVerifyGetKey } from 'jose';
 
-import { asTenantId } from '../db/index.js';
+import { schema, withRouting } from '../db/index.js';
 import { OIDC_CONFIG, OIDC_JWKS, type OidcConfig } from './auth.config.js';
 
 export interface VerifiedAuth {
   /** OIDC subject — the user's external identity id. */
   sub: string;
-  /** Tenant the request acts as, from a VERIFIED claim only. */
+  /** Tenant the request acts as — set from `user_tenant_index`, never from a JWT claim. */
   tenantId: string;
   /** Verified profile claims (present when the IdP grants email/profile scope). Used for JIT provisioning. */
   email?: string;
   name?: string;
+}
+
+/** What `verify()` returns before the guard narrows it. `tenantId: null` = unbound (no tenant yet). */
+export interface MaybeUnboundAuth extends Omit<VerifiedAuth, 'tenantId'> {
+  tenantId: string | null;
 }
 
 // Asymmetric only. Excludes `none` and HS* (an HS256 token signed with the public key would
@@ -25,8 +31,9 @@ export class AuthService {
     @Inject(OIDC_JWKS) private readonly jwks: JWTVerifyGetKey,
   ) {}
 
-  /** Verify a bearer JWT and return identity from verified claims. Throws 401 on any failure. */
-  async verify(token: string): Promise<VerifiedAuth> {
+  /** Verify a bearer JWT and derive identity. Returns `tenantId: null` for unbound users (no binding yet).
+   *  The guard enforces non-null for routes not decorated with `@AllowUnbound()`. */
+  async verify(token: string): Promise<MaybeUnboundAuth> {
     let payload: Record<string, unknown>;
     try {
       ({ payload } = await jwtVerify(token, this.jwks, {
@@ -43,11 +50,6 @@ export class AuthService {
     const sub = typeof payload.sub === 'string' ? payload.sub : '';
     if (!sub) throw new UnauthorizedException('token missing sub');
 
-    // Only a single string claim is accepted. Array / multi-valued claims (some IdPs emit them)
-    // fall through to 401 by design — do NOT add array handling and silently accept the first element.
-    const claim = payload[this.cfg.tenantClaim];
-    if (typeof claim !== 'string') throw new UnauthorizedException('token missing tenant claim');
-
     // Optional verified profile claims (used for JIT provisioning). Trustworthy — they're inside
     // the signed token. `name` falls back to preferred_username.
     const email = typeof payload.email === 'string' ? payload.email : undefined;
@@ -57,10 +59,19 @@ export class AuthService {
         : typeof payload.preferred_username === 'string'
           ? payload.preferred_username
           : undefined;
-    try {
-      return { sub, tenantId: asTenantId(claim), email, name };
-    } catch {
-      throw new UnauthorizedException('invalid tenant claim');
-    }
+
+    // Tenant derivation: DB lookup on user_tenant_index (no RLS — this is a routing table).
+    // `sub` comes from the IdP-signed token; the binding row is INSERT-only from app paths — both
+    // sides are server-controlled. `null` = unbound (new user, no tenant created or accepted yet).
+    const row = await withRouting((tx) =>
+      tx
+        .select({ tenantId: schema.userTenantIndex.tenantId })
+        .from(schema.userTenantIndex)
+        .where(eq(schema.userTenantIndex.sub, sub))
+        .limit(1)
+        .then((r) => r[0]),
+    );
+
+    return { sub, tenantId: row?.tenantId ?? null, email, name };
   }
 }

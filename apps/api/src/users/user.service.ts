@@ -9,12 +9,14 @@ export interface UserRecord {
   id: string;
   email: string;
   displayName: string | null;
+  role: string;
 }
 
 const SELECTION = {
   id: schema.users.id,
   email: schema.users.email,
   displayName: schema.users.displayName,
+  role: schema.users.role,
 } as const;
 
 // With a 40k handle pool a fresh handle almost never collides, but the DB unique index is the source of truth —
@@ -146,6 +148,7 @@ export class UserService {
           and(
             eq(schema.users.externalIdentityId, auth.sub),
             eq(schema.users.tenantId, auth.tenantId),
+            eq(schema.users.status, 'active'),
           ),
         )
         .limit(1),

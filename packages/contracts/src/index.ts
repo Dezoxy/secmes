@@ -48,12 +48,21 @@ const objectKey = z
   .max(512)
   .refine((s) => !s.includes('://'), 'must be an object key, not a URL');
 
-export const MeSchema = z.object({
+// GET /me — discriminated union: unbound users (no tenant yet) vs. bound users.
+export const MeUnboundSchema = z.object({ bound: z.literal(false) });
+export type MeUnbound = z.infer<typeof MeUnboundSchema>;
+
+export const MeBoundSchema = z.object({
+  bound: z.literal(true),
   userId: z.string().uuid(),
   tenantId: z.string().uuid(),
   email: z.string().email(),
   displayName: z.string().nullable(),
+  role: z.enum(['admin', 'member']),
 });
+export type MeBound = z.infer<typeof MeBoundSchema>;
+
+export const MeSchema = z.discriminatedUnion('bound', [MeUnboundSchema, MeBoundSchema]);
 export type Me = z.infer<typeof MeSchema>;
 
 export const PublishKeyPackagesRequestSchema = z.object({
@@ -267,3 +276,56 @@ export const ReceiptEventSchema = z.object({
   throughMessageId: z.string().uuid(),
 });
 export type ReceiptEvent = z.infer<typeof ReceiptEventSchema>;
+
+// ── G1: self-serve tenant onboarding ────────────────────────────────────────
+
+export const CreateTenantBodySchema = z
+  .object({
+    /** Tenant display name. Not secret and not indexed for search; metadata only. */
+    name: z.string().min(1).max(100).trim(),
+  })
+  .strict();
+export type CreateTenantBody = z.infer<typeof CreateTenantBodySchema>;
+
+export const CreateTenantResponseSchema = z.object({
+  tenantId: z.string().uuid(),
+  userId: z.string().uuid(),
+});
+export type CreateTenantResponse = z.infer<typeof CreateTenantResponseSchema>;
+
+export const CreateInviteBodySchema = z
+  .object({
+    /** Optional email hint — if set, only the matching Zitadel identity may accept. */
+    inviteeEmail: z.string().email().optional(),
+  })
+  .strict();
+export type CreateInviteBody = z.infer<typeof CreateInviteBodySchema>;
+
+export const CreateInviteResponseSchema = z.object({
+  inviteId: z.string().uuid(),
+  /** The one-time plaintext token. Return once; never stored. The recipient uses it in AcceptInviteBody. */
+  token: z.string(),
+  expiresAt: z.string().datetime(),
+});
+export type CreateInviteResponse = z.infer<typeof CreateInviteResponseSchema>;
+
+export const AcceptInviteBodySchema = z.object({ token: z.string().min(1).max(128) }).strict();
+export type AcceptInviteBody = z.infer<typeof AcceptInviteBodySchema>;
+
+export const InviteSummarySchema = z.object({
+  id: z.string().uuid(),
+  inviteeEmail: z.string().email().nullable(),
+  expiresAt: z.string().datetime(),
+  acceptedAt: z.string().datetime().nullable(),
+  revokedAt: z.string().datetime().nullable(),
+  createdAt: z.string().datetime(),
+});
+export type InviteSummary = z.infer<typeof InviteSummarySchema>;
+
+export const MemberSummarySchema = z.object({
+  userId: z.string().uuid(),
+  email: z.string().email(),
+  displayName: z.string().nullable(),
+  role: z.enum(['admin', 'member']),
+});
+export type MemberSummary = z.infer<typeof MemberSummarySchema>;

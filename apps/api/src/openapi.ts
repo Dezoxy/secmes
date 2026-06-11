@@ -62,10 +62,13 @@ function refineNamed(name: string, schema: unknown): void {
   }
 }
 
-/** Pin an explicit bound on a single schema node (idempotent — never overrides an existing constraint). */
-function tightenNode(node: MutableSchema): void {
+/** Pin an explicit bound on a single schema node (idempotent — never overrides an existing constraint).
+ *  `inXof` = true when this node is a direct child of oneOf/anyOf/allOf — 42Crunch rule
+ *  v3-schema-response-xof-additionalproperties-false flags additionalProperties:false inside
+ *  combining schemas, so we skip that injection in that context. */
+function tightenNode(node: MutableSchema, inXof = false): void {
   const type = node.type;
-  if ('properties' in node && node.additionalProperties === undefined) {
+  if (!inXof && 'properties' in node && node.additionalProperties === undefined) {
     node.additionalProperties = false; // reject unknown keys (mirrors Zod `.strict()`)
   }
   if (type === 'string' && !('enum' in node)) {
@@ -92,10 +95,11 @@ function tightenNode(node: MutableSchema): void {
   }
 }
 
-/** Recursively tighten every schema node reachable under `root` (components + inline path schemas). */
-function walk(root: unknown): void {
+/** Recursively tighten every schema node reachable under `root` (components + inline path schemas).
+ *  `inXof` propagates to direct children of oneOf/anyOf/allOf to suppress additionalProperties injection. */
+function walk(root: unknown, inXof = false): void {
   if (Array.isArray(root)) {
-    for (const item of root) walk(item);
+    for (const item of root) walk(item, inXof);
     return;
   }
   if (!root || typeof root !== 'object') return;
@@ -113,8 +117,11 @@ function walk(root: unknown): void {
       }
     }
   }
-  if ('type' in node || 'properties' in node || 'items' in node) tightenNode(node);
-  for (const value of Object.values(node)) walk(value);
+  if ('type' in node || 'properties' in node || 'items' in node) tightenNode(node, inXof);
+  for (const [key, value] of Object.entries(node)) {
+    const childInXof = key === 'oneOf' || key === 'anyOf' || key === 'allOf';
+    walk(value, childInXof);
+  }
 }
 
 /** Single source of truth for the API spec that 42Crunch audits. */

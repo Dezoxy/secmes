@@ -7,6 +7,7 @@ import { KeyDirectoryModule } from './key-directory/key-directory.module.js';
 import { MessagingModule } from './messaging/messaging.module.js';
 import { PushModule } from './push/push.module.js';
 import { RealtimeModule } from './realtime/realtime.module.js';
+import { TenantsModule } from './tenants/tenants.module.js';
 import { UsersModule } from './users/users.module.js';
 
 @Module({
@@ -19,6 +20,7 @@ import { UsersModule } from './users/users.module.js';
     MessagingModule,
     PushModule,
     RealtimeModule,
+    TenantsModule,
   ],
   controllers: [AppController],
 })

@@ -3,10 +3,11 @@ import type { Reflector } from '@nestjs/core';
 import type { ThrottlerStorage } from '@nestjs/throttler';
 import { describe, expect, it } from 'vitest';
 
-import type { VerifiedAuth } from '../auth/auth.service.js';
+import type { MaybeUnboundAuth } from '../auth/auth.service.js';
 import { UserThrottlerGuard } from './user-throttler.guard.js';
 
-const AUTH: VerifiedAuth = { sub: 'u1', tenantId: '11111111-1111-1111-1111-111111111111' };
+const AUTH: MaybeUnboundAuth = { sub: 'u1', tenantId: '11111111-1111-1111-1111-111111111111' };
+const UNBOUND_AUTH: MaybeUnboundAuth = { sub: 'u2', tenantId: null };
 
 // Subclass to reach the two protected overrides under test; the base ctor just needs stub deps since we
 // never exercise the storage path here (only the tracking key + skip predicate, which are pure).
@@ -38,6 +39,11 @@ describe('UserThrottlerGuard — tracking key', () => {
     const key = await makeGuard(false).track({ auth: AUTH, ip: '203.0.113.7' });
     // Per-user, tenant-scoped — never the IP when a verified identity exists (NAT-safe, cross-tenant-safe).
     expect(key).toBe(`u:${AUTH.tenantId}:${AUTH.sub}`);
+  });
+
+  it('uses unbound:<sub> for @AllowUnbound routes where tenantId is null', async () => {
+    const key = await makeGuard(false).track({ auth: UNBOUND_AUTH, ip: '203.0.113.7' });
+    expect(key).toBe(`unbound:${UNBOUND_AUTH.sub}`);
   });
 
   it('falls back to the IP as a defensive default when auth is absent (not the pre-auth control)', async () => {
