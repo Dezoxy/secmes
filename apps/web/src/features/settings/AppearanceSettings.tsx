@@ -26,7 +26,7 @@ function FontSizePicker({
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-white">Font size</p>
-          <p className="mt-0.5 text-xs text-white/40">Level {value} of 10</p>
+          <p className="mt-0.5 text-xs text-white/60">Level {value} of 10</p>
         </div>
         <span
           className="flex h-9 min-w-12 items-center justify-end font-semibold text-white transition-colors duration-150"
@@ -50,7 +50,7 @@ function FontSizePicker({
         style={{ accentColor: accent.hex }}
       />
 
-      <div className="mt-1 flex justify-between text-[11px] font-medium uppercase tracking-[0.08em] text-white/35">
+      <div className="mt-1 flex justify-between text-[11px] font-medium uppercase tracking-[0.08em] text-white/60">
         <span>Minimum</span>
         <span>Maximum</span>
       </div>
@@ -73,7 +73,7 @@ export function AppearanceSettings({
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <p className="text-sm font-medium text-white">Accent colour</p>
-            <p className="mt-0.5 text-xs text-white/40">
+            <p className="mt-0.5 text-xs text-white/60">
               Pick a dark-mode accent that matches the current Argus contrast.
             </p>
           </div>

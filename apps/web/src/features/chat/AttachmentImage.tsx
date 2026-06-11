@@ -47,14 +47,14 @@ export function AttachmentImage({ refData, onClick }: AttachmentImageProps) {
 
   if (failed) {
     return (
-      <div className="flex h-32 w-[260px] max-w-full items-center justify-center rounded-lg bg-[#12121a] text-xs text-white/40">
+      <div className="flex h-32 w-[260px] max-w-full items-center justify-center rounded-lg bg-[#12121a] text-xs text-white/60">
         Couldn&apos;t load attachment
       </div>
     );
   }
   if (!url) {
     return (
-      <div className="flex h-32 w-[260px] max-w-full animate-pulse items-center justify-center rounded-lg bg-[#1a1a26] text-xs text-white/40">
+      <div className="flex h-32 w-[260px] max-w-full animate-pulse items-center justify-center rounded-lg bg-[#1a1a26] text-xs text-white/60">
         Decrypting…
       </div>
     );

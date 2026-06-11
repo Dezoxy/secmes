@@ -84,7 +84,7 @@ function MenuItem({
     >
       <Icon className="h-4 w-4 shrink-0" />
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {value && <span className="shrink-0 text-xs text-white/35">{value}</span>}
+      {value && <span className="shrink-0 text-xs text-white/60">{value}</span>}
     </button>
   );
 }
@@ -92,7 +92,7 @@ function MenuItem({
 function PanelRow({ title, value }: { title: string; value: ReactNode }) {
   return (
     <div className="rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3">
-      <p className="text-xs font-medium uppercase tracking-[0.08em] text-white/35">{title}</p>
+      <p className="text-xs font-medium uppercase tracking-[0.08em] text-white/60">{title}</p>
       <div className="mt-1 text-sm text-white/75">{value}</div>
     </div>
   );
@@ -235,12 +235,12 @@ export function ChatHeader({
                 {verified ? (
                   <ShieldCheck className="h-4 w-4 text-green-400" />
                 ) : (
-                  <Shield className="h-3.5 w-3.5 text-white/30 hover:text-white/60" />
+                  <Shield className="h-3.5 w-3.5 text-white/60" />
                 )}
               </IconButton>
             )}
           </div>
-          <p className={`text-xs ${isOnline ? 'text-green-400' : 'text-white/40'}`}>{statusText}</p>
+          <p className={`text-xs ${isOnline ? 'text-green-400' : 'text-white/60'}`}>{statusText}</p>
         </div>
       </div>
 
@@ -371,9 +371,9 @@ export function ChatHeader({
           <div className="flex items-center justify-between border-b border-white/5 px-5 py-4">
             <div>
               <h3 className="text-base font-semibold text-white">{panelTitle}</h3>
-              <p className="text-xs text-white/40">{displayName}</p>
+              <p className="text-xs text-white/60">{displayName}</p>
             </div>
-            <IconButton onClick={closePanel} className="text-white/45" aria-label="Close panel">
+            <IconButton onClick={closePanel} className="text-white/60" aria-label="Close panel">
               <X className="h-5 w-5" />
             </IconButton>
           </div>
@@ -404,7 +404,7 @@ export function ChatHeader({
                     />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-white">{participant.name}</p>
-                      <p className="text-xs text-white/40">
+                      <p className="text-xs text-white/60">
                         {participant.id === currentUser.id
                           ? 'You'
                           : participant.isOnline === undefined
@@ -422,7 +422,10 @@ export function ChatHeader({
             {activePanel === 'search' && (
               <div className="space-y-3">
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30" />
+                  <Search
+                    aria-hidden="true"
+                    className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30"
+                  />
                   <input
                     value={searchQuery}
                     onChange={(event) => setSearchQuery(event.target.value)}
@@ -437,13 +440,13 @@ export function ChatHeader({
                       className="rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3"
                     >
                       <p className="line-clamp-2 text-sm text-white/75">{message.content}</p>
-                      <p className="mt-1 text-xs text-white/35">
+                      <p className="mt-1 text-xs text-white/60">
                         {formatMessageTime(message.timestamp)}
                       </p>
                     </div>
                   ))}
                   {searchResults.length === 0 && (
-                    <p className="rounded-xl border border-dashed border-white/10 p-4 text-sm text-white/40">
+                    <p className="rounded-xl border border-dashed border-white/10 p-4 text-sm text-white/60">
                       No local message matches.
                     </p>
                   )}
@@ -468,14 +471,14 @@ export function ChatHeader({
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium text-white">{attachment.name}</p>
-                        <p className="text-xs text-white/40">
+                        <p className="text-xs text-white/60">
                           {attachment.type === 'image' ? 'Image' : (attachment.size ?? 'File')}
                         </p>
                       </div>
                     </div>
                   ))
                 ) : (
-                  <p className="rounded-xl border border-dashed border-white/10 p-4 text-sm text-white/40">
+                  <p className="rounded-xl border border-dashed border-white/10 p-4 text-sm text-white/60">
                     No local media or files in this conversation.
                   </p>
                 )}

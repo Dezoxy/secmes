@@ -58,7 +58,7 @@ function PassphraseStrengthMeter({ strength }: { strength: RecoveryPassphraseStr
     <div className="rounded-xl border border-white/5 bg-white/[0.025] p-3">
       <div className="mb-2 flex items-center justify-between gap-3 text-xs">
         <span className="font-medium text-white/60">Passphrase strength</span>
-        <span className="text-white/45">{strength.label}</span>
+        <span className="text-white/60">{strength.label}</span>
       </div>
       <div
         role="meter"
@@ -79,7 +79,7 @@ function PassphraseStrengthMeter({ strength }: { strength: RecoveryPassphraseStr
           />
         ))}
       </div>
-      <p className="mt-2 text-xs leading-relaxed text-white/35">{strength.hint}</p>
+      <p className="mt-2 text-xs leading-relaxed text-white/60">{strength.hint}</p>
     </div>
   );
 }
@@ -264,7 +264,7 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1.5 text-white/40 transition-colors hover:bg-white/5 hover:text-white/80"
+            className="rounded-lg p-1.5 text-white/60 transition-colors hover:bg-white/5 hover:text-white"
             aria-label="Close"
           >
             <X className="h-5 w-5" />
@@ -307,7 +307,7 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
 
       {setUp !== null && (
         <div
-          className={`mb-4 flex items-center gap-2 text-sm ${setUp ? 'text-green-400' : 'text-white/40'}`}
+          className={`mb-4 flex items-center gap-2 text-sm ${setUp ? 'text-green-400' : 'text-white/60'}`}
         >
           {setUp ? <Check className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
           {setUp ? 'Recovery is set up on this device.' : 'Recovery is not set up yet.'}
@@ -360,15 +360,15 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
           aria-expanded={importOpen}
         >
           <span className="inline-flex items-center gap-2">
-            <Upload className="h-4 w-4 text-white/45" />
+            <Upload aria-hidden="true" className="h-4 w-4 text-white/60" />
             Restore on this device
           </span>
-          <span className="text-xs text-white/35">{importOpen ? 'Hide' : 'Advanced'}</span>
+          <span className="text-xs text-white/60">{importOpen ? 'Hide' : 'Advanced'}</span>
         </button>
 
         {importOpen && (
           <div className="mt-3 space-y-3">
-            <p className="text-xs leading-relaxed text-white/40">
+            <p className="text-xs leading-relaxed text-white/60">
               Zitadel restores account access. This restores this browser&apos;s encrypted device
               state for future messages only; past message history is not recovered.
             </p>
@@ -400,7 +400,7 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
             {/* File picker — always available as fallback */}
             {serverFetchState !== 'found' && (
               <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-white/10 bg-[#1a1a26] px-4 py-3 text-sm text-white/60 transition-colors hover:border-purple-500/40">
-                <Upload className="h-4 w-4 shrink-0 text-white/40" />
+                <Upload aria-hidden="true" className="h-4 w-4 shrink-0 text-white/60" />
                 <span className="truncate">
                   {file ? file.name : 'Or choose your recovery file'}
                 </span>

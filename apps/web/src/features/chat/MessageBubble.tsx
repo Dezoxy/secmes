@@ -5,18 +5,27 @@ import type { Message, User, MessageStatus } from './seed';
 import { formatFullTime } from './seed';
 import { Avatar, IconButton, sentMessageEnterMotion } from '../ui';
 
+const STATUS_LABEL: Record<MessageStatus, string> = {
+  sending: 'Sending',
+  sent: 'Sent',
+  delivered: 'Delivered',
+  read: 'Read',
+  failed: 'Not sent',
+};
+
 function StatusIcon({ status }: { status: MessageStatus }) {
+  const label = STATUS_LABEL[status];
   switch (status) {
     case 'sending':
-      return <Check className="w-3.5 h-3.5 text-white/30" />;
+      return <Check aria-label={label} className="w-3.5 h-3.5 text-white/60" />;
     case 'sent':
-      return <Check className="w-3.5 h-3.5 text-white/40" />;
+      return <Check aria-label={label} className="w-3.5 h-3.5 text-white/60" />;
     case 'delivered':
-      return <CheckCheck className="w-3.5 h-3.5 text-white/40" />;
+      return <CheckCheck aria-label={label} className="w-3.5 h-3.5 text-white/60" />;
     case 'read':
-      return <CheckCheck className="w-3.5 h-3.5 text-purple-400" />;
+      return <CheckCheck aria-label={label} className="w-3.5 h-3.5 text-purple-400" />;
     case 'failed':
-      return <AlertCircle className="w-3.5 h-3.5 text-red-400" aria-label="Not sent" />;
+      return <AlertCircle aria-label={label} className="w-3.5 h-3.5 text-red-400" />;
   }
 }
 
@@ -123,7 +132,7 @@ export function MessageBubble({
                           {attachment.name}
                         </p>
                         {attachment.size && (
-                          <p className={`text-xs ${isOwn ? 'text-white/60' : 'text-white/40'}`}>
+                          <p className={`text-xs ${isOwn ? 'text-white/60' : 'text-white/60'}`}>
                             {attachment.size}
                           </p>
                         )}
@@ -157,7 +166,7 @@ export function MessageBubble({
               isOwn ? 'flex-row-reverse' : ''
             }`}
           >
-            <span className="text-xs text-white/30">{formatFullTime(message.timestamp)}</span>
+            <span className="text-xs text-white/60">{formatFullTime(message.timestamp)}</span>
             {isOwn && message.encrypted && (
               <span title="Ran a real MLS encrypt→decrypt in this browser (demo — not yet to a remote recipient)">
                 <Lock

@@ -117,7 +117,12 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
     <div className="border-t border-white/5 bg-[#0f0f16] p-3">
       {/* Attachment previews */}
       {attachments.length > 0 && (
-        <div className="flex gap-2 mb-3 overflow-x-auto pb-2">
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="flex gap-2 mb-3 overflow-x-auto pb-2"
+        >
           {attachments.map((file, index) => (
             <div key={index} className="relative shrink-0 group">
               {file.type.startsWith('image/') && previews[index] ? (
@@ -130,8 +135,8 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
                 </div>
               ) : (
                 <div className="w-20 h-20 rounded-lg bg-[#1a1a26] flex flex-col items-center justify-center p-2">
-                  <Paperclip className="w-5 h-5 text-white/40 mb-1" />
-                  <span className="text-xs text-white/40 truncate w-full text-center">
+                  <Paperclip aria-hidden="true" className="w-5 h-5 text-white/60 mb-1" />
+                  <span className="text-xs text-white/60 truncate w-full text-center">
                     {file.name.split('.').pop()?.toUpperCase()}
                   </span>
                 </div>

@@ -166,7 +166,10 @@ export function StartConversation({
       </div>
 
       <div className="relative mb-3">
-        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30" />
+        <Search
+          aria-hidden="true"
+          className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30"
+        />
         <input
           type="text"
           value={filter}
@@ -214,7 +217,7 @@ export function StartConversation({
               />
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-white/90">{label}</p>
-                <p className="truncate text-xs text-white/40">Pseudonymous member</p>
+                <p className="truncate text-xs text-white/60">Pseudonymous member</p>
               </div>
             </button>
           );

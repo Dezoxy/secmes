@@ -29,6 +29,7 @@
     "workbox-window": "^7.3.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
     "@playwright/test": "^1.60.0",
     "@tailwindcss/vite": "^4.2.0",
     "@types/react": "^19.2.17",

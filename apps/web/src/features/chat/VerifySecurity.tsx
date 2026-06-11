@@ -71,7 +71,7 @@ export function VerifySecurity({
           ))}
         </div>
       ) : (
-        <div className="mb-4 rounded-2xl bg-[#0f0f16] p-4 text-center text-sm text-white/40">
+        <div className="mb-4 rounded-2xl bg-[#0f0f16] p-4 text-center text-sm text-white/60">
           Computing safety number…
         </div>
       )}
@@ -105,7 +105,7 @@ export function VerifySecurity({
         </Button>
       )}
 
-      <p className="mt-4 text-xs leading-relaxed text-white/30">
+      <p className="mt-4 text-xs leading-relaxed text-white/60">
         {mode === 'live'
           ? 'Compare every digit out-of-band — in person or on a call you both recognise. If it does not match, stop: a key may have been swapped in transit. Verification resets if the device key changes.'
           : 'Demo: this number is computed for a local peer in your browser (the real out-of-band check with a remote contact lands with the live message loop). Verification resets if the device key changes.'}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 
 interface ModalProps {
   ariaLabel: string;
@@ -9,6 +9,9 @@ interface ModalProps {
   closeOnBackdrop?: boolean;
   style?: CSSProperties;
 }
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 function joinClasses(...classes: Array<string | false | undefined>): string {
   return classes.filter(Boolean).join(' ');
@@ -42,6 +45,25 @@ export function Modal({
     return () => document.removeEventListener('keydown', closeOnEscape);
   }, [onClose]);
 
+  const trapFocus = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Tab' || !dialogRef.current) return;
+    const nodes = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE));
+    if (nodes.length === 0) return;
+    const first = nodes[0]!;
+    const last = nodes[nodes.length - 1]!;
+    if (event.shiftKey) {
+      if (document.activeElement === first || document.activeElement === dialogRef.current) {
+        event.preventDefault();
+        last.focus();
+      }
+    } else {
+      if (document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+  }, []);
+
   return (
     <div
       ref={dialogRef}
@@ -50,6 +72,7 @@ export function Modal({
       aria-modal="true"
       aria-label={ariaLabel}
       tabIndex={-1}
+      onKeyDown={trapFocus}
       onClick={(event) => {
         if (closeOnBackdrop && event.target === event.currentTarget) onClose();
       }}
