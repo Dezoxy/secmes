@@ -208,3 +208,42 @@ export type StoreBackupRequest = z.infer<typeof StoreBackupRequestSchema>;
 // client-side, so bounding it stops a misbehaving/compromised server from forcing an oversized parse + KDF.
 export const BackupResponseSchema = z.object({ backup: z.string().min(1).max(65536) });
 export type BackupResponse = z.infer<typeof BackupResponseSchema>;
+
+// Delivery/read receipts (checkpoint 31). Metadata only — a member id + a "through message id" + when.
+// Mirrors the server-local RecordReceiptSchema in apps/api messaging.schemas.ts (same de-facto duplication
+// as SendMessage above; the server doesn't import this package).
+export const ReceiptStatusSchema = z.enum(['delivered', 'read']);
+export type ReceiptStatus = z.infer<typeof ReceiptStatusSchema>;
+
+export const RecordReceiptRequestSchema = z
+  .object({
+    status: ReceiptStatusSchema,
+    // The message the caller has received/read THROUGH — all earlier messages implied.
+    throughMessageId: z.string().uuid(),
+  })
+  .strict();
+export type RecordReceiptRequest = z.infer<typeof RecordReceiptRequestSchema>;
+
+// One member's delivered/read high-water-marks (GET /conversations/:id/receipts). Watermarks are null
+// until the member first acks. Matches ConversationReceiptDto in apps/api receipts.controller.ts.
+export const ConversationReceiptSchema = z.object({
+  userId: z.string().uuid(),
+  deliveredThroughMessageId: z.string().uuid().nullable(),
+  deliveredAt: z.string().datetime().nullable(),
+  readThroughMessageId: z.string().uuid().nullable(),
+  readAt: z.string().datetime().nullable(),
+});
+export type ConversationReceipt = z.infer<typeof ConversationReceiptSchema>;
+
+export const ConversationReceiptsSchema = z.array(ConversationReceiptSchema);
+export type ConversationReceipts = z.infer<typeof ConversationReceiptsSchema>;
+
+// The `receipt` WS frame the gateway pushes to a conversation room when a member advances a watermark
+// (checkpoint 31 live push). Metadata only — never content. `userId` is the member who acked.
+export const ReceiptEventSchema = z.object({
+  conversationId: z.string().uuid(),
+  userId: z.string().uuid(),
+  status: ReceiptStatusSchema,
+  throughMessageId: z.string().uuid(),
+});
+export type ReceiptEvent = z.infer<typeof ReceiptEventSchema>;

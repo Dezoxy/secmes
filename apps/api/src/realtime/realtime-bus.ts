@@ -48,6 +48,31 @@ export const WelcomeCreatedEventSchema = z.object({
 });
 
 /**
+ * A member advanced their delivered/read HIGH-WATER-MARK in a conversation (checkpoint 31). Fanned out to
+ * the conversation room so the OTHER members' connected sockets flip their delivery ticks live (without it,
+ * a sender only learns the peer received/read on their next refetch). METADATA ONLY: the member id + a
+ * "through message id" + the status — never content or keys (invariant #2).
+ */
+export interface ReceiptAdvancedEvent {
+  tenantId: string;
+  conversationId: string;
+  /** The member who advanced their watermark (the VERIFIED caller of POST …/receipts). */
+  userId: string;
+  status: 'delivered' | 'read';
+  /** The message the member has received/read THROUGH (earlier implied). */
+  throughMessageId: string;
+}
+
+// Validates a ReceiptAdvancedEvent decoded from the Redis backplane (same defensive posture as the others).
+export const ReceiptAdvancedEventSchema = z.object({
+  tenantId: z.string().min(1),
+  conversationId: z.string().uuid(),
+  userId: z.string().uuid(),
+  status: z.enum(['delivered', 'read']),
+  throughMessageId: z.string().uuid(),
+});
+
+/**
  * Realtime fan-out bus — decouples the HTTP send path (publisher) from the WebSocket gateway
  * (subscriber). Abstract so it can be in-process (single-pod / dev / tests) or Redis-backed for
  * cross-pod delivery (checkpoint 29). Only the opaque ciphertext envelope ever crosses it.
@@ -57,4 +82,6 @@ export abstract class RealtimeBus {
   abstract onMessageCreated(listener: (event: MessageCreatedEvent) => void): void;
   abstract emitWelcomeCreated(event: WelcomeCreatedEvent): void;
   abstract onWelcomeCreated(listener: (event: WelcomeCreatedEvent) => void): void;
+  abstract emitReceiptAdvanced(event: ReceiptAdvancedEvent): void;
+  abstract onReceiptAdvanced(listener: (event: ReceiptAdvancedEvent) => void): void;
 }

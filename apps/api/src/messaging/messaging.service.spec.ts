@@ -394,6 +394,26 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it('recordReceipt emits a post-commit receipt advance — INTERNAL userId + ids/status only', async () => {
+    const bus = new InProcessRealtimeBus();
+    const spy = vi.spyOn(bus, 'emitReceiptAdvanced');
+    const svc2 = new MessagingService(bus);
+    const conv = await newConversation();
+    const m1 = (await svc2.sendMessage(aliceAuth, conv, msg())).messageId;
+
+    await svc2.recordReceipt(bobAuth, conv, { status: 'read', throughMessageId: m1 });
+    expect(spy).toHaveBeenCalledTimes(1);
+    // userId is the INTERNAL users.id (bobId) — NOT bobAuth.sub (the external subject) — so it lines up with
+    // GET /receipts and the client's own identity. Metadata only; no content crosses the bus.
+    expect(spy.mock.calls[0]?.[0]).toEqual({
+      tenantId: tenantA,
+      conversationId: conv,
+      userId: bobId,
+      status: 'read',
+      throughMessageId: m1,
+    });
+  });
+
   // ── MLS Welcome delivery (live message loop, welcome-delivery.md) ─────────────────────────────────
   const wel = (
     over: Partial<{

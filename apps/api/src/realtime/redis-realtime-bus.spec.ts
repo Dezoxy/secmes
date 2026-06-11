@@ -1,8 +1,8 @@
 import { Redis } from 'ioredis';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
-import { CHANNEL, RedisRealtimeBus } from './redis-realtime-bus.js';
-import type { MessageCreatedEvent } from './realtime-bus.js';
+import { CHANNEL, RECEIPT_CHANNEL, RedisRealtimeBus } from './redis-realtime-bus.js';
+import type { MessageCreatedEvent, ReceiptAdvancedEvent } from './realtime-bus.js';
 
 // Integration — proves the Redis backplane fans a published event out to a subscriber on ANOTHER bus
 // instance (i.e. another pod). Needs a live Redis; auto-skips without REDIS_URL.
@@ -48,6 +48,47 @@ describe.skipIf(!REDIS_URL)('RedisRealtimeBus — cross-pod fan-out', () => {
     podA.emitMessageCreated(sample);
     await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 2000, interval: 20 });
     expect(received[0]).toEqual(sample); // delivered to the OTHER pod, verbatim
+  });
+
+  it('a receipt advance published on one bus reaches a subscriber on another (cross-pod)', async () => {
+    const podA = mkBus();
+    const podB = mkBus();
+    await Promise.all([podA.ready, podB.ready]);
+    const received: ReceiptAdvancedEvent[] = [];
+    podB.onReceiptAdvanced((e) => received.push(e));
+
+    const receipt: ReceiptAdvancedEvent = {
+      tenantId: u(0),
+      conversationId: u(1),
+      userId: u(2),
+      status: 'read',
+      throughMessageId: u(3),
+    };
+    podA.emitReceiptAdvanced(receipt);
+    await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 2000, interval: 20 });
+    expect(received[0]).toEqual(receipt);
+  });
+
+  it('ignores a malformed receipt payload (defensive parse) on the receipt channel', async () => {
+    const pod = mkBus();
+    await pod.ready;
+    const received: ReceiptAdvancedEvent[] = [];
+    pod.onReceiptAdvanced((e) => received.push(e));
+
+    const good: ReceiptAdvancedEvent = {
+      tenantId: u(0),
+      conversationId: u(1),
+      userId: u(2),
+      status: 'delivered',
+      throughMessageId: u(3),
+    };
+    raw = new Redis(REDIS_URL as string, { maxRetriesPerRequest: null });
+    await raw.publish(RECEIPT_CHANNEL, 'not-json');
+    await raw.publish(RECEIPT_CHANNEL, JSON.stringify({ status: 'bogus' })); // wrong shape/enum
+    await raw.publish(RECEIPT_CHANNEL, JSON.stringify(good));
+
+    await vi.waitFor(() => expect(received).toHaveLength(1), { timeout: 2000, interval: 20 });
+    expect(received[0]).toEqual(good);
   });
 
   it('ignores a malformed payload but still delivers a valid one', async () => {

@@ -15,6 +15,18 @@ export interface IncomingMessage {
   message: FetchedMessage;
 }
 
+/**
+ * A delivery/read watermark advance pushed by the gateway (checkpoint 31). Metadata only: which member
+ * (`userId`) acked, through which message, and whether they delivered or read. Lets a sender flip its
+ * ticks live. Never carries content.
+ */
+export interface IncomingReceipt {
+  conversationId: string;
+  userId: string;
+  status: 'delivered' | 'read';
+  throughMessageId: string;
+}
+
 export type MessageSocketStatus = 'connecting' | 'connected' | 'reconnecting' | 'offline';
 
 export interface MessageSocketOptions {
@@ -24,6 +36,8 @@ export interface MessageSocketOptions {
   token: () => Promise<string | null>;
   /** A ciphertext envelope was pushed for a subscribed conversation. */
   onMessage: (msg: IncomingMessage) => void;
+  /** A member advanced their delivered/read watermark in a subscribed conversation (metadata only). */
+  onReceipt?: (receipt: IncomingReceipt) => void;
   /** Safe connection state for UI banners. Never includes URLs, tokens, payloads, or error objects. */
   onStatus?: (status: MessageSocketStatus) => void;
   /** (Re)connected + authenticated + re-subscribed. A connection-status signal (catch-up runs per-room). */
@@ -117,6 +131,25 @@ export function createMessageSocket(opts: MessageSocketOptions): MessageSocket {
       const data = frame.data as Partial<IncomingMessage> | null;
       if (data && typeof data.conversationId === 'string' && data.message) {
         opts.onMessage({ conversationId: data.conversationId, message: data.message });
+      }
+      return;
+    }
+    if (frame.event === 'receipt') {
+      if (!authed) return; // same defence in depth as 'message' — never act on a pre-auth frame
+      const d = frame.data as Partial<IncomingReceipt> | null;
+      if (
+        d &&
+        typeof d.conversationId === 'string' &&
+        typeof d.userId === 'string' &&
+        (d.status === 'delivered' || d.status === 'read') &&
+        typeof d.throughMessageId === 'string'
+      ) {
+        opts.onReceipt?.({
+          conversationId: d.conversationId,
+          userId: d.userId,
+          status: d.status,
+          throughMessageId: d.throughMessageId,
+        });
       }
       return;
     }

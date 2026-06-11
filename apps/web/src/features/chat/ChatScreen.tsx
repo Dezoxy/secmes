@@ -24,6 +24,7 @@ import {
 import { useChatState } from './useChatState';
 import { useLiveConversations } from './useLiveConversations';
 import { useMessageSending } from './useMessageSending';
+import { useReceiptSending } from './useReceiptSending';
 import { loadArgusProfile, saveArgusProfile } from '../settings/argus-profile';
 import type { AnonymousProfile } from '../settings/SettingsPanel';
 import {
@@ -209,6 +210,8 @@ export default function ChatScreen() {
     appendHistory,
     setConversations,
   });
+
+  useReceiptSending({ conversations, liveIds, selectedId, selectedIsLive });
 
   useEffect(() => {
     setMounted(true);

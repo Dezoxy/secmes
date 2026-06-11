@@ -4,6 +4,7 @@
 import {
   BackupResponseSchema,
   ClaimedKeyPackageSchema,
+  ConversationReceiptsSchema,
   CreateConversationRequestSchema,
   CreatedConversationSchema,
   CreateDownloadGrantRequestSchema,
@@ -16,6 +17,7 @@ import {
   PendingWelcomesSchema,
   PublishKeyPackagesRequestSchema,
   PublishKeyPackagesResponseSchema,
+  RecordReceiptRequestSchema,
   RevokeKeyPackagesRequestSchema,
   RevokeKeyPackagesResponseSchema,
   SendConversationMessageRequestSchema,
@@ -24,7 +26,9 @@ import {
   UploadGrantSchema,
   WelcomeMaterialSchema,
   type ClaimedKeyPackage as ContractClaimedKeyPackage,
+  type ConversationReceipt as ContractConversationReceipt,
   type CreatedConversation,
+  type ReceiptStatus,
   type DeliverWelcomeRequest,
   type FetchedMessage as ContractFetchedMessage,
   type Me as ContractMe,
@@ -374,4 +378,43 @@ export async function fetchBackup(): Promise<string | null> {
     return unwrapApiResult(result); // throws a classified message (never reached for 404)
   }
   return result.data.backup;
+}
+
+// --- Delivery receipts (POST/GET /conversations/:id/receipts) ---------------------------------------
+// Metadata only — a member id + a "through message id" + when. The server stores per-member high-water-
+// marks and (checkpoint 31) fans an advance out over the `/ws` gateway so a sender's ticks flip live.
+
+/** One member's delivered/read high-water-marks in a conversation. Watermarks are null until first ack. */
+export type ConversationReceipt = ContractConversationReceipt;
+
+/**
+ * Advance the caller's OWN delivered/read watermark in a conversation (POST …/receipts → 204). The server
+ * is monotonic (never rolls a watermark back) and authz is member-only. Throws on non-OK.
+ */
+export async function recordReceipt(
+  conversationId: string,
+  status: ReceiptStatus,
+  throughMessageId: string,
+): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: `/conversations/${encodeURIComponent(conversationId)}/receipts`,
+      method: 'POST',
+      body: { status, throughMessageId },
+      requestSchema: RecordReceiptRequestSchema,
+    }),
+  );
+}
+
+/**
+ * Fetch per-member delivered/read watermarks for a conversation (GET …/receipts). Used to SEED a sender's
+ * tick state on opening a conversation (the live `receipt` WS frame refines it afterward). Throws on non-OK.
+ */
+export async function fetchReceipts(conversationId: string): Promise<ConversationReceipt[]> {
+  return unwrapApiResult(
+    await requestJson({
+      path: `/conversations/${encodeURIComponent(conversationId)}/receipts`,
+      responseSchema: ConversationReceiptsSchema,
+    }),
+  );
 }

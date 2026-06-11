@@ -1,6 +1,11 @@
 import { EventEmitter } from 'node:events';
 
-import { RealtimeBus, type MessageCreatedEvent, type WelcomeCreatedEvent } from './realtime-bus.js';
+import {
+  RealtimeBus,
+  type MessageCreatedEvent,
+  type ReceiptAdvancedEvent,
+  type WelcomeCreatedEvent,
+} from './realtime-bus.js';
 
 /**
  * Single-pod (and dev/test) bus — direct in-process delivery via a Node EventEmitter, no external
@@ -23,5 +28,13 @@ export class InProcessRealtimeBus extends RealtimeBus {
 
   onWelcomeCreated(listener: (event: WelcomeCreatedEvent) => void): void {
     this.emitter.on('welcome.created', listener);
+  }
+
+  emitReceiptAdvanced(event: ReceiptAdvancedEvent): void {
+    this.emitter.emit('receipt.advanced', event);
+  }
+
+  onReceiptAdvanced(listener: (event: ReceiptAdvancedEvent) => void): void {
+    this.emitter.on('receipt.advanced', listener);
   }
 }
