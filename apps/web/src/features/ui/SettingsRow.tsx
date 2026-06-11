@@ -47,7 +47,7 @@ export function SettingsRow(props: SettingsRowProps) {
     <>
       <div>
         <p className="text-sm font-medium text-white">{props.title}</p>
-        <p className="mt-0.5 text-xs text-white/40">{props.value}</p>
+        <p className="mt-0.5 text-xs text-white/60">{props.value}</p>
       </div>
       <Trailing {...props} />
     </>

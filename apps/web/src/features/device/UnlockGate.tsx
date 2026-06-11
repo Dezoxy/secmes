@@ -17,7 +17,7 @@ const INPUT =
   'w-full rounded-xl border border-white/5 bg-[#1a1a26] px-4 py-3 text-sm text-white placeholder-white/30 outline-none transition-colors focus:border-purple-500/50 disabled:opacity-50';
 const PRIMARY =
   'flex w-full items-center justify-center gap-2 rounded-xl bg-purple-500 py-3 text-sm font-medium text-white shadow-lg shadow-purple-500/25 transition-all hover:bg-purple-400 disabled:cursor-not-allowed disabled:opacity-40';
-const LINK = 'w-full text-center text-xs text-white/40 transition-colors hover:text-white/70';
+const LINK = 'w-full text-center text-xs text-white/60 transition-colors hover:text-white/90';
 
 export function UnlockGate({ children }: { children: ReactNode }): ReactNode {
   const { status, error, unlock, restore, resetForNewAccount } = useDevice();
@@ -52,7 +52,7 @@ export function UnlockGate({ children }: { children: ReactNode }): ReactNode {
             {icon}
           </div>
           <h1 className="text-lg font-semibold text-white">{title}</h1>
-          <p className="mt-1 text-sm text-white/40">{subtitle}</p>
+          <p className="mt-1 text-sm text-white/60">{subtitle}</p>
         </div>
         {body}
       </div>
@@ -66,7 +66,7 @@ export function UnlockGate({ children }: { children: ReactNode }): ReactNode {
       'Upload your recovery file and enter its passphrase to restore this account on this device.',
       <form onSubmit={(e) => void submitRestore(e)} className="space-y-3">
         <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-white/10 bg-[#1a1a26] px-4 py-3 text-sm text-white/60 transition-colors hover:border-purple-500/40">
-          <Upload className="h-4 w-4 shrink-0 text-white/40" />
+          <Upload aria-hidden="true" className="h-4 w-4 shrink-0 text-white/60" />
           <span className="truncate">{file ? file.name : 'Choose your recovery file…'}</span>
           <input
             type="file"
@@ -79,6 +79,7 @@ export function UnlockGate({ children }: { children: ReactNode }): ReactNode {
         <input
           type="password"
           autoComplete="off"
+          aria-label="Recovery passphrase"
           value={passphrase}
           onChange={(e) => setPassphrase(e.target.value)}
           placeholder="Recovery passphrase"
@@ -142,6 +143,7 @@ export function UnlockGate({ children }: { children: ReactNode }): ReactNode {
         type="password"
         autoComplete={creating ? 'new-password' : 'current-password'}
         autoFocus
+        aria-label="Passphrase"
         value={passphrase}
         onChange={(e) => setPassphrase(e.target.value)}
         placeholder="Passphrase"
@@ -152,6 +154,7 @@ export function UnlockGate({ children }: { children: ReactNode }): ReactNode {
         <input
           type="password"
           autoComplete="new-password"
+          aria-label="Confirm passphrase"
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
           placeholder="Confirm passphrase"

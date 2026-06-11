@@ -133,7 +133,7 @@ export function AboutSettings() {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between gap-4 rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3">
         <span className="text-sm font-medium text-white">Backend status</span>
-        <span className={`text-sm font-medium ${online ? 'text-green-400' : 'text-white/45'}`}>
+        <span className={`text-sm font-medium ${online ? 'text-green-400' : 'text-white/60'}`}>
           {statusLabel(backendStatus)}
         </span>
       </div>
@@ -142,14 +142,14 @@ export function AboutSettings() {
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-sm font-medium text-white">App update</p>
-            <p className="mt-0.5 text-xs leading-relaxed text-white/40">
+            <p className="mt-0.5 text-xs leading-relaxed text-white/60">
               {updateReady
                 ? 'A new app shell is ready. Restart when your current work is saved.'
                 : 'Checks the installed PWA shell for a newer frontend release.'}
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <span className="hidden text-xs font-medium text-white/35 sm:inline">
+            <span className="hidden text-xs font-medium text-white/60 sm:inline">
               {updateStatusLabel(updateStatus)}
             </span>
             <button
@@ -163,7 +163,7 @@ export function AboutSettings() {
             </button>
           </div>
         </div>
-        <p className="mt-2 text-xs leading-relaxed text-white/30">
+        <p className="mt-2 text-xs leading-relaxed text-white/60">
           Android, iOS, iPadOS, macOS, and desktop browsers can install Argus as a PWA when served
           over HTTPS. Some iOS metadata changes can still require removing and adding it again.
         </p>
@@ -182,9 +182,9 @@ export function AboutSettings() {
               <article key={`${note.version}-${note.title}`} className="space-y-2">
                 <div className="flex items-baseline justify-between gap-3">
                   <p className="text-xs font-medium text-white/65">{note.version}</p>
-                  <p className="truncate text-xs text-white/35">{note.title}</p>
+                  <p className="truncate text-xs text-white/60">{note.title}</p>
                 </div>
-                <ul className="space-y-1 pl-4 text-xs leading-5 text-white/45">
+                <ul className="space-y-1 pl-4 text-xs leading-5 text-white/60">
                   {note.items.map((item) => (
                     <li key={item} className="list-disc">
                       {item}

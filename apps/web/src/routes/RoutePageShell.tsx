@@ -80,7 +80,7 @@ export function RoutePageShell({
                   <Icon className="h-6 w-6" />
                 </span>
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/35">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-white/60">
                     {eyebrow}
                   </p>
                   <h1 className="mt-1 text-2xl font-semibold tracking-normal text-white sm:text-3xl">

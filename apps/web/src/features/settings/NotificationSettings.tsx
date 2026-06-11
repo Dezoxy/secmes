@@ -88,7 +88,7 @@ export function NotificationSettings({ deviceId }: NotificationSettingsProps) {
                 {busy ? 'Enabling…' : 'Enable notifications'}
               </Button>
               {!VAPID_KEY && (
-                <span className="text-xs text-white/40">
+                <span className="text-xs text-white/60">
                   Push is not configured on this server.
                 </span>
               )}

@@ -34,7 +34,7 @@ function variantClass(variant: NonNullable<StateBlockProps['variant']>): string 
 function iconClass(variant: NonNullable<StateBlockProps['variant']>): string {
   if (variant === 'error') return 'text-rose-300';
   if (variant === 'offline') return 'text-amber-300';
-  if (variant === 'empty') return 'text-white/35';
+  if (variant === 'empty') return 'text-white/60';
   return 'text-purple-300';
 }
 
@@ -71,7 +71,7 @@ export function StateBlock({
         />
         {title}
       </div>
-      {children && <div className="text-sm leading-6 text-white/45">{children}</div>}
+      {children && <div className="text-sm leading-6 text-white/60">{children}</div>}
     </div>
   );
 }
@@ -139,7 +139,7 @@ export function ErrorState({
     >
       <p>{safe.message}</p>
       {metadata && (
-        <p className="mt-1 text-xs uppercase tracking-[0.08em] text-white/30">{metadata}</p>
+        <p className="mt-1 text-xs uppercase tracking-[0.08em] text-white/60">{metadata}</p>
       )}
     </StateBlock>
   );

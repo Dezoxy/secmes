@@ -160,7 +160,7 @@ export function ConversationList({
             <p className="text-white/55 text-xs truncate">Online</p>
           </div>
           <div className="flex items-center gap-1">
-            <span className="p-1.5 rounded-lg text-white/40 group-hover:text-white/80 transition-all duration-300">
+            <span className="p-1.5 rounded-lg text-white/60 group-hover:text-white transition-all duration-300">
               <Settings className="w-4 h-4" />
             </span>
           </div>
@@ -196,7 +196,10 @@ export function ConversationList({
       >
         <div className="px-4 pb-3 pt-2">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30" />
+            <Search
+              aria-hidden="true"
+              className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30"
+            />
             <input
               ref={searchInputRef}
               type="text"

@@ -27,8 +27,9 @@ function assertSafeEndpoint(endpoint: string): void {
     throw new TypeError('endpoint is not a valid URL');
   }
   if (url.protocol !== 'https:') throw new TypeError('endpoint must be https');
-  const host = url.hostname;
-  if (host === 'localhost' || PRIVATE_IP_RE.test(host)) {
+  // Strip IPv6 bracket notation: URL.hostname returns "[::1]" not "::1" for IPv6 literals.
+  const host = url.hostname.replace(/^\[(.+)\]$/, '$1');
+  if (host === 'localhost' || host === '0.0.0.0' || PRIVATE_IP_RE.test(host)) {
     throw new TypeError('endpoint targets a private or reserved address');
   }
 }
@@ -187,10 +188,11 @@ export class PushService {
               await webpush.sendNotification(
                 { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
                 payload,
+                { urgency: 'low', TTL: 3600 },
               );
             } catch (err: unknown) {
               const status = (err as { statusCode?: number }).statusCode;
-              if (status === 410) staleIds.push(sub.id);
+              if (status === 410 || status === 404) staleIds.push(sub.id);
               // Log only the row id — never the endpoint, p256dh, or auth (invariant #2).
               this.logger.warn(
                 `push: send failed for subscription ${sub.id}, status ${status ?? 'unknown'}`,

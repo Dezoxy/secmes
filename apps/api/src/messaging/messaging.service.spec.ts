@@ -11,9 +11,9 @@ import { getDb } from '../db/index.js';
 import { InProcessRealtimeBus } from '../realtime/in-process-realtime-bus.js';
 import { PushService } from '../push/push.service.js';
 import { MessagingService } from './messaging.service.js';
+import type { SendMessage } from './messaging.schemas.js';
 
 const noopPush = new PushService({ publicKey: '', privateKey: '', subject: '', configured: false });
-import type { SendMessage } from './messaging.schemas.js';
 
 // Integration (roadmap 26) — needs a live Postgres with migrations applied. Auto-skips without DATABASE_URL.
 const DB_URL = process.env.DATABASE_URL;

@@ -338,7 +338,10 @@ export function SettingsPanel({
             >
               <Icon className="h-4 w-4" />
               <span>{label}</span>
-              <ChevronRight className="ml-auto h-4 w-4 text-white/25 sm:hidden" />
+              <ChevronRight
+                aria-hidden="true"
+                className="ml-auto h-4 w-4 text-white/60 sm:hidden"
+              />
             </button>
           ))}
         </nav>
@@ -377,7 +380,7 @@ export function SettingsPanel({
             </div>
             <div className="min-w-0">
               <h3 className="text-xl font-semibold text-white">{activeSection.label}</h3>
-              <p className="text-sm text-white/40">Anonymous account settings</p>
+              <p className="text-sm text-white/60">Anonymous account settings</p>
             </div>
             <IconButton
               onClick={closeSettings}

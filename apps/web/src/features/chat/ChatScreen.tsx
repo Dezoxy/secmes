@@ -4,6 +4,7 @@ import type { UserSummary } from '../../lib/api';
 import { ConversationManager, type ConversationSession } from '../../lib/conversations';
 import type { MessagingDeps } from '../../lib/messaging';
 import { getMlsSession } from '../../lib/mls';
+import { prefersReducedMotion } from '../../lib/pref';
 import { useAuth } from '../auth/AuthContext';
 import { ArgusAppIcon } from '../brand/ArgusAppIcon';
 import { useDevice } from '../device/DeviceContext';
@@ -52,12 +53,6 @@ const DEMO_PROFILE_SUBJECT = 'demo-local';
 const SettingsPanel = lazy(() =>
   import('../settings/SettingsPanel').then((module) => ({ default: module.SettingsPanel })),
 );
-
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  );
-}
 
 /**
  * Chat experience, ported from the reworked design (`~/Downloads`) into the Vite PWA.
@@ -459,7 +454,7 @@ export default function ChatScreen() {
                 <MessageCircle className="w-10 h-10 text-purple-400" />
               </div>
               <h2 className="text-xl font-semibold text-white mb-2">Welcome to Argus</h2>
-              <p className="text-white/40 max-w-sm">
+              <p className="text-white/60 max-w-sm">
                 Select a conversation from the sidebar to start messaging
               </p>
             </div>

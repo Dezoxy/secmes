@@ -2,6 +2,7 @@ import { Suspense, lazy, useState, useEffect, useCallback } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Fingerprint, RefreshCw } from 'lucide-react';
 import { useAuth } from './features/auth/AuthContext';
+import { prefersReducedMotion } from './lib/pref';
 import { ArgusAppIcon } from './features/brand/ArgusAppIcon';
 import { usePwaUpdate } from './features/pwa/PwaUpdateContext';
 import AuthCallbackRoute from './routes/AuthCallbackRoute';
@@ -38,7 +39,7 @@ function LandingRoute() {
   }, []);
 
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || prefersReducedMotion()) return;
     const interval = setInterval(() => {
       setActiveSlide((prev) => (prev + 1) % slides.length);
     }, 5000);
@@ -147,7 +148,7 @@ function LandingRoute() {
               Welcome to Argus
             </h1>
             <p
-              className={`mx-auto mb-8 max-w-[18rem] text-base leading-relaxed text-white/40 transition-all duration-500 delay-[350ms] ${
+              className={`mx-auto mb-8 max-w-[18rem] text-base leading-relaxed text-white/60 transition-all duration-500 delay-[350ms] ${
                 mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
               }`}
             >
@@ -169,24 +170,18 @@ function LandingRoute() {
             </div>
 
             <p
-              className={`mt-8 text-center text-xs text-white/30 transition-all duration-500 delay-[600ms] ${
+              className={`mt-8 text-center text-xs text-white/60 transition-all duration-500 delay-[600ms] ${
                 mounted ? 'opacity-100' : 'opacity-0'
               }`}
             >
               By continuing, you agree to our{' '}
-              <a
-                href="#"
-                className="text-purple-400 underline underline-offset-2 transition-colors duration-300 hover:text-purple-300"
-              >
+              <span aria-disabled="true" className="text-purple-400 underline underline-offset-2">
                 Terms of Service
-              </a>{' '}
+              </span>{' '}
               and{' '}
-              <a
-                href="#"
-                className="text-purple-400 underline underline-offset-2 transition-colors duration-300 hover:text-purple-300"
-              >
+              <span aria-disabled="true" className="text-purple-400 underline underline-offset-2">
                 Privacy Policy
-              </a>
+              </span>
             </p>
           </div>
         </div>
