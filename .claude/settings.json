@@ -3,6 +3,7 @@
   "model": "opusplan",
   "effortLevel": "high",
   "permissions": {
+    "defaultMode": "plan",
     "allow": [
       "Read",
       "Grep",
