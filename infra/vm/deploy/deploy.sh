@@ -54,10 +54,16 @@ install -m 0640 -o root -g argus "$REPO_ROOT/compose.prod.yaml" "$COMPOSE"
 # at ./infra/vm/observability (relative to $COMPOSE in $APP_DIR). World-readable (0755 dirs / 0644 files) so
 # the non-root prometheus/grafana container users can read it; it contains NO secrets (Grafana's admin pw is a
 # Key Vault credential file, not in this tree). Refresh from the staged repo each deploy.
-rm -rf "$APP_DIR/infra/vm/observability"
+rm -rf "$APP_DIR/infra/vm/observability" "$APP_DIR/infra/vm/glitchtip"
 install -d -m 0755 "$APP_DIR/infra/vm"
 cp -a "$REPO_ROOT/infra/vm/observability" "$APP_DIR/infra/vm/observability"
 chmod -R a+rX "$APP_DIR/infra/vm/observability"
+# GlitchTip entrypoint wrapper — bind-mounted read-only into the glitchtip + glitchtip-worker containers.
+# Contains NO secrets (reads them from Docker-secret files at runtime); world-executable so the container
+# user can exec it regardless of uid.
+install -d -m 0755 "$APP_DIR/infra/vm/glitchtip"
+install -m 0755 "$REPO_ROOT/infra/vm/glitchtip/docker-entrypoint.sh" "$APP_DIR/infra/vm/glitchtip/docker-entrypoint.sh"
+chmod a+rx "$APP_DIR/infra/vm/glitchtip/docker-entrypoint.sh"
 install -m 0755 "$REPO_ROOT/infra/vm/secrets/fetch-keyvault-secrets.sh" "$APP_DIR/secrets/fetch-keyvault-secrets.sh"
 install -m 0644 "$REPO_ROOT/infra/vm/secrets/argus-secrets.service" /etc/systemd/system/argus-secrets.service
 # Point the unit at our fetch script + the real vault name (the repo ships a placeholder).
@@ -148,6 +154,27 @@ chmod 0444 "$SECRETS_DIR/redis.conf" "$SECRETS_DIR/redis_url"
 _redispw=""
 _redis_conf=""
 
+# --- 3c. GlitchTip DATABASE_URL — derived from glitchtip_db_password (same pattern as redis_url above).
+#         The URL is NEVER stored in Key Vault directly; only the password is. This keeps the single source
+#         of truth in Key Vault and lets us change the service hostname without a KV rotation. ---
+[ -s "$SECRETS_DIR/glitchtip_db_password" ] || {
+  log "FATAL: missing/empty runtime secret file: glitchtip_db_password"
+  exit 1
+}
+_gtpw="$(cat "$SECRETS_DIR/glitchtip_db_password")"
+# Enforce URL-safe characters: the password is embedded raw into the postgresql:// DSN. Special chars
+# (@, :, /, #, ?, etc.) split the userinfo / host / path segments and produce a silently wrong DSN that
+# dj-database-url misparses. Reject anything outside the URL-unreserved set — same rule as redis_password.
+case "$_gtpw" in
+*[!A-Za-z0-9._~-]*)
+  log "FATAL: argus-glitchtip-db-password must be URL-safe (A-Za-z0-9._~- only — e.g. openssl rand -hex 32)"
+  exit 1
+  ;;
+esac
+printf 'postgresql://glitchtip:%s@glitchtip-db:5432/glitchtip' "$_gtpw" >"$SECRETS_DIR/glitchtip_database_url"
+chmod 0444 "$SECRETS_DIR/glitchtip_database_url"
+_gtpw=""
+
 # --- 4. Bring up data services first; wait for Postgres to be healthy before migrating. (redis comes up
 #        authenticated — its redis.conf + redis_url credential files were generated in step 3b above; the
 #        password is never passed via env.) ---
@@ -165,6 +192,9 @@ if [ "${REDIS_CONF_CHANGED:-1}" = 1 ]; then
 else
   docker compose -f "$COMPOSE" up -d --no-deps redis
 fi
+# GlitchTip gets its own dedicated Postgres cluster — start it alongside the app DB (both are cold-start
+# idempotent). glitchtip-db is smaller (512m) and independent of the app schema / migrations.
+docker compose -f "$COMPOSE" up -d --no-deps glitchtip-db
 pg_cid="$(docker compose -f "$COMPOSE" ps -q postgres)"
 for _ in $(seq 1 60); do
   [ "$(docker inspect -f '{{.State.Health.Status}}' "$pg_cid" 2>/dev/null)" = "healthy" ] && break
@@ -172,6 +202,16 @@ for _ in $(seq 1 60); do
 done
 [ "$(docker inspect -f '{{.State.Health.Status}}' "$pg_cid" 2>/dev/null)" = "healthy" ] || {
   log "FATAL: Postgres did not become healthy"
+  exit 1
+}
+# Wait for glitchtip-db separately (independent health; don't block the app-DB wait path).
+gt_cid="$(docker compose -f "$COMPOSE" ps -q glitchtip-db)"
+for _ in $(seq 1 60); do
+  [ "$(docker inspect -f '{{.State.Health.Status}}' "$gt_cid" 2>/dev/null)" = "healthy" ] && break
+  sleep 2
+done
+[ "$(docker inspect -f '{{.State.Health.Status}}' "$gt_cid" 2>/dev/null)" = "healthy" ] || {
+  log "FATAL: glitchtip-db did not become healthy"
   exit 1
 }
 
@@ -285,7 +325,7 @@ wait_running() { # $1 = compose service without a healthcheck
     return 1
   }
 }
-log "waiting for the rollout to become healthy (api, caddy, zitadel-db, zitadel, zitadel-login) + the tunnel"
+log "waiting for the rollout to become healthy (api, caddy, zitadel-db, zitadel, zitadel-login, glitchtip) + the tunnel"
 wait_healthy api
 wait_healthy caddy
 wait_running cloudflared
@@ -314,6 +354,12 @@ wait_running grafana
 # on running + not-crash-looping (catches a bad config mount / missing log dir / image pull).
 wait_running loki
 wait_running alloy
+# Error tracking (checkpoint 48): glitchtip has a healthcheck (wget /api/0/version/) that
+# only passes after migrations complete + gunicorn is serving — gate on HEALTHY to catch a
+# bad SECRET_KEY, migration failure, or DB connection error at deploy time.
+# glitchtip-worker has no healthcheck; gate on running + not-crash-looping.
+wait_healthy glitchtip 90
+wait_running glitchtip-worker
 
 # --- 7. Tidy up: drop dangling images (the GHCR login is cleared by the EXIT trap). ---
 docker image prune -f >/dev/null 2>&1 || true
