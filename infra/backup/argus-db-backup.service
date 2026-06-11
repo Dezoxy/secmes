@@ -14,6 +14,9 @@ Wants=network-online.target
 # the Managed Identity). Gate on it so a missing secret fails closed instead of starting on a stale file.
 Requires=argus-secrets.service
 After=argus-secrets.service
+# On any failure (non-zero exit, timeout, signal) fire the notifier template, which posts a Sentry event
+# to GlitchTip. %p = unit prefix without .service, so the instance is argus-notify-failure@argus-db-backup.
+OnFailure=argus-notify-failure@%p.service
 
 [Service]
 Type=oneshot

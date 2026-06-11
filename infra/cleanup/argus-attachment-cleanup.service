@@ -12,6 +12,8 @@ Wants=network-online.target
 # the Managed Identity). Gate on it so a missing secret fails closed instead of starting on a stale file.
 Requires=argus-secrets.service
 After=argus-secrets.service
+# On any failure fire the notifier template (see infra/notify/).
+OnFailure=argus-notify-failure@%p.service
 
 [Service]
 Type=oneshot
