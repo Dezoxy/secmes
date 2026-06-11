@@ -325,7 +325,7 @@ wait_running() { # $1 = compose service without a healthcheck
     return 1
   }
 }
-log "waiting for the rollout to become healthy (api, caddy, zitadel-db, zitadel, zitadel-login) + the tunnel"
+log "waiting for the rollout to become healthy (api, caddy, zitadel-db, zitadel, zitadel-login, glitchtip) + the tunnel"
 wait_healthy api
 wait_healthy caddy
 wait_running cloudflared
@@ -354,6 +354,12 @@ wait_running grafana
 # on running + not-crash-looping (catches a bad config mount / missing log dir / image pull).
 wait_running loki
 wait_running alloy
+# Error tracking (checkpoint 48): glitchtip has a healthcheck (wget /api/0/version/) that
+# only passes after migrations complete + gunicorn is serving — gate on HEALTHY to catch a
+# bad SECRET_KEY, migration failure, or DB connection error at deploy time.
+# glitchtip-worker has no healthcheck; gate on running + not-crash-looping.
+wait_healthy glitchtip 90
+wait_running glitchtip-worker
 
 # --- 7. Tidy up: drop dangling images (the GHCR login is cleared by the EXIT trap). ---
 docker image prune -f >/dev/null 2>&1 || true

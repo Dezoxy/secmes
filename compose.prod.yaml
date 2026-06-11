@@ -611,7 +611,8 @@ services:
           cpus: '0.5'
 
   glitchtip:
-    image: glitchtip/glitchtip:v4
+    # Pin: verify/refresh the tag before first deploy (Dependabot tracks it).
+    image: glitchtip/glitchtip:6.1.8
     restart: unless-stopped
     # The entrypoint wrapper reads the three secret files into env (DATABASE_URL, SECRET_KEY, REDIS_URL)
     # before exec-ing the original command. The wrapper is bind-mounted read-only from the staged repo tree.
@@ -635,6 +636,8 @@ services:
       # Single worker is enough for current event volume (single VM). Increase if ingestion is slow.
       CELERY_WORKER_CONCURRENCY: '1'
       # DATABASE_URL, SECRET_KEY, REDIS_URL are NOT set here — injected by /entrypoint.sh from secret files.
+      # Prevent Python from writing .pyc files so the read-only root FS is not violated.
+      PYTHONDONTWRITEBYTECODE: '1'
     secrets:
       - glitchtip_database_url
       - glitchtip_secret_key
@@ -645,6 +648,9 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://localhost:8000/api/0/version/ || exit 1']
       interval: 20s
@@ -658,7 +664,8 @@ services:
           cpus: '0.75'
 
   glitchtip-worker:
-    image: glitchtip/glitchtip:v4
+    # Pin: verify/refresh the tag before first deploy (Dependabot tracks it).
+    image: glitchtip/glitchtip:6.1.8
     restart: unless-stopped
     entrypoint: /entrypoint.sh
     command: ./bin/run-celery-with-beat.sh
@@ -672,6 +679,7 @@ services:
       GLITCHTIP_DISABLE_REGISTRATION: 'True'
       GLITCHTIP_MAX_EVENT_LIFE_DAYS: '90'
       CELERY_WORKER_CONCURRENCY: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
     secrets:
       - glitchtip_database_url
       - glitchtip_secret_key
@@ -682,6 +690,9 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
     deploy:
       resources:
         limits:
