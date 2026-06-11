@@ -53,7 +53,13 @@
       "Bash(git push -f*)",
       "Read(./.env)",
       "Read(./**/.env)",
-      "Read(./**/*.tfvars)"
+      "Read(./**/*.tfvars)",
+      "Edit(./.env)",
+      "Edit(./**/.env)",
+      "Edit(./**/*.tfvars)",
+      "Write(./.env)",
+      "Write(./**/.env)",
+      "Write(./**/*.tfvars)"
     ]
   },
   "hooks": {
