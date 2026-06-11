@@ -33,4 +33,6 @@ export const SENSITIVE_LIMITS = {
   /** Presigned-URL minting: bound download-grant churn. Generous (attachments lazy-load) but < baseline;
    *  lower-risk than upload (read-only, membership-gated, no storage write) so the cap is looser. */
   downloadGrant: 60,
+  /** Push subscription register/update/delete. Rare in practice; cap prevents registration thrashing. */
+  subscribePush: 20,
 } as const;

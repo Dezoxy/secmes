@@ -23,6 +23,7 @@ import {
   SendConversationMessageRequestSchema,
   SentMessageSchema,
   StoreBackupRequestSchema,
+  SubscribePushRequestSchema,
   UploadGrantSchema,
   WelcomeMaterialSchema,
   type ClaimedKeyPackage as ContractClaimedKeyPackage,
@@ -38,6 +39,7 @@ import {
   type RevokeKeyPackagesResponse,
   type SendConversationMessageRequest,
   type SentMessage as ContractSentMessage,
+  type SubscribePushRequest,
   type UploadGrant as ContractUploadGrant,
   type UserSummary as ContractUserSummary,
   type WelcomeMaterial as ContractWelcomeMaterial,
@@ -415,6 +417,32 @@ export async function fetchReceipts(conversationId: string): Promise<Conversatio
     await requestJson({
       path: `/conversations/${encodeURIComponent(conversationId)}/receipts`,
       responseSchema: ConversationReceiptsSchema,
+    }),
+  );
+}
+
+// --- Push subscriptions (PUT/DELETE /push/subscription) -----------------------------------------------
+// Transport-level registration only — endpoint + RFC 8291 keys. No message content or E2E keys involved.
+// The server stores these to fan content-free VAPID pings after a message is committed.
+
+/** Register or update the push subscription for this device (PUT /push/subscription → 204). */
+export async function savePushSubscription(req: SubscribePushRequest): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: '/push/subscription',
+      method: 'PUT',
+      body: req,
+      requestSchema: SubscribePushRequestSchema,
+    }),
+  );
+}
+
+/** Remove the push subscription for this device (DELETE /push/subscription → 204). */
+export async function deletePushSubscription(): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: '/push/subscription',
+      method: 'DELETE',
     }),
   );
 }

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { BlobStoreModule } from '../blob/blob-store.module.js';
+import { PushModule } from '../push/push.module.js';
 import { RealtimeBusModule } from '../realtime/realtime-bus.module.js';
 import { AttachmentsController } from './attachments.controller.js';
 import { AttachmentsService } from './attachments.service.js';
@@ -17,7 +18,7 @@ import { WelcomesController } from './welcomes.controller.js';
 // Welcome material so an added member can join a group. AttachmentsController mints presigned upload/download
 // grants for E2EE blobs (BlobStoreModule) — metadata only, never the bytes or the content key.
 @Module({
-  imports: [RealtimeBusModule, BlobStoreModule],
+  imports: [RealtimeBusModule, BlobStoreModule, PushModule],
   controllers: [
     MessagingController,
     SyncController,
