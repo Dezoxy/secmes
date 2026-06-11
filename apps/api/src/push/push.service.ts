@@ -192,7 +192,7 @@ export class PushService {
               );
             } catch (err: unknown) {
               const status = (err as { statusCode?: number }).statusCode;
-              if (status === 410) staleIds.push(sub.id);
+              if (status === 410 || status === 404) staleIds.push(sub.id);
               // Log only the row id — never the endpoint, p256dh, or auth (invariant #2).
               this.logger.warn(
                 `push: send failed for subscription ${sub.id}, status ${status ?? 'unknown'}`,
