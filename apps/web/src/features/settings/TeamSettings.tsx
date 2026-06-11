@@ -224,6 +224,7 @@ export function TeamSettings({ currentUserId }: TeamSettingsProps) {
   const handleRoleToggle = async (userId: string, newRole: 'admin' | 'member') => {
     try {
       await setMemberRole(userId, newRole);
+      setError(null);
       setMembers(
         (prev) => prev?.map((m) => (m.userId === userId ? { ...m, role: newRole } : m)) ?? null,
       );
@@ -235,6 +236,7 @@ export function TeamSettings({ currentUserId }: TeamSettingsProps) {
   const handleRevokeMember = async (userId: string) => {
     try {
       await revokeMember(userId);
+      setError(null);
       setMembers((prev) => prev?.filter((m) => m.userId !== userId) ?? null);
     } catch {
       setError('Could not remove member.');
@@ -246,6 +248,7 @@ export function TeamSettings({ currentUserId }: TeamSettingsProps) {
   const handleRevokeInvite = async (inviteId: string) => {
     try {
       await revokeInvite(inviteId);
+      setError(null);
       setInvites((prev) => prev?.filter((i) => i.id !== inviteId) ?? null);
     } catch {
       setError('Could not revoke invite.');

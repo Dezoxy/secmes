@@ -3,8 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../features/auth/AuthContext';
 import { ArgusAppIcon } from '../features/brand/ArgusAppIcon';
 import { storePendingInviteToken } from '../features/onboarding/JoinWorkspace';
-import { Button } from '../features/ui';
-import { LoadingState } from '../features/ui';
+import { Button, LoadingState } from '../features/ui';
 
 /**
  * Landing page for invite links: `/invite#<token>`.

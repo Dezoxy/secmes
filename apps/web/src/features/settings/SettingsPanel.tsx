@@ -440,7 +440,7 @@ export function SettingsPanel({
 
           {active === 'about' && <AboutSettings />}
 
-          {active === 'team' && serverProfile && (
+          {active === 'team' && serverProfile?.role === 'admin' && (
             <TeamSettings currentUserId={serverProfile.userId} />
           )}
         </div>

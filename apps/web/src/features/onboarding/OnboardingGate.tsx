@@ -2,13 +2,13 @@ import { useState, type ReactNode } from 'react';
 import { ArgusAppIcon } from '../brand/ArgusAppIcon';
 import { useAuth } from '../auth/AuthContext';
 import { CreateWorkspace } from './CreateWorkspace';
-import { JoinWorkspace } from './JoinWorkspace';
+import { JoinWorkspace, readPendingInviteToken } from './JoinWorkspace';
 
 type Tab = 'create' | 'join';
 
 function OnboardingScreen() {
   const { refreshProfile } = useAuth();
-  const [tab, setTab] = useState<Tab>('create');
+  const [tab, setTab] = useState<Tab>(() => (readPendingInviteToken() ? 'join' : 'create'));
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#1a1a24] p-4">

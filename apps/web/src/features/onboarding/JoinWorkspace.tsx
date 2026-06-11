@@ -21,7 +21,7 @@ export function clearPendingInviteToken(): void {
   }
 }
 
-function readPendingInviteToken(): string {
+export function readPendingInviteToken(): string {
   try {
     return sessionStorage.getItem(PENDING_INVITE_KEY) ?? '';
   } catch {
