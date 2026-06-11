@@ -7,7 +7,7 @@ import {
   type DecryptedMessage,
   type MessagingDeps,
 } from '../../lib/messaging';
-import { resolvePeerUser, withPeerNamed } from './peer-naming';
+import { loadPersistedPeerMapping, resolvePeerUser, withPeerNamed } from './peer-naming';
 import { liveConversationShell, prependConversationIfMissing } from './useLiveConversations';
 import type { Attachment, Conversation, Message, User } from './seed';
 
@@ -245,9 +245,11 @@ export function useConversationHistoryRehydration({
               messages: history,
             }),
           );
-          // Name the peer from history: try each distinct foreign sender until one resolves in the
-          // directory (own local-echo ids aren't directory ids and simply don't resolve). Best-effort.
+          // Name the peer: try the persisted mapping first (set at creation — survives a no-reply
+          // reload), then fall back to distinct foreign senders from history. Best-effort.
+          const persistedPeerId = loadPersistedPeerMapping(conversationId);
           const senderIds = [
+            ...(persistedPeerId ? [persistedPeerId] : []),
             ...new Set(stored.map((m) => m.senderId).filter((id) => id && id !== selfUserId)),
           ].slice(0, 3);
           void (async () => {

@@ -38,6 +38,7 @@ import {
   paneBackExitMotion,
 } from '../ui';
 import type { Conversation, User } from './seed';
+import { persistPeerMapping } from './peer-naming';
 import { dicebearAvatar, isCustomPhoto } from '../../lib/dicebear';
 import {
   conversations as initialConversations,
@@ -259,8 +260,8 @@ export default function ChatScreen() {
 
   // A 1:1 is unique per peer: find an existing direct conversation with this user (the picker opens it
   // instead of creating a duplicate). Matches on the REAL peer user id, which creator-made conversations
-  // carry from the start and joined/rehydrated ones gain via peer-naming. A still-unnamed placeholder
-  // can't match — the one residual dupe window (creator-no-reply, then a reload) is accepted for now.
+  // carry from the start and joined/rehydrated ones gain via peer-naming (or the persisted mapping on
+  // reload — see persistPeerMapping in handleStarted below and useConversationHistoryRehydration).
   const findConversationWith = (peerUserId: string): string | null =>
     conversations.find(
       (c) => c.type === 'direct' && c.participants.some((p) => p.id === peerUserId),
@@ -296,6 +297,7 @@ export default function ChatScreen() {
             ...prev,
           ],
     );
+    persistPeerMapping(session.conversationId, peer.id);
     setNumbersByConv((prev) => ({ ...prev, [session.conversationId]: session.safetyNumber }));
     setVerifiedByConv((prev) => ({ ...prev, [session.conversationId]: session.safetyNumber }));
     setSelectedId(session.conversationId);
