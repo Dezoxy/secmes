@@ -86,6 +86,24 @@ describe.skipIf(!DB_URL)('PushService', () => {
     ).rejects.toThrow(TypeError);
   });
 
+  it('upsert: rejects IPv6 loopback (bracket notation) with TypeError', async () => {
+    await expect(
+      svc.upsert(aliceAuth, {
+        deviceId,
+        subscription: { endpoint: 'https://[::1]/push', p256dh: 'A', auth: 'B' },
+      }),
+    ).rejects.toThrow(TypeError);
+  });
+
+  it('upsert: rejects IPv6 ULA (bracket notation) with TypeError', async () => {
+    await expect(
+      svc.upsert(aliceAuth, {
+        deviceId,
+        subscription: { endpoint: 'https://[fd12:3456::1]/push', p256dh: 'A', auth: 'B' },
+      }),
+    ).rejects.toThrow(TypeError);
+  });
+
   it('upsert: rejects a device that belongs to another user (silent no-op, not an error)', async () => {
     // Create a different user + device in the same tenant
     const otherId = (
