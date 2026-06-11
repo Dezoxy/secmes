@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant, type Tx } from '../db/index.js';
 import { requireMembership, requireUser } from './membership.js';
+import { PushService } from '../push/push.service.js';
 import { RealtimeBus, type MessageCreatedEvent } from '../realtime/realtime-bus.js';
 import type {
   DeliverWelcome,
@@ -123,7 +124,10 @@ function decodeSyncCursor(token: string): { createdAt: string; id: string } {
 
 @Injectable()
 export class MessagingService {
-  constructor(private readonly bus: RealtimeBus) {}
+  constructor(
+    private readonly bus: RealtimeBus,
+    private readonly push: PushService,
+  ) {}
 
   /** Is the verified caller a member of `conversationId`? Used by the realtime gateway's subscribe authz. */
   async isMember(auth: VerifiedAuth, conversationId: string): Promise<boolean> {
@@ -480,7 +484,12 @@ export class MessagingService {
     });
 
     // Post-commit: the row is durable + visible to a subsequent fetch before any client is notified.
-    if (event) this.bus.emitMessageCreated(event);
+    if (event) {
+      this.bus.emitMessageCreated(event);
+      // Fire-and-forget content-free push ping. Errors are caught inside notifyConversationMembers;
+      // a push failure must never surface to the caller or delay the response.
+      void this.push.notifyConversationMembers(auth.tenantId, conversationId, auth.sub);
+    }
     return result;
   }
 

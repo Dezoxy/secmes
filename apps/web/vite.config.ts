@@ -145,14 +145,13 @@ export default defineConfig({
     bundleVisibilityPlugin(),
     VitePWA({
       registerType: 'prompt',
-      workbox: {
-        cleanupOutdatedCaches: true,
+      // injectManifest: custom sw.ts handles precaching + push/notificationclick.
+      // The workbox precache manifest is injected at build time via self.__WB_MANIFEST.
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
+      injectManifest: {
         globPatterns: [...pwaPrecacheGlobPatterns],
-        navigateFallback: pwaNavigateFallback,
-        navigateFallbackDenylist: [...pwaNavigateFallbackDenylist],
-        // Static precache only. API, auth, WebSocket, attachment, and authorization-bearing requests must
-        // remain network-only until a threat-modeled runtime cache is intentionally added.
-        runtimeCaching: [],
       },
       manifest: argusPwaManifest,
     }),

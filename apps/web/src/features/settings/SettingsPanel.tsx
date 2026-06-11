@@ -405,7 +405,7 @@ export function SettingsPanel({
             <PrivacySettings settings={privacySettings} onSettingsChange={setPrivacySettings} />
           )}
 
-          {active === 'notifications' && <NotificationSettings />}
+          {active === 'notifications' && <NotificationSettings deviceId={deviceId} />}
 
           {active === 'appearance' && (
             <AppearanceSettings

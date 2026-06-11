@@ -238,6 +238,26 @@ export type ConversationReceipt = z.infer<typeof ConversationReceiptSchema>;
 export const ConversationReceiptsSchema = z.array(ConversationReceiptSchema);
 export type ConversationReceipts = z.infer<typeof ConversationReceiptsSchema>;
 
+// Web Push subscription (RFC 8291 VAPID). Values are base64url-encoded as returned by PushManager.subscribe().
+// The server stores these to send content-free wake-up pings. See web-push.md.
+const base64url = z.string().regex(/^[A-Za-z0-9_-]+=*$/, 'must be base64url');
+export const PushSubscriptionSchema = z
+  .object({
+    endpoint: z.string().url().max(2048),
+    p256dh: base64url.max(256),
+    auth: base64url.max(64),
+  })
+  .strict();
+export type PushSubscription = z.infer<typeof PushSubscriptionSchema>;
+
+export const SubscribePushRequestSchema = z
+  .object({
+    deviceId: z.string().uuid(),
+    subscription: PushSubscriptionSchema,
+  })
+  .strict();
+export type SubscribePushRequest = z.infer<typeof SubscribePushRequestSchema>;
+
 // The `receipt` WS frame the gateway pushes to a conversation room when a member advances a watermark
 // (checkpoint 31 live push). Metadata only — never content. `userId` is the member who acked.
 export const ReceiptEventSchema = z.object({

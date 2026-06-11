@@ -9,7 +9,10 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { getDb } from '../db/index.js';
 import { InProcessRealtimeBus } from '../realtime/in-process-realtime-bus.js';
+import { PushService } from '../push/push.service.js';
 import { MessagingService } from './messaging.service.js';
+
+const noopPush = new PushService({ publicKey: '', privateKey: '', subject: '', configured: false });
 import type { SendMessage } from './messaging.schemas.js';
 
 // Integration (roadmap 26) — needs a live Postgres with migrations applied. Auto-skips without DATABASE_URL.
@@ -29,7 +32,7 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
   let daveDev1Priv: Uint8Array; // signature private keys, to forge proofs of possession on consume
   let daveDev2Priv: Uint8Array;
   let bobDevPriv: Uint8Array;
-  const svc = new MessagingService(new InProcessRealtimeBus());
+  const svc = new MessagingService(new InProcessRealtimeBus(), noopPush);
 
   let aliceAuth: VerifiedAuth; // tenant A, conversation creator + member
   let bobAuth: VerifiedAuth; // tenant A, member
@@ -146,7 +149,7 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
   it('emits a realtime event on a new send (after commit), but not on a dedup retry', async () => {
     const bus = new InProcessRealtimeBus();
     const spy = vi.spyOn(bus, 'emitMessageCreated');
-    const svc2 = new MessagingService(bus);
+    const svc2 = new MessagingService(bus, noopPush);
     const conv = await newConversation();
     const body = msg({ ciphertext: 'ZXZlbnQ=' });
 
@@ -397,7 +400,7 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
   it('recordReceipt emits a post-commit receipt advance — INTERNAL userId + ids/status only', async () => {
     const bus = new InProcessRealtimeBus();
     const spy = vi.spyOn(bus, 'emitReceiptAdvanced');
-    const svc2 = new MessagingService(bus);
+    const svc2 = new MessagingService(bus, noopPush);
     const conv = await newConversation();
     const m1 = (await svc2.sendMessage(aliceAuth, conv, msg())).messageId;
 
@@ -459,7 +462,7 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
   it('deliver emits a post-commit welcome nudge — ids + the recipient subject only, never the blobs', async () => {
     const bus = new InProcessRealtimeBus();
     const spy = vi.spyOn(bus, 'emitWelcomeCreated');
-    const svc2 = new MessagingService(bus);
+    const svc2 = new MessagingService(bus, noopPush);
     const conv = await newConversation();
     await svc2.deliverWelcome(aliceAuth, conv, wel());
     expect(spy).toHaveBeenCalledTimes(1);
