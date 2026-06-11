@@ -139,7 +139,9 @@ test('settings sections preserve defaults after component split', async ({ page 
   await dialog.getByRole('button', { name: 'Notifications' }).click();
   await expect(dialog.getByRole('heading', { name: 'Notifications' })).toBeVisible();
   await expect(dialog.getByText('Push notifications')).toBeVisible();
-  await expect(dialog.getByText('Automatically follows device permission')).toBeVisible();
+  await expect(
+    dialog.getByText('Content-free pings only — zero message text reaches the server'),
+  ).toBeVisible();
 
   await dialog.getByRole('button', { name: 'Appearance' }).click();
   await expect(dialog.getByRole('heading', { name: 'Appearance' })).toBeVisible();
