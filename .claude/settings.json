@@ -54,7 +54,9 @@
       "Bash(gh pr comment*)",
       "Bash(gh run view*)",
       "Bash(gh run list*)",
-      "Bash(gh run watch*)"
+      "Bash(gh run watch*)",
+      "Bash(DATABASE_URL=* pnpm*)",
+      "Bash(DATABASE_URL=* REDIS_URL=* pnpm*)"
     ],
     "ask": [
       "Bash(terraform apply*)",
