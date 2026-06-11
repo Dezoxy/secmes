@@ -615,7 +615,7 @@ export class MessagingService {
     conversationId: string,
     body: RecordReceipt,
   ): Promise<void> {
-    await withTenant(auth.tenantId, async (tx) => {
+    const userId = await withTenant(auth.tenantId, async (tx) => {
       const user = await requireUser(tx, auth.sub);
       await requireMembership(tx, conversationId, user);
 
@@ -652,6 +652,21 @@ export class MessagingService {
            or (excluded.${c}_through_created_at, excluded.${c}_through_message_id)
             > (conversation_receipts.${c}_through_created_at, conversation_receipts.${c}_through_message_id)
       `);
+      return user; // the INTERNAL users.id — what GET /receipts returns + what the client matches on
+    });
+
+    // Fan the advance out to the conversation room so the OTHER members' sockets flip their delivery ticks
+    // live (checkpoint 31). Metadata only (ids + status). `userId` is the INTERNAL users.id (NOT auth.sub,
+    // the external OIDC subject) so it lines up with GET /receipts and the client's own identity. Emit
+    // unconditionally: the upsert may have been a no-op (the watermark was already past), but the client
+    // fold is monotonic (takes max), so re-announcing an unchanged watermark is harmless — and it avoids a
+    // RETURNING round-trip just to gate the emit.
+    this.bus.emitReceiptAdvanced({
+      tenantId: auth.tenantId,
+      conversationId,
+      userId,
+      status: body.status,
+      throughMessageId: body.throughMessageId,
     });
   }
 

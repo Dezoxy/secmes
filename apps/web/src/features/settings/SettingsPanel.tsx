@@ -42,11 +42,8 @@ import { AppearanceSettings, FONT_SIZE_LEVELS } from './AppearanceSettings';
 import { DataStorageSettings } from './DataStorageSettings';
 import { DeviceSettings } from './DeviceSettings';
 import { NotificationSettings } from './NotificationSettings';
-import {
-  DEFAULT_PRIVACY_SETTINGS,
-  PrivacySettings,
-  type PrivacySettingsRecord,
-} from './PrivacySettings';
+import { PrivacySettings, type PrivacySettingsRecord } from './PrivacySettings';
+import { readStoredPrivacySettings, writeStoredPrivacySettings } from './privacy-settings';
 import { ProfileSettings, type AnonymousProfile } from './ProfileSettings';
 import { SecuritySettings } from './SecuritySettings';
 
@@ -81,7 +78,6 @@ const sections: Array<{ id: SectionId; label: string; icon: LucideIcon }> = [
 ];
 
 const DEVICE_SETTINGS_STORAGE_KEY = versionedStorageKey('settings', 'device');
-const PRIVACY_SETTINGS_STORAGE_KEY = versionedStorageKey('settings', 'privacy');
 const SETTINGS_CLOSE_ANIMATION_MS = 220;
 
 interface DeviceSettingsRecord {
@@ -130,47 +126,6 @@ function writeStoredDeviceSettings(settings: DeviceSettingsRecord): void {
   writeVersionedRecord({
     storage: browserLocalStorage(),
     key: DEVICE_SETTINGS_STORAGE_KEY,
-    value: settings,
-  });
-}
-
-function decodePrivacySettingsRecord(value: unknown): PrivacySettingsRecord | null {
-  if (typeof value !== 'object' || value === null) return null;
-  const record = value as Record<string, unknown>;
-
-  return {
-    readReceipts:
-      typeof record.readReceipts === 'boolean'
-        ? record.readReceipts
-        : DEFAULT_PRIVACY_SETTINGS.readReceipts,
-    typingIndicators:
-      typeof record.typingIndicators === 'boolean'
-        ? record.typingIndicators
-        : DEFAULT_PRIVACY_SETTINGS.typingIndicators,
-    linkPreviews:
-      typeof record.linkPreviews === 'boolean'
-        ? record.linkPreviews
-        : DEFAULT_PRIVACY_SETTINGS.linkPreviews,
-  };
-}
-
-function readStoredPrivacySettings(): PrivacySettingsRecord {
-  if (typeof window === 'undefined') return DEFAULT_PRIVACY_SETTINGS;
-
-  const stored = readVersionedRecord({
-    storage: browserLocalStorage(),
-    key: PRIVACY_SETTINGS_STORAGE_KEY,
-    decode: decodePrivacySettingsRecord,
-  });
-
-  return stored.status === 'ok' ? stored.value : DEFAULT_PRIVACY_SETTINGS;
-}
-
-function writeStoredPrivacySettings(settings: PrivacySettingsRecord): void {
-  if (typeof window === 'undefined') return;
-  writeVersionedRecord({
-    storage: browserLocalStorage(),
-    key: PRIVACY_SETTINGS_STORAGE_KEY,
     value: settings,
   });
 }

@@ -11,7 +11,12 @@ import { WebSocket } from 'ws';
 
 import { AuthService, type VerifiedAuth } from '../auth/auth.service.js';
 import { MessagingService } from '../messaging/messaging.service.js';
-import { RealtimeBus, type MessageCreatedEvent, type WelcomeCreatedEvent } from './realtime-bus.js';
+import {
+  RealtimeBus,
+  type MessageCreatedEvent,
+  type ReceiptAdvancedEvent,
+  type WelcomeCreatedEvent,
+} from './realtime-bus.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const AUTH_DEADLINE_MS = 10_000; // close a socket that doesn't authenticate (first frame) in time
@@ -58,6 +63,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   onModuleInit(): void {
     this.bus.onMessageCreated((event) => this.deliver(event));
     this.bus.onWelcomeCreated((event) => this.notifyWelcome(event));
+    this.bus.onReceiptAdvanced((event) => this.deliverReceipt(event));
   }
 
   handleConnection(client: WebSocket): void {
@@ -188,6 +194,27 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
    * conversation it hasn't joined yet. Frame carries the conversationId only (ids/metadata, invariant #2);
    * the sealed join material still rides the proof-gated REST fetch.
    */
+  /**
+   * Fan a watermark advance out to the conversation room so the OTHER members' sockets flip their delivery
+   * ticks live. Same room-scoped authz as `deliver` (only subscribed members of this tenant+conversation
+   * receive it) — a receipt never crosses a tenant or reaches a non-member. METADATA ONLY (ids + status):
+   * the member who acked, and the message they acked through. The actor's own sockets get the echo too
+   * (harmless — the client fold is monotonic).
+   */
+  private deliverReceipt(event: ReceiptAdvancedEvent): void {
+    const sockets = this.rooms.get(roomKey(event.tenantId, event.conversationId));
+    if (!sockets) return;
+    const data = {
+      conversationId: event.conversationId,
+      userId: event.userId,
+      status: event.status,
+      throughMessageId: event.throughMessageId,
+    };
+    for (const client of sockets) {
+      if (client.readyState === WebSocket.OPEN) this.send(client, 'receipt', data);
+    }
+  }
+
   private notifyWelcome(event: WelcomeCreatedEvent): void {
     for (const [client, state] of this.conns) {
       if (!state.authed || !state.auth) continue;

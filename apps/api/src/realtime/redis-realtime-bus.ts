@@ -3,14 +3,17 @@ import { Redis } from 'ioredis';
 
 import {
   MessageCreatedEventSchema,
+  ReceiptAdvancedEventSchema,
   RealtimeBus,
   WelcomeCreatedEventSchema,
   type MessageCreatedEvent,
+  type ReceiptAdvancedEvent,
   type WelcomeCreatedEvent,
 } from './realtime-bus.js';
 
 export const CHANNEL = 'argus:realtime:message-created';
 export const WELCOME_CHANNEL = 'argus:realtime:welcome-created';
+export const RECEIPT_CHANNEL = 'argus:realtime:receipt-advanced';
 
 /**
  * Cross-pod bus (checkpoint 29): each send PUBLISHES the event to a Redis channel, and every gateway
@@ -25,6 +28,7 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
   private readonly sub: Redis;
   private readonly listeners: Array<(event: MessageCreatedEvent) => void> = [];
   private readonly welcomeListeners: Array<(event: WelcomeCreatedEvent) => void> = [];
+  private readonly receiptListeners: Array<(event: ReceiptAdvancedEvent) => void> = [];
   /** Resolves once the subscriptions are active — await before relying on receipt (readiness/tests). */
   readonly ready: Promise<void>;
 
@@ -42,7 +46,9 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
     this.pub.on('error', () => {});
     this.sub.on('error', () => {});
     this.sub.on('message', (channel, payload) => this.onPayload(channel, payload));
-    this.ready = this.sub.subscribe(CHANNEL, WELCOME_CHANNEL).then(() => undefined);
+    this.ready = this.sub
+      .subscribe(CHANNEL, WELCOME_CHANNEL, RECEIPT_CHANNEL)
+      .then(() => undefined);
   }
 
   private onPayload(channel: string, payload: string): void {
@@ -63,6 +69,12 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
       const parsed = WelcomeCreatedEventSchema.safeParse(raw);
       if (!parsed.success) return;
       for (const listener of this.welcomeListeners) listener(parsed.data);
+      return;
+    }
+    if (channel === RECEIPT_CHANNEL) {
+      const parsed = ReceiptAdvancedEventSchema.safeParse(raw);
+      if (!parsed.success) return;
+      for (const listener of this.receiptListeners) listener(parsed.data);
     }
   }
 
@@ -83,6 +95,16 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
 
   onWelcomeCreated(listener: (event: WelcomeCreatedEvent) => void): void {
     this.welcomeListeners.push(listener);
+  }
+
+  emitReceiptAdvanced(event: ReceiptAdvancedEvent): void {
+    // Same best-effort posture as messages/welcomes: the watermark is durable in the DB; a peer reconciles
+    // via GET /receipts on reconnect. A dropped publish (Redis down) just delays a tick flip.
+    this.pub.publish(RECEIPT_CHANNEL, JSON.stringify(event)).catch(() => {});
+  }
+
+  onReceiptAdvanced(listener: (event: ReceiptAdvancedEvent) => void): void {
+    this.receiptListeners.push(listener);
   }
 
   async onModuleDestroy(): Promise<void> {

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthService } from '../auth/auth.service.js';
 import type { MessagingService } from '../messaging/messaging.service.js';
 import { InProcessRealtimeBus } from './in-process-realtime-bus.js';
-import { type MessageCreatedEvent } from './realtime-bus.js';
+import { type MessageCreatedEvent, type ReceiptAdvancedEvent } from './realtime-bus.js';
 import { RealtimeGateway } from './realtime.gateway.js';
 
 // Deterministic gateway tests with MOCK sockets — no real WebSocket server. Validates the security
@@ -138,6 +138,53 @@ describe('RealtimeGateway', () => {
       event: 'message',
       data: { conversationId: CONV, message: e.message },
     });
+  });
+
+  const receiptEvent = (over: Partial<ReceiptAdvancedEvent> = {}): ReceiptAdvancedEvent => ({
+    tenantId: 'T1',
+    conversationId: CONV,
+    userId: 'u-peer',
+    status: 'read',
+    throughMessageId: 'm1',
+    ...over,
+  });
+
+  it('delivers a receipt advance to a subscribed member (metadata only)', async () => {
+    const s = mkSocket();
+    await authed(s);
+    messaging.isMember.mockResolvedValue(true);
+    await gw.onSubscribe(sock(s), { conversationId: CONV });
+
+    s.send.mockClear();
+    bus.emitReceiptAdvanced(receiptEvent());
+    expect(lastSend(s)).toEqual({
+      event: 'receipt',
+      data: { conversationId: CONV, userId: 'u-peer', status: 'read', throughMessageId: 'm1' },
+    });
+  });
+
+  it('a receipt never reaches an unsubscribed socket or crosses a tenant', async () => {
+    // alice in T1 subscribed to CONV; carol in T2 subscribed to the same id value (different room)
+    const a = mkSocket();
+    await authed(a, 'alice', 'T1');
+    messaging.isMember.mockResolvedValue(true);
+    await gw.onSubscribe(sock(a), { conversationId: CONV });
+    const c = mkSocket();
+    await authed(c, 'carol', 'T2');
+    await gw.onSubscribe(sock(c), { conversationId: CONV });
+
+    a.send.mockClear();
+    c.send.mockClear();
+    bus.emitReceiptAdvanced(receiptEvent({ tenantId: 'T1', conversationId: CONV })); // → only alice
+    expect(lastSend(a)).toEqual({
+      event: 'receipt',
+      data: { conversationId: CONV, userId: 'u-peer', status: 'read', throughMessageId: 'm1' },
+    });
+    expect(c.send).not.toHaveBeenCalled();
+
+    a.send.mockClear();
+    bus.emitReceiptAdvanced(receiptEvent({ conversationId: CONV2 })); // other conversation
+    expect(a.send).not.toHaveBeenCalled();
   });
 
   it('does not join a socket that disconnects during the membership lookup (no leak)', async () => {
