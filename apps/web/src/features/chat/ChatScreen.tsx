@@ -469,6 +469,7 @@ export default function ChatScreen() {
             profile={anonymousProfile}
             deviceId={deviceId}
             serverHandle={profile?.displayName ?? null}
+            serverProfile={profile}
             onProfileChange={handleProfileChange}
             onClose={closeSettings}
           />

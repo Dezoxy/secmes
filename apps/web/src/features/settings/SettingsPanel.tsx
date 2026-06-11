@@ -10,6 +10,7 @@ import {
   Lock,
   Shield,
   UserRound,
+  Users,
   X,
   type LucideIcon,
 } from 'lucide-react';
@@ -46,6 +47,8 @@ import { PrivacySettings, type PrivacySettingsRecord } from './PrivacySettings';
 import { readStoredPrivacySettings, writeStoredPrivacySettings } from './privacy-settings';
 import { ProfileSettings, type AnonymousProfile } from './ProfileSettings';
 import { SecuritySettings } from './SecuritySettings';
+import { TeamSettings } from './TeamSettings';
+import type { MeBound } from '../../lib/api';
 
 export type { AnonymousProfile } from './ProfileSettings';
 
@@ -53,6 +56,8 @@ interface SettingsPanelProps {
   profile: AnonymousProfile;
   deviceId: string | null;
   serverHandle: string | null;
+  /** Full server profile — used to render admin-only sections. */
+  serverProfile?: MeBound | null;
   onProfileChange: (profile: AnonymousProfile) => boolean;
   onClose: () => void;
 }
@@ -65,9 +70,10 @@ type SectionId =
   | 'appearance'
   | 'storage'
   | 'devices'
-  | 'about';
+  | 'about'
+  | 'team';
 
-const sections: Array<{ id: SectionId; label: string; icon: LucideIcon }> = [
+const baseSections: Array<{ id: SectionId; label: string; icon: LucideIcon }> = [
   { id: 'profile', label: 'Profile', icon: UserRound },
   { id: 'security', label: 'Security & Recovery', icon: Shield },
   { id: 'privacy', label: 'Privacy', icon: Lock },
@@ -77,6 +83,12 @@ const sections: Array<{ id: SectionId; label: string; icon: LucideIcon }> = [
   { id: 'devices', label: 'Devices', icon: HardDrive },
   { id: 'about', label: 'About', icon: Info },
 ];
+
+const teamSection: { id: SectionId; label: string; icon: LucideIcon } = {
+  id: 'team',
+  label: 'Team',
+  icon: Users,
+};
 
 const DEVICE_SETTINGS_STORAGE_KEY = versionedStorageKey('settings', 'device');
 const SETTINGS_CLOSE_ANIMATION_MS = 220;
@@ -153,9 +165,12 @@ export function SettingsPanel({
   profile,
   deviceId,
   serverHandle,
+  serverProfile,
   onProfileChange,
   onClose,
 }: SettingsPanelProps) {
+  const isAdmin = serverProfile?.role === 'admin';
+  const sections = isAdmin ? [...baseSections, teamSection] : baseSections;
   const [active, setActive] = useState<SectionId>('profile');
   const [closing, setClosing] = useState(false);
   const [mobileSectionOpen, setMobileSectionOpen] = useState(false);
@@ -424,6 +439,10 @@ export function SettingsPanel({
           {active === 'devices' && <DeviceSettings deviceId={deviceId} />}
 
           {active === 'about' && <AboutSettings />}
+
+          {active === 'team' && serverProfile && (
+            <TeamSettings currentUserId={serverProfile.userId} />
+          )}
         </div>
       </section>
     </Modal>
