@@ -52,6 +52,7 @@ export type { AnonymousProfile } from './ProfileSettings';
 interface SettingsPanelProps {
   profile: AnonymousProfile;
   deviceId: string | null;
+  serverHandle: string | null;
   onProfileChange: (profile: AnonymousProfile) => boolean;
   onClose: () => void;
 }
@@ -148,7 +149,13 @@ function readStoredFontSize(): number {
   return readStoredDeviceSettings().fontSizeLevel;
 }
 
-export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: SettingsPanelProps) {
+export function SettingsPanel({
+  profile,
+  deviceId,
+  serverHandle,
+  onProfileChange,
+  onClose,
+}: SettingsPanelProps) {
   const [active, setActive] = useState<SectionId>('profile');
   const [closing, setClosing] = useState(false);
   const [mobileSectionOpen, setMobileSectionOpen] = useState(false);
@@ -159,7 +166,6 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
   const [privacySettings, setPrivacySettings] = useState<PrivacySettingsRecord>(() =>
     readStoredPrivacySettings(),
   );
-  const [username, setUsername] = useState(profile.username);
   const [avatar, setAvatar] = useState(profile.avatar);
   const [profileError, setProfileError] = useState<string | null>(null);
   const sectionButtonRefs = useRef(new Map<SectionId, HTMLButtonElement>());
@@ -169,10 +175,9 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
   const closeTimerRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
-    setUsername(profile.username);
     setAvatar(profile.avatar);
     setProfileError(null);
-  }, [profile.avatar, profile.id, profile.username]);
+  }, [profile.avatar, profile.id]);
 
   useEffect(() => {
     writeStoredDeviceSettings({ accentId, fontSizeLevel });
@@ -191,16 +196,15 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
   } as CSSProperties;
 
   const saveProfileDraft = useCallback(
-    (draftUsername: string, draftAvatar: string): boolean => {
-      const clean = draftUsername.trim();
-      const safeAvatar = safeAvatarSrc(draftAvatar, clean || profile.id);
+    (draftAvatar: string): boolean => {
+      const safeAvatar = safeAvatarSrc(draftAvatar, profile.username || profile.id);
 
-      if (profile.username === clean && profile.avatar === safeAvatar) {
+      if (profile.avatar === safeAvatar) {
         setProfileError(null);
         return true;
       }
 
-      if (onProfileChange({ id: profile.id, username: clean, avatar: safeAvatar })) {
+      if (onProfileChange({ id: profile.id, username: profile.username, avatar: safeAvatar })) {
         setProfileError(null);
         if (safeAvatar !== draftAvatar) setAvatar(safeAvatar);
         return true;
@@ -215,7 +219,7 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
   const closeSettings = useCallback(() => {
     if (closing) return;
 
-    saveProfileDraft(username, avatar);
+    saveProfileDraft(avatar);
 
     if (prefersReducedMotion()) {
       onClose();
@@ -226,7 +230,7 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
     closeTimerRef.current = window.setTimeout(() => {
       onClose();
     }, SETTINGS_CLOSE_ANIMATION_MS);
-  }, [avatar, closing, onClose, saveProfileDraft, username]);
+  }, [avatar, closing, onClose, saveProfileDraft]);
 
   const openSection = useCallback((id: SectionId) => {
     if (mobileBackTimerRef.current !== undefined) window.clearTimeout(mobileBackTimerRef.current);
@@ -265,11 +269,11 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
-      saveProfileDraft(username, avatar);
+      saveProfileDraft(avatar);
     }, 300);
 
     return () => window.clearTimeout(handle);
-  }, [avatar, saveProfileDraft, username]);
+  }, [avatar, saveProfileDraft]);
 
   useEffect(() => {
     if (!mobileSectionOpen || !isMobileSettingsViewport()) return undefined;
@@ -387,10 +391,9 @@ export function SettingsPanel({ profile, deviceId, onProfileChange, onClose }: S
           {active === 'profile' && (
             <ProfileSettings
               profile={profile}
-              username={username}
+              displayName={serverHandle}
               avatar={avatar}
               profileError={profileError}
-              onUsernameChange={setUsername}
               onAvatarChange={setAvatar}
               onProfileErrorChange={setProfileError}
             />

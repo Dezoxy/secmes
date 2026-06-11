@@ -8,7 +8,7 @@ import {
   type ConversationSession,
   type PendingConversation,
 } from '../../lib/conversations';
-import { generatedAvatar } from './seed';
+import { dicebearAvatar } from '../../lib/dicebear';
 import { contactDisplayName, contactSearchText } from './user-label';
 import { VerifySecurity } from './VerifySecurity';
 import { Avatar, EmptyState, ErrorState, IconButton, LoadingState, Modal } from '../ui';
@@ -206,7 +206,7 @@ export function StartConversation({
               className="flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:bg-[#1a1a26] disabled:opacity-50"
             >
               <Avatar
-                src={generatedAvatar(`${label} ${u.id}`)}
+                src={dicebearAvatar(u.id)}
                 name={label}
                 size="md"
                 shape="circle"
