@@ -1,12 +1,11 @@
 # Threat model: server-side error tracking (#48)
 
-> Status: **DRAFT for ratification.** Roadmap Phase 6 #48. Server-side `@sentry/node` error tracking for
-> `apps/api`, built **SDK-first + DSN-GATED** — completely disabled (a no-op) when `SENTRY_DSN` is unset,
-> which is the default until arming. Backend = self-hosted **GlitchTip** (Sentry-API-compatible) stood up as a
-> gated Compose service on the VM at arming (**Slice B**); SaaS Sentry EU is a one-line DSN swap (same SDK +
-> protocol, zero lock-in). **Build-only:** the SDK + scrubbing + gating land now (**Slice A**); nothing emits
-> until a DSN is configured at arming. Frontend error tracking (`@sentry/react`) is **out of scope** (separate
-> work). Mirrors the crypto-blind, IDs/metadata-only posture of the #47 metrics (`observability.md`).
+> Status: **COMPLETE.** Roadmap Phase 6 #48. Server-side `@sentry/node` error tracking for `apps/api`.
+> **Slice A** (SDK + default-deny scrubbing, DSN-gated) merged previously. **Slice B** (self-hosted GlitchTip
+> Compose service, hardened + gated + secrets from Key Vault) is the current PR. Backend = self-hosted
+> **GlitchTip** (Sentry-API-compatible, EU data residency, no new sub-processor); SaaS Sentry EU is a one-line
+> DSN swap (same SDK + protocol, zero lock-in). Frontend error tracking (`@sentry/react`) is out of scope.
+> Mirrors the crypto-blind, IDs/metadata-only posture of the #47 metrics (`observability.md`).
 
 ## 1. Feature & data flow
 
@@ -14,7 +13,16 @@
 API request → handler throws / explicitly-reported error
    → @sentry/node captures (exception + request context)
    → beforeSend / beforeBreadcrumb   [DEFAULT-DENY SCRUB]   ← the single critical control
-   → event over HTTPS to SENTRY_DSN → GlitchTip (self-hosted on the VM)   |   SENTRY_DSN unset = NO-OP (nothing sent)
+   → event → GlitchTip (self-hosted on the VM, internal network only)
+                         |
+                         ↳ SENTRY_DSN_FILE empty/unset = NO-OP (nothing sent, the default until arming)
+
+GlitchTip topology (Slice B, compose.prod.yaml):
+  glitchtip-db    — dedicated postgres:16-alpine (separate cluster from argus app DB, same isolation as zitadel-db)
+  glitchtip       — Django web + gunicorn on :8000; runs migrate on startup; depends on glitchtip-db healthy
+  glitchtip-worker — Celery worker + beat (async event ingest, cleanup, notifications)
+  Caddy           — host-splits glitchtip.4rgus.com:8080 → glitchtip:8000 (same pattern as grafana.4rgus.com)
+  Cloudflare Access — gates glitchtip.4rgus.com at the edge (identity + Cloudflare Access policy)
 ```
 
 After scrubbing, an event carries **only**: error type + message + stack (code paths), HTTP method +
@@ -73,19 +81,31 @@ stream is a metadata-only projection, the same posture as the #47 metrics.
 3. **tenant_id + RLS** — N/A (no schema/table). At most an **opaque** tenant id rides as a metadata tag; it is
    never used to read cross-tenant data.
 4. **No hand-rolled crypto** — ✅ none; TLS to the DSN host is the platform's.
-5. **Secrets via Key Vault as files** — the `SENTRY_DSN` is a **write-only ingest key**, not a read
-   credential; it may ride env per the invariant-#5 carve-out for non-secret-ish config, or be delivered as a
-   `SENTRY_DSN_FILE` credential file for consistency. No long-lived cloud cred in env. Default unset ⇒ disabled.
+5. **Secrets via Key Vault as files** — ✅ `SENTRY_DSN_FILE` (file-mounted Docker secret); `glitchtip_db_password`
+   + `glitchtip_secret_key` from Key Vault; `glitchtip_database_url` derived by `deploy.sh`. No long-lived
+   cloud creds in env. Default unset ⇒ disabled.
 6. **No admin path to content** — ✅ GlitchTip admins see error metadata + stacks only; scrubbing guarantees
    content never reaches the store.
 
 ## 5. Decision & mitigations
 
-Ship **Slice A** now: the `@sentry/node` SDK init (gated on `SENTRY_DSN`; a no-op when unset), the default-deny
-scrubbing hook, a global capture path (a Nest exception filter / the Sentry Nest integration) that records
-**unhandled** errors *after* the existing typed `ErrorResponse` mapping, and a scrubbing unit-test suite. No
-infra in Slice A — nothing emits until a DSN is set at arming. **Slice B** (later) stands up the GlitchTip
-Compose service (its own Postgres + Redis, behind **Cloudflare Access**, **no published ports**) at arming.
+**Slice A** (merged): the `@sentry/node` SDK init gated on `SENTRY_DSN_FILE` / `SENTRY_DSN` (a no-op when
+unset/empty), the default-deny scrubbing hook, and a non-invasive global interceptor that captures 5xx +
+unhandled exceptions. Nothing emits until a DSN is set.
+
+**Slice B** (this PR): GlitchTip Compose service — its own `glitchtip-db` Postgres (dedicated cluster,
+not the app DB), shared Redis for Celery, `glitchtip` web container + `glitchtip-worker`, all behind Caddy +
+Cloudflare Access at `glitchtip.4rgus.com` with **no published ports**. Django's lack of `_FILE` env support is
+handled by a tiny `docker-entrypoint.sh` wrapper that reads the three secret files and `exec`s the original
+command — secrets are never committed, never in env, never in container config at rest. DSN (`sentry_dsn`
+Docker secret) is OPTIONAL (fetched from Key Vault as `argus-sentry-dsn`); seeded EMPTY on first boot so the
+mount resolves; the api stays a no-op until the operator provisions the DSN post-arming.
+
+**Arming checklist** (post-deploy):
+1. Browse `https://glitchtip.4rgus.com`, create org + project.
+2. Copy the project DSN (`https://...@glitchtip.4rgus.com/1`).
+3. `az keyvault secret set --vault-name $KV --name argus-sentry-dsn --value '<DSN>'`
+4. Redeploy (or restart argus-secrets.service + the api container) — the api now sends scrubbed events.
 
 Must-hold:
 

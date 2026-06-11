@@ -125,11 +125,12 @@ services:
       S3_FORCE_PATH_STYLE: 'false' # B2 uses virtual-host style
       OIDC_ISSUER: ${OIDC_ISSUER:-}
       OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
-      # Error tracking (#48) — DSN-GATED: unset = a complete no-op (the Slice-A default). At arming, set
-      # SENTRY_DSN in the deploy env to enable (it's a write-only INGEST key — env is acceptable, like the B2
-      # key-id; events are default-deny scrubbed). SENTRY_RELEASE tags the deployed commit. The optional
-      # SENTRY_DSN_FILE (mounted secret) form arrives with the GlitchTip service in Slice B.
-      SENTRY_DSN: ${SENTRY_DSN:-}
+      # Error tracking (#48 Slice B) — DSN-GATED: SENTRY_DSN_FILE unset/empty = a complete no-op.
+      # The DSN is delivered as a mounted file (sentry_dsn Docker secret, sourced from Key Vault as
+      # argus-sentry-dsn). The fetch script seeds an EMPTY file on first boot; the api stays disabled
+      # until the operator provisions the DSN in Key Vault after the GlitchTip UI is up (see .env.prod.example).
+      # Events are default-deny scrubbed before send (docs/threat-models/error-tracking.md).
+      SENTRY_DSN_FILE: /run/secrets/sentry_dsn
       SENTRY_RELEASE: ${IMAGE_TAG:-}
       # --- Secrets are delivered as FILES, never env (invariant #5) ---
       # The app reads the password-bearing connection URLs and the B2 secret key from mounted credential
@@ -147,6 +148,7 @@ services:
       - database_url
       - s3_secret_access_key
       - redis_url
+      - sentry_dsn
     depends_on:
       postgres:
         condition: service_healthy
@@ -564,6 +566,128 @@ services:
           memory: 256m
           cpus: '0.5'
 
+  # ─── GlitchTip — self-hosted error tracking (#48 Slice B) ────────────────────────────────────────────────
+  # Sentry-API-compatible, EU data residency, no new sub-processor. Three components:
+  #   glitchtip-db   — dedicated Postgres (same isolation pattern as zitadel-db)
+  #   glitchtip      — Django web + gunicorn (runs migrate on startup, then serves the API + UI on :8000)
+  #   glitchtip-worker — Celery worker + beat (async event ingest, cleanup, notifications)
+  # ONLY glitchtip is exposed at https://glitchtip.4rgus.com via Caddy (host-split), gated by Cloudflare
+  # Access + GlitchTip's own auth. glitchtip-db never has a published port.
+  # GlitchTip (Django) has no `_FILE` env support — secrets are read from files via the entrypoint wrapper.
+  # DSN is provisioned post-arming (OPTIONAL secret argus-sentry-dsn); api is a no-op until then.
+  # See docs/threat-models/error-tracking.md.
+
+  glitchtip-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: glitchtip
+      POSTGRES_DB: glitchtip
+      POSTGRES_PASSWORD_FILE: /run/secrets/glitchtip_db_password
+    secrets:
+      - glitchtip_db_password
+    volumes:
+      - glitchtip-db-data:/var/lib/postgresql/data
+    security_opt:
+      - no-new-privileges:true
+    # initdb needs CHOWN/SETUID/SETGID/DAC_OVERRIDE/FOWNER to set up the data dir — same cap set as zitadel-db.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+      - FOWNER
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U glitchtip -d glitchtip']
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
+
+  glitchtip:
+    image: glitchtip/glitchtip:v4
+    restart: unless-stopped
+    # The entrypoint wrapper reads the three secret files into env (DATABASE_URL, SECRET_KEY, REDIS_URL)
+    # before exec-ing the original command. The wrapper is bind-mounted read-only from the staged repo tree.
+    entrypoint: /entrypoint.sh
+    # run-migrate-and-web.sh: runs `manage.py migrate --run-syncdb` then starts gunicorn on :8000.
+    # Migrations run on EVERY container start (idempotent) — no separate migrate service needed.
+    command: ./bin/run-migrate-and-web.sh
+    depends_on:
+      glitchtip-db:
+        condition: service_healthy
+    environment:
+      # Non-secret config. GLITCHTIP_DOMAIN must match the public URL for correct absolute link generation.
+      GLITCHTIP_DOMAIN: https://glitchtip.4rgus.com
+      DEFAULT_FROM_EMAIL: noreply@4rgus.com
+      # consolemail: logs emails to stdout — no SMTP required. Configure SMTP as a follow-up if desired.
+      EMAIL_URL: consolemail://
+      # Disable self-registration: only operators (who have the Cloudflare Access identity) can sign in.
+      GLITCHTIP_DISABLE_REGISTRATION: 'True'
+      # Retain events for 90 days (matches audit log retention in roadmap #16).
+      GLITCHTIP_MAX_EVENT_LIFE_DAYS: '90'
+      # Single worker is enough for current event volume (single VM). Increase if ingestion is slow.
+      CELERY_WORKER_CONCURRENCY: '1'
+      # DATABASE_URL, SECRET_KEY, REDIS_URL are NOT set here — injected by /entrypoint.sh from secret files.
+    secrets:
+      - glitchtip_database_url
+      - glitchtip_secret_key
+      - redis_url
+    volumes:
+      - ./infra/vm/glitchtip/docker-entrypoint.sh:/entrypoint.sh:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:8000/api/0/version/ || exit 1']
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.75'
+
+  glitchtip-worker:
+    image: glitchtip/glitchtip:v4
+    restart: unless-stopped
+    entrypoint: /entrypoint.sh
+    command: ./bin/run-celery-with-beat.sh
+    depends_on:
+      glitchtip:
+        condition: service_healthy
+    environment:
+      GLITCHTIP_DOMAIN: https://glitchtip.4rgus.com
+      DEFAULT_FROM_EMAIL: noreply@4rgus.com
+      EMAIL_URL: consolemail://
+      GLITCHTIP_DISABLE_REGISTRATION: 'True'
+      GLITCHTIP_MAX_EVENT_LIFE_DAYS: '90'
+      CELERY_WORKER_CONCURRENCY: '1'
+    secrets:
+      - glitchtip_database_url
+      - glitchtip_secret_key
+      - redis_url
+    volumes:
+      - ./infra/vm/glitchtip/docker-entrypoint.sh:/entrypoint.sh:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
+
 secrets:
   # Sourced from ${ARGUS_SECRETS_DIR} — local dev uses the gitignored ./secrets; prod points it at the tmpfs
   # dir that argus-secrets.service fills from Key Vault via the Managed Identity (Slice 3:
@@ -612,6 +736,23 @@ secrets:
     # Grafana admin password — Grafana reads it via GF_SECURITY_ADMIN_PASSWORD__FILE (native `__FILE` support).
     # Delivered from Key Vault (argus-grafana-admin-password); set it before the first deploy.
     file: ${ARGUS_SECRETS_DIR:-./secrets}/grafana_admin_password
+  glitchtip_db_password:
+    # GlitchTip Postgres owner password — glitchtip-db reads it via POSTGRES_PASSWORD_FILE.
+    # deploy.sh derives glitchtip_database_url from it (same pattern as redis_url). Set before first deploy.
+    file: ${ARGUS_SECRETS_DIR:-./secrets}/glitchtip_db_password
+  glitchtip_database_url:
+    # Full GlitchTip DSN: postgresql://glitchtip:<pw>@glitchtip-db:5432/glitchtip.
+    # GENERATED by deploy.sh from glitchtip_db_password (never stored in Key Vault directly).
+    file: ${ARGUS_SECRETS_DIR:-./secrets}/glitchtip_database_url
+  glitchtip_secret_key:
+    # Django SECRET_KEY (cryptographic). Generate: python -c "import secrets; print(secrets.token_urlsafe(50))"
+    # Stored in Key Vault as argus-glitchtip-secret-key. Set before first deploy.
+    file: ${ARGUS_SECRETS_DIR:-./secrets}/glitchtip_secret_key
+  sentry_dsn:
+    # GlitchTip project DSN — a write-only ingest key for the api's @sentry/node SDK (roadmap #48).
+    # OPTIONAL: fetched from Key Vault (argus-sentry-dsn); seeded EMPTY on first boot so the mount
+    # resolves (api is a no-op until provisioned). Operator provisions AFTER the GlitchTip UI is live.
+    file: ${ARGUS_SECRETS_DIR:-./secrets}/sentry_dsn
 
 volumes:
   pgdata:
@@ -624,3 +765,5 @@ volumes:
   # Centralized logs (roadmap #47b): Loki chunks/index, Alloy read offsets/WAL.
   loki-data:
   alloy-data:
+  # GlitchTip dedicated Postgres data (roadmap #48 Slice B) — separate cluster from the app DB.
+  glitchtip-db-data:

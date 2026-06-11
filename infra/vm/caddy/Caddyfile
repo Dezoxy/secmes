@@ -74,6 +74,13 @@ http://grafana.4rgus.com:8080 {
 	reverse_proxy grafana:3000
 }
 
+# --- GlitchTip (error tracking, https://glitchtip.4rgus.com) — roadmap #48 Slice B -----------------------
+# Admin surface: gated by Cloudflare Access at the edge (identity) + GlitchTip's own auth; NEVER public.
+# No h2c — GlitchTip speaks plain HTTP/1.1 (Django/gunicorn). Internal-only; shares the VM failure domain.
+http://glitchtip.4rgus.com:8080 {
+	reverse_proxy glitchtip:8000
+}
+
 # --- App origin (PWA + /api + /ws) — catch-all :8080 for every other host (4rgus.com, health, direct IP) ---
 :8080 {
 	# Code-delivery hardening response headers (#43; the edge adds HSTS). Served HERE at the static origin so
