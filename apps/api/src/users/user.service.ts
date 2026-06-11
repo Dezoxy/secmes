@@ -148,6 +148,7 @@ export class UserService {
           and(
             eq(schema.users.externalIdentityId, auth.sub),
             eq(schema.users.tenantId, auth.tenantId),
+            eq(schema.users.status, 'active'),
           ),
         )
         .limit(1),

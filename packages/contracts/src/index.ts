@@ -309,7 +309,7 @@ export const CreateInviteResponseSchema = z.object({
 });
 export type CreateInviteResponse = z.infer<typeof CreateInviteResponseSchema>;
 
-export const AcceptInviteBodySchema = z.object({ token: z.string().min(1) }).strict();
+export const AcceptInviteBodySchema = z.object({ token: z.string().min(1).max(128) }).strict();
 export type AcceptInviteBody = z.infer<typeof AcceptInviteBodySchema>;
 
 export const InviteSummarySchema = z.object({

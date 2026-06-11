@@ -221,7 +221,11 @@ export class TenantsService {
             .update(schema.tenantInvites)
             .set({ acceptedAt: new Date() })
             .where(
-              and(eq(schema.tenantInvites.id, invite.id), isNull(schema.tenantInvites.acceptedAt)),
+              and(
+                eq(schema.tenantInvites.id, invite.id),
+                isNull(schema.tenantInvites.acceptedAt),
+                isNull(schema.tenantInvites.revokedAt),
+              ),
             )
             .returning({ id: schema.tenantInvites.id });
           if (!marked) throw new ForbiddenException(INVALID);
@@ -282,7 +286,7 @@ export class TenantsService {
     );
   }
 
-  /** Revoke an invite (admin). Idempotent if already revoked; 404 if not found. */
+  /** Revoke an invite (admin). 404 if not found or already accepted/revoked. */
   async revokeInvite(auth: VerifiedAuth, inviteId: string): Promise<void> {
     await withTenant(auth.tenantId, async (tx) => {
       const [row] = await tx
@@ -326,6 +330,10 @@ export class TenantsService {
     await withTenant(auth.tenantId, async (tx) => {
       // Prevent leaving the tenant with zero admins.
       if (newRole === 'member') {
+        // Lock admin rows before counting to prevent concurrent demotions leaving zero admins.
+        await tx.execute(
+          sql`SELECT id FROM users WHERE tenant_id = ${auth.tenantId} AND role = 'admin' AND status = 'active' FOR UPDATE`, // nosemgrep: argus-no-sql-string-interpolation
+        );
         const admins = await tx
           .select({ id: schema.users.id })
           .from(schema.users)
@@ -368,6 +376,10 @@ export class TenantsService {
       if (!target) throw new NotFoundException('user not found');
 
       if (target.role === 'admin') {
+        // Lock admin rows before counting to prevent concurrent revocations leaving zero admins.
+        await tx.execute(
+          sql`SELECT id FROM users WHERE tenant_id = ${auth.tenantId} AND role = 'admin' AND status = 'active' FOR UPDATE`, // nosemgrep: argus-no-sql-string-interpolation
+        );
         const admins = await tx
           .select({ id: schema.users.id })
           .from(schema.users)
