@@ -5,6 +5,13 @@
 // client-supplied text.
 
 import { listUsers, type UserSummary } from '../../lib/api';
+import {
+  browserLocalStorage,
+  readVersionedRecord,
+  versionedStorageKey,
+  writeVersionedRecord,
+  type BrowserStorage,
+} from '../../lib/persistence';
 import { contactDisplayName } from './user-label';
 import { dicebearAvatar } from '../../lib/dicebear';
 import type { Conversation, User } from './seed';
@@ -12,6 +19,53 @@ import type { Conversation, User } from './seed';
 /** The placeholder participant id a not-yet-named live conversation carries (see liveConversationShell). */
 export function placeholderPeerId(conversationId: string): string {
   return `peer-${conversationId}`;
+}
+
+interface PeerMapping {
+  peerId: string;
+}
+
+function decodePeerMapping(value: unknown): PeerMapping | null {
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    'peerId' in value &&
+    typeof (value as Record<string, unknown>).peerId === 'string'
+  ) {
+    return value as PeerMapping;
+  }
+  return null;
+}
+
+/**
+ * Persist the real peer user id for a direct conversation so rehydration can name the peer on reload
+ * even when no messages have been exchanged yet (closes the dedup gap: issue #160).
+ */
+export function persistPeerMapping(
+  conversationId: string,
+  peerId: string,
+  storage: BrowserStorage = browserLocalStorage(),
+): void {
+  writeVersionedRecord({
+    storage,
+    key: versionedStorageKey('peer-mapping', conversationId),
+    value: { peerId },
+  });
+}
+
+/**
+ * Load a previously persisted peer user id for a conversation. Returns null when absent or unreadable.
+ */
+export function loadPersistedPeerMapping(
+  conversationId: string,
+  storage: BrowserStorage = browserLocalStorage(),
+): string | null {
+  const result = readVersionedRecord<PeerMapping>({
+    storage,
+    key: versionedStorageKey('peer-mapping', conversationId),
+    decode: decodePeerMapping,
+  });
+  return result.status === 'ok' ? result.value.peerId : null;
 }
 
 // One directory fetch per session, shared across naming triggers; refreshed once on a miss (a peer who
