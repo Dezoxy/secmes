@@ -9,9 +9,17 @@
 #   - Event payload is metadata only: unit name, timestamp, level. Never plaintext content (invariant #2).
 #   - Exits 0 in ALL cases: a failing notifier must never shadow the original failure in journalctl.
 set -euo pipefail
+# Global ERR trap: if any unguarded command exits non-zero, exit 0 rather than shadowing the original
+# failure in the journal with a non-zero notifier exit. The explicit || guards on openssl/curl remain
+# for clarity; this is the backstop for paths like the `tr` read (TOCTOU) and `date` inside log().
+trap 'exit 0' ERR
 
 UNIT="${1:?unit name (failing service prefix) required}"
 DSN_FILE="${CREDENTIALS_DIRECTORY:-}/sentry-dsn"
+
+# Validate unit name before interpolating into JSON. systemd.unit(5) restricts names to
+# [a-zA-Z0-9._:@-], so this also rules out any character that could malform the JSON body.
+[[ "$UNIT" =~ ^[a-zA-Z0-9._:@-]+$ ]] || { printf 'notify: invalid unit name "%s" — aborting\n' "$UNIT" >&2; exit 0; }
 
 log() { printf '[%s] notify: %s\n' "$(date -u +%FT%TZ)" "$*"; }
 

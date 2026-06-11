@@ -5,6 +5,10 @@
 # No enable needed — the template is started on-demand by OnFailure=.
 [Unit]
 Description=argus — failure alert for %i
+# DefaultDependencies=no: the default implicit deps include Before=shutdown.target + Requires=basic.target.
+# A unit that fails late in shutdown (after basic.target deactivates) would be refused by systemd, silently
+# swallowing the alert. This is a pure notification oneshot with no ordering requirements beyond After=.
+DefaultDependencies=no
 # After= only (no Requires=): if argus-secrets.service is in a failed state while the credential file still
 # exists on tmpfs, Requires= would suppress the alert. The script no-ops gracefully on a missing/empty file,
 # so After= alone (ordering at boot) is the more robust choice for an alerting path.
