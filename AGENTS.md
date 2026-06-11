@@ -32,7 +32,7 @@ Hard rules. A change that violates one is wrong even if it "works".
 ## Definition of done
 
 - `pnpm -r typecheck && pnpm -r test && pnpm lint && pnpm format:check` pass.
-- User-visible web change: Playwright E2E suite passes (`pnpm --filter @argus/web test:e2e`); new user-facing flows get an E2E test. The `e2e` CI job gates merges on this.
+- User-visible web change: Playwright E2E suite passes (`pnpm --filter @argus/web test:e2e`); new user-facing flows get an E2E test; **removed or renamed UI interactions must have their E2E assertions updated in the same commit** — grep `apps/web/e2e/` for the changed label/text/role before pushing. The `e2e` CI job gates merges on this.
 - New API endpoints: in the OpenAPI spec with auth + typed schemas (refresh the spec, run the 42Crunch audit).
 - New tables: `tenant_id` + RLS policy.
 - Security-relevant change: a short threat-model note under `docs/threat-models/`.

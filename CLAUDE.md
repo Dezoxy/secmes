@@ -20,3 +20,16 @@ The session default is set in `.claude/settings.json`: `opusplan` (Sonnet for ex
 - After a merged PR or a finished roadmap slice, suggest `/compact`.
 
 Keep all *rules* in AGENTS.md so Codex and Claude never drift. Only Claude-specific wiring belongs here.
+
+## Post-coding auto-flow
+
+Once local gates pass (`pnpm -r typecheck && pnpm -r test`), run the full PR flow **automatically — no pause, no confirmation needed**:
+
+1. `/code-review` (medium effort) over the full branch diff → fix any must-fix findings → commit (Write tool for body file, `git commit -F`).
+2. `git push -u origin <branch>`.
+3. `gh pr create --body-file /tmp/pr-body.md` (Write tool for the body).
+4. **Watch CI**: `gh pr checks <pr> --watch` — if any job fails, immediately investigate (`gh run view … --log | grep -A20 Error`) and fix: new commit → push → wait for CI to re-run. Don't wait for the user to notice failures.
+5. **Await review**: `./scripts/codex-review-status.sh <pr> --wait` (blocks up to 15 min; handles the @claude fallback per the `/await-codex` skill). If exit 4 (USAGE_LIMIT), post the `@claude` fallback comment then re-run with `--wait`. If FINDINGS, fix → push → re-run.
+6. **Only pause for `gh pr merge`** — that is the one outward, hard-to-reverse step the user drives explicitly.
+
+Steps 4 and 5 run concurrently: start the CI watch, then in the same turn run the review status check with `--wait`. Fix CI failures as they appear.
