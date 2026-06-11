@@ -56,7 +56,20 @@
       "Bash(gh run list*)",
       "Bash(gh run watch*)",
       "Bash(DATABASE_URL=* pnpm*)",
-      "Bash(DATABASE_URL=* REDIS_URL=* pnpm*)"
+      "Bash(DATABASE_URL=* REDIS_URL=* pnpm*)",
+      "Bash(cat *)",
+      "Bash(sleep *)",
+      "Bash(grep *)",
+      "Bash(node -e *)",
+      "Bash(source .venv/*)",
+      "Bash(sed *)",
+      "Bash(awk *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(sort *)",
+      "Bash(cut *)",
+      "Bash(uniq *)"
     ],
     "ask": [
       "Bash(terraform apply*)",
