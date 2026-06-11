@@ -42,17 +42,18 @@ export function NotificationSettings({ deviceId }: NotificationSettingsProps) {
   }, [deviceId]);
 
   const handleDisable = useCallback(async () => {
+    if (!deviceId) return;
     setBusy(true);
     setError(null);
     try {
-      await unsubscribeFromPush();
+      await unsubscribeFromPush(deviceId);
       setPermission(currentPermission());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not disable notifications.');
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [deviceId]);
 
   return (
     <div className="space-y-3">

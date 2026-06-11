@@ -13,8 +13,10 @@ export const VAPID_CONFIG = 'VAPID_CONFIG';
 // before any DB write, so a redirected URL can't bypass it at the HTTP layer.
 // ::ffff: covers IPv4-mapped IPv6 (::ffff:127.0.0.1, ::ffff:192.168.x.x, etc.) which the URL
 // parser normalises to this form — a legitimate push endpoint never uses IPv4-mapped addresses.
+// fc[0-9a-f] / fd[0-9a-f] anchors the ULA IPv6 check to actual hex digits so fc.example.com
+// (a valid public hostname) is not rejected.
 const PRIVATE_IP_RE =
-  /^(127\.|169\.254\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|::1$|::ffff:|fc|fd|fe80)/i;
+  /^(127\.|169\.254\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|::1$|::ffff:|fc[0-9a-f]|fd[0-9a-f]|fe80)/i;
 
 /** Validate an endpoint before storing. Throws a TypeError (caught in controller → 400) on failure. */
 function assertSafeEndpoint(endpoint: string): void {
@@ -92,8 +94,12 @@ export class PushService {
     });
   }
 
-  /** Remove the verified caller's push subscription. Silent no-op if none exists. */
-  async remove(auth: VerifiedAuth): Promise<void> {
+  /**
+   * Remove the verified caller's push subscription for a specific device. Silent no-op if none
+   * exists. Scoped to (tenantId, userId, deviceId) so disabling push on one device never affects
+   * other devices belonging to the same user.
+   */
+  async remove(auth: VerifiedAuth, deviceId: string): Promise<void> {
     await withTenant(auth.tenantId, async (tx) => {
       const [user] = await tx
         .select({ id: schema.users.id })
@@ -108,6 +114,7 @@ export class PushService {
           and(
             eq(schema.pushSubscriptions.tenantId, auth.tenantId),
             eq(schema.pushSubscriptions.userId, user.id),
+            eq(schema.pushSubscriptions.deviceId, deviceId),
           ),
         );
     });
@@ -170,6 +177,10 @@ export class PushService {
 
         const payload = JSON.stringify({ type: 'new_message' });
 
+        // Collect stale subscription ids during the concurrent sends, then delete in one query
+        // to avoid issuing concurrent writes on the same transaction object.
+        const staleIds: string[] = [];
+
         await Promise.allSettled(
           subs.map(async (sub) => {
             try {
@@ -179,12 +190,7 @@ export class PushService {
               );
             } catch (err: unknown) {
               const status = (err as { statusCode?: number }).statusCode;
-              if (status === 410) {
-                // Subscription expired — self-heal: remove the stale row.
-                await tx
-                  .delete(schema.pushSubscriptions)
-                  .where(eq(schema.pushSubscriptions.id, sub.id));
-              }
+              if (status === 410) staleIds.push(sub.id);
               // Log only the row id — never the endpoint, p256dh, or auth (invariant #2).
               this.logger.warn(
                 `push: send failed for subscription ${sub.id}, status ${status ?? 'unknown'}`,
@@ -192,6 +198,12 @@ export class PushService {
             }
           }),
         );
+
+        if (staleIds.length > 0) {
+          await tx
+            .delete(schema.pushSubscriptions)
+            .where(inArray(schema.pushSubscriptions.id, staleIds));
+        }
       });
     } catch (err: unknown) {
       // DB or config errors must never surface to the message-send caller.

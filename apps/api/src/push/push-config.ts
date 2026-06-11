@@ -21,14 +21,12 @@ export function loadVapidConfig(): VapidConfig {
 
 function resolvePrivateKey(): string {
   const file = process.env.VAPID_PRIVATE_KEY_FILE;
-  if (file) {
-    try {
-      return readFileSync(file, 'utf8').trim();
-    } catch {
-      // Log only that the file is unreadable — never the path or its contents (invariant #2).
-      logger.warn('push: VAPID credential file unreadable; push disabled');
-      return '';
-    }
+  if (!file) return '';
+  try {
+    return readFileSync(file, 'utf8').trim();
+  } catch {
+    // Log only that the file is unreadable — never the path or its contents (invariant #2).
+    logger.warn('push: VAPID credential file unreadable; push disabled');
+    return '';
   }
-  return process.env.VAPID_PRIVATE_KEY ?? '';
 }

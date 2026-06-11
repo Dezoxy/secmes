@@ -115,21 +115,53 @@ describe.skipIf(!DB_URL)('PushService', () => {
 
   // ─── remove ────────────────────────────────────────────────────────────────
 
-  it('remove: deletes the subscription for the caller', async () => {
-    // Ensure there's something to delete (upserted above)
+  it('remove: deletes the subscription for the calling device only', async () => {
+    // Ensure there's something to delete (upserted above in the upsert tests)
     const rowsBefore =
       await sql`select id from push_subscriptions where tenant_id = ${tenantId} and device_id = ${deviceId}`;
     expect(rowsBefore.length).toBeGreaterThan(0);
 
-    await svc.remove(aliceAuth);
+    await svc.remove(aliceAuth, deviceId);
 
     const rowsAfter =
       await sql`select id from push_subscriptions where tenant_id = ${tenantId} and device_id = ${deviceId}`;
     expect(rowsAfter).toHaveLength(0);
   });
 
+  it('remove: does not affect subscriptions on other devices owned by the same user', async () => {
+    // Set up two devices for Alice, each with a subscription.
+    const deviceA = (
+      (
+        await sql`insert into devices (tenant_id, user_id, signature_public_key)
+                values (${tenantId}, ${userId}, 'd2Ex') returning id`
+      )[0] as { id: string }
+    ).id;
+    const deviceB = (
+      (
+        await sql`insert into devices (tenant_id, user_id, signature_public_key)
+                values (${tenantId}, ${userId}, 'd2Ey') returning id`
+      )[0] as { id: string }
+    ).id;
+
+    await svc.upsert(aliceAuth, { deviceId: deviceA, subscription: fakeSub('dev-a') });
+    await svc.upsert(aliceAuth, { deviceId: deviceB, subscription: fakeSub('dev-b') });
+
+    // Remove only device A's subscription.
+    await svc.remove(aliceAuth, deviceA);
+
+    const rowsA = await sql`select id from push_subscriptions where device_id = ${deviceA}`;
+    expect(rowsA).toHaveLength(0); // removed
+
+    const rowsB = await sql`select id from push_subscriptions where device_id = ${deviceB}`;
+    expect(rowsB).toHaveLength(1); // untouched
+
+    // cleanup
+    await sql`delete from devices where id = ${deviceA}`;
+    await sql`delete from devices where id = ${deviceB}`;
+  });
+
   it('remove: is a no-op when no subscription exists', async () => {
-    await expect(svc.remove(aliceAuth)).resolves.toBeUndefined();
+    await expect(svc.remove(aliceAuth, deviceId)).resolves.toBeUndefined();
   });
 
   // ─── cascade ───────────────────────────────────────────────────────────────

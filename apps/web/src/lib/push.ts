@@ -1,11 +1,13 @@
 import { deletePushSubscription, savePushSubscription } from './api';
 
-/** Convert an ArrayBuffer to a base64url string (no padding). */
+/** Convert an ArrayBuffer to a base64url string (no padding). Loop-safe for any buffer size. */
 function toBase64Url(buf: ArrayBuffer): string {
-  return btoa(String.fromCharCode(...new Uint8Array(buf)))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 /**
@@ -47,11 +49,12 @@ export async function subscribeToPush(deviceId: string, vapidPublicKey: string):
 
 /**
  * Unsubscribe the current device from push notifications and remove the server-side record.
+ * Scoped to the specific device — other devices' subscriptions are unaffected.
  * Silent no-op if no subscription exists.
  */
-export async function unsubscribeFromPush(): Promise<void> {
+export async function unsubscribeFromPush(deviceId: string): Promise<void> {
   const reg = await navigator.serviceWorker.ready;
   const sub = await reg.pushManager.getSubscription();
   if (sub) await sub.unsubscribe();
-  await deletePushSubscription();
+  await deletePushSubscription(deviceId);
 }

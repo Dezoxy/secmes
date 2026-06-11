@@ -81,19 +81,21 @@ describe('subscribeToPush', () => {
 });
 
 describe('unsubscribeFromPush', () => {
-  it('unsubscribes the browser subscription and deletes the server record', async () => {
+  it('unsubscribes the browser subscription and deletes the server record for the given device', async () => {
     const unsub = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
     setupServiceWorker(makeSubObject(unsub));
 
-    await unsubscribeFromPush();
+    await unsubscribeFromPush(DEVICE_ID);
 
     expect(unsub).toHaveBeenCalledOnce();
     expect(del).toHaveBeenCalledOnce();
+    expect(del).toHaveBeenCalledWith(DEVICE_ID);
   });
 
   it('still deletes the server record even when no browser subscription exists', async () => {
     setupServiceWorker(null);
-    await unsubscribeFromPush();
+    await unsubscribeFromPush(DEVICE_ID);
     expect(del).toHaveBeenCalledOnce();
+    expect(del).toHaveBeenCalledWith(DEVICE_ID);
   });
 });

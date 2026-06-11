@@ -437,11 +437,11 @@ export async function savePushSubscription(req: SubscribePushRequest): Promise<v
   );
 }
 
-/** Remove the push subscription for this device (DELETE /push/subscription → 204). */
-export async function deletePushSubscription(): Promise<void> {
+/** Remove the push subscription for this device (DELETE /push/subscription?deviceId=… → 204). */
+export async function deletePushSubscription(deviceId: string): Promise<void> {
   unwrapApiResult(
     await requestStatus({
-      path: '/push/subscription',
+      path: `/push/subscription?deviceId=${encodeURIComponent(deviceId)}`,
       method: 'DELETE',
     }),
   );

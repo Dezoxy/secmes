@@ -1,4 +1,13 @@
-import { BadRequestException, Body, Controller, Delete, HttpCode, Put } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  HttpCode,
+  ParseUUIDPipe,
+  Put,
+  Query,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -6,6 +15,7 @@ import {
   ApiNoContentResponse,
   ApiOperation,
   ApiProperty,
+  ApiQuery,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
@@ -87,12 +97,22 @@ export class PushController {
   @HttpCode(204)
   @Throttle(perMinute(SENSITIVE_LIMITS.subscribePush))
   @ApiOperation({
-    summary: "Remove the caller's push subscription",
+    summary: "Remove the caller's push subscription for a specific device",
     operationId: 'unsubscribePush',
   })
+  @ApiQuery({
+    name: 'deviceId',
+    description: 'UUID of the device whose subscription to remove',
+    required: true,
+    schema: { type: 'string', format: 'uuid', maxLength: 36 },
+  })
   @ApiNoContentResponse({ description: 'subscription removed (or was not present)' })
+  @ApiBadRequestResponse({ description: 'deviceId is missing or not a valid UUID' })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
-  async unsubscribe(@CurrentAuth() auth: VerifiedAuth): Promise<void> {
-    await this.push.remove(auth);
+  async unsubscribe(
+    @CurrentAuth() auth: VerifiedAuth,
+    @Query('deviceId', new ParseUUIDPipe()) deviceId: string,
+  ): Promise<void> {
+    await this.push.remove(auth, deviceId);
   }
 }
