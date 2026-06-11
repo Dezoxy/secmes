@@ -14,7 +14,7 @@ The session default is set in `.claude/settings.json`: `opusplan` (Sonnet for ex
 
 - **Plan mode first for non-trivial work.** Enter plan mode (Opus under `opusplan`), present the plan in plain language a non-programmer product owner can judge — what will change, what could break, how it gets verified — and get approval before writing code. The owner steers at the plan stage, not the diff stage.
 - Heavy reasoning is pinned where it belongs: `security-architect` and `crypto-reviewer` run Fable high, the other reviewers Opus high, `/feature-threat-model` runs Fable for its turn. Delegate to them instead of suggesting a model switch.
-- **Deep reviews are scheduled, not continuous.** At milestones (finished roadmap phase, pre-beta), suggest a one-off `/code-review ultra` plus a full-surface `security-architect` pass. Per-PR, the pinned reviewers + Codex are enough.
+- **Deep reviews are scheduled, not continuous.** At milestones (finished roadmap phase, pre-beta), suggest a one-off `/code-review ultra` plus a full-surface `security-architect` pass. Per-PR: one `/code-review` (medium effort) pass over the branch diff before opening the PR, plus the pinned reviewers + Codex. Never per-edit — the hooks and pre-commit gates cover that tier.
 - Never use or suggest `ultracode`, a Fable main session, or a `[1m]` context model unless the user explicitly asks — these burn the usage window.
 - Stay frugal in the main loop: don't scan the whole repo when a targeted search works; prefer subagents (fresh, small context) for broad exploration.
 - After a merged PR or a finished roadmap slice, suggest `/compact`.
