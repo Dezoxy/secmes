@@ -6,7 +6,8 @@ test('settings can be opened from chat', async ({ page }) => {
 
   await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible();
-  await expect(page.getByLabel('Username')).toBeVisible();
+  await expect(page.getByText('Display name')).toBeVisible();
+  await expect(page.getByText('Upload photo')).toBeVisible();
 });
 
 test('mobile settings opens sections from the menu', async ({ page }) => {
@@ -27,64 +28,22 @@ test('mobile settings opens sections from the menu', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Appearance' })).toBeVisible();
 });
 
-test('profile autosave accepts a generated avatar and user-chosen username', async ({ page }) => {
-  await page.goto('/chat');
-  await page.getByRole('button', { name: 'Open settings' }).click();
-
-  await page.getByLabel('Username').fill('smoke-user');
-  await page.getByRole('button', { name: 'Generate' }).click();
-  await page.waitForFunction(() =>
-    Object.values(localStorage).some((value) => value.includes('smoke-user')),
-  );
-  await page.getByRole('button', { name: 'Close settings' }).click();
-
-  await expect(page.getByText('smoke-user')).toBeVisible();
-});
-
-test('profile draft survives settings section changes', async ({ page }) => {
+test('profile display name is read-only and survives section navigation', async ({ page }) => {
   await page.goto('/chat');
   await page.getByRole('button', { name: 'Open settings' }).click();
 
   const dialog = page.getByRole('dialog', { name: 'Settings' });
 
-  await dialog.getByLabel('Username').fill('draft-user');
+  await expect(dialog.getByText('Display name')).toBeVisible();
+  // No editable username input or Generate button — display name is server-assigned
+  await expect(dialog.getByLabel('Username')).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Generate' })).toHaveCount(0);
+
   await dialog.getByRole('button', { name: 'Appearance' }).click();
   await expect(dialog.getByRole('heading', { name: 'Appearance' })).toBeVisible();
 
   await dialog.getByRole('button', { name: 'Profile' }).click();
-  await expect(dialog.getByLabel('Username')).toHaveValue('draft-user');
-});
-
-test('profile autosave resets a blank username to the anonymous default', async ({ page }) => {
-  await page.goto('/chat');
-  await page.getByRole('button', { name: 'Open settings' }).click();
-
-  const username = page.getByLabel('Username');
-  const defaultName = await username.inputValue();
-
-  await username.fill('reset-user');
-  await page.waitForFunction(() =>
-    Object.values(localStorage).some((value) => value.includes('reset-user')),
-  );
-
-  await username.fill('');
-
-  await expect(username).toHaveValue(defaultName);
-  await page.getByRole('button', { name: 'Close settings' }).click();
-  await expect(page.getByText(defaultName)).toBeVisible();
-});
-
-test('profile autosave flushes before closing settings', async ({ page }) => {
-  await page.goto('/chat');
-  await page.getByRole('button', { name: 'Open settings' }).click();
-
-  await page.getByLabel('Username').fill('quick-close-user');
-  await page.getByRole('button', { name: 'Close settings' }).click();
-
-  await expect(page.getByText('quick-close-user')).toBeVisible();
-
-  await page.reload();
-  await expect(page.getByText('quick-close-user')).toBeVisible();
+  await expect(dialog.getByText('Display name')).toBeVisible();
 });
 
 test('privacy switches persist across section changes', async ({ page }) => {
