@@ -1,9 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { readFileSync } from 'node:fs';
 import Stripe from 'stripe';
-import { eq } from 'drizzle-orm';
 
-import { getDb, schema } from '../db/index.js';
 import { PlansService } from '../plans/plans.service.js';
 
 const MEMBER_LIMITS: Record<string, number | null> = {
@@ -243,12 +241,8 @@ export class BillingService implements OnModuleInit {
   }
 
   private async tenantIdFromCustomer(customerId: string): Promise<string | null> {
-    const { db } = getDb();
-    const [row] = await db
-      .select({ id: schema.tenants.id })
-      .from(schema.tenants)
-      .where(eq(schema.tenants.stripeCustomerId, customerId))
-      .limit(1);
-    return row?.id ?? null;
+    const customer = await this.requireStripe().customers.retrieve(customerId);
+    if (customer.deleted) return null;
+    return (customer.metadata?.tenantId as string | undefined) ?? null;
   }
 }

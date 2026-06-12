@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, count, eq, isNull } from 'drizzle-orm';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 
@@ -227,18 +227,31 @@ export class TenantsService {
 
     const { sub, email } = auth;
 
-    // Race-safety: also check the limit at accept time since multiple invites can be outstanding.
-    const plan = await this.plans.getPlan(invite.tenantId);
-    if (plan.memberLimit !== null && plan.memberCount >= plan.memberLimit) {
-      throw new PaymentRequiredException(
-        `This workspace has reached its member limit. Ask the workspace admin to upgrade.`,
-      );
-    }
-
     for (let attempt = 0; attempt < MAX_HANDLE_ATTEMPTS; attempt++) {
       const displayName = generate();
       try {
         const result = await withTenant(invite.tenantId, async (tx) => {
+          // Race-safety: lock the tenant row before counting members so concurrent acceptInvite
+          // calls with different invites cannot both pass the limit check and both insert a user.
+          const [tenantRow] = await tx
+            .select({ memberLimit: schema.tenants.memberLimit })
+            .from(schema.tenants)
+            .where(eq(schema.tenants.id, invite.tenantId))
+            .for('update');
+          if (tenantRow?.memberLimit !== null && tenantRow?.memberLimit !== undefined) {
+            const [countRow] = await tx
+              .select({ count: count() })
+              .from(schema.users)
+              .where(
+                and(eq(schema.users.tenantId, invite.tenantId), eq(schema.users.status, 'active')),
+              );
+            if ((countRow?.count ?? 0) >= tenantRow.memberLimit) {
+              throw new PaymentRequiredException(
+                'This workspace has reached its member limit. Ask the workspace admin to upgrade.',
+              );
+            }
+          }
+
           // Mark invite accepted atomically — first committer wins for ALL callers (not just same-sub
           // races). The RETURNING check enforces single-use: if accepted_at is already set (another
           // user beat us here), this UPDATE matches 0 rows → uniform INVALID 403, no user is created.

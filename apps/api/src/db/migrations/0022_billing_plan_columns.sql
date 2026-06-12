@@ -5,7 +5,7 @@
 ALTER TABLE tenants
   ADD COLUMN plan_tier              text        NOT NULL DEFAULT 'free'
                                     CHECK (plan_tier IN ('free', 'pro', 'enterprise')),
-  ADD COLUMN member_limit           int         NOT NULL DEFAULT 10,
+  ADD COLUMN member_limit           int                  DEFAULT 10,
   ADD COLUMN sso_enabled            boolean     NOT NULL DEFAULT false,
   ADD COLUMN plan_set_at            timestamptz NOT NULL DEFAULT now(),
   ADD COLUMN stripe_customer_id     text        UNIQUE,

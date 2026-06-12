@@ -5,7 +5,12 @@ import type { PlansService } from '../plans/plans.service.js';
 
 // vi.hoisted runs before module imports so the mock factory can reference it.
 const mockStripeInstance = vi.hoisted(() => ({
-  customers: { create: vi.fn().mockResolvedValue({ id: 'cus_test' }) },
+  customers: {
+    create: vi.fn().mockResolvedValue({ id: 'cus_test' }),
+    retrieve: vi
+      .fn()
+      .mockResolvedValue({ id: 'cus_test', deleted: false, metadata: { tenantId: 'tenant-1' } }),
+  },
   checkout: {
     sessions: {
       create: vi.fn().mockResolvedValue({ url: 'https://checkout.stripe.com/test' }),
@@ -31,21 +36,6 @@ vi.mock('stripe', () => ({
     return mockStripeInstance;
   },
 }));
-
-vi.mock('../db/index.js', () => ({
-  getDb: () => ({
-    db: {
-      select: vi.fn().mockReturnValue({
-        from: vi.fn().mockReturnThis(),
-        where: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockResolvedValue([{ id: 'tenant-1' }]),
-      }),
-    },
-  }),
-  schema: { tenants: { stripeCustomerId: 'stripeCustomerId', id: 'id' } },
-}));
-
-vi.mock('drizzle-orm', () => ({ eq: vi.fn() }));
 
 function makePlans(overrides?: Partial<PlansService>) {
   return {

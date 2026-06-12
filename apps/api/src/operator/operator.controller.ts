@@ -11,6 +11,7 @@ import {
 import { ApiExcludeController } from '@nestjs/swagger';
 import { z } from 'zod';
 
+import { Public } from '../auth/public.decorator.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { PlansService } from '../plans/plans.service.js';
 import { OperatorGuard } from './operator.guard.js';
@@ -26,6 +27,7 @@ const SetPlanBodySchema = z
 type SetPlanBody = z.infer<typeof SetPlanBodySchema>;
 
 @ApiExcludeController()
+@Public()
 @UseGuards(OperatorGuard)
 @Controller('operator/tenants')
 export class OperatorController {

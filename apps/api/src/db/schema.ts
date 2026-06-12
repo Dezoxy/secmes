@@ -15,15 +15,15 @@ import {
 // layer does not express row-level security).
 
 // Tenant ROOT: its own id IS the tenant, so it has no tenant_id column (see migration).
-// Plan and billing columns added in migration 0022 — tenants has no RLS so withRouting /
-// direct queries can write cross-tenant for the operator endpoint and Stripe webhook handler.
+// Plan and billing columns added in migration 0022. tenants has FORCE RLS (tenants_self_isolation
+// policy, keyed on app.tenant_id) — all queries must run inside withTenant(tenantId).
 export const tenants = pgTable('tenants', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   // Plan gating (G8)
   planTier: text('plan_tier').notNull().default('free'),
-  memberLimit: integer('member_limit').notNull().default(10),
+  memberLimit: integer('member_limit').default(10),
   ssoEnabled: boolean('sso_enabled').notNull().default(false),
   planSetAt: timestamp('plan_set_at', { withTimezone: true }).notNull().defaultNow(),
   // Stripe subscription (G8)
