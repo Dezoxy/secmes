@@ -114,7 +114,7 @@ class MeExportDto {
   @ApiProperty({ enum: ['1'] }) schemaVersion!: '1';
   @ApiProperty({ format: 'date-time' }) exportedAt!: string;
   @ApiProperty() notice!: string;
-  @ApiProperty({ type: ExportProfileDto }) profile!: ExportProfileDto;
+  @ApiProperty({ type: ExportProfileDto, nullable: true }) profile!: ExportProfileDto | null;
   @ApiProperty({ type: [ExportDeviceDto] }) devices!: ExportDeviceDto[];
   @ApiProperty({ type: ExportKeyBackupDto }) keyBackup!: ExportKeyBackupDto;
   @ApiProperty({ type: [ExportConversationDto] }) conversations!: ExportConversationDto[];

@@ -219,7 +219,7 @@ export class GdprService {
 
     if (!profile) {
       // User row was not found (not yet provisioned / already erased) — return minimal structure.
-      return buildEmptyExport(auth);
+      return buildEmptyExport();
     }
 
     const totalCount = messageSummaryRaw.reduce((s, r) => s + (r.count ?? 0), 0);
@@ -303,28 +303,14 @@ export class GdprService {
    * console. See docs/threat-models/gdpr.md §6 for the runbook.
    */
   async deleteAccount(auth: VerifiedAuth): Promise<void> {
-    // 1. Collect attachment object keys BEFORE the transaction (needed for blob cleanup after).
-    const objectKeys = await withTenant(auth.tenantId, async (tx) => {
-      const user = await resolveUserId(tx, auth);
-      if (!user) return [];
-      const rows = await tx
-        .select({ objectKey: schema.attachments.objectKey })
-        .from(schema.attachments)
-        .where(
-          and(
-            eq(schema.attachments.tenantId, auth.tenantId),
-            eq(schema.attachments.uploadedBy, user.id),
-          ),
-        );
-      return rows.map((r) => r.objectKey);
-    });
-
-    // 2. DB transaction: resolve user id, handle NO-ACTION FKs, then delete the user row.
-    const externalId = await withTenant(auth.tenantId, async (tx) => {
+    // 1. DB transaction: resolve user id, handle NO-ACTION FKs, then delete the user row.
+    //    objectKeys are collected inside the same transaction (between 1d and 1e) so that
+    //    attachments uploaded between a pre-transaction query and the delete are not orphaned.
+    const result = await withTenant(auth.tenantId, async (tx) => {
       const user = await resolveUserId(tx, auth);
       if (!user) return null; // already deleted or never provisioned — idempotent
 
-      // 2a. Delete conversation_welcomes — direct NO-ACTION FKs on both recipient and sender.
+      // 1a. Delete conversation_welcomes — direct NO-ACTION FKs on both recipient and sender.
       //     The cascade through conversation_members covers recipient_user_id in theory, but
       //     sender_user_id has no cascade path, so we delete explicitly for both.
       await tx
@@ -339,7 +325,7 @@ export class GdprService {
           ),
         );
 
-      // 2b. Pseudonymize sent messages — NO-ACTION FK; NULL sender = "account erased".
+      // 1b. Pseudonymize sent messages — NO-ACTION FK; NULL sender = "account erased".
       //     Keeps ciphertext accessible for offline recipients (they are entitled to it).
       await tx
         .update(schema.messages)
@@ -351,7 +337,7 @@ export class GdprService {
           ),
         );
 
-      // 2c. Null accepted_by on invites — nullable FK with no ON DELETE clause.
+      // 1c. Null accepted_by on invites — nullable FK with no ON DELETE clause.
       await tx
         .update(schema.tenantInvites)
         .set({ acceptedBy: sql`NULL` })
@@ -362,10 +348,10 @@ export class GdprService {
           ),
         );
 
-      // 2d. Null conversations.created_by — NO-ACTION FK (not cascade); the conversation and
+      // 1d. Null conversations.created_by — NO-ACTION FK (not cascade); the conversation and
       //     all members' ciphertext must survive the creator's erasure. NULL created_by means
       //     "created by an account that was erased". Requires migration 0020 (column nullable +
-      //     UPDATE grant on conversations to secmes_app).
+      //     UPDATE grant on conversations to argus_app).
       await tx
         .update(schema.conversations)
         .set({ createdBy: sql`NULL` })
@@ -376,7 +362,20 @@ export class GdprService {
           ),
         );
 
-      // 2e. Delete attachment metadata rows — NO-ACTION FK on uploaded_by.
+      // 1e. Collect attachment object keys inside the transaction so any attachment uploaded
+      //     between the start of this call and step 1f is included in blob cleanup.
+      const attachmentRows = await tx
+        .select({ objectKey: schema.attachments.objectKey })
+        .from(schema.attachments)
+        .where(
+          and(
+            eq(schema.attachments.tenantId, auth.tenantId),
+            eq(schema.attachments.uploadedBy, user.id),
+          ),
+        );
+      const objectKeys = attachmentRows.map((r) => r.objectKey);
+
+      // 1f. Delete attachment metadata rows — NO-ACTION FK on uploaded_by.
       await tx
         .delete(schema.attachments)
         .where(
@@ -386,7 +385,7 @@ export class GdprService {
           ),
         );
 
-      // 2f. Delete the user row — cascades:
+      // 1g. Delete the user row — cascades:
       //     • devices → key_packages (cascade), push_subscriptions (cascade)
       //     • key_backups (cascade)
       //     • conversation_members (cascade) → conversation_receipts (cascade)
@@ -395,21 +394,31 @@ export class GdprService {
         .delete(schema.users)
         .where(and(eq(schema.users.id, user.id), eq(schema.users.tenantId, auth.tenantId)));
 
-      return user.externalIdentityId;
+      return { externalId: user.externalIdentityId, objectKeys };
     });
 
-    // 3. Clean up the routing index (no RLS — uses withRouting).
-    if (externalId) {
-      await withRouting(async (tx) => {
-        await tx.delete(schema.userTenantIndex).where(eq(schema.userTenantIndex.sub, externalId));
-      });
+    // 2. Clean up the routing index (no RLS — uses withRouting). Best-effort: if this fails
+    //    the user row is already gone and the stale binding only matters if the Zitadel identity
+    //    still exists (the documented external gap). Wrap so a transient DB error doesn't surface.
+    if (result) {
+      try {
+        await withRouting(async (tx) => {
+          await tx
+            .delete(schema.userTenantIndex)
+            .where(eq(schema.userTenantIndex.sub, result.externalId));
+        });
+      } catch (err) {
+        this.logger.warn(
+          `gdpr: failed to delete routing index for ${result.externalId}: ${String(err)}`,
+        );
+      }
     }
 
-    // 4. Delete blobs best-effort — rows are already gone, so no auth path can generate a new
+    // 3. Delete blobs best-effort — rows are already gone, so no auth path can generate a new
     //    download grant. Failures are logged but not surfaced: the ciphertext is useless without
     //    the content key (which lived only in MLS envelopes), and the B2 lifecycle rule reaps it
     //    within 2 days regardless.
-    for (const key of objectKeys) {
+    for (const key of result?.objectKeys ?? []) {
       try {
         await this.blobStore.deleteObject(key);
       } catch (err) {
@@ -437,22 +446,14 @@ async function resolveUserId(
   return row;
 }
 
-function buildEmptyExport(auth: VerifiedAuth): MeExport {
+function buildEmptyExport(): MeExport {
   return {
     schemaVersion: '1',
     exportedAt: new Date().toISOString(),
     notice:
       'Message content is end-to-end encrypted and cannot be provided server-side. ' +
       'This export contains only the metadata the server holds.',
-    profile: {
-      id: '',
-      tenantId: auth.tenantId,
-      email: '',
-      displayName: null,
-      role: '',
-      status: '',
-      createdAt: new Date().toISOString(),
-    },
+    profile: null,
     devices: [],
     keyBackup: { exists: false, createdAt: null, updatedAt: null },
     conversations: [],

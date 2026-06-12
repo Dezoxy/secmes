@@ -143,10 +143,11 @@ describe.skipIf(!DB_URL)('GdprService', () => {
       expect(exp.notice).toContain('end-to-end encrypted');
 
       // Profile
-      expect(exp.profile.id).toBe(aliceId);
-      expect(exp.profile.tenantId).toBe(tenantA);
-      expect(exp.profile.email).toBe('alice@a.test');
-      expect(exp.profile.displayName).toBe('Alice');
+      expect(exp.profile).not.toBeNull();
+      expect(exp.profile!.id).toBe(aliceId);
+      expect(exp.profile!.tenantId).toBe(tenantA);
+      expect(exp.profile!.email).toBe('alice@a.test');
+      expect(exp.profile!.displayName).toBe('Alice');
 
       // Devices
       expect(exp.devices).toHaveLength(1);
@@ -206,7 +207,7 @@ describe.skipIf(!DB_URL)('GdprService', () => {
     it('returns minimal empty structure when user is not provisioned', async () => {
       const exp = await svc.exportAccount({ sub: 'nobody', tenantId: tenantA });
       expect(exp.schemaVersion).toBe('1');
-      expect(exp.profile.id).toBe('');
+      expect(exp.profile).toBeNull();
       expect(exp.devices).toHaveLength(0);
       expect(exp.messageSummary.totalCount).toBe(0);
     });

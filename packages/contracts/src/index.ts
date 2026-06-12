@@ -412,15 +412,17 @@ export const MeExportSchema = z.object({
   schemaVersion: z.literal('1'),
   exportedAt: z.string().datetime(),
   notice: z.string().max(512),
-  profile: z.object({
-    id: z.string().uuid(),
-    tenantId: z.string().uuid(),
-    email: z.string().email(),
-    displayName: z.string().nullable(),
-    role: z.string().max(32),
-    status: z.string().max(32),
-    createdAt: z.string().datetime(),
-  }),
+  profile: z
+    .object({
+      id: z.string().uuid(),
+      tenantId: z.string().uuid(),
+      email: z.string().email(),
+      displayName: z.string().nullable(),
+      role: z.string().max(32),
+      status: z.string().max(32),
+      createdAt: z.string().datetime(),
+    })
+    .nullable(),
   devices: z.array(
     z.object({
       id: z.string().uuid(),

@@ -50,7 +50,7 @@ The server is **crypto-blind** — it never holds message plaintext, content key
 
 The deletion runs inside a single DB transaction (`withTenant()`). Order respects NO-ACTION FK constraints:
 
-1. **`conversation_welcomes`** — deleted explicitly (NO-ACTION FKs on both `sender_user_id` and `recipient_user_id`; cascade covers recipient via `conversation_members` but not sender).
+1. **`conversation_welcomes`** — deleted explicitly (NO-ACTION FKs on both `sender_user_id` and `recipient_user_id`; cascade covers recipient via `conversation_members` but not sender). **Note:** an offline recipient who has not yet fetched their Welcome before the sender deletes their account loses the ability to join that MLS group. This is intentional — there is no clean NO-ACTION FK alternative — and the impact is bounded to group join, not to ciphertext already delivered.
 2. **`messages.sender_user_id`** — set to `NULL` (pseudonymized). Keeps ciphertext accessible for offline recipients who are entitled to it. The server cannot read the ciphertext anyway.
 3. **`tenant_invites.accepted_by`** — set to `NULL` (nullable FK, no ON DELETE clause).
 4. **`attachments`** — deleted explicitly (NO-ACTION FK on `uploaded_by`).
