@@ -219,10 +219,16 @@ export class BillingService implements OnModuleInit {
         const tier = priceIdToTier(priceId);
         const status = sanitizeStatus(sub.status);
 
+        // Only upgrade entitlements (tier/memberLimit/ssoEnabled) when the subscription
+        // is actively entitled. For non-entitled statuses (past_due, unpaid, paused, etc.)
+        // update the status only so the UI shows the right warning; definitive downgrade
+        // happens on customer.subscription.deleted.
+        const entitled = status === 'active' || status === 'trialing';
+
         await this.plans.setPlan(
           tenantId,
           {
-            ...(tier
+            ...(entitled && tier
               ? {
                   planTier: tier,
                   memberLimit: MEMBER_LIMITS[tier] ?? null,
