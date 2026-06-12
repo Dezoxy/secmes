@@ -125,7 +125,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (ro
 
 - [x] G1. **Self-serve tenant onboarding** — org create → admin → invite users — _Backend (PR #177) + web frontend (PR #179): OnboardingGate, CreateWorkspace, JoinWorkspace, `/invite#token` route, admin Team settings (member list, role toggle, revoke, invite management)._
 - [ ] G2. **Per-tenant SSO** — customers federate their own Entra/Okta/Google (OIDC/SAML)
-- [ ] G3. **Admin panel** — metadata only (users, devices, revoke, audit); never content 🔒
+- [x] G3. **Admin panel** — metadata only (users, devices, revoke, audit); never content 🔒 — _Backend (PR #181): `GET /admin/devices`, `DELETE /admin/devices/:deviceId`, `GET /admin/audit` — keyset-paginated, cursor-validated, limit clamped [1,100]; `AdminGuard` (live DB role check) + RLS double-enforcement; 42Crunch 100/100. Frontend (`AdminPanel.tsx`): Devices tab (list + inline confirm revoke) + Audit Log tab (load-more pagination, event-type badges). G1 tenant lifecycle audit events also shipped (PR #180)._
 - [ ] G4. **🔒 Independent cryptography review** of the MLS integration *(external, paid — gates GA)*
 - [ ] G5. **🔒 Third-party pen test** + remediation *(external, paid — gates GA)*
 - [ ] G6. **GDPR pack** — DPA, processing records, residency doc, deletion/export (metadata)
