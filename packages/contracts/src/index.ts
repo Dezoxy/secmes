@@ -355,3 +355,48 @@ export const AdminAuditResponseSchema = z.object({
   nextCursor: z.string().optional(),
 });
 export type AdminAuditResponse = z.infer<typeof AdminAuditResponseSchema>;
+
+// ── G2: Per-tenant SSO ────────────────────────────────────────────────────────
+
+export const SsoProviderTypeSchema = z.enum(['oidc_generic', 'google', 'entra', 'okta']);
+export type SsoProviderType = z.infer<typeof SsoProviderTypeSchema>;
+
+export const CreateSsoConfigBodySchema = z
+  .object({
+    providerType: SsoProviderTypeSchema,
+    providerName: z.string().min(1).max(100).trim(),
+    issuerUrl: z.string().url().max(512),
+    clientId: z.string().min(1).max(256),
+    /** Request-only. Never stored in our DB; passed to Zitadel only. Never returned. */
+    clientSecret: z.string().min(1).max(1024),
+  })
+  .strict();
+export type CreateSsoConfigBody = z.infer<typeof CreateSsoConfigBodySchema>;
+
+export const UpdateSsoConfigBodySchema = z
+  .object({
+    providerName: z.string().min(1).max(100).trim().optional(),
+    issuerUrl: z.string().url().max(512).optional(),
+    clientId: z.string().min(1).max(256).optional(),
+  })
+  .strict()
+  .refine((b) => Object.keys(b).length > 0, 'At least one field is required');
+export type UpdateSsoConfigBody = z.infer<typeof UpdateSsoConfigBodySchema>;
+
+export const RotateSsoSecretBodySchema = z
+  .object({ clientSecret: z.string().min(1).max(1024) })
+  .strict();
+export type RotateSsoSecretBody = z.infer<typeof RotateSsoSecretBodySchema>;
+
+/** Response schema — NO clientSecret field. */
+export const SsoConfigSchema = z.object({
+  id: z.string().uuid(),
+  providerType: SsoProviderTypeSchema,
+  providerName: z.string().max(100),
+  issuerUrl: z.string().url().max(512),
+  clientId: z.string().max(256),
+  loginUrl: z.string().url().max(1024),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type SsoConfig = z.infer<typeof SsoConfigSchema>;

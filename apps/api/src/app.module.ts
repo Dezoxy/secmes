@@ -8,6 +8,7 @@ import { KeyDirectoryModule } from './key-directory/key-directory.module.js';
 import { MessagingModule } from './messaging/messaging.module.js';
 import { PushModule } from './push/push.module.js';
 import { RealtimeModule } from './realtime/realtime.module.js';
+import { SsoModule } from './sso/sso.module.js';
 import { TenantsModule } from './tenants/tenants.module.js';
 import { UsersModule } from './users/users.module.js';
 
@@ -22,6 +23,7 @@ import { UsersModule } from './users/users.module.js';
     MessagingModule,
     PushModule,
     RealtimeModule,
+    SsoModule,
     TenantsModule,
   ],
   controllers: [AppController],

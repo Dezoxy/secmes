@@ -85,13 +85,19 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
     setProfile(me.bound ? me : null);
   }, []);
 
+  // G2 SSO: read ?orgID from the URL and pass it to Zitadel so the org's IdP shows on the login page.
+  const login = useCallback(async (): Promise<void> => {
+    const orgID = new URLSearchParams(window.location.search).get('orgID') ?? undefined;
+    return oidcLogin(orgID ? { organizationId: orgID } : undefined);
+  }, []);
+
   const value: AuthState = {
     configured: oidcConfigured,
     ready,
     user,
     subjectId: profileScopeFromAuth(user, profile?.userId),
     profile,
-    login: oidcLogin,
+    login,
     logout: oidcLogout,
     refreshProfile,
   };

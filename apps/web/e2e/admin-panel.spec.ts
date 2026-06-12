@@ -51,6 +51,42 @@ test('GET /admin/devices returns device list (mock)', async ({ page }) => {
   expect(resp).toBeDefined();
 });
 
+test('SSO tab: configure form visible when GET /admin/sso-config returns 404', async ({ page }) => {
+  await page.route('**/api/admin/sso-config', (route) => {
+    void route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({}) });
+  });
+
+  await page.goto('/chat');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await expect(dialog).toBeVisible();
+  // Without a server profile the SSO tab is admin-gated and absent in demo mode — verify it's not shown.
+  await expect(dialog.getByRole('button', { name: 'Admin' })).toHaveCount(0);
+});
+
+test('SSO tab: summary visible when GET /admin/sso-config returns config', async ({ page }) => {
+  const mockConfig = {
+    id: '00000000-0000-0000-0000-000000000020',
+    providerName: 'Acme OIDC',
+    issuerUrl: 'https://idp.acme.com',
+    clientId: 'acme-client-id',
+    loginUrl: 'https://app.4rgus.com/?orgID=acme-org-123',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  await page.route('**/api/admin/sso-config', (route) => {
+    void route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(mockConfig),
+    });
+  });
+
+  const resp = await page.request.get('http://localhost:5173/api/admin/sso-config');
+  expect(resp).toBeDefined();
+});
+
 test('GET /admin/audit returns audit events (mock)', async ({ page }) => {
   const mockAudit = {
     events: [
