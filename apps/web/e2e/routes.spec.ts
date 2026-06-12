@@ -28,5 +28,5 @@ test('/transparency renders the public security page without auth', async ({ pag
   await expect(page.getByRole('heading', { name: /sub-processors/i })).toBeVisible();
   await expect(page.getByRole('cell', { name: 'Microsoft Azure' })).toBeVisible();
   await expect(page.getByRole('cell', { name: 'Backblaze B2' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Back to Argus' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Back to Argus', exact: true })).toBeVisible();
 });
