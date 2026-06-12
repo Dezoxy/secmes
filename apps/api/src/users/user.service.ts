@@ -3,7 +3,7 @@ import { and, count, eq, sql } from 'drizzle-orm';
 import type { TenantPlan } from '@argus/contracts';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
-import { getDb, schema, withTenant } from '../db/index.js';
+import { schema, withTenant } from '../db/index.js';
 import { generateHandle } from './handle-words.js';
 
 export interface UserRecord {
@@ -157,22 +157,25 @@ export class UserService {
     );
     if (!user) return undefined;
 
-    // Fetch plan columns from tenants (no RLS on root entity) + active member count.
-    const { db } = getDb();
-    const [tenantRow] = await db
-      .select({
-        planTier: schema.tenants.planTier,
-        memberLimit: schema.tenants.memberLimit,
-        ssoEnabled: schema.tenants.ssoEnabled,
-        subscriptionStatus: schema.tenants.subscriptionStatus,
-      })
-      .from(schema.tenants)
-      .where(eq(schema.tenants.id, auth.tenantId))
-      .limit(1);
-
-    const [countRow] = await withTenant(auth.tenantId, (tx) =>
-      tx.select({ count: count() }).from(schema.users).where(eq(schema.users.status, 'active')),
-    );
+    // Fetch plan columns + active member count inside a single tenant-scoped transaction.
+    // tenants has FORCE RLS (tenants_self_isolation policy) so this must run inside withTenant.
+    const [tenantRow, countRow] = await withTenant(auth.tenantId, async (tx) => {
+      const [plan] = await tx
+        .select({
+          planTier: schema.tenants.planTier,
+          memberLimit: schema.tenants.memberLimit,
+          ssoEnabled: schema.tenants.ssoEnabled,
+          subscriptionStatus: schema.tenants.subscriptionStatus,
+        })
+        .from(schema.tenants)
+        .where(eq(schema.tenants.id, auth.tenantId))
+        .limit(1);
+      const [cnt] = await tx
+        .select({ count: count() })
+        .from(schema.users)
+        .where(eq(schema.users.status, 'active'));
+      return [plan, cnt] as const;
+    });
 
     return {
       ...user,

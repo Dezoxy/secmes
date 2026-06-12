@@ -12,4 +12,5 @@ ALTER TABLE tenants
   ADD COLUMN stripe_subscription_id text        UNIQUE,
   ADD COLUMN subscription_status    text
                                     CHECK (subscription_status IN
-                                      ('active', 'trialing', 'past_due', 'canceled', 'incomplete'));
+                                      ('active', 'trialing', 'past_due', 'canceled', 'incomplete',
+                                       'incomplete_expired', 'unpaid', 'paused'));

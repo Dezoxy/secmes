@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type Stripe from 'stripe';
 import { BillingService } from './billing.service.js';
 import type { PlansService } from '../plans/plans.service.js';
+import type { SsoService } from '../sso/sso.service.js';
 
 // vi.hoisted runs before module imports so the mock factory can reference it.
 const mockStripeInstance = vi.hoisted(() => ({
@@ -54,6 +55,13 @@ function makePlans(overrides?: Partial<PlansService>) {
   } as unknown as PlansService;
 }
 
+function makeSso(overrides?: Partial<SsoService>) {
+  return {
+    disableSsoForTenant: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  } as unknown as SsoService;
+}
+
 describe('BillingService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -66,7 +74,7 @@ describe('BillingService', () => {
 
   it('createCheckoutSession creates a new Stripe customer when none exists and returns the URL', async () => {
     const plans = makePlans();
-    const svc = new BillingService(plans);
+    const svc = new BillingService(plans, makeSso());
 
     const url = await svc.createCheckoutSession(
       'tenant-1',
@@ -95,7 +103,7 @@ describe('BillingService', () => {
         stripeCustomerId: 'cus_existing',
       }),
     });
-    const svc = new BillingService(plans);
+    const svc = new BillingService(plans, makeSso());
 
     const url = await svc.createCheckoutSession(
       'tenant-1',
@@ -111,7 +119,7 @@ describe('BillingService', () => {
 
   it('handleWebhookEvent checkout.session.completed upgrades plan to pro', async () => {
     const plans = makePlans();
-    const svc = new BillingService(plans);
+    const svc = new BillingService(plans, makeSso());
 
     const event = {
       type: 'checkout.session.completed',
@@ -137,9 +145,10 @@ describe('BillingService', () => {
     );
   });
 
-  it('handleWebhookEvent customer.subscription.deleted reverts to free', async () => {
+  it('handleWebhookEvent customer.subscription.deleted reverts to free and disables SSO', async () => {
     const plans = makePlans();
-    const svc = new BillingService(plans);
+    const sso = makeSso();
+    const svc = new BillingService(plans, sso);
 
     const event = {
       type: 'customer.subscription.deleted',
@@ -158,11 +167,12 @@ describe('BillingService', () => {
       expect.objectContaining({ planTier: 'free', subscriptionStatus: 'canceled' }),
       'stripe-webhook',
     );
+    expect(sso.disableSsoForTenant).toHaveBeenCalledWith('tenant-1');
   });
 
   it('handleWebhookEvent invoice.payment_failed sets past_due', async () => {
     const plans = makePlans();
-    const svc = new BillingService(plans);
+    const svc = new BillingService(plans, makeSso());
 
     const event = {
       type: 'invoice.payment_failed',
@@ -183,7 +193,7 @@ describe('BillingService', () => {
   it('is a no-op when STRIPE_SECRET_KEY is not set', () => {
     delete process.env.STRIPE_SECRET_KEY;
     const plans = makePlans();
-    const svc = new BillingService(plans);
+    const svc = new BillingService(plans, makeSso());
 
     expect(svc.configured).toBe(false);
     return expect(

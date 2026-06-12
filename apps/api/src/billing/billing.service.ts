@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import Stripe from 'stripe';
 
 import { PlansService } from '../plans/plans.service.js';
+import { SsoService } from '../sso/sso.service.js';
 
 const MEMBER_LIMITS: Record<string, number | null> = {
   free: 10,
@@ -40,13 +41,33 @@ function priceIdToTier(priceId: string): 'pro' | 'enterprise' | null {
   return null;
 }
 
+// Map every Stripe subscription status to the subset stored in our DB check constraint.
+// Stripe can emit statuses beyond our initial set (e.g. 'unpaid', 'paused', 'incomplete_expired').
+const STRIPE_STATUS_MAP: Record<string, string> = {
+  active: 'active',
+  trialing: 'trialing',
+  past_due: 'past_due',
+  canceled: 'canceled',
+  incomplete: 'incomplete',
+  incomplete_expired: 'incomplete_expired',
+  unpaid: 'unpaid',
+  paused: 'paused',
+};
+
+function sanitizeStatus(raw: string): string {
+  return STRIPE_STATUS_MAP[raw] ?? 'incomplete';
+}
+
 @Injectable()
 export class BillingService implements OnModuleInit {
   private readonly logger = new Logger(BillingService.name);
   private readonly stripe: Stripe | null;
   private readonly webhookSecret: string;
 
-  constructor(private readonly plans: PlansService) {
+  constructor(
+    private readonly plans: PlansService,
+    private readonly sso: SsoService,
+  ) {
     const secretKey = resolveSecretKey();
     this.webhookSecret = resolveWebhookSecret();
 
@@ -174,7 +195,7 @@ export class BillingService implements OnModuleInit {
 
         const priceId = sub.items.data[0]?.price.id ?? '';
         const tier = priceIdToTier(priceId);
-        const status = sub.status as string;
+        const status = sanitizeStatus(sub.status);
 
         await this.plans.setPlan(
           tenantId,
@@ -209,6 +230,9 @@ export class BillingService implements OnModuleInit {
           },
           'stripe-webhook',
         );
+        // Delete the SSO config row so that SSO-issued tokens issued before cancellation
+        // cannot be used to bypass the ssoEnabled=false gate (Zitadel deletion is best-effort).
+        await this.sso.disableSsoForTenant(tenantId);
         break;
       }
 

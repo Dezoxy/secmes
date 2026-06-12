@@ -21,5 +21,6 @@ import { SsoService } from './sso.service.js';
     ZitadelManagementClient,
     SsoService,
   ],
+  exports: [SsoService],
 })
 export class SsoModule {}

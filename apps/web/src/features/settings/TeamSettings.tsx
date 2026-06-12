@@ -126,10 +126,16 @@ function CreateInviteForm({
   const [open, setOpen] = useState(false);
   const [upgrading, setUpgrading] = useState(false);
 
+  const upgradeTier = plan?.tier === 'pro' ? 'enterprise' : 'pro';
+
   const handleUpgrade = async () => {
     setUpgrading(true);
     try {
-      const url = await createCheckoutSession('pro', window.location.href, window.location.href);
+      const url = await createCheckoutSession(
+        upgradeTier,
+        window.location.href,
+        window.location.href,
+      );
       window.location.href = url;
     } catch {
       setError('Could not start checkout. Please try again.');
@@ -151,7 +157,7 @@ function CreateInviteForm({
           loadingLabel="Opening Stripe…"
           onClick={() => void handleUpgrade()}
         >
-          Upgrade to Pro
+          {upgradeTier === 'enterprise' ? 'Upgrade to Enterprise' : 'Upgrade to Pro'}
         </Button>
         {error && <p className="text-xs text-rose-300">{error}</p>}
       </div>

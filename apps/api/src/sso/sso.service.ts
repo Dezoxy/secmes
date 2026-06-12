@@ -225,6 +225,35 @@ export class SsoService {
     });
   }
 
+  /** Delete SSO config for a tenant by ID — used by the billing webhook on plan downgrade.
+   *  Best-effort: Zitadel org deletion failure is logged but does not throw. */
+  async disableSsoForTenant(tenantId: string): Promise<void> {
+    const existing = await withTenant(tenantId, (tx) =>
+      tx
+        .select()
+        .from(schema.tenantSsoConfigs)
+        .where(eq(schema.tenantSsoConfigs.tenantId, tenantId))
+        .limit(1),
+    );
+    const cfg = existing[0];
+    if (!cfg) return; // no SSO configured — nothing to do
+
+    await withTenant(tenantId, (tx) =>
+      tx.delete(schema.tenantSsoConfigs).where(eq(schema.tenantSsoConfigs.tenantId, tenantId)),
+    );
+
+    await this.zitadel.deleteOrg(cfg.zitadelOrgId).catch((err: unknown) => {
+      this.logger.warn(
+        `deleteOrg ${cfg.zitadelOrgId} failed after billing downgrade — org may be orphaned: ${String(err)}`,
+      );
+    });
+
+    await this.audit.record(tenantId, {
+      eventType: 'sso.deleted',
+      actorSub: 'stripe-webhook',
+    });
+  }
+
   async deleteSsoConfig(auth: VerifiedAuth): Promise<void> {
     const existing = await withTenant(auth.tenantId, (tx) =>
       tx
