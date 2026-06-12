@@ -116,6 +116,12 @@ export interface BackfillResult {
   messages: DecryptedMessage[];
   /** The last server message id observed (pass as `after` next time to fetch only newer rows). */
   cursor: string | undefined;
+  /**
+   * True if backfill stopped early because a future-epoch message was encountered. The caller
+   * should drain pending commits and then call backfillConversation again with the same cursor —
+   * the epoch-gap messages will be decryptable at the advanced epoch.
+   */
+  epochGap: boolean;
 }
 
 /**
@@ -141,10 +147,18 @@ export async function backfillConversation(
     let cursor = after;
     let advanced = false;
 
+    let epochGap = false; // true if we stopped early at a future-epoch message
     for (let page = 0; page < MAX_BACKFILL_PAGES; page += 1) {
       const res = await fetchMessages(conversationId, { after: cursor, limit: FETCH_PAGE });
       for (const m of res.messages) {
-        cursor = m.id; // high-water mark — advance past everything, even what we skip
+        // Stop WITHOUT advancing cursor if the message is at a future epoch. The caller can drain
+        // commits first and then call backfillConversation again with the same cursor to resume —
+        // otherwise the cursor advances past these messages and they're lost permanently.
+        if (m.epoch > conversation.epoch) {
+          epochGap = true;
+          break;
+        }
+        cursor = m.id; // high-water mark — advance past everything at the current epoch
         if (m.senderUserId === selfUserId) continue; // can't decrypt our own; shown via local echo
         try {
           const plaintext = await conversation.decrypt(fromBase64(m.ciphertext));
@@ -160,6 +174,8 @@ export async function backfillConversation(
             createdAt: m.createdAt,
           });
         } catch (err) {
+          // Truly undecryptable (e.g. pre-join message, already-consumed ratchet generation) —
+          // advance past it so the cursor doesn't stall on the same message forever.
           // eslint-disable-next-line no-console
           console.warn(
             'backfill: skipped undecryptable message',
@@ -168,7 +184,7 @@ export async function backfillConversation(
           );
         }
       }
-      if (!res.nextCursor || res.messages.length === 0) break;
+      if (epochGap || !res.nextCursor || res.messages.length === 0) break;
       cursor = res.nextCursor;
     }
 
@@ -180,7 +196,7 @@ export async function backfillConversation(
         deps.sessionKey,
       );
     }
-    return { messages, cursor };
+    return { messages, cursor, epochGap };
   });
 }
 
