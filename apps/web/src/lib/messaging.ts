@@ -9,11 +9,16 @@
 
 import type { Conversation, DeviceKeys } from '@argus/crypto';
 
-import { fetchMessages, sendMessage, type FetchedMessage } from './api';
+import { fetchMessages, listCommits, sendMessage, type FetchedMessage } from './api';
 import { fromBase64, toBase64 } from './base64';
 import type { DeviceKeystore } from './keystore';
 import { conversationLock, withLock } from './locks';
-import { decodeEnvelope, encodeEnvelope, type AttachmentRef } from './message-envelope';
+import {
+  decodeEnvelope,
+  encodeEnvelope,
+  type AttachmentRef,
+  type MessageEnvelope,
+} from './message-envelope';
 
 // Non-secret AEAD/version tag stored alongside the ciphertext (server metadata only; it stays crypto-blind).
 const WIRE_ALG = 'MLS_1.0';
@@ -55,12 +60,13 @@ export async function sendLiveMessage(
   conversation: Conversation,
   text: string,
   attachments: AttachmentRef[] = [],
+  kind: MessageEnvelope['kind'] = 'app',
 ): Promise<SentLiveMessage> {
   // ALWAYS wrap in the versioned envelope — including text-only — so a user message that itself looks like
   // envelope JSON (e.g. `{"v":1,"text":"x","attachments":[]}`) is unambiguous on the wire: it becomes the
   // `text` field, never re-parsed as an envelope. `decodeEnvelope` still reads pre-A3 bare-string messages as
   // plain text (back-compat for already-sent history).
-  const plaintext = encodeEnvelope({ text, attachments });
+  const plaintext = encodeEnvelope({ kind, text, attachments });
   return withLock(conversationLock(conversationId), async () => {
     const wire = await conversation.encrypt(plaintext);
     // Persist the advanced ratchet BEFORE the ciphertext leaves the device (rollback/nonce-reuse guard).
@@ -206,6 +212,7 @@ export async function receiveLiveMessage(
       deps.sessionKey,
     );
     const env = decodeEnvelope(plaintext);
+    if (env.kind === 'group-meta') return null; // group-meta is handled by the commit drain path
     return {
       serverId: message.id,
       senderUserId: message.senderUserId,
@@ -215,4 +222,63 @@ export async function receiveLiveMessage(
       createdAt: message.createdAt,
     };
   });
+}
+
+// --- MLS commit drain state machine (B1 group chat) -------------------------------------------------
+// On a `commit` WS event or reconnect, the client fetches + applies all unapplied commits in epoch order
+// under the conversation's single-writer lock (same lock as sends/receives). Each commit is processed
+// via `conversation.processCommit`, which advances the ratchet and persists the new state immediately
+// via the keystore persister (built outside the conversation's op queue to avoid re-entering it).
+
+/**
+ * Fetch and apply all commits after `afterEpoch` under the conversation lock, in epoch-ascending order.
+ * Stops at the first unprocessable commit (subsequent epochs are unreachable without it).
+ */
+export async function drainCommits(
+  deps: MessagingDeps,
+  conversationId: string,
+  conversation: Conversation,
+  afterEpoch: number,
+): Promise<void> {
+  return withLock(conversationLock(conversationId), async () => {
+    const commits = await listCommits(conversationId, { afterEpoch, limit: 50 });
+    const persister = deps.keystore.makeConversationPersister(
+      deps.device,
+      conversationId,
+      deps.sessionKey,
+    );
+    for (const c of commits) {
+      try {
+        await conversation.processCommit(fromBase64(c.commit), persister);
+      } catch (err) {
+        // Subsequent epochs can't be processed without this one — bail out.
+        // eslint-disable-next-line no-console
+        console.warn(
+          'drainCommits: stopped at unprocessable commit',
+          c.id,
+          'epoch',
+          c.epoch,
+          err instanceof Error ? err.message : err,
+        );
+        break;
+      }
+    }
+  });
+}
+
+/**
+ * Handle a `commit` WS event: if the event's epoch is ahead of the local epoch, drain from
+ * the current epoch. If already past (stale event), ignore. Runs under the conversation lock.
+ */
+export async function processCommitEvent(
+  deps: MessagingDeps,
+  conversationId: string,
+  conversation: Conversation,
+  event: { epoch: number },
+): Promise<void> {
+  const convEpoch = conversation.epoch;
+  if (event.epoch < convEpoch) return; // stale — already at a later epoch
+  // afterEpoch = convEpoch - 1 → returns commits with epoch >= convEpoch (the next ones to apply)
+  const afterEpoch = Math.max(0, convEpoch - 1);
+  await drainCommits(deps, conversationId, conversation, afterEpoch);
 }

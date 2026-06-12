@@ -73,6 +73,34 @@ export const ReceiptAdvancedEventSchema = z.object({
 });
 
 /**
+ * A commit was accepted (epoch slot won). Nudges all conversation members' connected sockets to drain
+ * the new commit NOW via `GET /commits?afterEpoch=N`. OPAQUE COMMIT BYTES ARE NOT INCLUDED — only the
+ * routing metadata (ids + epoch). Clients fetch the frame via REST; the WS event is a push-notification
+ * only. This keeps the realtime bus at invariant #2 (IDs and metadata only, never ciphertext over the
+ * bus directly — the DB is the authoritative store).
+ *
+ * Note: unlike messages, commits are NOT included in the WS payload — clients must drain via REST to
+ * process them in epoch order. The event signals "there is a new commit you need to fetch".
+ */
+export interface CommitCreatedEvent {
+  tenantId: string;
+  conversationId: string;
+  epoch: number;
+  senderUserId: string | null;
+  commitId: string;
+  createdAt: string;
+}
+
+export const CommitCreatedEventSchema = z.object({
+  tenantId: z.string().min(1),
+  conversationId: z.string().uuid(),
+  epoch: z.number().int().nonnegative(),
+  senderUserId: z.string().uuid().nullable(),
+  commitId: z.string().uuid(),
+  createdAt: z.string(),
+});
+
+/**
  * Realtime fan-out bus — decouples the HTTP send path (publisher) from the WebSocket gateway
  * (subscriber). Abstract so it can be in-process (single-pod / dev / tests) or Redis-backed for
  * cross-pod delivery (checkpoint 29). Only the opaque ciphertext envelope ever crosses it.
@@ -84,4 +112,6 @@ export abstract class RealtimeBus {
   abstract onWelcomeCreated(listener: (event: WelcomeCreatedEvent) => void): void;
   abstract emitReceiptAdvanced(event: ReceiptAdvancedEvent): void;
   abstract onReceiptAdvanced(listener: (event: ReceiptAdvancedEvent) => void): void;
+  abstract emitCommitCreated(event: CommitCreatedEvent): void;
+  abstract onCommitCreated(listener: (event: CommitCreatedEvent) => void): void;
 }

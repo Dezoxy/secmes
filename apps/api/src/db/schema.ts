@@ -204,6 +204,20 @@ export const tenantSsoConfigs = pgTable('tenant_sso_configs', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+// B1: MLS group-commit fan-out. `commit` is opaque mls_private_message base64; server stores +
+// forwards only (invariant #1). Epoch lock: UNIQUE (tenant_id, conversation_id, epoch).
+// DDL, RLS, index, and grants live in 0023_conversation_commits.sql.
+export const conversationCommits = pgTable('conversation_commits', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  conversationId: uuid('conversation_id').notNull(),
+  senderUserId: uuid('sender_user_id'), // nullable — GDPR erasure parity with messages
+  clientCommitId: uuid('client_commit_id').notNull(),
+  epoch: bigint('epoch', { mode: 'bigint' }).notNull(),
+  commit: text('commit').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Append-only audit log (IDs + metadata only — never content/secrets). RLS + grants in 0002.
 export const auditEvents = pgTable('audit_events', {
   id: uuid('id').primaryKey().defaultRandom(),

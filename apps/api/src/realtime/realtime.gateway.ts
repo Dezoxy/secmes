@@ -13,6 +13,7 @@ import { AuthService, type MaybeUnboundAuth, type VerifiedAuth } from '../auth/a
 import { MessagingService } from '../messaging/messaging.service.js';
 import {
   RealtimeBus,
+  type CommitCreatedEvent,
   type MessageCreatedEvent,
   type ReceiptAdvancedEvent,
   type WelcomeCreatedEvent,
@@ -64,6 +65,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.bus.onMessageCreated((event) => this.deliver(event));
     this.bus.onWelcomeCreated((event) => this.notifyWelcome(event));
     this.bus.onReceiptAdvanced((event) => this.deliverReceipt(event));
+    this.bus.onCommitCreated((event) => this.deliverCommit(event));
   }
 
   handleConnection(client: WebSocket): void {
@@ -217,6 +219,22 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     };
     for (const client of sockets) {
       if (client.readyState === WebSocket.OPEN) this.send(client, 'receipt', data);
+    }
+  }
+
+  /** Notify all subscribed sockets in the conversation room that a new commit is available to drain. */
+  private deliverCommit(event: CommitCreatedEvent): void {
+    const sockets = this.rooms.get(roomKey(event.tenantId, event.conversationId));
+    if (!sockets) return;
+    const data = {
+      conversationId: event.conversationId,
+      epoch: event.epoch,
+      senderUserId: event.senderUserId,
+      commitId: event.commitId,
+      createdAt: event.createdAt,
+    };
+    for (const client of sockets) {
+      if (client.readyState === WebSocket.OPEN) this.send(client, 'commit', data);
     }
   }
 

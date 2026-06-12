@@ -15,6 +15,13 @@ const ClaimRowSchema = z.object({
   key_package: z.string(),
 });
 
+/** Validates a claim-all row — includes the device's stable signature key (fetched via JOIN). */
+const ClaimAllRowSchema = z.object({
+  device_id: z.string().uuid(),
+  key_package: z.string(),
+  signature_public_key: z.string(),
+});
+
 export interface PublishResult {
   deviceId: string;
   /** Net-new KeyPackages inserted by THIS call (already-published dups are skipped). */
@@ -209,5 +216,44 @@ export class KeyDirectoryService {
       });
     }
     return { revoked };
+  }
+
+  /**
+   * Claim one unclaimed KeyPackage per device for `targetUserId` (B1 group add). Used when staging
+   * a membership commit that adds a multi-device user — each device needs its own Welcome sealed to
+   * its own claimed KeyPackage. Returns one entry per device that has available packages; devices with
+   * an empty pool are omitted (caller must check coverage and prompt for replenishment if needed).
+   * `FOR UPDATE SKIP LOCKED` per device so concurrent claims pick different rows.
+   */
+  async claimAll(auth: VerifiedAuth, targetUserId: string): Promise<ClaimedKeyPackage[]> {
+    return withTenant(auth.tenantId, async (tx) => {
+      // Claim the oldest unclaimed package per device in ONE atomic scan. The UPDATE ... FROM devices
+      // JOIN lets us return the signature key in the same RETURNING clause, avoiding a second transaction
+      // and the O(N) per-device lookup loop. Defense-in-depth: explicit tenant_id filter on top of RLS.
+      const rows = (await tx.execute(sql`
+        update key_packages kp set claimed_at = now()
+        from devices d
+        where kp.id in (
+          select distinct on (kp2.device_id) kp2.id
+          from key_packages kp2
+          join devices d2 on d2.id = kp2.device_id
+          where d2.user_id = ${targetUserId}
+            and d2.tenant_id = ${auth.tenantId}
+            and kp2.claimed_at is null
+          order by kp2.device_id, kp2.created_at asc
+          for update skip locked
+        ) and d.id = kp.device_id
+        returning kp.device_id, kp.key_package, d.signature_public_key
+      `)) as unknown as unknown[];
+
+      return rows.map((r) => {
+        const parsed = ClaimAllRowSchema.parse(r);
+        return {
+          deviceId: parsed.device_id,
+          signaturePublicKey: parsed.signature_public_key,
+          keyPackage: parsed.key_package,
+        };
+      });
+    });
   }
 }

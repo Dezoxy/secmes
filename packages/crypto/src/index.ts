@@ -22,6 +22,7 @@ import {
   type CiphersuiteImpl,
   type ClientState,
   type KeyPackage,
+  type LeafIndex,
   type PrivateKeyPackage,
   type RatchetTree,
   type Welcome,
@@ -198,6 +199,45 @@ export interface DeviceIdentity {
 export interface ConversationInvite {
   welcome: Welcome;
   ratchetTree: RatchetTree;
+}
+
+/** One active member as seen from the local group roster. Used to resolve identities to leaf indices. */
+export interface GroupMember {
+  leafIndex: number;
+  identity: string;
+  signaturePublicKey: Uint8Array;
+}
+
+/**
+ * A commit created by {@link Conversation.stageMembershipCommit} but NOT yet applied.
+ * Holds the post-commit ClientState privately so the caller can: (a) seal and persist it before
+ * POSTing, (b) promote it on server 200, or (c) wipe it on a 409 epoch-race and rebase.
+ *
+ * The `_pendingState` and `_consumed` fields are internal — only pass a StagedCommit back
+ * to `applyStaged`/`discardStaged`/`serializeStaged` on the same Conversation.
+ */
+export class StagedCommit {
+  readonly commit: Uint8Array;
+  readonly invite: ConversationInvite | undefined;
+  readonly epoch: number;
+  /** @internal */
+  readonly _pendingState: ClientState;
+  /** @internal: spent ratchet secrets; wiped on discardStaged */
+  readonly _consumed: Uint8Array[];
+
+  constructor(
+    commit: Uint8Array,
+    invite: ConversationInvite | undefined,
+    epoch: number,
+    pendingState: ClientState,
+    consumed: Uint8Array[],
+  ) {
+    this.commit = commit;
+    this.invite = invite;
+    this.epoch = epoch;
+    this._pendingState = pendingState;
+    this._consumed = consumed;
+  }
 }
 
 function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
@@ -423,6 +463,148 @@ export class Conversation {
       wipe(commit.consumed);
       if (!commit.welcome) throw new Error('add did not produce a Welcome');
       return { welcome: commit.welcome, ratchetTree: this.state.ratchetTree };
+    });
+  }
+
+  /**
+   * Enumerate active group members from the local ratchet tree: leaf index, stable identity string,
+   * and signature public key. Used to resolve a user's devices to leaf indices before a remove commit.
+   * Synchronous — reads current state without advancing the ratchet.
+   */
+  members(): GroupMember[] {
+    const result: GroupMember[] = [];
+    // The ratchet tree is a flat array: node at index i is a leaf iff i % 2 === 0, with leafIndex = i / 2.
+    for (let nodeIdx = 0; nodeIdx < this.state.ratchetTree.length; nodeIdx++) {
+      if (nodeIdx % 2 !== 0) continue; // parent node slot
+      const node = this.state.ratchetTree[nodeIdx];
+      if (!node || node.nodeType !== 'leaf') continue; // blank leaf
+      const cred = node.leaf.credential;
+      if (cred.credentialType !== 'basic') continue; // v1 issues Basic only
+      result.push({
+        leafIndex: nodeIdx / 2,
+        identity: tdStrict.decode(cred.identity),
+        signaturePublicKey: node.leaf.signaturePublicKey,
+      });
+    }
+    return result;
+  }
+
+  /**
+   * Stage a membership commit (add and/or remove) WITHOUT advancing local state.
+   *
+   * Returns a {@link StagedCommit} holding: the encrypted commit wire bytes to fan out to the server,
+   * an optional invite (present iff there are adds), the epoch at which the commit was created (the
+   * server's slot key), and the pending post-commit state.
+   *
+   * The caller must:
+   *  1. Seal `serializeStaged(staged)` → persist to the pending keystore slot (before POSTing).
+   *  2. POST the commit. On 200: call `applyStaged` then persist the live state.
+   *     On 409: call `discardStaged` and re-stage from the new epoch (up to N retries).
+   *
+   * ⚠️ Identity binding: same requirement as `addMember` — the caller MUST verify each added
+   * KeyPackage out-of-band (safety number) before calling. See fingerprint-verification.md.
+   */
+  async stageMembershipCommit(opts: {
+    add?: KeyPackage[];
+    removeLeafIndices?: number[];
+  }): Promise<StagedCommit> {
+    return this.run(async () => {
+      const proposals: Array<
+        | { proposalType: 'add'; add: { keyPackage: KeyPackage } }
+        | { proposalType: 'remove'; remove: { removed: LeafIndex } }
+      > = [];
+      for (const kp of opts.add ?? []) {
+        proposals.push({ proposalType: 'add', add: { keyPackage: kp } });
+      }
+      for (const li of opts.removeLeafIndices ?? []) {
+        proposals.push({ proposalType: 'remove', remove: { removed: li as LeafIndex } });
+      }
+      const epochAtCreation = this.epoch; // snapshot BEFORE the commit advances the epoch
+
+      // Deep-clone via encode→decode round-trip so createCommit's `consumed` array holds
+      // references to clone buffers, not live-state buffers. Without this, discardStaged()
+      // would zero this.state.keySchedule.initSecret (same reference) and break any
+      // subsequent processCommit or stageMembershipCommit on this Conversation.
+      const stateSnapshot = encodeGroupState(this.state);
+      const decodedClone = decodeGroupState(stateSnapshot, 0);
+      if (!decodedClone) throw new Error('could not clone state for staging');
+      const stateForCommit: ClientState = {
+        ...decodedClone[0],
+        clientConfig: this.state.clientConfig,
+      };
+
+      const result = await createCommit(
+        { state: stateForCommit, cipherSuite: this.cs },
+        { extraProposals: proposals },
+      );
+      // DON'T advance this.state — the current state must remain valid for a 409 rebase.
+      const wire = encodeMlsMessage(result.commit);
+      const invite = result.welcome
+        ? { welcome: result.welcome, ratchetTree: result.newState.ratchetTree }
+        : undefined;
+      return new StagedCommit(wire, invite, epochAtCreation, result.newState, result.consumed);
+    });
+  }
+
+  /**
+   * Serialize the pending post-commit state from a staged commit for sealed persistence (the
+   * "pending keystore slot"). The returned bytes carry SECRET key material — seal immediately
+   * with `sealBackup`; never persist or transmit them raw. Inverse: `MlsEngine.deserializeConversation`.
+   */
+  serializeStaged(staged: StagedCommit): Uint8Array {
+    return encodeGroupState(staged._pendingState);
+  }
+
+  /**
+   * Promote a staged commit after the server returns 200 (epoch slot won). Advances this conversation
+   * to the pending post-commit state. Must be followed immediately by `persistVia` to seal the new state.
+   * Runs inside the op queue so it orders correctly with concurrent encrypt/decrypt.
+   */
+  async applyStaged(staged: StagedCommit): Promise<void> {
+    return this.run(async () => {
+      this.state = staged._pendingState;
+    });
+  }
+
+  /**
+   * Wipe a staged commit after a 409 epoch-race loss. Zeroes the spent ratchet secrets from the
+   * abandoned commit so they don't linger in memory. Does NOT touch `this.state` (still at the
+   * pre-commit epoch, ready for a rebase).
+   */
+  discardStaged(staged: StagedCommit): void {
+    wipe(staged._consumed);
+  }
+
+  /**
+   * Process an incoming commit frame (from another group member). Advances this conversation's
+   * epoch and updates the ratchet state. Must be called for every commit at the current epoch
+   * before decrypting any application messages at the next epoch.
+   *
+   * Strict: throws if the wire frame is not an application message (`mls_private_message`) or if
+   * the result is not a handshake/commit (`kind !== 'newState'`). Wrong-kind frames are dropped
+   * without advancing state (see threat model §T3). Persists after every successful commit via the
+   * provided `persister`; wires `persistVia` discipline (sealed snapshot inside the op queue).
+   */
+  async processCommit(
+    wire: Uint8Array,
+    persister: (snapshot: Uint8Array) => Promise<void>,
+  ): Promise<void> {
+    return this.run(async () => {
+      const decoded = decodeMlsMessage(wire, 0);
+      if (!decoded) throw new Error('could not decode MLS commit');
+      const [msg, bytesRead] = decoded;
+      if (bytesRead !== wire.length) throw new Error('trailing bytes after MLS message');
+      if (msg.wireformat !== 'mls_private_message') {
+        throw new Error(`expected mls_private_message commit, got "${msg.wireformat}"`);
+      }
+      const result = await processMessage(msg, this.state, emptyPskIndex, acceptAll, this.cs);
+      wipe(result.consumed);
+      if (result.kind !== 'newState') {
+        // Application message posted to the commit endpoint — noise, don't advance state.
+        throw new Error(`expected commit (newState), got "${result.kind}"`);
+      }
+      this.state = result.newState;
+      await persister(encodeGroupState(this.state));
     });
   }
 

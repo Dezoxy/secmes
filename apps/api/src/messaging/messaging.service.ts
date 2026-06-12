@@ -1,15 +1,26 @@
 import { verifyWelcomeConsume, verifyWelcomeFetch } from '@argus/crypto/device-proof';
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant, type Tx } from '../db/index.js';
 import { requireMembership, requireUser } from './membership.js';
 import { PushService } from '../push/push.service.js';
-import { RealtimeBus, type MessageCreatedEvent } from '../realtime/realtime-bus.js';
+import {
+  RealtimeBus,
+  type CommitCreatedEvent,
+  type MessageCreatedEvent,
+} from '../realtime/realtime-bus.js';
 import type {
+  CommitBody,
   DeliverWelcome,
+  ListCommitsQuery,
   ListMessagesQuery,
   RecordReceipt,
   SendMessage,
@@ -42,6 +53,21 @@ export interface SentMessage {
   createdAt: string;
   /** true when an idempotent retry matched an existing (sender, clientMessageId) — nothing new stored. */
   deduplicated: boolean;
+}
+
+export interface CommitResult {
+  id: string;
+  epoch: number;
+  deduplicated: boolean;
+}
+
+/** One fetched commit — opaque mls_private_message base64 + routing metadata. Server never decrypts. */
+export interface FetchedCommit {
+  id: string;
+  epoch: number;
+  senderUserId: string | null;
+  commit: string;
+  createdAt: string;
 }
 
 /** One fetched message — CIPHERTEXT ONLY plus routing metadata; the server never decrypts `ciphertext`. */
@@ -677,6 +703,216 @@ export class MessagingService {
       userId,
       status: body.status,
       throughMessageId: body.throughMessageId,
+    });
+  }
+
+  /**
+   * Submit a staged membership commit to win the epoch slot for `conversationId`.
+   *
+   * Invariant #1: the `commit` field is an opaque base64 mls_private_message — the server never
+   * decrypts it. Membership changes are applied to `conversation_members` via the DECLARED delta
+   * (`addedUserIds`, `removedUserIds`); the cryptographic truth is in the commit frame itself
+   * (see threat model §T2).
+   *
+   * Returns 200 on first win or on own idempotent retry. Throws ConflictException (409) if another
+   * member won the slot at this epoch first.
+   */
+  async postCommit(
+    auth: VerifiedAuth,
+    conversationId: string,
+    body: CommitBody,
+  ): Promise<CommitResult> {
+    const { result, event } = await withTenant(auth.tenantId, async (tx) => {
+      const sender = await requireUser(tx, auth.sub);
+      await requireMembership(tx, conversationId, sender);
+
+      // Attempt to insert — the UNIQUE (tenant_id, conversation_id, epoch) constraint is the server-side
+      // epoch lock. onConflictDoNothing is used here because we need to distinguish two conflict types:
+      // (a) epoch slot occupied by another member → 409; (b) own idempotent retry → 200 deduplicated.
+      // We distinguish them by checking the rows-inserted count and then querying for the own row.
+      const inserted = await tx
+        .insert(schema.conversationCommits)
+        .values({
+          tenantId: auth.tenantId,
+          conversationId,
+          senderUserId: sender,
+          clientCommitId: body.clientCommitId,
+          epoch: BigInt(body.epoch),
+          commit: body.commit,
+        })
+        .onConflictDoNothing()
+        .returning({
+          id: schema.conversationCommits.id,
+          createdAt: schema.conversationCommits.createdAt,
+        });
+
+      if (inserted[0]) {
+        // New commit — apply the declared membership delta in the same transaction.
+        for (const userId of body.addedUserIds) {
+          try {
+            await tx
+              .insert(schema.conversationMembers)
+              .values({ tenantId: auth.tenantId, conversationId, userId })
+              .onConflictDoNothing();
+          } catch {
+            // Unknown or cross-tenant userId — FK violation. Ignore (crypto truth is in the commit frame).
+          }
+        }
+        if (body.removedUserIds.length > 0) {
+          await tx.delete(schema.conversationMembers).where(
+            and(
+              eq(schema.conversationMembers.tenantId, auth.tenantId),
+              eq(schema.conversationMembers.conversationId, conversationId),
+              sql`${schema.conversationMembers.userId} = ANY(ARRAY[${sql.join(
+                body.removedUserIds.map((id) => sql`${id}::uuid`),
+                sql`, `,
+              )}])`,
+            ),
+          );
+        }
+
+        // Deliver Welcome material for each newly-added member device.
+        for (const w of body.welcomes) {
+          try {
+            await tx
+              .insert(schema.conversationWelcomes)
+              .values({
+                tenantId: auth.tenantId,
+                conversationId,
+                recipientUserId: w.recipientUserId,
+                recipientDeviceId: w.recipientDeviceId,
+                senderUserId: sender,
+                welcome: w.welcome,
+                ratchetTree: w.ratchetTree,
+              })
+              .onConflictDoNothing();
+          } catch (err) {
+            // Invalid recipientUserId/deviceId (FK violation). The MLS crypto is already correct from
+            // the commit frame, but the recipient won't receive the join notification — log it.
+            // eslint-disable-next-line no-console
+            console.warn(
+              'postCommit: welcome delivery failed for device',
+              w.recipientDeviceId,
+              err instanceof Error ? err.message : err,
+            );
+          }
+        }
+
+        const createdAt = inserted[0].createdAt.toISOString();
+        return {
+          result: { id: inserted[0].id, epoch: body.epoch, deduplicated: false },
+          event: {
+            tenantId: auth.tenantId,
+            conversationId,
+            epoch: body.epoch,
+            senderUserId: sender,
+            commitId: inserted[0].id,
+            createdAt,
+          } satisfies CommitCreatedEvent,
+        };
+      }
+
+      // Conflict — check if it's our own retry or another member's win.
+      const [existing] = await tx
+        .select({
+          id: schema.conversationCommits.id,
+          senderUserId: schema.conversationCommits.senderUserId,
+          clientCommitId: schema.conversationCommits.clientCommitId,
+        })
+        .from(schema.conversationCommits)
+        .where(
+          and(
+            eq(schema.conversationCommits.tenantId, auth.tenantId),
+            eq(schema.conversationCommits.conversationId, conversationId),
+            eq(schema.conversationCommits.epoch, BigInt(body.epoch)),
+          ),
+        )
+        .limit(1);
+
+      if (
+        existing &&
+        existing.senderUserId !== null &&
+        existing.senderUserId === sender &&
+        existing.clientCommitId === body.clientCommitId
+      ) {
+        // Own idempotent retry.
+        return { result: { id: existing.id, epoch: body.epoch, deduplicated: true }, event: null };
+      }
+
+      // Another member won this epoch slot.
+      throw new ConflictException('epoch slot already occupied');
+    });
+
+    // Post-commit: notify all conversation members about the new commit (metadata only, no ciphertext).
+    if (event) {
+      this.bus.emitCommitCreated(event);
+      void this.push.notifyConversationMembers(auth.tenantId, conversationId, auth.sub);
+
+      // Nudge welcome recipients — one WS push per unique added user (batch to a single query).
+      const uniqueRecipientIds = [...new Set(body.welcomes.map((w) => w.recipientUserId))];
+      if (uniqueRecipientIds.length > 0) {
+        const recipients = await withTenant(auth.tenantId, (tx) =>
+          tx
+            .select({ id: schema.users.id, sub: schema.users.externalIdentityId })
+            .from(schema.users)
+            .where(
+              and(
+                eq(schema.users.tenantId, auth.tenantId),
+                inArray(schema.users.id, uniqueRecipientIds),
+              ),
+            ),
+        );
+        for (const r of recipients) {
+          this.bus.emitWelcomeCreated({
+            tenantId: auth.tenantId,
+            conversationId,
+            recipientSub: r.sub,
+          });
+        }
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Drain commits after `afterEpoch` for a conversation (the client's catch-up / epoch-advance path).
+   * OPAQUE COMMIT BYTES ONLY — ciphertext only, server never decrypts. Member-only.
+   */
+  async listCommits(
+    auth: VerifiedAuth,
+    conversationId: string,
+    query: ListCommitsQuery,
+  ): Promise<FetchedCommit[]> {
+    return withTenant(auth.tenantId, async (tx) => {
+      const user = await requireUser(tx, auth.sub);
+      await requireMembership(tx, conversationId, user);
+
+      const rows = await tx
+        .select({
+          id: schema.conversationCommits.id,
+          epoch: schema.conversationCommits.epoch,
+          senderUserId: schema.conversationCommits.senderUserId,
+          commit: schema.conversationCommits.commit,
+          createdAt: schema.conversationCommits.createdAt,
+        })
+        .from(schema.conversationCommits)
+        .where(
+          and(
+            eq(schema.conversationCommits.tenantId, auth.tenantId),
+            eq(schema.conversationCommits.conversationId, conversationId),
+            gt(schema.conversationCommits.epoch, BigInt(query.afterEpoch)),
+          ),
+        )
+        .orderBy(asc(schema.conversationCommits.epoch))
+        .limit(query.limit);
+
+      return rows.map((r) => ({
+        id: r.id,
+        epoch: Number(r.epoch),
+        senderUserId: r.senderUserId,
+        commit: r.commit,
+        createdAt: r.createdAt.toISOString(),
+      }));
     });
   }
 

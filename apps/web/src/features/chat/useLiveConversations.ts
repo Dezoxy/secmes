@@ -10,7 +10,12 @@ import type { Conversation as MlsGroup, DeviceKeys } from '@argus/crypto';
 import { accessToken } from '../../lib/auth';
 import { fetchReceipts } from '../../lib/api';
 import { joinPendingConversations } from '../../lib/join';
-import { receiveLiveMessage, type DecryptedMessage, type MessagingDeps } from '../../lib/messaging';
+import {
+  receiveLiveMessage,
+  processCommitEvent,
+  type DecryptedMessage,
+  type MessagingDeps,
+} from '../../lib/messaging';
 import {
   createMessageSocket,
   type IncomingReceipt,
@@ -289,6 +294,19 @@ export function useLiveConversations({
       // A Welcome is waiting (added to a conversation while connected): drain now — join → subscribe →
       // backfill ride the existing onJoined → addLive path, so the conversation + its messages appear live.
       onWelcome: () => drainRef.current(),
+      // A membership commit was posted: drain commits >= event.epoch to advance the local MLS state.
+      onCommit: ({ conversationId, epoch }) => {
+        const group = liveGroups.current.get(conversationId);
+        if (!group) return;
+        void processCommitEvent(deps, conversationId, group, { epoch }).catch((err: unknown) => {
+          // eslint-disable-next-line no-console
+          console.warn(
+            'commit drain failed',
+            conversationId,
+            err instanceof Error ? err.message : err,
+          );
+        });
+      },
     });
     socketRef.current = socket;
     for (const id of liveGroups.current.keys()) socket.subscribe(id);

@@ -87,6 +87,35 @@ export const WelcomeProofQuerySchema = z
   .strict();
 export type WelcomeProofQuery = z.infer<typeof WelcomeProofQuerySchema>;
 
+export const CommitWelcomeSchema = z
+  .object({
+    recipientUserId: z.string().uuid(),
+    recipientDeviceId: z.string().uuid(),
+    welcome: base64.min(1).max(32768),
+    ratchetTree: base64.min(1).max(32768),
+  })
+  .strict();
+
+export const CommitBodySchema = z
+  .object({
+    clientCommitId: z.string().uuid(),
+    epoch: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    commit: base64.min(1).max(65536),
+    welcomes: z.array(CommitWelcomeSchema).max(64),
+    addedUserIds: z.array(z.string().uuid()).max(32),
+    removedUserIds: z.array(z.string().uuid()).max(32),
+  })
+  .strict();
+export type CommitBody = z.infer<typeof CommitBodySchema>;
+
+export const ListCommitsQuerySchema = z
+  .object({
+    afterEpoch: z.coerce.number().int().min(0).default(0),
+    limit: z.coerce.number().int().min(1).max(50).default(50),
+  })
+  .strict();
+export type ListCommitsQuery = z.infer<typeof ListCommitsQuerySchema>;
+
 export const SendMessageSchema = z
   .object({
     clientMessageId: z.string().uuid(), // client-generated; idempotency key (per sender)

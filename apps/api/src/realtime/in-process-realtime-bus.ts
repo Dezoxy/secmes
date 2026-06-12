@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 
 import {
   RealtimeBus,
+  type CommitCreatedEvent,
   type MessageCreatedEvent,
   type ReceiptAdvancedEvent,
   type WelcomeCreatedEvent,
@@ -36,5 +37,13 @@ export class InProcessRealtimeBus extends RealtimeBus {
 
   onReceiptAdvanced(listener: (event: ReceiptAdvancedEvent) => void): void {
     this.emitter.on('receipt.advanced', listener);
+  }
+
+  emitCommitCreated(event: CommitCreatedEvent): void {
+    this.emitter.emit('commit.created', event);
+  }
+
+  onCommitCreated(listener: (event: CommitCreatedEvent) => void): void {
+    this.emitter.on('commit.created', listener);
   }
 }

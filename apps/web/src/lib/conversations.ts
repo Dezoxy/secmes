@@ -15,8 +15,17 @@ import {
   type KeyPackage,
 } from '@argus/crypto';
 
-import { claimKeyPackage, createConversation, deliverWelcome } from './api';
+import {
+  claimAllKeyPackages,
+  claimKeyPackage,
+  createConversation,
+  deliverWelcome,
+  postCommit,
+  type ClaimedKeyPackage,
+} from './api';
+import { toBase64 } from './base64';
 import type { DeviceKeystore } from './keystore';
+import { sendLiveMessage, type MessagingDeps } from './messaging';
 
 /** The peer device a conversation is being started with — ids + the signature key (no private material). */
 export interface PeerRef {
@@ -134,5 +143,222 @@ export class ConversationManager {
    * on `confirm` and reloaded on unlock via the keystore). */
   get(conversationId: string): ConversationSession | undefined {
     return this.sessions.get(conversationId);
+  }
+}
+
+// ── Group conversation manager (B1) ──────────────────────────────────────────────────────────────────
+// Two-phase, safety-number-gated flow for creating and extending MLS group conversations.
+// Same security model as ConversationManager: prepare() only claims packages and derives safety numbers;
+// confirm() does the crypto + server operations, and is unreachable until the caller has shown safety
+// numbers to the user. Each claimed package is a separate KeyPackage (per-device) and an identity-bound
+// MLS add adds every device in a single commit, so all devices of a new member join together.
+
+/** Per-device data claimed for a group member in Phase 1. */
+export interface PendingGroupMember {
+  userId: string;
+  /** All devices that have packages available (one entry per device). */
+  allDevices: ClaimedKeyPackage[];
+  /**
+   * Per-device safety numbers — one per entry in `allDevices`. Each must be verified before confirming.
+   * Verifying only the first device is insufficient for multi-device members: a swapped key on any
+   * device is a MITM, and only per-device verification catches it.
+   */
+  safetyNumbers: string[];
+  /** Deserialized KeyPackages for all devices — held for Phase 2 add. */
+  keyPackages: KeyPackage[];
+}
+
+/** Phase-1 result for a group create or add — pending safety-number confirmation. */
+export interface PendingGroup {
+  members: PendingGroupMember[];
+  groupName: string;
+}
+
+/** A successfully created or extended group conversation. */
+export interface GroupConversationSession {
+  conversationId: string;
+  conversation: Conversation;
+  groupName: string;
+  /** The confirmed member user ids added in this operation (for UI naming). */
+  addedUserIds: string[];
+}
+
+/**
+ * Two-phase, safety-number-gated manager for MLS group conversations.
+ *
+ * `prepare(memberUserIds, groupName)` — claims packages from the key directory for all listed members,
+ * computes safety numbers (one per user, derived from their primary device's published signature key).
+ * Returns a `PendingGroup` with all material needed for Phase 2.
+ *
+ * `confirmCreate(pending)` — ONLY call after the user has confirmed every safety number in `pending.members`.
+ * Builds the MLS group locally, stages a commit adding all members, posts it to the server, delivers
+ * Welcomes, and sends an in-stream encrypted group-meta message carrying the group name.
+ *
+ * `confirmAdd(conversationId, conversation, pending, deps)` — same but for an existing conversation.
+ * Stages and posts an add commit for the new members.
+ */
+export class GroupConversationManager {
+  private enginePromise: Promise<MlsEngine> | null = null;
+
+  constructor(
+    private readonly device: DeviceKeys,
+    private readonly selfUserId: string,
+    private readonly keystore: DeviceKeystore,
+    private readonly sessionKey: CryptoKey,
+  ) {}
+
+  private engine(): Promise<MlsEngine> {
+    this.enginePromise ??= MlsEngine.create();
+    return this.enginePromise;
+  }
+
+  /** Phase 1: claim packages for all `memberUserIds` and derive safety numbers. Trusts nothing yet. */
+  async prepare(memberUserIds: string[], groupName: string): Promise<PendingGroup> {
+    const members: PendingGroupMember[] = [];
+    for (const userId of memberUserIds) {
+      const claimed = await claimAllKeyPackages(userId);
+      if (claimed.length === 0) {
+        throw new Error(`user ${userId} has no key packages available — ask them to sign in first`);
+      }
+      const keyPackages = claimed.map((c) => deserializeKeyPackage(c.keyPackage));
+      // One safety number per device — a swapped key on ANY device is a MITM; per-device SN is the
+      // only way to catch it. The UI shows each one sequentially before confirm() is reachable.
+      const safetyNumbers = await Promise.all(
+        claimed.map((c) =>
+          safetyNumber(this.device.publicPackage, deserializeKeyPackage(c.keyPackage)),
+        ),
+      );
+      members.push({ userId, allDevices: claimed, safetyNumbers, keyPackages });
+    }
+    return { members, groupName };
+  }
+
+  /**
+   * Phase 2 — create: ONLY after all safety numbers in `pending.members` are confirmed out-of-band.
+   * Creates a solo server conversation, stages a commit adding all member devices, wins the epoch-0 slot,
+   * and sends an in-stream encrypted group-meta message with the group name.
+   */
+  async confirmCreate(
+    pending: PendingGroup,
+    deps: MessagingDeps,
+  ): Promise<GroupConversationSession> {
+    const engine = await this.engine();
+    const conversation = await engine.createConversation(crypto.randomUUID(), this.device);
+
+    const allPackages = pending.members.flatMap((m) => m.keyPackages);
+    const staged = await conversation.stageMembershipCommit({ add: allPackages });
+    if (!staged.invite)
+      throw new Error('group commit produced no Welcome — check that members have packages');
+
+    const inv = serializeInvite(staged.invite);
+    const { conversationId } = await createConversation([this.selfUserId]);
+
+    const welcomes = pending.members.flatMap((m) =>
+      m.allDevices.map((d) => ({
+        recipientUserId: m.userId,
+        recipientDeviceId: d.deviceId,
+        welcome: inv.welcome,
+        ratchetTree: inv.ratchetTree,
+      })),
+    );
+
+    try {
+      await postCommit(conversationId, {
+        clientCommitId: crypto.randomUUID(),
+        epoch: staged.epoch,
+        commit: toBase64(staged.commit),
+        welcomes,
+        addedUserIds: pending.members.map((m) => m.userId),
+        removedUserIds: [],
+      });
+    } catch (err) {
+      conversation.discardStaged(staged);
+      throw err;
+    }
+
+    await conversation.applyStaged(staged);
+    await this.keystore.saveConversationState(
+      this.device,
+      conversationId,
+      conversation,
+      this.sessionKey,
+    );
+
+    if (pending.groupName) {
+      await sendLiveMessage(
+        deps,
+        conversationId,
+        conversation,
+        pending.groupName,
+        [],
+        'group-meta',
+      );
+    }
+
+    return {
+      conversationId,
+      conversation,
+      groupName: pending.groupName,
+      addedUserIds: pending.members.map((m) => m.userId),
+    };
+  }
+
+  /**
+   * Phase 2 — add member: ONLY after the safety numbers are confirmed. Stages a commit adding the new
+   * members to `conversationId`, posts it, re-sends the group-meta to cover the new member's history.
+   */
+  async confirmAdd(
+    conversationId: string,
+    conversation: Conversation,
+    pending: PendingGroup,
+    deps: MessagingDeps,
+  ): Promise<void> {
+    const allPackages = pending.members.flatMap((m) => m.keyPackages);
+    const staged = await conversation.stageMembershipCommit({ add: allPackages });
+    if (!staged.invite) throw new Error('add commit produced no Welcome — member has no packages');
+
+    const inv = serializeInvite(staged.invite);
+    const welcomes = pending.members.flatMap((m) =>
+      m.allDevices.map((d) => ({
+        recipientUserId: m.userId,
+        recipientDeviceId: d.deviceId,
+        welcome: inv.welcome,
+        ratchetTree: inv.ratchetTree,
+      })),
+    );
+
+    try {
+      await postCommit(conversationId, {
+        clientCommitId: crypto.randomUUID(),
+        epoch: staged.epoch,
+        commit: toBase64(staged.commit),
+        welcomes,
+        addedUserIds: pending.members.map((m) => m.userId),
+        removedUserIds: [],
+      });
+    } catch (err) {
+      conversation.discardStaged(staged);
+      throw err;
+    }
+
+    await conversation.applyStaged(staged);
+    await this.keystore.saveConversationState(
+      this.device,
+      conversationId,
+      conversation,
+      this.sessionKey,
+    );
+
+    // Re-send the group name so the new member can read it (they can't see pre-join history).
+    if (pending.groupName) {
+      await sendLiveMessage(
+        deps,
+        conversationId,
+        conversation,
+        pending.groupName,
+        [],
+        'group-meta',
+      );
+    }
   }
 }

@@ -374,19 +374,20 @@ export class DeviceKeystore {
    * Bound to the device identity + signature key. (CAS keeps the *durable* state monotonic; it does not gate
    * two tabs *sending* concurrently — that needs single-writer send coordination, wired with the send path.)
    */
-  async saveConversationState(
+  /**
+   * Build a persister function for a conversation that seals + CAS-writes a raw snapshot.
+   * The returned function runs OUTSIDE the conversation's op queue — pass it directly to
+   * `conversation.processCommit(wire, persister)`, which calls it from WITHIN its own `run()`.
+   * (Calling `saveConversationState` from there would re-enter `run()` and deadlock.)
+   */
+  makeConversationPersister(
     device: DeviceKeys,
     conversationId: string,
-    conversation: Conversation,
     sessionKey: CryptoKey,
-  ): Promise<void> {
-    await conversation.persistVia(async (snapshot) => {
-      // Session-key seal (one Argon2id at unlock, cheap AES-GCM per save) — the state advances on every
-      // send/receive, so a per-save KDF here made each delivered message cost seconds. The AAD pins the
-      // blob to its slot AND domain-separates it from the message log (same key, different stores).
+  ): (snapshot: Uint8Array) => Promise<void> {
+    return async (snapshot) => {
       const sealed = await sealWithKey(sessionKey, snapshot, groupStateAad(conversationId));
-      snapshot.fill(0); // wipe the transient unsealed group-state bytes after sealing
-
+      snapshot.fill(0);
       const base = this.groupStateVersions.get(conversationId) ?? -1;
       const tx = this.db.transaction(GROUP_STORE, 'readwrite');
       const current = (await tx.store.get(conversationId)) as StoredGroupState | undefined;
@@ -407,7 +408,18 @@ export class DeviceKeystore {
       await tx.done;
       if (conflict) throw new GroupStateConflict(conversationId);
       this.groupStateVersions.set(conversationId, version);
-    });
+    };
+  }
+
+  async saveConversationState(
+    device: DeviceKeys,
+    conversationId: string,
+    conversation: Conversation,
+    sessionKey: CryptoKey,
+  ): Promise<void> {
+    await conversation.persistVia(
+      this.makeConversationPersister(device, conversationId, sessionKey),
+    );
   }
 
   /** Rehydrate ALL of THIS device's persisted conversations (on unlock) → conversationId → Conversation. */
