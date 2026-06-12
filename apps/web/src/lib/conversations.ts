@@ -25,6 +25,7 @@ import {
 } from './api';
 import { toBase64 } from './base64';
 import type { DeviceKeystore, StoredMessage } from './keystore';
+import { conversationLock, withLock } from './locks';
 import { sendLiveMessage, type MessagingDeps } from './messaging';
 
 /** The peer device a conversation is being started with — ids + the signature key (no private material). */
@@ -266,43 +267,50 @@ export class GroupConversationManager {
       })),
     );
 
-    // Persist the pending post-commit state BEFORE the POST — if the tab crashes after a successful
-    // POST but before applyStaged/saveConversationState, the loader promotes this entry on reload
-    // so the device is never left at the old epoch while the server/peers are at the new one.
-    const pendingBytes = conversation.serializeStaged(staged);
-    await this.keystore.saveStagedCommit(
-      this.device,
-      conversationId,
-      this.sessionKey,
-      pendingBytes,
-    );
-    pendingBytes.fill(0); // wipe the transient plaintext — the sealed copy is in IDB
+    // Hold the conversation lock for the full stage→post→apply→persist sequence so concurrent sends,
+    // receives, or commit drains cannot interleave (same lock as sendLiveMessage/receiveLiveMessage/
+    // drainCommits). sendLiveMessage acquires the same lock, so it is called AFTER this block to
+    // avoid re-entrancy deadlock (Web Locks is non-reentrant per the spec).
+    await withLock(conversationLock(conversationId), async () => {
+      // Persist the pending post-commit state BEFORE the POST — if the tab crashes after a successful
+      // POST but before applyStaged/saveConversationState, the drain path (onSubscribed → drainCommits)
+      // re-syncs from the server on next load.
+      const pendingBytes = conversation.serializeStaged(staged);
+      await this.keystore.saveStagedCommit(
+        this.device,
+        conversationId,
+        this.sessionKey,
+        pendingBytes,
+      );
+      pendingBytes.fill(0); // wipe the transient plaintext — the sealed copy is in IDB
 
-    try {
-      await postCommit(conversationId, {
-        clientCommitId: crypto.randomUUID(),
-        epoch: staged.epoch,
-        commit: toBase64(staged.commit),
-        welcomes,
-        addedUserIds: pending.members.map((m) => m.userId),
-        removedUserIds: [],
-      });
-    } catch (err) {
-      conversation.discardStaged(staged);
+      try {
+        await postCommit(conversationId, {
+          clientCommitId: crypto.randomUUID(),
+          epoch: staged.epoch,
+          commit: toBase64(staged.commit),
+          welcomes,
+          addedUserIds: pending.members.map((m) => m.userId),
+          removedUserIds: [],
+        });
+      } catch (err) {
+        conversation.discardStaged(staged);
+        await this.keystore.clearStagedCommit(conversationId);
+        throw err;
+      }
+
+      await conversation.applyStaged(staged);
+      await this.keystore.saveConversationState(
+        this.device,
+        conversationId,
+        conversation,
+        this.sessionKey,
+      );
       await this.keystore.clearStagedCommit(conversationId);
-      throw err;
-    }
-
-    await conversation.applyStaged(staged);
-    await this.keystore.saveConversationState(
-      this.device,
-      conversationId,
-      conversation,
-      this.sessionKey,
-    );
-    await this.keystore.clearStagedCommit(conversationId);
+    });
 
     if (pending.groupName) {
+      // sendLiveMessage acquires the conversation lock itself — safe to call after the commit lock releases.
       const ack = await sendLiveMessage(
         deps,
         conversationId,
@@ -345,53 +353,61 @@ export class GroupConversationManager {
     deps: MessagingDeps,
   ): Promise<void> {
     const allPackages = pending.members.flatMap((m) => m.keyPackages);
-    const staged = await conversation.stageMembershipCommit({ add: allPackages });
-    if (!staged.invite) throw new Error('add commit produced no Welcome — member has no packages');
 
-    const inv = serializeInvite(staged.invite);
-    const welcomes = pending.members.flatMap((m) =>
-      m.allDevices.map((d) => ({
-        recipientUserId: m.userId,
-        recipientDeviceId: d.deviceId,
-        welcome: inv.welcome,
-        ratchetTree: inv.ratchetTree,
-      })),
-    );
+    // Serialize the full stage→post→apply→persist sequence under the conversation lock so concurrent
+    // sends, receives, or commit drains (all holding the same lock) cannot interleave. sendLiveMessage
+    // acquires the same lock, so it is called AFTER this block to avoid re-entrancy deadlock.
+    await withLock(conversationLock(conversationId), async () => {
+      const staged = await conversation.stageMembershipCommit({ add: allPackages });
+      if (!staged.invite)
+        throw new Error('add commit produced no Welcome — member has no packages');
 
-    const pendingBytes = conversation.serializeStaged(staged);
-    await this.keystore.saveStagedCommit(
-      this.device,
-      conversationId,
-      this.sessionKey,
-      pendingBytes,
-    );
-    pendingBytes.fill(0);
+      const inv = serializeInvite(staged.invite);
+      const welcomes = pending.members.flatMap((m) =>
+        m.allDevices.map((d) => ({
+          recipientUserId: m.userId,
+          recipientDeviceId: d.deviceId,
+          welcome: inv.welcome,
+          ratchetTree: inv.ratchetTree,
+        })),
+      );
 
-    try {
-      await postCommit(conversationId, {
-        clientCommitId: crypto.randomUUID(),
-        epoch: staged.epoch,
-        commit: toBase64(staged.commit),
-        welcomes,
-        addedUserIds: pending.members.map((m) => m.userId),
-        removedUserIds: [],
-      });
-    } catch (err) {
-      conversation.discardStaged(staged);
+      const pendingBytes = conversation.serializeStaged(staged);
+      await this.keystore.saveStagedCommit(
+        this.device,
+        conversationId,
+        this.sessionKey,
+        pendingBytes,
+      );
+      pendingBytes.fill(0);
+
+      try {
+        await postCommit(conversationId, {
+          clientCommitId: crypto.randomUUID(),
+          epoch: staged.epoch,
+          commit: toBase64(staged.commit),
+          welcomes,
+          addedUserIds: pending.members.map((m) => m.userId),
+          removedUserIds: [],
+        });
+      } catch (err) {
+        conversation.discardStaged(staged);
+        await this.keystore.clearStagedCommit(conversationId);
+        throw err;
+      }
+
+      await conversation.applyStaged(staged);
+      await this.keystore.saveConversationState(
+        this.device,
+        conversationId,
+        conversation,
+        this.sessionKey,
+      );
       await this.keystore.clearStagedCommit(conversationId);
-      throw err;
-    }
-
-    await conversation.applyStaged(staged);
-    await this.keystore.saveConversationState(
-      this.device,
-      conversationId,
-      conversation,
-      this.sessionKey,
-    );
-    await this.keystore.clearStagedCommit(conversationId);
+    });
 
     // Re-send the group name so the new member can read it (they can't see pre-join history).
+    // sendLiveMessage acquires the same conversation lock — called after the commit lock releases.
     if (pending.groupName) {
       await sendLiveMessage(
         deps,
