@@ -519,9 +519,9 @@ export class DeviceKeystore {
       // it successfully but crashed before applyStaged/saveConversationState ran. `serializeStaged`
       // produces the POST-COMMIT state (epoch N+1), so promoting it is the only way to recover the
       // committed ratchet — the sender cannot re-apply their own commit wire via processCommit.
-      // If the POST never reached the server, the pending state is epoch N+1 while the server is at
-      // epoch N; sends will fail with epoch-mismatch errors until a member re-invites. That corner
-      // case is acceptable for v1; a server-side epoch check would eliminate it in a future release.
+      // If the POST failed (ambiguous network error), the pending state is epoch N+1 while the server
+      // is still at epoch N; promoting would strand the device at a phantom epoch. `verifyCommitExists`
+      // (passed by the production caller) guards against this by confirming the slot exists on the server.
       const pendingRec = (await this.db.get(PENDING_STORE, rec.conversationId)) as
         | StoredPendingCommit
         | undefined;
@@ -530,6 +530,16 @@ export class DeviceKeystore {
         pendingRec.identity === identity &&
         pendingRec.signaturePublicKey === signaturePublicKey
       ) {
+        // Verify the commit actually landed on the server before promoting.
+        const commitLanded =
+          !verifyCommitExists || (await verifyCommitExists(rec.conversationId, pendingRec.epoch));
+        if (!commitLanded) {
+          // POST failed before reaching the server — discard pending slot, load pre-commit state.
+          await this.db.delete(PENDING_STORE, rec.conversationId);
+          out.set(rec.conversationId, this.engine.deserializeConversation(opened));
+          this.groupStateVersions.set(rec.conversationId, rec.version ?? -1);
+          continue;
+        }
         // CAS base must be set BEFORE saveConversationState so its persister sees the right version.
         this.groupStateVersions.set(rec.conversationId, rec.version ?? -1);
         try {

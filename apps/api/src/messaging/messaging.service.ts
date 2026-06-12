@@ -475,9 +475,10 @@ export class MessagingService {
         };
       }
 
-      // Stale-epoch gate: reject if the client is behind the latest committed epoch. A message
-      // encrypted at an old epoch is silently undecryptable by peers at a newer epoch — reject
-      // early so the client knows to drain commits before retrying.
+      // Epoch gate: reject messages at any epoch other than the current group epoch. A message
+      // encrypted at an old epoch is undecryptable (MLS FS); one at a future epoch indicates the
+      // client is ahead of the server-committed state and would be stored but undecryptable by peers.
+      // Both are rejected so the client knows to drain commits or re-sync before retrying.
       const [epochRow] = await tx
         .select({ maxEpoch: max(schema.conversationCommits.epoch) })
         .from(schema.conversationCommits)
@@ -491,10 +492,15 @@ export class MessagingService {
         epochRow?.maxEpoch !== null && epochRow?.maxEpoch !== undefined
           ? Number(epochRow.maxEpoch)
           : -1;
-      // A commit at epoch N advances the group to epoch N+1; messages at epoch ≤ N are stale.
-      if (body.epoch <= maxEpoch) {
+      const expectedEpoch = maxEpoch + 1; // commit at N → group at N+1
+      if (body.epoch !== expectedEpoch) {
+        const direction = body.epoch < expectedEpoch ? 'stale' : 'future';
         throw new ConflictException(
-          `stale epoch: client at ${String(body.epoch)}, group at ${String(maxEpoch + 1)} — drain commits before sending`,
+          `${direction} epoch: client at ${String(body.epoch)}, group at ${String(expectedEpoch)} — ${
+            direction === 'stale'
+              ? 'drain commits before sending'
+              : 'group has not yet advanced to this epoch'
+          }`,
         );
       }
 

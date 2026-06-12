@@ -301,19 +301,24 @@ export function useLiveConversations({
       onSubscribed: (conversationId) => {
         const group = liveGroups.current.get(conversationId);
         if (group) {
-          // Drain any commits posted since the group state was last persisted BEFORE backfilling
-          // messages. Without this, backfilled messages at a newer epoch are undecryptable (the
-          // MLS key schedule hasn't been advanced to that epoch yet).
-          void processCommitEvent(deps, conversationId, group, { epoch: group.epoch })
-            .then(() => void backfillInto(conversationId, group, selfUserId))
-            .catch((err: unknown) => {
-              // eslint-disable-next-line no-console
-              console.warn(
-                'subscribe: commit drain failed',
-                conversationId,
-                err instanceof Error ? err.message : err,
-              );
-            });
+          // Process messages and commits in epoch order:
+          // 1. Backfill at the current epoch first — so any messages sent before a pending commit
+          //    are decrypted while the key schedule is still at the right epoch (MLS FS means they
+          //    become undecryptable once the commit is applied).
+          // 2. Drain commits to catch up any membership changes posted while offline.
+          // 3. Backfill again to pick up messages encrypted at the new (post-commit) epoch.
+          void (async () => {
+            await backfillInto(conversationId, group, selfUserId);
+            await processCommitEvent(deps, conversationId, group, { epoch: group.epoch });
+            await backfillInto(conversationId, group, selfUserId);
+          })().catch((err: unknown) => {
+            // eslint-disable-next-line no-console
+            console.warn(
+              'subscribe: catch-up failed',
+              conversationId,
+              err instanceof Error ? err.message : err,
+            );
+          });
         }
         seedReceipts(conversationId); // seed historical delivered/read ticks once in the room
       },
