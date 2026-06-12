@@ -238,15 +238,18 @@ export class SsoService {
     const cfg = existing[0];
     if (!cfg) return; // no SSO configured — nothing to do
 
+    // Delete the Zitadel org BEFORE the DB row so that if the call fails the DB row is
+    // still present and the next Stripe webhook retry can find the org ID to try again.
+    // 404 means the org was already removed on a prior attempt (idempotent success).
+    await this.zitadel.deleteOrg(cfg.zitadelOrgId).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('HTTP 404')) return;
+      throw err;
+    });
+
     await withTenant(tenantId, (tx) =>
       tx.delete(schema.tenantSsoConfigs).where(eq(schema.tenantSsoConfigs.tenantId, tenantId)),
     );
-
-    await this.zitadel.deleteOrg(cfg.zitadelOrgId).catch((err: unknown) => {
-      this.logger.warn(
-        `deleteOrg ${cfg.zitadelOrgId} failed after billing downgrade — org may be orphaned: ${String(err)}`,
-      );
-    });
 
     await this.audit.record(tenantId, {
       eventType: 'sso.deleted',
