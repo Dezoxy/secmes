@@ -272,18 +272,30 @@ export function useLiveConversations({
       onMessage: ({ conversationId, message }) => {
         const group = liveGroups.current.get(conversationId);
         if (!group) return;
-        void receiveLiveMessage(deps, conversationId, group, message, selfUserId)
-          .then((decrypted) => {
-            if (decrypted) mergeIncoming(conversationId, [decrypted]);
-          })
-          .catch((err: unknown) => {
-            // eslint-disable-next-line no-console
-            console.warn(
-              'ws receive failed',
-              conversationId,
-              err instanceof Error ? err.message : err,
-            );
-          });
+        void (async () => {
+          // If the message was encrypted at a newer epoch, drain commits first so the MLS ratchet
+          // is at the right epoch before decrypting. Without this, a commit-then-message sequence
+          // can arrive with the message processed before the async onCommit drain completes —
+          // decrypt fails silently (returns null) and the message is lost from the live UI.
+          if (message.epoch > group.epoch) {
+            await processCommitEvent(deps, conversationId, group, { epoch: message.epoch });
+          }
+          const decrypted = await receiveLiveMessage(
+            deps,
+            conversationId,
+            group,
+            message,
+            selfUserId,
+          );
+          if (decrypted) mergeIncoming(conversationId, [decrypted]);
+        })().catch((err: unknown) => {
+          // eslint-disable-next-line no-console
+          console.warn(
+            'ws receive failed',
+            conversationId,
+            err instanceof Error ? err.message : err,
+          );
+        });
       },
       onReceipt: applyReceipt,
       onSubscribed: (conversationId) => {

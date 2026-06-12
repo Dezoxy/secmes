@@ -449,6 +449,32 @@ export class MessagingService {
       const sender = await requireUser(tx, auth.sub);
       await requireMembership(tx, conversationId, sender);
 
+      // Idempotent-retry fast path: if this (conversation, sender, clientMessageId) was already
+      // stored, return it immediately BEFORE the stale-epoch check. This prevents a retry from
+      // being rejected with 409 simply because a commit advanced the epoch after the first send
+      // succeeded but before the client received the acknowledgement.
+      const [alreadyStored] = await tx
+        .select({ id: schema.messages.id, createdAt: schema.messages.createdAt })
+        .from(schema.messages)
+        .where(
+          and(
+            eq(schema.messages.conversationId, conversationId),
+            eq(schema.messages.senderUserId, sender),
+            eq(schema.messages.clientMessageId, body.clientMessageId),
+          ),
+        )
+        .limit(1);
+      if (alreadyStored) {
+        return {
+          result: {
+            messageId: alreadyStored.id,
+            createdAt: alreadyStored.createdAt.toISOString(),
+            deduplicated: true,
+          },
+          event: null,
+        };
+      }
+
       // Stale-epoch gate: reject if the client is behind the latest committed epoch. A message
       // encrypted at an old epoch is silently undecryptable by peers at a newer epoch — reject
       // early so the client knows to drain commits before retrying.
