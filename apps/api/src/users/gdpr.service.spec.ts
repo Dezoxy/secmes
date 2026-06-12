@@ -251,6 +251,12 @@ describe.skipIf(!DB_URL)('GdprService', () => {
       expect(w).toBeUndefined();
     });
 
+    it('deletes audit events where alice was the actor', async () => {
+      const [evt] =
+        await sql`select id from audit_events where actor_sub = ${aliceSub} and tenant_id = ${tenantA}`;
+      expect(evt).toBeUndefined();
+    });
+
     it('removes alice from the routing index (user_tenant_index)', async () => {
       const [row] = await sql`select sub from user_tenant_index where sub = ${aliceSub}`;
       expect(row).toBeUndefined();
