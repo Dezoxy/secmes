@@ -102,15 +102,26 @@ export function mergeIncomingMessages(
 ): Conversation[] {
   if (incoming.length === 0) return conversations;
 
+  // group-meta messages carry the group name (not shown as chat bubbles); app messages go to the
+  // transcript. Latest group-meta text wins (they arrive in epoch order, so the last one is newest).
+  const appMessages = incoming.filter((m) => m.kind !== 'group-meta');
+  const latestGroupName = incoming
+    .filter((m) => m.kind === 'group-meta' && m.text.trim())
+    .at(-1)
+    ?.text.trim();
+
   return conversations.map((conversation) => {
     if (conversation.id !== conversationId) return conversation;
     const existing = new Set(conversation.messages.map((message) => message.id));
-    const fresh = incoming.filter((message) => !existing.has(message.serverId));
-    if (fresh.length === 0) return conversation;
+    const fresh = appMessages.filter((message) => !existing.has(message.serverId));
+    const base: Conversation = latestGroupName
+      ? { ...conversation, name: latestGroupName }
+      : conversation;
+    if (fresh.length === 0) return base;
 
     return {
-      ...conversation,
-      messages: [...conversation.messages, ...fresh.map(decryptedToMessage)].sort(
+      ...base,
+      messages: [...base.messages, ...fresh.map(decryptedToMessage)].sort(
         (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
       ),
     };
@@ -151,10 +162,12 @@ export function useConversationBackfill({
     (conversationId: string, incoming: DecryptedMessage[]): void => {
       if (incoming.length === 0) return;
       setConversations((prev) => mergeIncomingMessages(prev, conversationId, incoming));
-      appendHistory(conversationId, incoming.map(decryptedToStoredMessage));
-      // Name a still-placeholder peer from the (server-verified) sender — every incoming DecryptedMessage
+      // Only persist and name-resolve app messages — group-meta carries the group name, not chat content.
+      const appMessages = incoming.filter((m) => m.kind !== 'group-meta');
+      appendHistory(conversationId, appMessages.map(decryptedToStoredMessage));
+      // Name a still-placeholder peer from the (server-verified) sender — every incoming app message
       // is a PEER message (own sends are skipped upstream), so any sender id here identifies the peer.
-      const peerSender = incoming[0]?.senderUserId;
+      const peerSender = appMessages[0]?.senderUserId;
       if (peerSender && !peerNamingTried.current.has(conversationId)) {
         peerNamingTried.current.add(conversationId);
         void resolvePeerUser(peerSender).then((peer) => {

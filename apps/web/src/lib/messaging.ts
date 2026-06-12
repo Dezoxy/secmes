@@ -103,6 +103,12 @@ export interface DecryptedMessage {
   /** Attachment refs carried E2E in the envelope (empty for text-only / pre-A3 messages). */
   attachments: AttachmentRef[];
   createdAt: string;
+  /**
+   * 'group-meta' for in-stream group-name updates (the text field carries the name); absent for
+   * regular chat messages. Callers filter this out of the transcript but use the text to update
+   * the conversation's display name.
+   */
+  kind?: 'group-meta';
 }
 
 /** Decrypted peer messages from a backfill, plus the high-water cursor to resume from next time. */
@@ -148,6 +154,7 @@ export async function backfillConversation(
             serverId: m.id,
             senderUserId: m.senderUserId,
             clientMessageId: m.clientMessageId,
+            kind: env.kind === 'group-meta' ? 'group-meta' : undefined,
             text: env.text,
             attachments: env.attachments,
             createdAt: m.createdAt,
@@ -212,11 +219,11 @@ export async function receiveLiveMessage(
       deps.sessionKey,
     );
     const env = decodeEnvelope(plaintext);
-    if (env.kind === 'group-meta') return null; // group-meta is handled by the commit drain path
     return {
       serverId: message.id,
       senderUserId: message.senderUserId,
       clientMessageId: message.clientMessageId,
+      kind: env.kind === 'group-meta' ? 'group-meta' : undefined,
       text: env.text,
       attachments: env.attachments,
       createdAt: message.createdAt,
@@ -241,27 +248,33 @@ export async function drainCommits(
   afterEpoch: number,
 ): Promise<void> {
   return withLock(conversationLock(conversationId), async () => {
-    const commits = await listCommits(conversationId, { afterEpoch, limit: 50 });
     const persister = deps.keystore.makeConversationPersister(
       deps.device,
       conversationId,
       deps.sessionKey,
     );
-    for (const c of commits) {
-      try {
-        await conversation.processCommit(fromBase64(c.commit), persister);
-      } catch (err) {
-        // Subsequent epochs can't be processed without this one — bail out.
-        // eslint-disable-next-line no-console
-        console.warn(
-          'drainCommits: stopped at unprocessable commit',
-          c.id,
-          'epoch',
-          c.epoch,
-          err instanceof Error ? err.message : err,
-        );
-        break;
+    const LIMIT = 50;
+    let cursor = afterEpoch;
+    for (;;) {
+      const commits = await listCommits(conversationId, { afterEpoch: cursor, limit: LIMIT });
+      for (const c of commits) {
+        try {
+          await conversation.processCommit(fromBase64(c.commit), persister);
+          cursor = c.epoch; // advance past this commit so the next page starts here
+        } catch (err) {
+          // Subsequent epochs can't be processed without this one — bail out entirely.
+          // eslint-disable-next-line no-console
+          console.warn(
+            'drainCommits: stopped at unprocessable commit',
+            c.id,
+            'epoch',
+            c.epoch,
+            err instanceof Error ? err.message : err,
+          );
+          return;
+        }
       }
+      if (commits.length < LIMIT) break; // last page — no more commits to fetch
     }
   });
 }
