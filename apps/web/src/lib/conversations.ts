@@ -16,6 +16,7 @@ import {
 } from '@argus/crypto';
 
 import {
+  CommitEpochConflictError,
   claimAllKeyPackages,
   claimKeyPackage,
   createConversation,
@@ -295,7 +296,12 @@ export class GroupConversationManager {
         });
       } catch (err) {
         conversation.discardStaged(staged);
-        await this.keystore.clearStagedCommit(conversationId);
+        // Only clear the IDB pending slot on a definite 409 (another member won the epoch). For
+        // ambiguous failures (network error, 5xx), the server may have committed — preserve the
+        // pending slot so reload can detect and promote it if the commit landed.
+        if (err instanceof CommitEpochConflictError) {
+          await this.keystore.clearStagedCommit(conversationId);
+        }
         throw err;
       }
 
@@ -395,7 +401,12 @@ export class GroupConversationManager {
         });
       } catch (err) {
         conversation.discardStaged(staged);
-        await this.keystore.clearStagedCommit(conversationId);
+        // Only clear the IDB pending slot on a definite 409 (another member won the epoch). For
+        // ambiguous failures (network error, 5xx), the server may have committed — preserve the
+        // pending slot so reload can detect and promote it if the commit landed.
+        if (err instanceof CommitEpochConflictError) {
+          await this.keystore.clearStagedCommit(conversationId);
+        }
         throw err;
       }
 

@@ -465,9 +465,10 @@ export class MessagingService {
         epochRow?.maxEpoch !== null && epochRow?.maxEpoch !== undefined
           ? Number(epochRow.maxEpoch)
           : -1;
-      if (body.epoch < maxEpoch) {
+      // A commit at epoch N advances the group to epoch N+1; messages at epoch ≤ N are stale.
+      if (body.epoch <= maxEpoch) {
         throw new ConflictException(
-          `stale epoch: client at ${String(body.epoch)}, group at ${String(maxEpoch)} — drain commits before sending`,
+          `stale epoch: client at ${String(body.epoch)}, group at ${String(maxEpoch + 1)} — drain commits before sending`,
         );
       }
 
@@ -748,6 +749,30 @@ export class MessagingService {
     const { result, event, removedSubs } = await withTenant(auth.tenantId, async (tx) => {
       const sender = await requireUser(tx, auth.sub);
       await requireMembership(tx, conversationId, sender);
+
+      // Contiguity guard: reject commits that skip epochs. A gap commit would poison MAX(epoch) for
+      // the sendMessage stale-epoch gate, cause peer drain loops to halt at a missing slot, and let
+      // a malicious member inject an arbitrarily large epoch that blocks all future messaging.
+      // body.epoch === expectedEpoch → normal new commit; body.epoch < expectedEpoch → handled by
+      // the unique constraint below (own idempotent retry or 409).
+      const [slotRow] = await tx
+        .select({ currentMax: max(schema.conversationCommits.epoch) })
+        .from(schema.conversationCommits)
+        .where(
+          and(
+            eq(schema.conversationCommits.tenantId, auth.tenantId),
+            eq(schema.conversationCommits.conversationId, conversationId),
+          ),
+        );
+      const nextEpoch =
+        slotRow?.currentMax !== null && slotRow?.currentMax !== undefined
+          ? Number(slotRow.currentMax) + 1
+          : 0;
+      if (body.epoch > nextEpoch) {
+        throw new ConflictException(
+          `non-contiguous epoch: expected ${String(nextEpoch)}, got ${String(body.epoch)}`,
+        );
+      }
 
       // Attempt to insert — the UNIQUE (tenant_id, conversation_id, epoch) constraint is the server-side
       // epoch lock. onConflictDoNothing is used here because we need to distinguish two conflict types:
