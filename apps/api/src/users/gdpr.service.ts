@@ -362,7 +362,21 @@ export class GdprService {
           ),
         );
 
-      // 2d. Delete attachment metadata rows — NO-ACTION FK on uploaded_by.
+      // 2d. Null conversations.created_by — NO-ACTION FK (not cascade); the conversation and
+      //     all members' ciphertext must survive the creator's erasure. NULL created_by means
+      //     "created by an account that was erased". Requires migration 0020 (column nullable +
+      //     UPDATE grant on conversations to secmes_app).
+      await tx
+        .update(schema.conversations)
+        .set({ createdBy: sql`NULL` })
+        .where(
+          and(
+            eq(schema.conversations.tenantId, auth.tenantId),
+            eq(schema.conversations.createdBy, user.id),
+          ),
+        );
+
+      // 2e. Delete attachment metadata rows — NO-ACTION FK on uploaded_by.
       await tx
         .delete(schema.attachments)
         .where(
@@ -372,7 +386,7 @@ export class GdprService {
           ),
         );
 
-      // 2e. Delete the user row — cascades:
+      // 2f. Delete the user row — cascades:
       //     • devices → key_packages (cascade), push_subscriptions (cascade)
       //     • key_backups (cascade)
       //     • conversation_members (cascade) → conversation_receipts (cascade)

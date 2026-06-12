@@ -55,7 +55,7 @@ export const keyBackups = pgTable('key_backups', {
 export const conversations = pgTable('conversations', {
   id: uuid('id').primaryKey().defaultRandom(),
   tenantId: uuid('tenant_id').notNull(),
-  createdBy: uuid('created_by').notNull(),
+  createdBy: uuid('created_by'), // nullable after GDPR erasure (migration 0020)
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
