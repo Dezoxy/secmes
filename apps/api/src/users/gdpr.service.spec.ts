@@ -104,7 +104,7 @@ describe.skipIf(!DB_URL)('GdprService', () => {
     // Push subscription on alice's device
     await sql`
       insert into push_subscriptions (tenant_id, device_id, user_id, endpoint, p256dh, auth)
-      values (${tenantA}, ${deviceId}, ${aliceId}, 'https://push.test/endpoint/alice', 'p256-pub', 'auth-secret')`;
+      values (${tenantA}, ${deviceId}, ${aliceId}, 'https://push.example.test/endpoint/alice/sub', 'p256-pub', 'auth-secret')`;
 
     // Audit event (alice as actor)
     await sql`
@@ -174,7 +174,7 @@ describe.skipIf(!DB_URL)('GdprService', () => {
       // Push subscriptions (prefix only — never the full capability URL)
       expect(exp.pushSubscriptions).toHaveLength(1);
       expect(exp.pushSubscriptions[0]!.endpointPrefix).toBe(
-        'https://push.test/endpoint/alice'.slice(0, 40),
+        'https://push.example.test/endpoint/alice/sub'.slice(0, 40),
       );
       expect(exp.pushSubscriptions[0]!.endpointPrefix).toHaveLength(40);
 

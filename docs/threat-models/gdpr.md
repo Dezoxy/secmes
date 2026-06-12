@@ -53,13 +53,15 @@ The deletion runs inside a single DB transaction (`withTenant()`). Order respect
 1. **`conversation_welcomes`** — deleted explicitly (NO-ACTION FKs on both `sender_user_id` and `recipient_user_id`; cascade covers recipient via `conversation_members` but not sender). **Note:** an offline recipient who has not yet fetched their Welcome before the sender deletes their account loses the ability to join that MLS group. This is intentional — there is no clean NO-ACTION FK alternative — and the impact is bounded to group join, not to ciphertext already delivered.
 2. **`messages.sender_user_id`** — set to `NULL` (pseudonymized). Keeps ciphertext accessible for offline recipients who are entitled to it. The server cannot read the ciphertext anyway.
 3. **`tenant_invites.accepted_by`** — set to `NULL` (nullable FK, no ON DELETE clause).
-4. **`attachments`** — deleted explicitly (NO-ACTION FK on `uploaded_by`).
-5. **`users`** row — deleted last; cascades:
+4. **`conversations.created_by`** — set to `NULL` (NO-ACTION FK; conversation and members' ciphertext must survive the creator's erasure).
+5. **`attachments`** — deleted explicitly (NO-ACTION FK on `uploaded_by`). Object keys collected atomically via `DELETE…RETURNING`.
+6. **`audit_events`** — deleted explicitly where `actor_sub = auth.sub` (NO-ACTION string FK; rows survive user deletion otherwise). Personal data in the audit log is erased under Art. 17; event type and tenant context for rows by other actors are unaffected. Requires migration 0021 (`grant delete on audit_events to argus_app`).
+7. **`users`** row — deleted last; cascades:
    - `devices` → `key_packages` (CASCADE), `push_subscriptions` (CASCADE)
    - `key_backups` (CASCADE)
    - `conversation_members` (CASCADE) → `conversation_receipts` (CASCADE)
    - `tenant_invites.created_by` (CASCADE)
-6. **`user_tenant_index`** — deleted via `withRouting()` after the tenant transaction (pre-tenant table, no RLS).
+8. **`user_tenant_index`** — deleted via `withRouting()` after the tenant transaction (pre-tenant table, no RLS).
 
 After the transaction, attachment blobs are deleted **best-effort** from object storage:
 - Rows are already gone, so no new download grant can be issued.

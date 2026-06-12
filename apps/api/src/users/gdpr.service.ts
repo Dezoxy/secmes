@@ -377,7 +377,21 @@ export class GdprService {
         .returning({ objectKey: schema.attachments.objectKey });
       const objectKeys = deletedAttachments.map((r) => r.objectKey);
 
-      // 1g. Delete the user row — cascades:
+      // 1g. Delete audit events where this identity was the actor — NO-ACTION FK (actor_sub is
+      //     a string, not a UUID FK to users); rows survive user deletion otherwise. Erasing
+      //     personal data from the audit log is required under GDPR Art. 17; the audit trail
+      //     retains event type and tenant context for any rows created by other actors.
+      //     Requires migration 0021 (grant delete on audit_events to argus_app).
+      await tx
+        .delete(schema.auditEvents)
+        .where(
+          and(
+            eq(schema.auditEvents.tenantId, auth.tenantId),
+            eq(schema.auditEvents.actorSub, auth.sub),
+          ),
+        );
+
+      // 1h. Delete the user row — cascades:
       //     • devices → key_packages (cascade), push_subscriptions (cascade)
       //     • key_backups (cascade)
       //     • conversation_members (cascade) → conversation_receipts (cascade)
