@@ -19,7 +19,7 @@ The server is **crypto-blind** — it never holds message plaintext, content key
 | Message counts per conversation | ✅ | Counts + time range only; no ciphertext |
 | Attachment metadata | ✅ | Object key, byte size, timestamps |
 | Push subscription prefix | ✅ | First 40 chars of endpoint URL only |
-| Audit events (own activity) | ✅ | IDs + metadata only; capped at 1000 |
+| Audit events (own activity) | ✅ | IDs + metadata only |
 | Invites created | ✅ | |
 | Message ciphertext | ❌ | Server crypto-blind |
 | Attachment ciphertext | ❌ | Lives in object storage, never served |

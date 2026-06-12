@@ -190,8 +190,7 @@ export class GdprService {
               eq(schema.auditEvents.actorSub, auth.sub),
             ),
           )
-          .orderBy(schema.auditEvents.createdAt)
-          .limit(1000); // hard cap — audit events are IDs/metadata only but let's be bounded
+          .orderBy(schema.auditEvents.createdAt);
       }),
 
       // Invites created by this user
