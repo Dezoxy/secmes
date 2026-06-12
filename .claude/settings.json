@@ -38,7 +38,7 @@
       "Bash(gh pr *)",
       "Bash(gh run *)",
       "Bash(gh api *)",
-      "Bash(./scripts/codex-review-status.sh *)",
+      "Bash(.claude/hooks/review-status.sh *)",
 
       "Bash(docker compose *)",
 

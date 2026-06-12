@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-POLL_SECONDS=20
 TIMEOUT_SECONDS=1800
 
 usage() {
@@ -11,11 +10,11 @@ Usage: scripts/frontend-pr-gate.sh [--merge]
 Runs the frontend verification and PR review gate for the current branch:
   1. pnpm frontend:verify
   2. gh pr checks <number> --watch
-  3. comments @codex review
-  4. waits for Codex to respond on the current head
+  3. requests BOTH reviews (Codex + the Claude reviewer)
+  4. waits for both verdicts via .claude/hooks/review-status.sh
   5. prints actionable Codex review thread ids/URLs and exits nonzero if any remain
 
---merge  Squash-merge only after CI is green and the latest Codex result has no actionable threads.
+--merge  Squash-merge only after CI is green and both review verdicts are clean.
 USAGE
 }
 
@@ -48,12 +47,11 @@ require_command() {
 require_command gh
 require_command pnpm
 require_command python3
+require_command jq
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-owner="$(gh repo view --json owner --jq '.owner.login')"
-repo="$(gh repo view --json name --jq '.name')"
 pr_number="$(gh pr view --json number --jq '.number')"
 pr_url="$(gh pr view --json url --jq '.url')"
 head_oid="$(gh pr view --json headRefOid --jq '.headRefOid')"
@@ -95,146 +93,30 @@ if [[ "$(not_green_count)" != "0" ]]; then
   exit 1
 fi
 
-triggered_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 echo
-echo "Requesting Codex review..."
+echo "Requesting both reviews (Codex + Claude)..."
 gh pr comment "$pr_number" --body "@codex review"
+gh pr comment "$pr_number" --body "@claude review this PR.
+Apply the AGENTS.md review criteria (crypto / server boundary / infra) to the full diff at head ${head_short}.
+Treat P1/P2 findings like CI failures and list them with file:line.
+In your reply, never write the two bot mention strings verbatim (say \"codex-bot\" / \"claude-bot\" instead).
+End your review with exactly one line: \`VERDICT: PASS\` or \`VERDICT: FINDINGS\`."
 
-# shellcheck disable=SC2016
-codex_query='
-query($owner: String!, $repo: String!, $number: Int!) {
-  repository(owner: $owner, name: $repo) {
-    pullRequest(number: $number) {
-      headRefOid
-      reviews(last: 20) {
-        nodes {
-          author { login }
-          body
-          submittedAt
-          commit { oid }
-        }
-      }
-      comments(last: 20) {
-        nodes {
-          author { login }
-          body
-          createdAt
-          url
-        }
-      }
-    }
-  }
-}
-'
-
-codex_seen() {
-  local payload_file
-  payload_file="$(mktemp)"
-  gh api graphql \
-    -f query="$codex_query" \
-    -f owner="$owner" \
-    -f repo="$repo" \
-    -F number="$pr_number" >"$payload_file"
-
-  python3 - "$head_oid" "$triggered_at" "$payload_file" <<'PY'
-from __future__ import annotations
-
-import json
-import sys
-from datetime import datetime, timezone
-
-CODEX_LOGIN = "chatgpt-codex-connector"
-CLEAN_COMMENT_MARKERS = (
-    "didn't find any major issues",
-    "did not find any major issues",
-)
-FAILURE_COMMENT_MARKERS = (
-    "try @codex review again",
-    "try again",
-    "failed",
-    "failure",
-    "error",
-    "couldn't",
-    "could not",
-    "unable to",
-    "timed out",
-    "rate limit",
-)
-
-head_oid = sys.argv[1]
-triggered_at = sys.argv[2]
-payload_file = sys.argv[3]
-
-def parse_time(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
-
-def normalized_body(value: str) -> str:
-    return " ".join(value.lower().split())
-
-def is_clean_codex_comment(body: str) -> bool:
-    normalized = normalized_body(body)
-    return any(marker in normalized for marker in CLEAN_COMMENT_MARKERS)
-
-def is_failed_codex_result_comment(body: str) -> bool:
-    normalized = normalized_body(body)
-    return normalized.startswith("codex review:") and any(
-        marker in normalized for marker in FAILURE_COMMENT_MARKERS
-    )
-
-triggered = parse_time(triggered_at)
-with open(payload_file, "r", encoding="utf-8") as fh:
-    data = json.load(fh)
-
-pr = data["data"]["repository"]["pullRequest"]
-
-for review in pr["reviews"]["nodes"]:
-    author = review.get("author", {}).get("login")
-    commit = review.get("commit") or {}
-    body = review.get("body") or ""
-    if author != CODEX_LOGIN:
-        continue
-    if commit.get("oid") == head_oid or head_oid[:12] in body:
-        print(f"Codex review detected at {review['submittedAt']}.")
-        sys.exit(0)
-
-for comment in pr["comments"]["nodes"]:
-    author = comment.get("author", {}).get("login")
-    body = comment.get("body") or ""
-    if author != CODEX_LOGIN:
-        continue
-    if parse_time(comment["createdAt"]) < triggered:
-        continue
-    if is_clean_codex_comment(body):
-        print(f"Codex clean-result comment detected at {comment['createdAt']}: {comment['url']}")
-        sys.exit(0)
-    if is_failed_codex_result_comment(body):
-        print(f"Codex failed-result comment detected at {comment['createdAt']}: {comment['url']}", file=sys.stderr)
-        sys.exit(2)
-    if normalized_body(body).startswith("codex review:"):
-        print(f"Codex returned an unknown non-clean result at {comment['createdAt']}: {comment['url']}", file=sys.stderr)
-        sys.exit(2)
-
-sys.exit(1)
-PY
-  local status=$?
-  rm -f "$payload_file"
-  if [[ "$status" == "2" ]]; then
-    echo "Codex did not return an accepted review result; refusing to continue." >&2
-    exit 1
-  fi
-  return "$status"
-}
-
-echo "Waiting for Codex to respond..."
-deadline=$((SECONDS + TIMEOUT_SECONDS))
-until codex_seen; do
-  assert_head_unchanged
-  if ((SECONDS >= deadline)); then
-    echo "Timed out waiting for Codex review after ${TIMEOUT_SECONDS}s." >&2
-    exit 1
-  fi
-  sleep "$POLL_SECONDS"
-done
+# Both reviewers gate the merge as equals — .claude/hooks/review-status.sh aggregates every
+# signal channel for both and exits 0 only when both verdicts are in and clean (or Claude-only
+# under a Codex usage limit, flagged degraded:true). Don't hand-roll review detection here.
+echo "Waiting for both review verdicts..."
+if ! review_status="$(.claude/hooks/review-status.sh "$pr_number" --wait --timeout $((TIMEOUT_SECONDS / 60)))"; then
+  printf '%s\n' "$review_status"
+  echo "Review gate is not clean; refusing to continue." >&2
+  exit 1
+fi
+printf '%s\n' "$review_status"
+# AGENTS.md: a Claude-only pass under a Codex usage limit must be recorded on the PR.
+if [[ "$(jq -r '.degraded // false' <<<"$review_status")" == "true" ]]; then
+  echo "Recording the degraded (Claude-only) review gate on the PR..."
+  gh pr comment "$pr_number" --body "Review gate note: Codex was over its usage limit for this head, so the gate passed on the Claude reviewer's PASS alone (degraded mode per AGENTS.md — recorded here)."
+fi
 assert_head_unchanged
 
 echo
