@@ -17,6 +17,8 @@ import {
   DeliverWelcomeRequestSchema,
   DeliveredWelcomeSchema,
   DownloadGrantSchema,
+  AdminAuditResponseSchema,
+  DeviceSummarySchema,
   InviteSummarySchema,
   MeSchema,
   MemberSummarySchema,
@@ -38,6 +40,9 @@ import {
   type CreateInviteResponse as ContractCreateInviteResponse,
   type CreateTenantResponse as ContractCreateTenantResponse,
   type CreatedConversation,
+  type AdminAuditResponse as ContractAdminAuditResponse,
+  type AuditEventSummary as ContractAuditEventSummary,
+  type DeviceSummary as ContractDeviceSummary,
   type InviteSummary as ContractInviteSummary,
   type MemberSummary as ContractMemberSummary,
   type ReceiptStatus,
@@ -473,6 +478,12 @@ export type CreateInviteResponse = ContractCreateInviteResponse;
 export type InviteSummary = ContractInviteSummary;
 export type MemberSummary = ContractMemberSummary;
 
+// ── G3: admin panel ───────────────────────────────────────────────────────────
+
+export type DeviceSummary = ContractDeviceSummary;
+export type AuditEventSummary = ContractAuditEventSummary;
+export type AdminAuditResponse = ContractAdminAuditResponse;
+
 /** Create a new tenant with the caller as the first admin (POST /tenants → 201). */
 export async function createTenant(name: string): Promise<CreateTenantResponse> {
   return unwrapApiResult(
@@ -562,6 +573,40 @@ export async function revokeMember(userId: string): Promise<void> {
     await requestStatus({
       path: `/tenants/members/${encodeURIComponent(userId)}`,
       method: 'DELETE',
+    }),
+  );
+}
+
+/** List all devices in the tenant (admin only). */
+export async function listAdminDevices(): Promise<DeviceSummary[]> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/admin/devices',
+      method: 'GET',
+      responseSchema: DeviceSummarySchema.array(),
+    }),
+  );
+}
+
+/** Hard-delete a device (admin only, cascades key packages). */
+export async function adminRevokeDevice(deviceId: string): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: `/admin/devices/${encodeURIComponent(deviceId)}`,
+      method: 'DELETE',
+    }),
+  );
+}
+
+/** Paginated audit log, newest first (admin only). */
+export async function listAdminAudit(cursor?: string, limit = 50): Promise<AdminAuditResponse> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set('cursor', cursor);
+  return unwrapApiResult(
+    await requestJson({
+      path: `/admin/audit?${params.toString()}`,
+      method: 'GET',
+      responseSchema: AdminAuditResponseSchema,
     }),
   );
 }

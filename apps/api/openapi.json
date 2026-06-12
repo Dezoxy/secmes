@@ -1,6 +1,582 @@
 {
   "openapi": "3.0.0",
   "paths": {
+    "/admin/devices": {
+      "get": {
+        "operationId": "adminListDevices",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "list of registered devices",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DeviceSummaryDto"
+                  },
+                  "maxItems": 1000
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "caller is not an admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List all devices in the tenant (admin only)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/devices/{deviceId}": {
+      "delete": {
+        "operationId": "adminRevokeDevice",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+              "maxLength": 65536
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "device revoked"
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "caller is not an admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "device not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Revoke a device (admin only) — hard-delete, cascades key packages",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/audit": {
+      "get": {
+        "operationId": "adminListAudit",
+        "parameters": [
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "Keyset cursor",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]+$",
+              "maxLength": 65536
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50,
+              "format": "int64"
+            },
+            "description": "Max 100, default 50"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "paginated audit events",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAuditResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "caller is not an admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List tenant audit events, newest first (admin only)",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/auth/session": {
+      "post": {
+        "operationId": "startSession",
+        "parameters": [
+          {
+            "name": "user-agent",
+            "in": "header",
+            "description": "optional client hint, audited",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "maxLength": 65536
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "user provisioned and login recorded"
+          },
+          "400": {
+            "description": "token missing the email claim required to provision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted to perform this action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Start session: JIT-provision the user + record login",
+        "tags": [
+          "auth"
+        ]
+      },
+      "delete": {
+        "operationId": "endSession",
+        "parameters": [
+          {
+            "name": "user-agent",
+            "in": "header",
+            "description": "optional client hint, audited",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "maxLength": 65536
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "logout recorded"
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted to perform this action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Record session end (logout)",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/me": {
       "get": {
         "operationId": "getMe",
@@ -294,228 +870,6 @@
         "summary": "List users in the caller's tenant",
         "tags": [
           "users"
-        ]
-      }
-    },
-    "/auth/session": {
-      "post": {
-        "operationId": "startSession",
-        "parameters": [
-          {
-            "name": "user-agent",
-            "in": "header",
-            "description": "optional client hint, audited",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-              "maxLength": 65536
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "user provisioned and login recorded"
-          },
-          "400": {
-            "description": "token missing the email claim required to provision",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Start session: JIT-provision the user + record login",
-        "tags": [
-          "auth"
-        ]
-      },
-      "delete": {
-        "operationId": "endSession",
-        "parameters": [
-          {
-            "name": "user-agent",
-            "in": "header",
-            "description": "optional client hint, audited",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-              "maxLength": 65536
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "logout recorded"
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Record session end (logout)",
-        "tags": [
-          "auth"
         ]
       }
     },
@@ -3772,6 +4126,125 @@
       }
     },
     "schemas": {
+      "DeviceSummaryDto": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "maxLength": 36
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "maxLength": 36
+          },
+          "displayName": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "maxLength": 65536
+          },
+          "email": {
+            "type": "string",
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+            "maxLength": 65536
+          },
+          "signaturePublicKeyPrefix": {
+            "type": "string",
+            "maxLength": 12,
+            "description": "First 12 chars of the base64 signature public key",
+            "pattern": "^[A-Za-z0-9+/]+={0,2}$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "deviceId",
+          "userId",
+          "displayName",
+          "email",
+          "signaturePublicKeyPrefix",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "AuditEventSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "maxLength": 36
+          },
+          "eventType": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "actorSub": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 256,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "actorDisplayName": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 128,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "ip": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 45,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "id",
+          "eventType",
+          "actorSub",
+          "actorDisplayName",
+          "ip",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "AdminAuditResponseDto": {
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditEventSummaryDto"
+            },
+            "maxItems": 1000
+          },
+          "nextCursor": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "maxLength": 65536
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "additionalProperties": false
+      },
       "UserSummaryDto": {
         "type": "object",
         "properties": {

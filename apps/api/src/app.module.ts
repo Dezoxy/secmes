@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller.js';
+import { AdminModule } from './admin/admin.module.js';
 import { AuditModule } from './audit/audit.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { KeyBackupModule } from './key-backup/key-backup.module.js';
@@ -12,6 +13,7 @@ import { UsersModule } from './users/users.module.js';
 
 @Module({
   imports: [
+    AdminModule,
     AuthModule,
     UsersModule,
     AuditModule,
