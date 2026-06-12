@@ -329,3 +329,29 @@ export const MemberSummarySchema = z.object({
   role: z.enum(['admin', 'member']),
 });
 export type MemberSummary = z.infer<typeof MemberSummarySchema>;
+
+export const DeviceSummarySchema = z.object({
+  deviceId: z.string().uuid(),
+  userId: z.string().uuid(),
+  displayName: z.string().max(128).nullable(),
+  email: z.string().email(),
+  signaturePublicKeyPrefix: z.string().max(12),
+  createdAt: z.string().datetime(),
+});
+export type DeviceSummary = z.infer<typeof DeviceSummarySchema>;
+
+export const AuditEventSummarySchema = z.object({
+  id: z.string().uuid(),
+  eventType: z.string().max(64),
+  actorSub: z.string().max(256).nullable(),
+  actorDisplayName: z.string().max(128).nullable(),
+  ip: z.string().max(45).nullable(),
+  createdAt: z.string().datetime(),
+});
+export type AuditEventSummary = z.infer<typeof AuditEventSummarySchema>;
+
+export const AdminAuditResponseSchema = z.object({
+  events: z.array(AuditEventSummarySchema),
+  nextCursor: z.string().optional(),
+});
+export type AdminAuditResponse = z.infer<typeof AdminAuditResponseSchema>;

@@ -35,6 +35,8 @@ export const SENSITIVE_LIMITS = {
   downloadGrant: 60,
   /** Push subscription register/update/delete. Rare in practice; cap prevents registration thrashing. */
   subscribePush: 20,
+  /** Admin device revoke — low cap; rare action, prevents bulk device purge floods. */
+  adminDeviceRevoke: 12,
   /** Tenant creation — one per identity; 5/min hard cap prevents squatting floods. */
   createTenant: 5,
   /** Invite issuance — admin action; low cap prevents harvesting. */

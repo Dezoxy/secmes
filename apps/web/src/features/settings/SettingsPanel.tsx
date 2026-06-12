@@ -8,6 +8,7 @@ import {
   HardDrive,
   Info,
   Lock,
+  ShieldCheck,
   Shield,
   UserRound,
   Users,
@@ -47,6 +48,7 @@ import { PrivacySettings, type PrivacySettingsRecord } from './PrivacySettings';
 import { readStoredPrivacySettings, writeStoredPrivacySettings } from './privacy-settings';
 import { ProfileSettings, type AnonymousProfile } from './ProfileSettings';
 import { SecuritySettings } from './SecuritySettings';
+import { AdminPanel } from './AdminPanel';
 import { TeamSettings } from './TeamSettings';
 import type { MeBound } from '../../lib/api';
 
@@ -71,7 +73,8 @@ type SectionId =
   | 'storage'
   | 'devices'
   | 'about'
-  | 'team';
+  | 'team'
+  | 'admin';
 
 const baseSections: Array<{ id: SectionId; label: string; icon: LucideIcon }> = [
   { id: 'profile', label: 'Profile', icon: UserRound },
@@ -88,6 +91,12 @@ const teamSection: { id: SectionId; label: string; icon: LucideIcon } = {
   id: 'team',
   label: 'Team',
   icon: Users,
+};
+
+const adminSection: { id: SectionId; label: string; icon: LucideIcon } = {
+  id: 'admin',
+  label: 'Admin',
+  icon: ShieldCheck,
 };
 
 const DEVICE_SETTINGS_STORAGE_KEY = versionedStorageKey('settings', 'device');
@@ -170,7 +179,7 @@ export function SettingsPanel({
   onClose,
 }: SettingsPanelProps) {
   const isAdmin = serverProfile?.role === 'admin';
-  const sections = isAdmin ? [...baseSections, teamSection] : baseSections;
+  const sections = isAdmin ? [...baseSections, teamSection, adminSection] : baseSections;
   const [active, setActive] = useState<SectionId>('profile');
   const [closing, setClosing] = useState(false);
   const [mobileSectionOpen, setMobileSectionOpen] = useState(false);
@@ -443,6 +452,8 @@ export function SettingsPanel({
           {active === 'team' && serverProfile?.role === 'admin' && (
             <TeamSettings currentUserId={serverProfile.userId} />
           )}
+
+          {active === 'admin' && serverProfile?.role === 'admin' && <AdminPanel />}
         </div>
       </section>
     </Modal>
