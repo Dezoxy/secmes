@@ -101,6 +101,24 @@ export const CommitCreatedEventSchema = z.object({
 });
 
 /**
+ * A commit removed one or more members — signals their connected sockets to leave the room.
+ * METADATA ONLY: the verified subs of the removed members (so the gateway can evict by (tenant, sub)
+ * without touching message content). Never carries conversation content or keys (invariant #2).
+ */
+export interface MemberRemovedEvent {
+  tenantId: string;
+  conversationId: string;
+  /** External identity subjects (`users.external_identity_id`) of the removed members. */
+  removedSubs: string[];
+}
+
+export const MemberRemovedEventSchema = z.object({
+  tenantId: z.string().min(1),
+  conversationId: z.string().uuid(),
+  removedSubs: z.array(z.string().min(1)),
+});
+
+/**
  * Realtime fan-out bus — decouples the HTTP send path (publisher) from the WebSocket gateway
  * (subscriber). Abstract so it can be in-process (single-pod / dev / tests) or Redis-backed for
  * cross-pod delivery (checkpoint 29). Only the opaque ciphertext envelope ever crosses it.
@@ -114,4 +132,6 @@ export abstract class RealtimeBus {
   abstract onReceiptAdvanced(listener: (event: ReceiptAdvancedEvent) => void): void;
   abstract emitCommitCreated(event: CommitCreatedEvent): void;
   abstract onCommitCreated(listener: (event: CommitCreatedEvent) => void): void;
+  abstract emitMemberRemoved(event: MemberRemovedEvent): void;
+  abstract onMemberRemoved(listener: (event: MemberRemovedEvent) => void): void;
 }

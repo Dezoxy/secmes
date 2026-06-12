@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import {
   RealtimeBus,
   type CommitCreatedEvent,
+  type MemberRemovedEvent,
   type MessageCreatedEvent,
   type ReceiptAdvancedEvent,
   type WelcomeCreatedEvent,
@@ -45,5 +46,13 @@ export class InProcessRealtimeBus extends RealtimeBus {
 
   onCommitCreated(listener: (event: CommitCreatedEvent) => void): void {
     this.emitter.on('commit.created', listener);
+  }
+
+  emitMemberRemoved(event: MemberRemovedEvent): void {
+    this.emitter.emit('member.removed', event);
+  }
+
+  onMemberRemoved(listener: (event: MemberRemovedEvent) => void): void {
+    this.emitter.on('member.removed', listener);
   }
 }

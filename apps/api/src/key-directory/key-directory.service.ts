@@ -227,22 +227,26 @@ export class KeyDirectoryService {
    */
   async claimAll(auth: VerifiedAuth, targetUserId: string): Promise<ClaimedKeyPackage[]> {
     return withTenant(auth.tenantId, async (tx) => {
-      // Claim the oldest unclaimed package per device in ONE atomic scan. The UPDATE ... FROM devices
-      // JOIN lets us return the signature key in the same RETURNING clause, avoiding a second transaction
-      // and the O(N) per-device lookup loop. Defense-in-depth: explicit tenant_id filter on top of RLS.
+      // LATERAL JOIN: for each device of the target user, select the oldest unclaimed package with
+      // FOR UPDATE SKIP LOCKED, then UPDATE (claim) it in one statement. This avoids DISTINCT ON +
+      // FOR UPDATE, which PostgreSQL rejects (DISTINCT ON is not allowed with locking clauses). The
+      // LATERAL subquery runs once per device; SKIP LOCKED means concurrent claimAll calls pick
+      // different packages rather than blocking. Defense-in-depth: explicit tenant_id filter on top of RLS.
       const rows = (await tx.execute(sql`
         update key_packages kp set claimed_at = now()
         from devices d
-        where kp.id in (
-          select distinct on (kp2.device_id) kp2.id
+        join lateral (
+          select kp2.id
           from key_packages kp2
-          join devices d2 on d2.id = kp2.device_id
-          where d2.user_id = ${targetUserId}
-            and d2.tenant_id = ${auth.tenantId}
+          where kp2.device_id = d.id
             and kp2.claimed_at is null
-          order by kp2.device_id, kp2.created_at asc
+          order by kp2.created_at asc
+          limit 1
           for update skip locked
-        ) and d.id = kp.device_id
+        ) chosen on true
+        where d.user_id = ${targetUserId}
+          and d.tenant_id = ${auth.tenantId}
+          and kp.id = chosen.id
         returning kp.device_id, kp.key_package, d.signature_public_key
       `)) as unknown as unknown[];
 

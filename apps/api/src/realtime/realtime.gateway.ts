@@ -14,6 +14,7 @@ import { MessagingService } from '../messaging/messaging.service.js';
 import {
   RealtimeBus,
   type CommitCreatedEvent,
+  type MemberRemovedEvent,
   type MessageCreatedEvent,
   type ReceiptAdvancedEvent,
   type WelcomeCreatedEvent,
@@ -66,6 +67,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.bus.onWelcomeCreated((event) => this.notifyWelcome(event));
     this.bus.onReceiptAdvanced((event) => this.deliverReceipt(event));
     this.bus.onCommitCreated((event) => this.deliverCommit(event));
+    this.bus.onMemberRemoved((event) => this.notifyRemoved(event));
   }
 
   handleConnection(client: WebSocket): void {
@@ -246,6 +248,30 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
         this.send(client, 'welcome', { conversationId: event.conversationId });
       }
     }
+  }
+
+  /**
+   * Evict sockets belonging to removed members from the conversation room and push a 'removed' frame
+   * so the client can immediately leave the conversation UI. Matched on (tenant, sub) — never by an
+   * unverified client id — so a removed member's in-flight sockets stop receiving room traffic as soon
+   * as the commit lands. METADATA ONLY (ids, invariant #2).
+   */
+  private notifyRemoved(event: MemberRemovedEvent): void {
+    const room = roomKey(event.tenantId, event.conversationId);
+    const removedSubSet = new Set(event.removedSubs);
+    for (const [client, state] of this.conns) {
+      if (!state.authed || !state.auth) continue;
+      if (state.auth.tenantId !== event.tenantId) continue;
+      if (!removedSubSet.has(state.auth.sub)) continue;
+      // Notify before evicting so the client receives the frame before the socket unsubscribes.
+      if (client.readyState === WebSocket.OPEN) {
+        this.send(client, 'removed', { conversationId: event.conversationId });
+      }
+      state.subs.delete(room);
+      this.rooms.get(room)?.delete(client);
+    }
+    const sockets = this.rooms.get(room);
+    if (sockets && sockets.size === 0) this.rooms.delete(room);
   }
 
   private send(client: WebSocket, event: string, data: unknown): void {

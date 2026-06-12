@@ -288,7 +288,21 @@ export function useLiveConversations({
       onReceipt: applyReceipt,
       onSubscribed: (conversationId) => {
         const group = liveGroups.current.get(conversationId);
-        if (group) void backfillInto(conversationId, group, selfUserId);
+        if (group) {
+          // Drain any commits posted since the group state was last persisted BEFORE backfilling
+          // messages. Without this, backfilled messages at a newer epoch are undecryptable (the
+          // MLS key schedule hasn't been advanced to that epoch yet).
+          void processCommitEvent(deps, conversationId, group, { epoch: group.epoch })
+            .then(() => void backfillInto(conversationId, group, selfUserId))
+            .catch((err: unknown) => {
+              // eslint-disable-next-line no-console
+              console.warn(
+                'subscribe: commit drain failed',
+                conversationId,
+                err instanceof Error ? err.message : err,
+              );
+            });
+        }
         seedReceipts(conversationId); // seed historical delivered/read ticks once in the room
       },
       // A Welcome is waiting (added to a conversation while connected): drain now — join → subscribe →

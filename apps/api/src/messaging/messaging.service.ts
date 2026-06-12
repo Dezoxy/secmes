@@ -15,6 +15,7 @@ import { PushService } from '../push/push.service.js';
 import {
   RealtimeBus,
   type CommitCreatedEvent,
+  type MemberRemovedEvent,
   type MessageCreatedEvent,
 } from '../realtime/realtime-bus.js';
 import type {
@@ -722,7 +723,7 @@ export class MessagingService {
     conversationId: string,
     body: CommitBody,
   ): Promise<CommitResult> {
-    const { result, event } = await withTenant(auth.tenantId, async (tx) => {
+    const { result, event, removedSubs } = await withTenant(auth.tenantId, async (tx) => {
       const sender = await requireUser(tx, auth.sub);
       await requireMembership(tx, conversationId, sender);
 
@@ -747,17 +748,47 @@ export class MessagingService {
         });
 
       if (inserted[0]) {
-        // New commit — apply the declared membership delta in the same transaction.
+        // Pre-validate added user IDs to avoid FK violations that abort the tx. A PostgreSQL FK
+        // violation puts the connection in an error state; a JS catch only handles the Node error,
+        // not the Postgres tx-aborted state — all subsequent statements would fail. Unknown /
+        // cross-tenant IDs are silently skipped (crypto truth is in the MLS commit frame, §T2).
+        const validAddedUsers =
+          body.addedUserIds.length > 0
+            ? await tx
+                .select({ id: schema.users.id })
+                .from(schema.users)
+                .where(
+                  and(
+                    eq(schema.users.tenantId, auth.tenantId),
+                    inArray(schema.users.id, body.addedUserIds),
+                  ),
+                )
+            : [];
+        const validAddedIds = new Set(validAddedUsers.map((u) => u.id));
         for (const userId of body.addedUserIds) {
-          try {
-            await tx
-              .insert(schema.conversationMembers)
-              .values({ tenantId: auth.tenantId, conversationId, userId })
-              .onConflictDoNothing();
-          } catch {
-            // Unknown or cross-tenant userId — FK violation. Ignore (crypto truth is in the commit frame).
-          }
+          if (!validAddedIds.has(userId)) continue;
+          await tx
+            .insert(schema.conversationMembers)
+            .values({ tenantId: auth.tenantId, conversationId, userId })
+            .onConflictDoNothing();
         }
+
+        // Look up removed members' external subs BEFORE deleting them (needed to evict their live
+        // WS room subscriptions via MemberRemovedEvent post-commit).
+        const removedSubs: string[] =
+          body.removedUserIds.length > 0
+            ? (
+                await tx
+                  .select({ sub: schema.users.externalIdentityId })
+                  .from(schema.users)
+                  .where(
+                    and(
+                      eq(schema.users.tenantId, auth.tenantId),
+                      inArray(schema.users.id, body.removedUserIds),
+                    ),
+                  )
+              ).map((u) => u.sub)
+            : [];
         if (body.removedUserIds.length > 0) {
           await tx.delete(schema.conversationMembers).where(
             and(
@@ -771,31 +802,35 @@ export class MessagingService {
           );
         }
 
-        // Deliver Welcome material for each newly-added member device.
+        // Pre-validate welcome device IDs (same FK posture as addedUserIds above).
+        const welcomeDeviceIds = body.welcomes.map((w) => w.recipientDeviceId);
+        const validDevices =
+          welcomeDeviceIds.length > 0
+            ? await tx
+                .select({ id: schema.devices.id })
+                .from(schema.devices)
+                .where(
+                  and(
+                    eq(schema.devices.tenantId, auth.tenantId),
+                    inArray(schema.devices.id, welcomeDeviceIds),
+                  ),
+                )
+            : [];
+        const validDeviceIds = new Set(validDevices.map((d) => d.id));
         for (const w of body.welcomes) {
-          try {
-            await tx
-              .insert(schema.conversationWelcomes)
-              .values({
-                tenantId: auth.tenantId,
-                conversationId,
-                recipientUserId: w.recipientUserId,
-                recipientDeviceId: w.recipientDeviceId,
-                senderUserId: sender,
-                welcome: w.welcome,
-                ratchetTree: w.ratchetTree,
-              })
-              .onConflictDoNothing();
-          } catch (err) {
-            // Invalid recipientUserId/deviceId (FK violation). The MLS crypto is already correct from
-            // the commit frame, but the recipient won't receive the join notification — log it.
-            // eslint-disable-next-line no-console
-            console.warn(
-              'postCommit: welcome delivery failed for device',
-              w.recipientDeviceId,
-              err instanceof Error ? err.message : err,
-            );
-          }
+          if (!validDeviceIds.has(w.recipientDeviceId)) continue;
+          await tx
+            .insert(schema.conversationWelcomes)
+            .values({
+              tenantId: auth.tenantId,
+              conversationId,
+              recipientUserId: w.recipientUserId,
+              recipientDeviceId: w.recipientDeviceId,
+              senderUserId: sender,
+              welcome: w.welcome,
+              ratchetTree: w.ratchetTree,
+            })
+            .onConflictDoNothing();
         }
 
         const createdAt = inserted[0].createdAt.toISOString();
@@ -809,6 +844,7 @@ export class MessagingService {
             commitId: inserted[0].id,
             createdAt,
           } satisfies CommitCreatedEvent,
+          removedSubs,
         };
       }
 
@@ -836,7 +872,11 @@ export class MessagingService {
         existing.clientCommitId === body.clientCommitId
       ) {
         // Own idempotent retry.
-        return { result: { id: existing.id, epoch: body.epoch, deduplicated: true }, event: null };
+        return {
+          result: { id: existing.id, epoch: body.epoch, deduplicated: true },
+          event: null,
+          removedSubs: [],
+        };
       }
 
       // Another member won this epoch slot.
@@ -869,6 +909,16 @@ export class MessagingService {
             recipientSub: r.sub,
           });
         }
+      }
+
+      // Evict removed members from their live WS room subscriptions so they stop receiving
+      // metadata pushes immediately after the commit lands (no wait for disconnect/reconnect).
+      if (removedSubs.length > 0) {
+        this.bus.emitMemberRemoved({
+          tenantId: auth.tenantId,
+          conversationId,
+          removedSubs,
+        } satisfies MemberRemovedEvent);
       }
     }
     return result;
