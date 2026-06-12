@@ -72,6 +72,12 @@ export interface MessageSocketOptions {
    * separate `GET /conversations/:id/commits` fetch; only metadata crosses the WebSocket.
    */
   onCommit?: (event: IncomingCommit) => void;
+  /**
+   * The current user has been removed from a conversation by a group commit. The server has already
+   * evicted the socket from the room — no further messages will arrive. The UI should remove the
+   * conversation from the visible list.
+   */
+  onRemoved?: (conversationId: string) => void;
   /** Injectable WebSocket constructor (tests). Defaults to the global. */
   WebSocketImpl?: typeof WebSocket;
   /** Reconnect backoff knobs (tests tune these down). */
@@ -197,6 +203,12 @@ export function createMessageSocket(opts: MessageSocketOptions): MessageSocket {
           senderUserId: d.senderUserId,
         });
       }
+      return;
+    }
+    if (frame.event === 'removed') {
+      if (!authed) return;
+      const id = (frame.data as { conversationId?: unknown } | null)?.conversationId;
+      if (typeof id === 'string') opts.onRemoved?.(id);
       return;
     }
     // 'error' frames need no client action (membership/authz is server-enforced; the keys gate content).

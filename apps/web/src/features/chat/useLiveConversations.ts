@@ -308,6 +308,16 @@ export function useLiveConversations({
       // A Welcome is waiting (added to a conversation while connected): drain now — join → subscribe →
       // backfill ride the existing onJoined → addLive path, so the conversation + its messages appear live.
       onWelcome: () => drainRef.current(),
+      onRemoved: (conversationId) => {
+        liveGroups.current.delete(conversationId);
+        setLiveIds((prev) => {
+          if (!prev.has(conversationId)) return prev;
+          const next = new Set(prev);
+          next.delete(conversationId);
+          return next;
+        });
+        setConversations((prev) => prev.filter((c) => c.id !== conversationId));
+      },
       // A membership commit was posted: drain commits >= event.epoch to advance the local MLS state.
       onCommit: ({ conversationId, epoch }) => {
         const group = liveGroups.current.get(conversationId);
