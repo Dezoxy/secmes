@@ -5,13 +5,15 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, count, eq, isNull } from 'drizzle-orm';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 
 import { AuditService } from '../audit/audit.service.js';
 import type { MaybeUnboundAuth, VerifiedAuth } from '../auth/auth.service.js';
+import { PaymentRequiredException } from '../common/http-exceptions.js';
 import { schema, withRouting, withTenant } from '../db/index.js';
+import { PlansService } from '../plans/plans.service.js';
 import { generateHandle } from '../users/handle-words.js';
 
 const MAX_HANDLE_ATTEMPTS = 8;
@@ -84,7 +86,10 @@ export interface AcceptInviteResult {
 
 @Injectable()
 export class TenantsService {
-  constructor(private readonly audit: AuditService) {}
+  constructor(
+    private readonly audit: AuditService,
+    private readonly plans: PlansService,
+  ) {}
   /**
    * Create a new tenant and its first admin user atomically.
    * Three rows are inserted: `tenants`, `users` (role: admin), `user_tenant_index`.
@@ -127,6 +132,14 @@ export class TenantsService {
 
   /** Create an invite token for a tenant. Returns the plaintext token once — never stored. */
   async createInvite(auth: VerifiedAuth, inviteeEmail?: string): Promise<CreateInviteResult> {
+    // Enforce member limit — check before creating the invite so admins get immediate feedback.
+    const plan = await this.plans.getPlan(auth.tenantId);
+    if (plan.memberLimit !== null && plan.memberCount >= plan.memberLimit) {
+      throw new PaymentRequiredException(
+        `Member limit reached (${plan.memberCount}/${plan.memberLimit}). Upgrade your plan to add more members.`,
+      );
+    }
+
     const raw = randomBytes(32).toString('base64url');
     const tokenHash = sha256hex(raw);
 
@@ -218,6 +231,27 @@ export class TenantsService {
       const displayName = generate();
       try {
         const result = await withTenant(invite.tenantId, async (tx) => {
+          // Race-safety: lock the tenant row before counting members so concurrent acceptInvite
+          // calls with different invites cannot both pass the limit check and both insert a user.
+          const [tenantRow] = await tx
+            .select({ memberLimit: schema.tenants.memberLimit })
+            .from(schema.tenants)
+            .where(eq(schema.tenants.id, invite.tenantId))
+            .for('update');
+          if (tenantRow?.memberLimit !== null && tenantRow?.memberLimit !== undefined) {
+            const [countRow] = await tx
+              .select({ count: count() })
+              .from(schema.users)
+              .where(
+                and(eq(schema.users.tenantId, invite.tenantId), eq(schema.users.status, 'active')),
+              );
+            if ((countRow?.count ?? 0) >= tenantRow.memberLimit) {
+              throw new PaymentRequiredException(
+                'This workspace has reached its member limit. Ask the workspace admin to upgrade.',
+              );
+            }
+          }
+
           // Mark invite accepted atomically — first committer wins for ALL callers (not just same-sub
           // races). The RETURNING check enforces single-use: if accepted_at is already set (another
           // user beat us here), this UPDATE matches 0 rows → uniform INVALID 403, no user is created.

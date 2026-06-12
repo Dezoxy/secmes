@@ -21,6 +21,7 @@ import {
   CreateSsoConfigBodySchema,
   DeviceSummarySchema,
   SsoConfigSchema,
+  TenantPlanSchema,
   UpdateSsoConfigBodySchema,
   InviteSummarySchema,
   MeSchema,
@@ -49,6 +50,7 @@ import {
   type DeviceSummary as ContractDeviceSummary,
   type RotateSsoSecretBody as ContractRotateSsoSecretBody,
   type SsoConfig as ContractSsoConfig,
+  type TenantPlan as ContractTenantPlan,
   type UpdateSsoConfigBody as ContractUpdateSsoConfigBody,
   type InviteSummary as ContractInviteSummary,
   type MemberSummary as ContractMemberSummary,
@@ -77,6 +79,8 @@ export { apiFetch } from './api-client';
 export type Me = ContractMe;
 /** Narrowed /me response for a user already bound to a tenant. */
 export type MeBound = ContractMeBound;
+/** The tenant plan returned inside MeBound and from GET /billing/status. */
+export type TenantPlan = ContractTenantPlan;
 
 /** Fetch the caller's server profile (GET /me). Throws on non-OK. */
 export async function fetchMe(): Promise<Me> {
@@ -680,5 +684,66 @@ export async function deleteSsoConfig(): Promise<void> {
       path: '/admin/sso-config',
       method: 'DELETE',
     }),
+  );
+}
+
+// ── Billing ─────────────────────────────────────────────────────────────────
+
+const CheckoutUrlSchema = {
+  safeParse(data: unknown): { success: true; data: { url: string } } | { success: false } {
+    if (
+      typeof data === 'object' &&
+      data !== null &&
+      typeof (data as Record<string, unknown>).url === 'string'
+    ) {
+      return { success: true, data: data as { url: string } };
+    }
+    return { success: false };
+  },
+};
+
+const PortalUrlSchema = {
+  safeParse(data: unknown): { success: true; data: { url: string } } | { success: false } {
+    if (
+      typeof data === 'object' &&
+      data !== null &&
+      typeof (data as Record<string, unknown>).url === 'string'
+    ) {
+      return { success: true, data: data as { url: string } };
+    }
+    return { success: false };
+  },
+};
+
+/** Create a Stripe Checkout session; returns the hosted URL to redirect to (admin only). */
+export async function createCheckoutSession(
+  planTier: 'pro' | 'enterprise',
+  successUrl: string,
+  cancelUrl: string,
+): Promise<string> {
+  const result = await requestJson({
+    path: '/billing/checkout',
+    method: 'POST',
+    body: { planTier, successUrl, cancelUrl },
+    responseSchema: CheckoutUrlSchema,
+  });
+  return unwrapApiResult(result).url;
+}
+
+/** Create a Stripe Billing Portal session; returns the hosted URL to redirect to (admin only). */
+export async function createPortalSession(returnUrl: string): Promise<string> {
+  const result = await requestJson({
+    path: '/billing/portal',
+    method: 'POST',
+    body: { returnUrl },
+    responseSchema: PortalUrlSchema,
+  });
+  return unwrapApiResult(result).url;
+}
+
+/** Fetch the current billing/plan status (admin only). */
+export async function getBillingStatus(): Promise<TenantPlan> {
+  return unwrapApiResult(
+    await requestJson({ path: '/billing/status', responseSchema: TenantPlanSchema }),
   );
 }

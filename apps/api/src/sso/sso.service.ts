@@ -15,7 +15,9 @@ import type {
 } from '@argus/contracts';
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { AuditService } from '../audit/audit.service.js';
+import { PaymentRequiredException } from '../common/http-exceptions.js';
 import { schema, withTenant } from '../db/index.js';
+import { PlansService } from '../plans/plans.service.js';
 import { ZitadelManagementClient } from './zitadel-management.client.js';
 
 const APP_BASE_URL = (process.env.APP_BASE_URL ?? 'https://app.4rgus.com').replace(/\/$/, '');
@@ -66,6 +68,7 @@ export class SsoService {
   constructor(
     private readonly zitadel: ZitadelManagementClient,
     private readonly audit: AuditService,
+    private readonly plans: PlansService,
   ) {}
 
   async getSsoConfig(auth: VerifiedAuth): Promise<SsoConfig | null> {
@@ -80,6 +83,11 @@ export class SsoService {
   }
 
   async createSsoConfig(auth: VerifiedAuth, body: CreateSsoConfigBody): Promise<SsoConfig> {
+    const plan = await this.plans.getPlan(auth.tenantId);
+    if (!plan.ssoEnabled) {
+      throw new PaymentRequiredException('SSO requires a Pro or Enterprise plan');
+    }
+
     validateIssuerUrl(body.issuerUrl);
 
     // 409 if already configured.
@@ -214,6 +222,38 @@ export class SsoService {
     await this.audit.record(auth.tenantId, {
       eventType: 'sso.secret_rotated',
       actorSub: auth.sub,
+    });
+  }
+
+  /** Delete SSO config for a tenant by ID — used by the billing webhook on plan downgrade.
+   *  Best-effort: Zitadel org deletion failure is logged but does not throw. */
+  async disableSsoForTenant(tenantId: string): Promise<void> {
+    const existing = await withTenant(tenantId, (tx) =>
+      tx
+        .select()
+        .from(schema.tenantSsoConfigs)
+        .where(eq(schema.tenantSsoConfigs.tenantId, tenantId))
+        .limit(1),
+    );
+    const cfg = existing[0];
+    if (!cfg) return; // no SSO configured — nothing to do
+
+    // Delete the Zitadel org BEFORE the DB row so that if the call fails the DB row is
+    // still present and the next Stripe webhook retry can find the org ID to try again.
+    // 404 means the org was already removed on a prior attempt (idempotent success).
+    await this.zitadel.deleteOrg(cfg.zitadelOrgId).catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('HTTP 404')) return;
+      throw err;
+    });
+
+    await withTenant(tenantId, (tx) =>
+      tx.delete(schema.tenantSsoConfigs).where(eq(schema.tenantSsoConfigs.tenantId, tenantId)),
+    );
+
+    await this.audit.record(tenantId, {
+      eventType: 'sso.deleted',
+      actorSub: 'stripe-webhook',
     });
   }
 

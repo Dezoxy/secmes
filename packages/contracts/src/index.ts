@@ -48,6 +48,31 @@ const objectKey = z
   .max(512)
   .refine((s) => !s.includes('://'), 'must be an object key, not a URL');
 
+// Plan tier — returned in GET /me so the frontend can gate UI without a separate request.
+export const PlanTierSchema = z.enum(['free', 'pro', 'enterprise']);
+export type PlanTier = z.infer<typeof PlanTierSchema>;
+
+export const SubscriptionStatusSchema = z.enum([
+  'active',
+  'trialing',
+  'past_due',
+  'canceled',
+  'incomplete',
+  'incomplete_expired',
+  'unpaid',
+  'paused',
+]);
+export type SubscriptionStatus = z.infer<typeof SubscriptionStatusSchema>;
+
+export const TenantPlanSchema = z.object({
+  tier: PlanTierSchema,
+  memberLimit: z.number().int().nullable(),
+  ssoEnabled: z.boolean(),
+  memberCount: z.number().int(),
+  subscriptionStatus: SubscriptionStatusSchema.nullable(),
+});
+export type TenantPlan = z.infer<typeof TenantPlanSchema>;
+
 // GET /me — discriminated union: unbound users (no tenant yet) vs. bound users.
 export const MeUnboundSchema = z.object({ bound: z.literal(false) });
 export type MeUnbound = z.infer<typeof MeUnboundSchema>;
@@ -59,6 +84,7 @@ export const MeBoundSchema = z.object({
   email: z.string().email(),
   displayName: z.string().nullable(),
   role: z.enum(['admin', 'member']),
+  plan: TenantPlanSchema,
 });
 export type MeBound = z.infer<typeof MeBoundSchema>;
 

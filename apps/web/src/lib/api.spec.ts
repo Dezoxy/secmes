@@ -62,6 +62,13 @@ describe('api client', () => {
       email: 'alice@example.com',
       displayName: 'A',
       role: 'member',
+      plan: {
+        tier: 'free',
+        memberLimit: 10,
+        ssoEnabled: false,
+        memberCount: 1,
+        subscriptionStatus: null,
+      },
     };
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')

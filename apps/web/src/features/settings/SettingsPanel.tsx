@@ -450,10 +450,12 @@ export function SettingsPanel({
           {active === 'about' && <AboutSettings />}
 
           {active === 'team' && serverProfile?.role === 'admin' && (
-            <TeamSettings currentUserId={serverProfile.userId} />
+            <TeamSettings currentUserId={serverProfile.userId} plan={serverProfile.plan} />
           )}
 
-          {active === 'admin' && serverProfile?.role === 'admin' && <AdminPanel />}
+          {active === 'admin' && serverProfile?.role === 'admin' && (
+            <AdminPanel ssoEnabled={serverProfile.plan?.ssoEnabled} />
+          )}
         </div>
       </section>
     </Modal>

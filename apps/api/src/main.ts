@@ -17,7 +17,10 @@ async function bootstrap(): Promise<void> {
   // (no content/keys/tokens/headers/presigned URLs ever leave — see observability/error-tracking.ts).
   initErrorTracking((msg) => Logger.log(msg, 'ErrorTracking'));
 
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: false });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bufferLogs: false,
+    rawBody: true,
+  });
 
   // Report unhandled/5xx errors to Sentry/GlitchTip without altering the response (observe + rethrow). No-op
   // when error tracking is disabled. Captures method + route-template + opaque ids only.

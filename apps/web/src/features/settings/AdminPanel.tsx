@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Clipboard, Cpu, KeyRound, ScrollText, ShieldCheck, Trash2 } from 'lucide-react';
 import {
   adminRevokeDevice,
+  createCheckoutSession,
   createSsoConfig,
   deleteSsoConfig,
   getSsoConfig,
@@ -17,6 +18,10 @@ import {
 import { Button, StateBlock } from '../ui';
 
 type SubTab = 'devices' | 'audit' | 'sso';
+
+interface AdminPanelProps {
+  ssoEnabled?: boolean;
+}
 
 // ── Devices ──────────────────────────────────────────────────────────────────
 
@@ -221,7 +226,48 @@ const SSO_PROVIDER_OPTIONS = [
   { value: 'okta', label: 'Okta' },
 ] as const;
 
-function SsoTab() {
+function SsoTab({ ssoEnabled = true }: { ssoEnabled?: boolean }) {
+  const [upgrading, setUpgrading] = useState(false);
+  const [upgradeError, setUpgradeError] = useState<string | null>(null);
+
+  const handleUpgrade = async () => {
+    setUpgrading(true);
+    try {
+      const url = await createCheckoutSession('pro', window.location.href, window.location.href);
+      window.location.href = url;
+    } catch {
+      setUpgradeError('Could not start checkout. Please try again.');
+      setUpgrading(false);
+    }
+  };
+
+  if (!ssoEnabled) {
+    return (
+      <div className="flex flex-col gap-3 rounded-xl border border-amber-400/20 bg-amber-400/[0.04] p-4">
+        <p className="text-sm font-medium text-amber-300">SSO requires Pro or Enterprise</p>
+        <p className="text-xs text-white/60">
+          Single sign-on lets your team log in via your corporate identity provider (OIDC). Upgrade
+          your plan to enable it.
+        </p>
+        {upgradeError && <p className="text-xs text-rose-300">{upgradeError}</p>}
+        <Button
+          size="sm"
+          variant="subtle"
+          loading={upgrading}
+          loadingLabel="Opening Stripe…"
+          onClick={() => void handleUpgrade()}
+        >
+          Upgrade to Pro
+        </Button>
+      </div>
+    );
+  }
+
+  // Original function body follows — split out of the outer function to satisfy hooks rules.
+  return <SsoTabContent />;
+}
+
+function SsoTabContent() {
   const [config, setConfig] = useState<SsoConfig | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -541,7 +587,7 @@ function SsoTab() {
 
 // ── Shell ─────────────────────────────────────────────────────────────────────
 
-export function AdminPanel() {
+export function AdminPanel({ ssoEnabled }: AdminPanelProps) {
   const [tab, setTab] = useState<SubTab>('devices');
 
   const tabs: { id: SubTab; label: string; Icon: typeof Cpu }[] = [
@@ -570,7 +616,7 @@ export function AdminPanel() {
 
       {tab === 'devices' && <DevicesTab />}
       {tab === 'audit' && <AuditTab />}
-      {tab === 'sso' && <SsoTab />}
+      {tab === 'sso' && <SsoTab ssoEnabled={ssoEnabled} />}
     </div>
   );
 }

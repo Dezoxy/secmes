@@ -237,6 +237,13 @@ export default function TransparencyRoute() {
                     </td>
                     <td className="py-2.5">Global edge</td>
                   </tr>
+                  <tr>
+                    <td className="py-2.5 pr-4 font-medium text-white">Stripe</td>
+                    <td className="py-2.5 pr-4">
+                      Payment processing (billing data only — no access to message content)
+                    </td>
+                    <td className="py-2.5">US/EU (DPA available)</td>
+                  </tr>
                 </tbody>
               </table>
             </div>
