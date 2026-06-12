@@ -41,8 +41,23 @@ export class MeController {
             email: { type: 'string', format: 'email' },
             displayName: { type: 'string', nullable: true },
             role: { type: 'string', enum: ['admin', 'member'] },
+            plan: {
+              type: 'object',
+              properties: {
+                tier: { type: 'string', enum: ['free', 'pro', 'enterprise'] },
+                memberLimit: { type: 'integer', nullable: true },
+                ssoEnabled: { type: 'boolean' },
+                memberCount: { type: 'integer', minimum: 0 },
+                subscriptionStatus: {
+                  type: 'string',
+                  enum: ['active', 'trialing', 'past_due', 'canceled', 'incomplete'],
+                  nullable: true,
+                },
+              },
+              required: ['tier', 'memberLimit', 'ssoEnabled', 'memberCount', 'subscriptionStatus'],
+            },
           },
-          required: ['bound', 'userId', 'tenantId', 'email', 'displayName', 'role'],
+          required: ['bound', 'userId', 'tenantId', 'email', 'displayName', 'role', 'plan'],
         },
       ],
     },
@@ -62,6 +77,7 @@ export class MeController {
       email: user.email,
       displayName: user.displayName,
       role: user.role,
+      plan: user.plan,
     });
   }
 }

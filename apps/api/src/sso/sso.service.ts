@@ -15,7 +15,9 @@ import type {
 } from '@argus/contracts';
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { AuditService } from '../audit/audit.service.js';
+import { PaymentRequiredException } from '../common/http-exceptions.js';
 import { schema, withTenant } from '../db/index.js';
+import { PlansService } from '../plans/plans.service.js';
 import { ZitadelManagementClient } from './zitadel-management.client.js';
 
 const APP_BASE_URL = (process.env.APP_BASE_URL ?? 'https://app.4rgus.com').replace(/\/$/, '');
@@ -66,6 +68,7 @@ export class SsoService {
   constructor(
     private readonly zitadel: ZitadelManagementClient,
     private readonly audit: AuditService,
+    private readonly plans: PlansService,
   ) {}
 
   async getSsoConfig(auth: VerifiedAuth): Promise<SsoConfig | null> {
@@ -80,6 +83,11 @@ export class SsoService {
   }
 
   async createSsoConfig(auth: VerifiedAuth, body: CreateSsoConfigBody): Promise<SsoConfig> {
+    const plan = await this.plans.getPlan(auth.tenantId);
+    if (!plan.ssoEnabled) {
+      throw new PaymentRequiredException('SSO requires a Pro or Enterprise plan');
+    }
+
     validateIssuerUrl(body.issuerUrl);
 
     // 409 if already configured.

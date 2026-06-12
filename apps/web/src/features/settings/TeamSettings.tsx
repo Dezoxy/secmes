@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Check, Copy, Mail, Trash2, Users } from 'lucide-react';
 import {
+  createCheckoutSession,
   createInvite,
   listInvites,
   listMembers,
@@ -9,11 +10,13 @@ import {
   setMemberRole,
   type InviteSummary,
   type MemberSummary,
+  type TenantPlan,
 } from '../../lib/api';
 import { Button, StateBlock } from '../ui';
 
 interface TeamSettingsProps {
   currentUserId: string;
+  plan?: TenantPlan | null;
 }
 
 function MemberRow({
@@ -108,11 +111,52 @@ function InviteRow({
   );
 }
 
-function CreateInviteForm({ onCreated }: { onCreated: (token: string) => void }) {
+function CreateInviteForm({
+  onCreated,
+  atLimit,
+  plan,
+}: {
+  onCreated: (token: string) => void;
+  atLimit: boolean;
+  plan?: TenantPlan | null;
+}) {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const [upgrading, setUpgrading] = useState(false);
+
+  const handleUpgrade = async () => {
+    setUpgrading(true);
+    try {
+      const url = await createCheckoutSession('pro', window.location.href, window.location.href);
+      window.location.href = url;
+    } catch {
+      setError('Could not start checkout. Please try again.');
+      setUpgrading(false);
+    }
+  };
+
+  if (atLimit) {
+    return (
+      <div className="flex flex-col gap-2 rounded-xl border border-amber-400/20 bg-amber-400/[0.04] px-4 py-3">
+        <p className="text-xs text-amber-300">
+          Member limit reached
+          {plan?.memberLimit != null ? ` (${plan.memberLimit})` : ''} — upgrade to add more.
+        </p>
+        <Button
+          size="sm"
+          variant="subtle"
+          loading={upgrading}
+          loadingLabel="Opening Stripe…"
+          onClick={() => void handleUpgrade()}
+        >
+          Upgrade to Pro
+        </Button>
+        {error && <p className="text-xs text-rose-300">{error}</p>}
+      </div>
+    );
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -200,12 +244,14 @@ function CopyInviteLink({ token, onDismiss }: { token: string; onDismiss: () => 
   );
 }
 
-export function TeamSettings({ currentUserId }: TeamSettingsProps) {
+export function TeamSettings({ currentUserId, plan }: TeamSettingsProps) {
   const [members, setMembers] = useState<MemberSummary[] | null>(null);
   const [invites, setInvites] = useState<InviteSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingInviteToken, setPendingInviteToken] = useState<string | null>(null);
   const [confirmRevokeUserId, setConfirmRevokeUserId] = useState<string | null>(null);
+
+  const atLimit = plan != null && plan.memberLimit != null && plan.memberCount >= plan.memberLimit;
 
   const load = useCallback(async () => {
     try {
@@ -273,9 +319,22 @@ export function TeamSettings({ currentUserId }: TeamSettingsProps) {
             <Users className="h-4 w-4 text-white/50" />
             <h4 className="text-sm font-medium text-white/70">
               Members
-              {members && <span className="ml-2 text-white/40">({members.length})</span>}
+              {plan != null && (
+                <span className="ml-2 text-white/40">
+                  {plan.memberCount}
+                  {plan.memberLimit != null ? `/${plan.memberLimit}` : ''}
+                </span>
+              )}
+              {plan == null && members && (
+                <span className="ml-2 text-white/40">({members.length})</span>
+              )}
             </h4>
           </div>
+          {plan != null && (
+            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-xs text-white/50 capitalize">
+              {plan.tier}
+            </span>
+          )}
         </div>
 
         {members === null && !error && <div className="text-sm text-white/40">Loading…</div>}
@@ -337,6 +396,8 @@ export function TeamSettings({ currentUserId }: TeamSettingsProps) {
             setPendingInviteToken(token);
             void load();
           }}
+          atLimit={atLimit}
+          plan={plan}
         />
       </div>
     </div>

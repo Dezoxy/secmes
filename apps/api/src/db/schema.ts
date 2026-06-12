@@ -1,14 +1,35 @@
-import { bigint, inet, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  boolean,
+  inet,
+  integer,
+  jsonb,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 // Typed table definitions for query building. The authoritative DDL — including RLS
 // policies, FORCE RLS, indexes and grants — lives in ./migrations/*.sql (Drizzle's schema
 // layer does not express row-level security).
 
 // Tenant ROOT: its own id IS the tenant, so it has no tenant_id column (see migration).
+// Plan and billing columns added in migration 0022 — tenants has no RLS so withRouting /
+// direct queries can write cross-tenant for the operator endpoint and Stripe webhook handler.
 export const tenants = pgTable('tenants', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  // Plan gating (G8)
+  planTier: text('plan_tier').notNull().default('free'),
+  memberLimit: integer('member_limit').notNull().default(10),
+  ssoEnabled: boolean('sso_enabled').notNull().default(false),
+  planSetAt: timestamp('plan_set_at', { withTimezone: true }).notNull().defaultNow(),
+  // Stripe subscription (G8)
+  stripeCustomerId: text('stripe_customer_id'),
+  stripeSubscriptionId: text('stripe_subscription_id'),
+  subscriptionStatus: text('subscription_status'),
 });
 
 export const users = pgTable('users', {

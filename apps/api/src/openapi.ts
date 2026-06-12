@@ -13,6 +13,7 @@ const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'patch', 'options', 'head'
 const STD_ERROR_RESPONSES: Record<string, string> = {
   '400': 'Validation failed — malformed or out-of-bounds request.',
   '401': 'Missing or invalid bearer token.',
+  '402': 'Plan upgrade required — current plan does not include this feature.',
   '403': 'Authenticated, but not permitted to perform this action.',
   '404': 'Resource not found (or deliberately hidden to avoid an existence oracle).',
   '406': 'No acceptable representation for the requested `Accept` header.',

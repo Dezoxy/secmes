@@ -11,7 +11,9 @@ import { sql } from 'drizzle-orm';
 
 import { AuditService } from '../audit/audit.service.js';
 import type { MaybeUnboundAuth, VerifiedAuth } from '../auth/auth.service.js';
+import { PaymentRequiredException } from '../common/http-exceptions.js';
 import { schema, withRouting, withTenant } from '../db/index.js';
+import { PlansService } from '../plans/plans.service.js';
 import { generateHandle } from '../users/handle-words.js';
 
 const MAX_HANDLE_ATTEMPTS = 8;
@@ -84,7 +86,10 @@ export interface AcceptInviteResult {
 
 @Injectable()
 export class TenantsService {
-  constructor(private readonly audit: AuditService) {}
+  constructor(
+    private readonly audit: AuditService,
+    private readonly plans: PlansService,
+  ) {}
   /**
    * Create a new tenant and its first admin user atomically.
    * Three rows are inserted: `tenants`, `users` (role: admin), `user_tenant_index`.
@@ -127,6 +132,14 @@ export class TenantsService {
 
   /** Create an invite token for a tenant. Returns the plaintext token once — never stored. */
   async createInvite(auth: VerifiedAuth, inviteeEmail?: string): Promise<CreateInviteResult> {
+    // Enforce member limit — check before creating the invite so admins get immediate feedback.
+    const plan = await this.plans.getPlan(auth.tenantId);
+    if (plan.memberLimit !== null && plan.memberCount >= plan.memberLimit) {
+      throw new PaymentRequiredException(
+        `Member limit reached (${plan.memberCount}/${plan.memberLimit}). Upgrade your plan to add more members.`,
+      );
+    }
+
     const raw = randomBytes(32).toString('base64url');
     const tokenHash = sha256hex(raw);
 
@@ -213,6 +226,14 @@ export class TenantsService {
     }
 
     const { sub, email } = auth;
+
+    // Race-safety: also check the limit at accept time since multiple invites can be outstanding.
+    const plan = await this.plans.getPlan(invite.tenantId);
+    if (plan.memberLimit !== null && plan.memberCount >= plan.memberLimit) {
+      throw new PaymentRequiredException(
+        `This workspace has reached its member limit. Ask the workspace admin to upgrade.`,
+      );
+    }
 
     for (let attempt = 0; attempt < MAX_HANDLE_ATTEMPTS; attempt++) {
       const displayName = generate();

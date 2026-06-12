@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { AuditModule } from '../audit/audit.module.js';
+import { PlansModule } from '../plans/plans.module.js';
 import {
   buildZitadelManagementConfig,
   ZITADEL_MANAGEMENT_CONFIG,
@@ -10,7 +11,7 @@ import { SsoController } from './sso.controller.js';
 import { SsoService } from './sso.service.js';
 
 @Module({
-  imports: [AuditModule],
+  imports: [AuditModule, PlansModule],
   controllers: [SsoController],
   providers: [
     {
