@@ -19,7 +19,11 @@ export class PlansService {
   constructor(private readonly audit: AuditService) {}
 
   /** Read the plan columns for a tenant, then count active members. */
-  async getPlan(tenantId: string): Promise<TenantPlan & { stripeCustomerId: string | null }> {
+  async getPlan(
+    tenantId: string,
+  ): Promise<
+    TenantPlan & { stripeCustomerId: string | null; stripeSubscriptionId: string | null }
+  > {
     const row = await withTenant(tenantId, async (tx) => {
       const [r] = await tx
         .select({
@@ -27,6 +31,7 @@ export class PlansService {
           memberLimit: schema.tenants.memberLimit,
           ssoEnabled: schema.tenants.ssoEnabled,
           stripeCustomerId: schema.tenants.stripeCustomerId,
+          stripeSubscriptionId: schema.tenants.stripeSubscriptionId,
           subscriptionStatus: schema.tenants.subscriptionStatus,
         })
         .from(schema.tenants)
@@ -45,6 +50,7 @@ export class PlansService {
       memberCount,
       subscriptionStatus: (row.subscriptionStatus as TenantPlan['subscriptionStatus']) ?? null,
       stripeCustomerId: row.stripeCustomerId ?? null,
+      stripeSubscriptionId: row.stripeSubscriptionId ?? null,
     };
   }
 

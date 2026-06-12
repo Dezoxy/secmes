@@ -225,6 +225,17 @@ export class BillingService implements OnModuleInit {
         const tenantId = await this.tenantIdFromCustomer(sub.customer as string);
         if (!tenantId) break;
 
+        // Guard against stale-sub deletion: when Pro→Enterprise upgrade creates a new
+        // subscription, Stripe later deletes the old Pro sub. Only downgrade when the
+        // deleted sub matches the tenant's current active subscription.
+        const currentPlan = await this.plans.getPlan(tenantId);
+        if (currentPlan.stripeSubscriptionId && currentPlan.stripeSubscriptionId !== sub.id) {
+          this.logger.log(
+            `billing: ignoring deletion of stale sub ${sub.id} for tenant ${tenantId}`,
+          );
+          break;
+        }
+
         await this.plans.setPlan(
           tenantId,
           {

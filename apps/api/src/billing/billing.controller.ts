@@ -72,7 +72,16 @@ class BillingStatusDto {
   @ApiProperty() ssoEnabled!: boolean;
   @ApiProperty({ type: 'integer' }) memberCount!: number;
   @ApiProperty({
-    enum: ['active', 'trialing', 'past_due', 'canceled', 'incomplete'],
+    enum: [
+      'active',
+      'trialing',
+      'past_due',
+      'canceled',
+      'incomplete',
+      'incomplete_expired',
+      'unpaid',
+      'paused',
+    ],
     nullable: true,
     type: 'string',
   })

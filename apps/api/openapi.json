@@ -6450,7 +6450,10 @@
               "trialing",
               "past_due",
               "canceled",
-              "incomplete"
+              "incomplete",
+              "incomplete_expired",
+              "unpaid",
+              "paused"
             ],
             "nullable": true
           }
