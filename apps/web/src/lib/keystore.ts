@@ -545,6 +545,35 @@ export class DeviceKeystore {
         this.groupStateVersions.set(rec.conversationId, rec.version ?? -1);
       }
     }
+
+    // Orphaned-pending scan: when a new-group create crashes between saveStagedCommit (PENDING_STORE
+    // written) and the first saveConversationState (GROUP_STORE never written), the GROUP_STORE loop
+    // above never visits the PENDING_STORE entry. Scan all pending entries and promote any whose
+    // conversationId is NOT already in `out` — bootstrapping the GROUP_STORE record from the sealed
+    // post-commit state so the creator recovers the group on reload.
+    const allPending = (await this.db.getAll(PENDING_STORE)) as StoredPendingCommit[];
+    for (const pendingRec of allPending) {
+      if (pendingRec.identity !== identity || pendingRec.signaturePublicKey !== signaturePublicKey)
+        continue;
+      const { conversationId } = pendingRec;
+      if (out.has(conversationId)) continue; // already handled by the GROUP_STORE loop
+      try {
+        const pendingBytes = await openWithKey(
+          sessionKey,
+          pendingRec.sealed,
+          pendingCommitAad(conversationId),
+        );
+        const conversation = this.engine.deserializeConversation(pendingBytes);
+        this.groupStateVersions.set(conversationId, -1); // no prior GROUP_STORE record
+        await this.saveConversationState(device, conversationId, conversation, sessionKey);
+        await this.db.delete(PENDING_STORE, conversationId);
+        out.set(conversationId, conversation);
+      } catch {
+        // Pending bytes corrupt or wrong key — discard; the creator will need a re-invite.
+        await this.db.delete(PENDING_STORE, conversationId);
+      }
+    }
+
     return out;
   }
 
