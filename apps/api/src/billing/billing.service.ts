@@ -19,20 +19,16 @@ const SSO_ENABLED: Record<string, boolean> = {
 
 function resolveSecretKey(): string {
   const file = process.env.STRIPE_SECRET_KEY_FILE;
-  if (file) {
-    // eslint-disable-next-line security/detect-non-literal-fs-filename
-    return readFileSync(file, 'utf8').trim();
-  }
-  return process.env.STRIPE_SECRET_KEY ?? '';
+  if (!file) return '';
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  return readFileSync(file, 'utf8').trim();
 }
 
 function resolveWebhookSecret(): string {
   const file = process.env.STRIPE_WEBHOOK_SECRET_FILE;
-  if (file) {
-    // eslint-disable-next-line security/detect-non-literal-fs-filename
-    return readFileSync(file, 'utf8').trim();
-  }
-  return process.env.STRIPE_WEBHOOK_SECRET ?? '';
+  if (!file) return '';
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  return readFileSync(file, 'utf8').trim();
 }
 
 function priceIdToTier(priceId: string): 'pro' | 'enterprise' | null {
@@ -174,6 +170,16 @@ export class BillingService implements OnModuleInit {
           break;
         }
 
+        // Use actual subscription status — Stripe doesn't guarantee event ordering,
+        // so the sub may already be canceled by the time this event is processed.
+        const status = sanitizeStatus(sub.status);
+        if (status !== 'active' && status !== 'trialing') {
+          this.logger.warn(
+            `billing: checkout.session.completed for sub ${subscriptionId} has status ${status} — skipping upgrade`,
+          );
+          break;
+        }
+
         await this.plans.setPlan(
           tenantId,
           {
@@ -181,7 +187,7 @@ export class BillingService implements OnModuleInit {
             memberLimit: MEMBER_LIMITS[tier] ?? null,
             ssoEnabled: SSO_ENABLED[tier] ?? false,
             stripeSubscriptionId: subscriptionId,
-            subscriptionStatus: 'active',
+            subscriptionStatus: status,
           },
           'stripe-webhook',
         );

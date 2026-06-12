@@ -1581,6 +1581,702 @@
         ]
       }
     },
+    "/admin/sso-config": {
+      "get": {
+        "operationId": "getSsoConfig",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "SSO config, or null if not yet configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "nullable": true,
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+                      "maxLength": 36
+                    },
+                    "providerType": {
+                      "type": "string",
+                      "enum": [
+                        "oidc_generic",
+                        "google",
+                        "entra",
+                        "okta"
+                      ]
+                    },
+                    "providerName": {
+                      "type": "string",
+                      "maxLength": 100,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "issuerUrl": {
+                      "type": "string",
+                      "maxLength": 512,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "clientId": {
+                      "type": "string",
+                      "maxLength": 256,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "loginUrl": {
+                      "type": "string",
+                      "maxLength": 1024,
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+                      "maxLength": 40
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+                      "maxLength": 40
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "providerType",
+                    "providerName",
+                    "issuerUrl",
+                    "clientId",
+                    "loginUrl",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Plan upgrade required — current plan does not include this feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "caller is not an admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get tenant SSO config (admin only). Returns null body if not configured.",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "operationId": "createSsoConfig",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSsoConfigBodyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "SSO configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SsoConfigDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Plan upgrade required — current plan does not include this feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "caller is not an admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "SSO already configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Zitadel management not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Configure SSO for this tenant (admin only). Provisions a Zitadel org + IdP.",
+        "tags": [
+          "admin"
+        ]
+      },
+      "patch": {
+        "operationId": "updateSsoConfig",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSsoConfigBodyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "SSO config updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SsoConfigDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Plan upgrade required — current plan does not include this feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "caller is not an admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SSO not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Zitadel management not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update tenant SSO config (admin only). Does not touch the client secret.",
+        "tags": [
+          "admin"
+        ]
+      },
+      "delete": {
+        "operationId": "deleteSsoConfig",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "SSO config deleted"
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Plan upgrade required — current plan does not include this feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "caller is not an admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SSO not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove tenant SSO config and delete Zitadel org (admin only).",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/sso-config/secret": {
+      "patch": {
+        "operationId": "rotateSsoSecret",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RotateSsoSecretBodyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "secret rotated"
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Plan upgrade required — current plan does not include this feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "caller is not an admin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "SSO not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Zitadel management not configured or unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Rotate the SSO client secret (admin only). New secret forwarded to Zitadel.",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/devices/me/key-packages": {
       "post": {
         "operationId": "publishKeyPackages",
@@ -4108,702 +4804,6 @@
         ]
       }
     },
-    "/admin/sso-config": {
-      "get": {
-        "operationId": "getSsoConfig",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "SSO config, or null if not yet configured",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "nullable": true,
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "format": "uuid",
-                      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-                      "maxLength": 36
-                    },
-                    "providerType": {
-                      "type": "string",
-                      "enum": [
-                        "oidc_generic",
-                        "google",
-                        "entra",
-                        "okta"
-                      ]
-                    },
-                    "providerName": {
-                      "type": "string",
-                      "maxLength": 100,
-                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-                    },
-                    "issuerUrl": {
-                      "type": "string",
-                      "maxLength": 512,
-                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-                    },
-                    "clientId": {
-                      "type": "string",
-                      "maxLength": 256,
-                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-                    },
-                    "loginUrl": {
-                      "type": "string",
-                      "maxLength": 1024,
-                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-                    },
-                    "createdAt": {
-                      "type": "string",
-                      "format": "date-time",
-                      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-                      "maxLength": 40
-                    },
-                    "updatedAt": {
-                      "type": "string",
-                      "format": "date-time",
-                      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-                      "maxLength": 40
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "providerType",
-                    "providerName",
-                    "issuerUrl",
-                    "clientId",
-                    "loginUrl",
-                    "createdAt",
-                    "updatedAt"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "caller is not an admin",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get tenant SSO config (admin only). Returns null body if not configured.",
-        "tags": [
-          "admin"
-        ]
-      },
-      "post": {
-        "operationId": "createSsoConfig",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateSsoConfigBodyDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "SSO configured",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SsoConfigDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "caller is not an admin",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "SSO already configured",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Zitadel management not configured or unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Configure SSO for this tenant (admin only). Provisions a Zitadel org + IdP.",
-        "tags": [
-          "admin"
-        ]
-      },
-      "patch": {
-        "operationId": "updateSsoConfig",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateSsoConfigBodyDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "SSO config updated",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SsoConfigDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "caller is not an admin",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "SSO not configured",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Zitadel management not configured or unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Update tenant SSO config (admin only). Does not touch the client secret.",
-        "tags": [
-          "admin"
-        ]
-      },
-      "delete": {
-        "operationId": "deleteSsoConfig",
-        "parameters": [],
-        "responses": {
-          "204": {
-            "description": "SSO config deleted"
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "caller is not an admin",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "SSO not configured",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Remove tenant SSO config and delete Zitadel org (admin only).",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
-    "/admin/sso-config/secret": {
-      "patch": {
-        "operationId": "rotateSsoSecret",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RotateSsoSecretBodyDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "secret rotated"
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "caller is not an admin",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "SSO not configured",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Zitadel management not configured or unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Rotate the SSO client secret (admin only). New secret forwarded to Zitadel.",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
     "/tenants": {
       "post": {
         "operationId": "createTenant",
@@ -6464,6 +6464,148 @@
         ],
         "additionalProperties": false
       },
+      "CreateSsoConfigBodyDto": {
+        "type": "object",
+        "properties": {
+          "providerType": {
+            "type": "string",
+            "enum": [
+              "oidc_generic",
+              "google",
+              "entra",
+              "okta"
+            ]
+          },
+          "providerName": {
+            "type": "string",
+            "maxLength": 100,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "issuerUrl": {
+            "type": "string",
+            "maxLength": 512,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "clientId": {
+            "type": "string",
+            "maxLength": 256,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "clientSecret": {
+            "type": "string",
+            "maxLength": 1024,
+            "writeOnly": true,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          }
+        },
+        "required": [
+          "providerType",
+          "providerName",
+          "issuerUrl",
+          "clientId",
+          "clientSecret"
+        ],
+        "additionalProperties": false
+      },
+      "SsoConfigDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "maxLength": 36
+          },
+          "providerType": {
+            "type": "string",
+            "enum": [
+              "oidc_generic",
+              "google",
+              "entra",
+              "okta"
+            ]
+          },
+          "providerName": {
+            "type": "string",
+            "maxLength": 100,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "issuerUrl": {
+            "type": "string",
+            "maxLength": 512,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "clientId": {
+            "type": "string",
+            "maxLength": 256,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "loginUrl": {
+            "type": "string",
+            "maxLength": 1024,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "id",
+          "providerType",
+          "providerName",
+          "issuerUrl",
+          "clientId",
+          "loginUrl",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateSsoConfigBodyDto": {
+        "type": "object",
+        "properties": {
+          "providerName": {
+            "type": "string",
+            "maxLength": 100,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "issuerUrl": {
+            "type": "string",
+            "maxLength": 512,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "clientId": {
+            "type": "string",
+            "maxLength": 256,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RotateSsoSecretBodyDto": {
+        "type": "object",
+        "properties": {
+          "clientSecret": {
+            "type": "string",
+            "maxLength": 1024,
+            "writeOnly": true,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          }
+        },
+        "required": [
+          "clientSecret"
+        ],
+        "additionalProperties": false
+      },
       "PublishKeyPackagesBody": {
         "type": "object",
         "properties": {
@@ -7190,148 +7332,6 @@
         "required": [
           "deviceId",
           "subscription"
-        ],
-        "additionalProperties": false
-      },
-      "CreateSsoConfigBodyDto": {
-        "type": "object",
-        "properties": {
-          "providerType": {
-            "type": "string",
-            "enum": [
-              "oidc_generic",
-              "google",
-              "entra",
-              "okta"
-            ]
-          },
-          "providerName": {
-            "type": "string",
-            "maxLength": 100,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          },
-          "issuerUrl": {
-            "type": "string",
-            "maxLength": 512,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          },
-          "clientId": {
-            "type": "string",
-            "maxLength": 256,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          },
-          "clientSecret": {
-            "type": "string",
-            "maxLength": 1024,
-            "writeOnly": true,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          }
-        },
-        "required": [
-          "providerType",
-          "providerName",
-          "issuerUrl",
-          "clientId",
-          "clientSecret"
-        ],
-        "additionalProperties": false
-      },
-      "SsoConfigDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-            "maxLength": 36
-          },
-          "providerType": {
-            "type": "string",
-            "enum": [
-              "oidc_generic",
-              "google",
-              "entra",
-              "okta"
-            ]
-          },
-          "providerName": {
-            "type": "string",
-            "maxLength": 100,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          },
-          "issuerUrl": {
-            "type": "string",
-            "maxLength": 512,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          },
-          "clientId": {
-            "type": "string",
-            "maxLength": 256,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          },
-          "loginUrl": {
-            "type": "string",
-            "maxLength": 1024,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          }
-        },
-        "required": [
-          "id",
-          "providerType",
-          "providerName",
-          "issuerUrl",
-          "clientId",
-          "loginUrl",
-          "createdAt",
-          "updatedAt"
-        ],
-        "additionalProperties": false
-      },
-      "UpdateSsoConfigBodyDto": {
-        "type": "object",
-        "properties": {
-          "providerName": {
-            "type": "string",
-            "maxLength": 100,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          },
-          "issuerUrl": {
-            "type": "string",
-            "maxLength": 512,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          },
-          "clientId": {
-            "type": "string",
-            "maxLength": 256,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          }
-        },
-        "additionalProperties": false
-      },
-      "RotateSsoSecretBodyDto": {
-        "type": "object",
-        "properties": {
-          "clientSecret": {
-            "type": "string",
-            "maxLength": 1024,
-            "writeOnly": true,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          }
-        },
-        "required": [
-          "clientSecret"
         ],
         "additionalProperties": false
       },

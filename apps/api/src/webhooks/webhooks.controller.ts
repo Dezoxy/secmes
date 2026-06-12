@@ -40,9 +40,13 @@ export class WebhooksController {
       throw new BadRequestException('invalid stripe signature');
     }
 
-    // Return 200 immediately; process async so Stripe doesn't time out on slow DB writes.
-    void this.billing.handleWebhookEvent(event).catch((err: unknown) => {
+    // Await processing before returning 200 so Stripe retries on failure.
+    // If the handler throws, NestJS returns 500 → Stripe retries with backoff.
+    try {
+      await this.billing.handleWebhookEvent(event);
+    } catch (err: unknown) {
       this.logger.error('stripe webhook handler error', err instanceof Error ? err.stack : err);
-    });
+      throw err;
+    }
   }
 }

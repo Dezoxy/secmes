@@ -38,6 +38,11 @@ vi.mock('stripe', () => ({
   },
 }));
 
+// Mock readFileSync so STRIPE_SECRET_KEY_FILE resolves without touching disk.
+vi.mock('node:fs', () => ({
+  readFileSync: vi.fn().mockReturnValue('sk_test_fake'),
+}));
+
 function makePlans(overrides?: Partial<PlansService>) {
   return {
     getPlan: vi.fn().mockResolvedValue({
@@ -65,10 +70,9 @@ function makeSso(overrides?: Partial<SsoService>) {
 describe('BillingService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.STRIPE_SECRET_KEY = 'sk_test_fake';
+    process.env.STRIPE_SECRET_KEY_FILE = '/fake/stripe.key';
     process.env.STRIPE_PRO_PRICE_ID = 'price_pro';
     process.env.STRIPE_ENTERPRISE_PRICE_ID = 'price_enterprise';
-    delete process.env.STRIPE_SECRET_KEY_FILE;
     delete process.env.STRIPE_WEBHOOK_SECRET_FILE;
   });
 
@@ -190,8 +194,8 @@ describe('BillingService', () => {
     );
   });
 
-  it('is a no-op when STRIPE_SECRET_KEY is not set', () => {
-    delete process.env.STRIPE_SECRET_KEY;
+  it('is a no-op when STRIPE_SECRET_KEY_FILE is not set', () => {
+    delete process.env.STRIPE_SECRET_KEY_FILE;
     const plans = makePlans();
     const svc = new BillingService(plans, makeSso());
 
