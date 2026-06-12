@@ -47,6 +47,7 @@ require_command() {
 require_command gh
 require_command pnpm
 require_command python3
+require_command jq
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
@@ -103,11 +104,18 @@ End your review with exactly one line: \`VERDICT: PASS\` or \`VERDICT: FINDINGS\
 
 # Both reviewers gate the merge as equals — .claude/hooks/review-status.sh aggregates every
 # signal channel for both and exits 0 only when both verdicts are in and clean (or Claude-only
-# under a recorded Codex usage limit). Don't hand-roll review detection here.
+# under a Codex usage limit, flagged degraded:true). Don't hand-roll review detection here.
 echo "Waiting for both review verdicts..."
-if ! .claude/hooks/review-status.sh "$pr_number" --wait --timeout $((TIMEOUT_SECONDS / 60)); then
-  echo "Review gate is not clean (see status above); refusing to continue." >&2
+if ! review_status="$(.claude/hooks/review-status.sh "$pr_number" --wait --timeout $((TIMEOUT_SECONDS / 60)))"; then
+  printf '%s\n' "$review_status"
+  echo "Review gate is not clean; refusing to continue." >&2
   exit 1
+fi
+printf '%s\n' "$review_status"
+# AGENTS.md: a Claude-only pass under a Codex usage limit must be recorded on the PR.
+if [[ "$(jq -r '.degraded // false' <<<"$review_status")" == "true" ]]; then
+  echo "Recording the degraded (Claude-only) review gate on the PR..."
+  gh pr comment "$pr_number" --body "Review gate note: Codex was over its usage limit for this head, so the gate passed on the Claude reviewer's PASS alone (degraded mode per AGENTS.md — recorded here)."
 fi
 assert_head_unchanged
 
