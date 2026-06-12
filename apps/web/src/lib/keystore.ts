@@ -101,6 +101,9 @@ export interface StoredMessage {
   timestamp: string; // ISO 8601
   status: string; // 'sending' | 'sent' | 'delivered' | 'read' | 'failed'
   encrypted?: boolean;
+  /** 'group-meta' for in-stream group-name updates — filtered from the transcript but persisted so the
+   * group name survives page reload (extracted during history rehydration). Absent for chat messages. */
+  kind?: 'group-meta';
   // E2E attachment refs (objectKey + content key/iv). Sealed at rest with the rest of the log, like `content`.
   attachments?: AttachmentRef[];
 }

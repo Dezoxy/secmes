@@ -91,6 +91,7 @@ export function decryptedToStoredMessage(message: DecryptedMessage): StoredMessa
     timestamp: message.createdAt,
     status: 'read',
     encrypted: true,
+    kind: message.kind,
     attachments: message.attachments.length ? message.attachments : undefined,
   };
 }
@@ -115,7 +116,7 @@ export function mergeIncomingMessages(
     const existing = new Set(conversation.messages.map((message) => message.id));
     const fresh = appMessages.filter((message) => !existing.has(message.serverId));
     const base: Conversation = latestGroupName
-      ? { ...conversation, name: latestGroupName }
+      ? { ...conversation, name: latestGroupName, type: 'group' }
       : conversation;
     if (fresh.length === 0) return base;
 
@@ -162,12 +163,10 @@ export function useConversationBackfill({
     (conversationId: string, incoming: DecryptedMessage[]): void => {
       if (incoming.length === 0) return;
       setConversations((prev) => mergeIncomingMessages(prev, conversationId, incoming));
-      // Only persist and name-resolve app messages — group-meta carries the group name, not chat content.
-      const appMessages = incoming.filter((m) => m.kind !== 'group-meta');
-      appendHistory(conversationId, appMessages.map(decryptedToStoredMessage));
-      // Name a still-placeholder peer from the (server-verified) sender — every incoming app message
-      // is a PEER message (own sends are skipped upstream), so any sender id here identifies the peer.
-      const peerSender = appMessages[0]?.senderUserId;
+      // Persist all messages including group-meta so group name survives page reload.
+      appendHistory(conversationId, incoming.map(decryptedToStoredMessage));
+      // Name a still-placeholder peer from the (server-verified) sender of any non-meta message.
+      const peerSender = incoming.find((m) => m.kind !== 'group-meta')?.senderUserId;
       if (peerSender && !peerNamingTried.current.has(conversationId)) {
         peerNamingTried.current.add(conversationId);
         void resolvePeerUser(peerSender).then((peer) => {
@@ -251,11 +250,16 @@ export function useConversationHistoryRehydration({
         for (const [conversationId, conversation] of restored) {
           addLive(conversationId, conversation);
           const stored = logs.get(conversationId) ?? [];
-          const history = stored.map(storedToMessage);
+          const groupName = stored
+            .filter((m) => m.kind === 'group-meta')
+            .at(-1)
+            ?.content.trim();
+          const history = stored.filter((m) => m.kind !== 'group-meta').map(storedToMessage);
           setConversations((prev) =>
             prependConversationIfMissing(prev, {
               ...liveConversationShell(conversationId, currentUserProfile),
               messages: history,
+              ...(groupName ? { name: groupName, type: 'group' as const } : {}),
             }),
           );
           // Name the peer: try the persisted mapping first (set at creation — survives a no-reply
