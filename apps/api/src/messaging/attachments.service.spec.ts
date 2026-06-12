@@ -16,6 +16,7 @@ class FakeBlobStore extends BlobStore {
   presignPut = vi.fn((objectKey: string) => Promise.resolve(`https://blob.test/put/${objectKey}`));
   presignGet = vi.fn((objectKey: string) => Promise.resolve(`https://blob.test/get/${objectKey}`));
   blobSize = vi.fn((): Promise<number | null> => Promise.resolve(1024)); // within cap by default
+  deleteObject = vi.fn((): Promise<void> => Promise.resolve());
 }
 
 describe.skipIf(!DB_URL)('AttachmentsService — membership-gated grants', () => {

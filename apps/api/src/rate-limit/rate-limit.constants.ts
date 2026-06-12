@@ -13,6 +13,16 @@ export const perMinute = (limit: number): Record<string, { ttl: number; limit: n
   default: { ttl: seconds(60), limit },
 });
 
+/** Per-route override: n requests per user per hour (3 600 s). */
+export const perHour = (limit: number): Record<string, { ttl: number; limit: number }> => ({
+  default: { ttl: seconds(3600), limit },
+});
+
+/** Per-route override: n requests per user per day (86 400 s). */
+export const perDay = (limit: number): Record<string, { ttl: number; limit: number }> => ({
+  default: { ttl: seconds(86400), limit },
+});
+
 // Tighter caps for the abuse-prone mutations the threat models flag. Each is well above any legitimate
 // human burst but far below what a drain/flood attack needs. Keyed per verified user, so one tenant/user
 // can't spend another's budget. Numbers live here (not inline) so the threat model and the guard test
@@ -52,4 +62,8 @@ export const SENSITIVE_LIMITS = {
   rotateSsoSecret: 5,
   /** SSO config deletion — admin; Zitadel org teardown; low cap. */
   deleteSsoConfig: 5,
+  /** DSAR export — heavy parallel DB read; tight cap discourages scraping. Per hour, not per minute. */
+  exportMyData: 2,
+  /** Account deletion — irreversible cascade; low cap prevents accidental hammering. Per day. */
+  deleteAccount: 3,
 } as const;

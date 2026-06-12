@@ -89,7 +89,8 @@ export async function sendLiveMessage(
 /** A decrypted incoming message — plaintext stays in memory only (never persisted; never sent back). */
 export interface DecryptedMessage {
   serverId: string;
-  senderUserId: string;
+  /** null when the sender has exercised their GDPR right to erasure (account deleted). */
+  senderUserId: string | null;
   clientMessageId: string;
   /** The decoded message text — an old bare-string message decodes to itself. */
   text: string;

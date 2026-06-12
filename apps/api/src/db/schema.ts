@@ -74,7 +74,7 @@ export const messages = pgTable('messages', {
   id: uuid('id').primaryKey().defaultRandom(),
   tenantId: uuid('tenant_id').notNull(),
   conversationId: uuid('conversation_id').notNull(),
-  senderUserId: uuid('sender_user_id').notNull(),
+  senderUserId: uuid('sender_user_id'), // nullable after GDPR erasure (migration 0020)
   clientMessageId: uuid('client_message_id').notNull(),
   ciphertext: text('ciphertext').notNull(),
   alg: text('alg').notNull(),

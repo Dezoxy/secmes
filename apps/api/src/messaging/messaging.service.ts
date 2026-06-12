@@ -47,7 +47,8 @@ export interface SentMessage {
 /** One fetched message — CIPHERTEXT ONLY plus routing metadata; the server never decrypts `ciphertext`. */
 export interface FetchedMessage {
   id: string;
-  senderUserId: string;
+  /** null when the sender has exercised their GDPR right to erasure (account deleted). */
+  senderUserId: string | null;
   clientMessageId: string;
   ciphertext: string;
   alg: string;
@@ -86,7 +87,7 @@ export interface ConversationReceipt {
 // `created_at` (timestamptz) come back from the driver as string/Date — coerce them.
 const MessageRowSchema = z.object({
   id: z.string().uuid(),
-  sender_user_id: z.string().uuid(),
+  sender_user_id: z.string().uuid().nullable(), // null after GDPR erasure (migration 0020)
   client_message_id: z.string().uuid(),
   ciphertext: z.string(),
   alg: z.string(),
