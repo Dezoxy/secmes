@@ -291,7 +291,8 @@ export async function processCommitEvent(
 ): Promise<void> {
   const convEpoch = conversation.epoch;
   if (event.epoch < convEpoch) return; // stale — already at a later epoch
-  // afterEpoch = convEpoch - 1 → returns commits with epoch >= convEpoch (the next ones to apply)
-  const afterEpoch = Math.max(0, convEpoch - 1);
+  // afterEpoch = convEpoch - 1 → returns commits with epoch > (convEpoch-1), i.e. epoch >= convEpoch.
+  // No floor at 0: a group at epoch 0 passes -1 so the server returns epoch-0 commits too.
+  const afterEpoch = convEpoch - 1;
   await drainCommits(deps, conversationId, conversation, afterEpoch);
 }

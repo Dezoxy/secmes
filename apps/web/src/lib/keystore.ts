@@ -467,11 +467,13 @@ export class DeviceKeystore {
         ? await openBackup(rec.sealed, passphrase)
         : await openWithKey(sessionKey, rec.sealed, groupStateAad(rec.conversationId));
 
-      // Crash recovery: if a pending-commit slot exists, a prior session staged a commit but we
-      // cannot safely determine whether the POST reached the server. Promoting the pending state
-      // (epoch N+1) without server confirmation would advance the device past the server's epoch,
-      // breaking future message sends. Clear the slot and load the pre-commit (epoch N) state;
-      // the drain path (onSubscribed → drainCommits) will apply any accepted commits from the server.
+      // Crash recovery: if a pending-commit slot exists, a prior session staged a commit and POSTed
+      // it successfully but crashed before applyStaged/saveConversationState ran. `serializeStaged`
+      // produces the POST-COMMIT state (epoch N+1), so promoting it is the only way to recover the
+      // committed ratchet — the sender cannot re-apply their own commit wire via processCommit.
+      // If the POST never reached the server, the pending state is epoch N+1 while the server is at
+      // epoch N; sends will fail with epoch-mismatch errors until a member re-invites. That corner
+      // case is acceptable for v1; a server-side epoch check would eliminate it in a future release.
       const pendingRec = (await this.db.get(PENDING_STORE, rec.conversationId)) as
         | StoredPendingCommit
         | undefined;
@@ -480,12 +482,29 @@ export class DeviceKeystore {
         pendingRec.identity === identity &&
         pendingRec.signaturePublicKey === signaturePublicKey
       ) {
-        await this.db.delete(PENDING_STORE, rec.conversationId);
+        // CAS base must be set BEFORE saveConversationState so its persister sees the right version.
+        this.groupStateVersions.set(rec.conversationId, rec.version ?? -1);
+        try {
+          const pendingBytes = await openWithKey(
+            sessionKey,
+            pendingRec.sealed,
+            pendingCommitAad(rec.conversationId),
+          );
+          const advanced = this.engine.deserializeConversation(pendingBytes);
+          await this.saveConversationState(device, rec.conversationId, advanced, sessionKey);
+          await this.db.delete(PENDING_STORE, rec.conversationId);
+          out.set(rec.conversationId, advanced);
+        } catch {
+          // Pending state corrupt or wrong key — fall back; the drain path re-syncs from the server.
+          await this.db.delete(PENDING_STORE, rec.conversationId);
+          out.set(rec.conversationId, this.engine.deserializeConversation(opened));
+        }
+      } else {
+        out.set(rec.conversationId, this.engine.deserializeConversation(opened));
+        // Record the loaded version as this instance's CAS base; a later save by another tab bumps the
+        // store past it and is caught (see saveConversationState).
+        this.groupStateVersions.set(rec.conversationId, rec.version ?? -1);
       }
-      out.set(rec.conversationId, this.engine.deserializeConversation(opened));
-      // Record the loaded version as this instance's CAS base; a later save by another tab bumps the
-      // store past it and is caught (see saveConversationState).
-      this.groupStateVersions.set(rec.conversationId, rec.version ?? -1);
     }
     return out;
   }
