@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, max, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
@@ -448,6 +448,28 @@ export class MessagingService {
     const { result, event } = await withTenant(auth.tenantId, async (tx) => {
       const sender = await requireUser(tx, auth.sub);
       await requireMembership(tx, conversationId, sender);
+
+      // Stale-epoch gate: reject if the client is behind the latest committed epoch. A message
+      // encrypted at an old epoch is silently undecryptable by peers at a newer epoch — reject
+      // early so the client knows to drain commits before retrying.
+      const [epochRow] = await tx
+        .select({ maxEpoch: max(schema.conversationCommits.epoch) })
+        .from(schema.conversationCommits)
+        .where(
+          and(
+            eq(schema.conversationCommits.tenantId, auth.tenantId),
+            eq(schema.conversationCommits.conversationId, conversationId),
+          ),
+        );
+      const maxEpoch =
+        epochRow?.maxEpoch !== null && epochRow?.maxEpoch !== undefined
+          ? Number(epochRow.maxEpoch)
+          : -1;
+      if (body.epoch < maxEpoch) {
+        throw new ConflictException(
+          `stale epoch: client at ${String(body.epoch)}, group at ${String(maxEpoch)} — drain commits before sending`,
+        );
+      }
 
       const inserted = await tx
         .insert(schema.messages)

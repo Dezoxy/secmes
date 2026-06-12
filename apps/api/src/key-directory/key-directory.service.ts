@@ -226,7 +226,7 @@ export class KeyDirectoryService {
    * `FOR UPDATE SKIP LOCKED` per device so concurrent claims pick different rows.
    */
   async claimAll(auth: VerifiedAuth, targetUserId: string): Promise<ClaimedKeyPackage[]> {
-    return withTenant(auth.tenantId, async (tx) => {
+    const claimed = await withTenant(auth.tenantId, async (tx) => {
       // LATERAL JOIN: for each device of the target user, select the oldest unclaimed package with
       // FOR UPDATE SKIP LOCKED, then UPDATE (claim) it in one statement. This avoids DISTINCT ON +
       // FOR UPDATE, which PostgreSQL rejects (DISTINCT ON is not allowed with locking clauses). The
@@ -259,5 +259,15 @@ export class KeyDirectoryService {
         };
       });
     });
+
+    // Audit bulk claims so pool-drain attempts (repeated group-adds) are detectable, matching
+    // the per-claim audit trail on the single-claim path. Separate tx (same pattern as claimKeyPackage).
+    if (claimed.length > 0) {
+      await this.audit.record(auth.tenantId, {
+        eventType: 'keydir.key_packages_claimed_bulk',
+        actorSub: auth.sub,
+      });
+    }
+    return claimed;
   }
 }
