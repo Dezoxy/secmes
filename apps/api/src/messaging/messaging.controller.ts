@@ -31,6 +31,7 @@ import {
   type ListMessagesQuery,
   type SendMessage,
 } from './messaging.schemas.js';
+import { type FetchedCommit } from './messaging.service.js';
 
 const BASE64_PATTERN = '^[A-Za-z0-9+/]+={0,2}$';
 
@@ -194,6 +195,8 @@ class CommitResultDto {
 class FetchedCommitDto {
   @ApiProperty({ format: 'uuid' })
   id!: string;
+  @ApiProperty({ format: 'uuid', description: 'client-generated idempotency key for this commit' })
+  clientCommitId!: string;
   @ApiProperty({ minimum: 0 })
   epoch!: number;
   @ApiProperty({
@@ -319,7 +322,7 @@ export class MessagingController {
     @CurrentAuth() auth: VerifiedAuth,
     @Param('conversationId', ParseUUIDPipe) conversationId: string,
     @Query(new ZodValidationPipe(ListCommitsQuerySchema)) query: ListCommitsQuery,
-  ): Promise<FetchedCommitDto[]> {
+  ): Promise<FetchedCommit[]> {
     return this.messaging.listCommits(auth, conversationId, query);
   }
 

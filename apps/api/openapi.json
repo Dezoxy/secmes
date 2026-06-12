@@ -7424,6 +7424,13 @@
             "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
             "maxLength": 36
           },
+          "clientCommitId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "client-generated idempotency key for this commit",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "maxLength": 36
+          },
           "epoch": {
             "type": "number",
             "minimum": 0,
@@ -7453,6 +7460,7 @@
         },
         "required": [
           "id",
+          "clientCommitId",
           "epoch",
           "senderUserId",
           "commit",

@@ -65,6 +65,7 @@ export interface CommitResult {
 /** One fetched commit — opaque mls_private_message base64 + routing metadata. Server never decrypts. */
 export interface FetchedCommit {
   id: string;
+  clientCommitId: string;
   epoch: number;
   senderUserId: string | null;
   commit: string;
