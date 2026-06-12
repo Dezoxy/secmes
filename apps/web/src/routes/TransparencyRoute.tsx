@@ -127,9 +127,11 @@ export default function TransparencyRoute() {
                 Argus is a web app: the encryption code is delivered by the server on each load. A
                 fully compromised server could ship malicious JavaScript to intercept plaintext
                 before encryption. Mitigations: a strict Content-Security-Policy, Subresource
-                Integrity (SRI) hashes on every script and stylesheet, service-worker pinning, and
-                reproducible builds with a published bundle digest (see below). This is the accepted
-                trade-off for a browser-delivered app — strong privacy, not unconditional security.
+                Integrity (SRI) hashes on entry scripts and stylesheets (lazily-loaded chunks are
+                excluded — an accepted residual documented in the code-delivery threat model),
+                service-worker pinning, and reproducible builds with a published bundle digest (see
+                below). This is the accepted trade-off for a browser-delivered app — strong privacy,
+                not unconditional security.
               </p>
             </div>
           </div>
@@ -201,8 +203,10 @@ export default function TransparencyRoute() {
           </h2>
           <div className="rounded-xl border border-white/5 bg-white/[0.03] px-5 py-4 text-sm">
             <p className="mb-4 leading-relaxed text-white/70">
-              All personal data is processed exclusively in the EU/EEA. No data is transferred to
-              third countries.
+              All data at rest is stored and processed exclusively in the EU/EEA. Cloudflare
+              terminates TLS at global edge PoPs for ingress and WAF — data in transit only, nothing
+              stored — so TLS handshakes occur outside the EU. No personal data is stored or
+              processed by any sub-processor outside the EU/EEA.
             </p>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
