@@ -50,7 +50,16 @@ export class MeController {
                 memberCount: { type: 'integer', minimum: 0 },
                 subscriptionStatus: {
                   type: 'string',
-                  enum: ['active', 'trialing', 'past_due', 'canceled', 'incomplete'],
+                  enum: [
+                    'active',
+                    'trialing',
+                    'past_due',
+                    'canceled',
+                    'incomplete',
+                    'incomplete_expired',
+                    'unpaid',
+                    'paused',
+                  ],
                   nullable: true,
                 },
               },
