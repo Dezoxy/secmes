@@ -166,7 +166,8 @@ export type SentMessage = z.infer<typeof SentMessageSchema>;
 
 export const FetchedMessageSchema = z.object({
   id: z.string().uuid(),
-  senderUserId: z.string().uuid(),
+  /** null when the sender has exercised their GDPR right to erasure (account deleted). */
+  senderUserId: z.string().uuid().nullable(),
   clientMessageId: z.string().uuid(),
   ciphertext: base64,
   alg: z.string().min(1),
@@ -400,3 +401,90 @@ export const SsoConfigSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 export type SsoConfig = z.infer<typeof SsoConfigSchema>;
+
+// ── G6: GDPR — data export (Art. 20) ─────────────────────────────────────────
+// Server is crypto-blind: no ciphertext, content keys, or message plaintext appears here.
+// `messageSummary` describes counts and timestamps only. `endpointPrefix` is the first
+// 40 chars of the push endpoint URL (enough to identify the push service, not the full
+// capability URL).
+
+export const MeExportSchema = z.object({
+  schemaVersion: z.literal('1'),
+  exportedAt: z.string().datetime(),
+  notice: z.string().max(512),
+  profile: z
+    .object({
+      id: z.string().uuid(),
+      tenantId: z.string().uuid(),
+      email: z.string().email(),
+      displayName: z.string().nullable(),
+      role: z.string().max(32),
+      status: z.string().max(32),
+      createdAt: z.string().datetime(),
+    })
+    .nullable(),
+  devices: z.array(
+    z.object({
+      id: z.string().uuid(),
+      createdAt: z.string().datetime(),
+    }),
+  ),
+  keyBackup: z.object({
+    exists: z.boolean(),
+    createdAt: z.string().datetime().nullable(),
+    updatedAt: z.string().datetime().nullable(),
+  }),
+  conversations: z.array(
+    z.object({
+      id: z.string().uuid(),
+      createdAt: z.string().datetime(),
+    }),
+  ),
+  messageSummary: z.object({
+    totalCount: z.number().int().nonnegative(),
+    byConversation: z.array(
+      z.object({
+        conversationId: z.string().uuid(),
+        count: z.number().int().nonnegative(),
+        firstAt: z.string().datetime(),
+        lastAt: z.string().datetime(),
+      }),
+    ),
+  }),
+  attachments: z.array(
+    z.object({
+      id: z.string().uuid(),
+      conversationId: z.string().uuid(),
+      objectKey: z.string().max(512),
+      byteSize: z.number().int().nonnegative(),
+      createdAt: z.string().datetime(),
+      expiresAt: z.string().datetime().nullable(),
+    }),
+  ),
+  pushSubscriptions: z.array(
+    z.object({
+      id: z.string().uuid(),
+      endpointPrefix: z.string().max(64),
+      createdAt: z.string().datetime(),
+    }),
+  ),
+  auditEvents: z.array(
+    z.object({
+      id: z.string().uuid(),
+      eventType: z.string().max(64),
+      createdAt: z.string().datetime(),
+      metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).nullable(),
+    }),
+  ),
+  invitesCreated: z.array(
+    z.object({
+      id: z.string().uuid(),
+      inviteeEmail: z.string().email().nullable(),
+      createdAt: z.string().datetime(),
+      expiresAt: z.string().datetime(),
+      acceptedAt: z.string().datetime().nullable(),
+      revokedAt: z.string().datetime().nullable(),
+    }),
+  ),
+});
+export type MeExport = z.infer<typeof MeExportSchema>;

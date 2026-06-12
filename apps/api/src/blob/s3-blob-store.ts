@@ -1,4 +1,5 @@
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
@@ -70,6 +71,15 @@ export class S3BlobStore extends BlobStore {
       },
     );
   }
+
+  async deleteObject(objectKey: string): Promise<void> {
+    try {
+      await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: objectKey }));
+    } catch (err) {
+      if (isNotFound(err)) return; // already absent — idempotent
+      throw err;
+    }
+  }
 }
 
 /** A missing object surfaces as a 404 / `NotFound` from S3 + B2 + MinIO alike. */
@@ -92,6 +102,9 @@ export class UnconfiguredBlobStore extends BlobStore {
     return this.fail();
   }
   blobSize(): Promise<number | null> {
+    return this.fail();
+  }
+  deleteObject(): Promise<void> {
     return this.fail();
   }
 }

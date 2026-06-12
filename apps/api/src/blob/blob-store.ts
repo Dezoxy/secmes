@@ -14,6 +14,11 @@ export abstract class BlobStore {
    * yet. Used to hard-enforce the size cap at download, since a SAS PUT can't bind `Content-Length`.
    */
   abstract blobSize(objectKey: string): Promise<number | null>;
+  /**
+   * Permanently delete the blob at `objectKey`. Idempotent — a missing object is NOT an error.
+   * Used only during GDPR account erasure; attachment rows must be deleted before this is called.
+   */
+  abstract deleteObject(objectKey: string): Promise<void>;
 }
 
 /** How long a minted presigned URL stays valid — short, since the client uses it immediately. */

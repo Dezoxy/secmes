@@ -23,8 +23,13 @@ class SyncedMessageDto {
   @ApiProperty({ format: 'uuid', description: 'which conversation this message belongs to' })
   conversationId!: string;
 
-  @ApiProperty({ format: 'uuid' })
-  senderUserId!: string;
+  @ApiProperty({
+    type: String,
+    format: 'uuid',
+    nullable: true,
+    description: 'null when the sender has exercised GDPR erasure',
+  })
+  senderUserId!: string | null;
 
   @ApiProperty({ format: 'uuid' })
   clientMessageId!: string;

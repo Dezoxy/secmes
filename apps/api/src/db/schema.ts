@@ -55,7 +55,7 @@ export const keyBackups = pgTable('key_backups', {
 export const conversations = pgTable('conversations', {
   id: uuid('id').primaryKey().defaultRandom(),
   tenantId: uuid('tenant_id').notNull(),
-  createdBy: uuid('created_by').notNull(),
+  createdBy: uuid('created_by'), // nullable after GDPR erasure (migration 0020)
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -74,7 +74,7 @@ export const messages = pgTable('messages', {
   id: uuid('id').primaryKey().defaultRandom(),
   tenantId: uuid('tenant_id').notNull(),
   conversationId: uuid('conversation_id').notNull(),
-  senderUserId: uuid('sender_user_id').notNull(),
+  senderUserId: uuid('sender_user_id'), // nullable after GDPR erasure (migration 0020)
   clientMessageId: uuid('client_message_id').notNull(),
   ciphertext: text('ciphertext').notNull(),
   alg: text('alg').notNull(),

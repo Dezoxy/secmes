@@ -72,7 +72,7 @@ export function storedToMessage(message: StoredMessage): Message {
 export function decryptedToMessage(message: DecryptedMessage): Message {
   return {
     id: message.serverId,
-    senderId: message.senderUserId,
+    senderId: message.senderUserId ?? '', // null = GDPR-erased sender; '' never matches a real user id
     content: message.text,
     timestamp: new Date(message.createdAt),
     status: 'read',
@@ -86,7 +86,7 @@ export function decryptedToMessage(message: DecryptedMessage): Message {
 export function decryptedToStoredMessage(message: DecryptedMessage): StoredMessage {
   return {
     id: message.serverId,
-    senderId: message.senderUserId,
+    senderId: message.senderUserId ?? '', // null = GDPR-erased sender
     content: message.text,
     timestamp: message.createdAt,
     status: 'read',
