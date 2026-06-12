@@ -44,4 +44,12 @@ export const SENSITIVE_LIMITS = {
   /** Invite acceptance — unbound user; brute-force protection for token guessing (256-bit entropy makes
    *  it infeasible, but the cap adds a second layer at negligible cost). */
   acceptInvite: 10,
+  /** SSO config creation — admin; 5/min caps Zitadel org provisioning storms. */
+  createSsoConfig: 5,
+  /** SSO config update — admin; allows quick iteration on settings. */
+  updateSsoConfig: 10,
+  /** SSO secret rotation — admin; low cap prevents credential churn abuse. */
+  rotateSsoSecret: 5,
+  /** SSO config deletion — admin; Zitadel org teardown; low cap. */
+  deleteSsoConfig: 5,
 } as const;

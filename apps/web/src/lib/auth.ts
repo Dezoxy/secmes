@@ -74,9 +74,11 @@ export function userManager(): UserManager {
   return manager;
 }
 
-/** Begin the OIDC redirect to Zitadel's hosted login. */
-export async function login(): Promise<void> {
-  await userManager().signinRedirect({ prompt: 'login' });
+/** Begin the OIDC redirect to Zitadel's hosted login.
+ * Pass `organizationId` to scope the login to a specific Zitadel org (G2 SSO login URL). */
+export async function login(opts?: { organizationId?: string }): Promise<void> {
+  const extra = opts?.organizationId ? { organization_id: opts.organizationId } : undefined;
+  await userManager().signinRedirect({ prompt: 'login', extraQueryParams: extra });
 }
 
 /** Complete the redirect on the callback route: exchange the code for tokens (PKCE). */

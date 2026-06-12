@@ -18,7 +18,10 @@ import {
   DeliveredWelcomeSchema,
   DownloadGrantSchema,
   AdminAuditResponseSchema,
+  CreateSsoConfigBodySchema,
   DeviceSummarySchema,
+  SsoConfigSchema,
+  UpdateSsoConfigBodySchema,
   InviteSummarySchema,
   MeSchema,
   MemberSummarySchema,
@@ -42,7 +45,11 @@ import {
   type CreatedConversation,
   type AdminAuditResponse as ContractAdminAuditResponse,
   type AuditEventSummary as ContractAuditEventSummary,
+  type CreateSsoConfigBody as ContractCreateSsoConfigBody,
   type DeviceSummary as ContractDeviceSummary,
+  type RotateSsoSecretBody as ContractRotateSsoSecretBody,
+  type SsoConfig as ContractSsoConfig,
+  type UpdateSsoConfigBody as ContractUpdateSsoConfigBody,
   type InviteSummary as ContractInviteSummary,
   type MemberSummary as ContractMemberSummary,
   type ReceiptStatus,
@@ -607,6 +614,71 @@ export async function listAdminAudit(cursor?: string, limit = 50): Promise<Admin
       path: `/admin/audit?${params.toString()}`,
       method: 'GET',
       responseSchema: AdminAuditResponseSchema,
+    }),
+  );
+}
+
+// ── G2: Per-tenant SSO ────────────────────────────────────────────────────────
+
+export type SsoConfig = ContractSsoConfig;
+export type CreateSsoConfigBody = ContractCreateSsoConfigBody;
+export type UpdateSsoConfigBody = ContractUpdateSsoConfigBody;
+export type RotateSsoSecretBody = ContractRotateSsoSecretBody;
+
+/** Get SSO config for this tenant (admin only). Returns null when not configured. */
+export async function getSsoConfig(): Promise<SsoConfig | null> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/admin/sso-config',
+      method: 'GET',
+      responseSchema: SsoConfigSchema.nullable(),
+    }),
+  );
+}
+
+/** Configure SSO for this tenant (admin only). Provisions a Zitadel org + IdP. */
+export async function createSsoConfig(body: CreateSsoConfigBody): Promise<SsoConfig> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/admin/sso-config',
+      method: 'POST',
+      body,
+      requestSchema: CreateSsoConfigBodySchema,
+      responseSchema: SsoConfigSchema,
+    }),
+  );
+}
+
+/** Update SSO provider metadata (admin only). Does not touch the client secret. */
+export async function updateSsoConfig(body: UpdateSsoConfigBody): Promise<SsoConfig> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/admin/sso-config',
+      method: 'PATCH',
+      body,
+      requestSchema: UpdateSsoConfigBodySchema,
+      responseSchema: SsoConfigSchema,
+    }),
+  );
+}
+
+/** Rotate the SSO client secret (admin only). New secret forwarded to Zitadel only. */
+export async function rotateSsoSecret(body: RotateSsoSecretBody): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: '/admin/sso-config/secret',
+      method: 'PATCH',
+      body,
+    }),
+  );
+}
+
+/** Remove SSO config and delete the Zitadel org (admin only). */
+export async function deleteSsoConfig(): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: '/admin/sso-config',
+      method: 'DELETE',
     }),
   );
 }

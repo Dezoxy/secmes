@@ -68,6 +68,9 @@ OPTIONAL_SECRETS=(
   # GlitchTip project DSN — a write-only ingest key the operator creates in the GlitchTip UI after
   # the first deploy (arming). Seeded EMPTY until provisioned; the api is a complete no-op without it.
   "argus-sentry-dsn=sentry_dsn"
+  # G2 SSO: Zitadel Management API PAT for org+IdP provisioning. Seeded EMPTY until the operator runs
+  # provision.sh and stores the admin PAT in Key Vault. SSO endpoints return 503 when empty.
+  "argus-zitadel-management-pat=zitadel_management_pat"
 )
 
 log() { printf 'argus-secrets: %s\n' "$*" >&2; } # names/status only — NEVER a secret value

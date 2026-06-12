@@ -167,6 +167,22 @@ export const tenantInvites = pgTable('tenant_invites', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+// G2: per-tenant OIDC SSO config (one per tenant, lazy). client_secret is NOT stored here —
+// it lives in Zitadel only. All SSO endpoints are admin-only. See 0019 + per-tenant-sso.md.
+export const tenantSsoConfigs = pgTable('tenant_sso_configs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  zitadelOrgId: text('zitadel_org_id').notNull(),
+  zitadelIdpId: text('zitadel_idp_id').notNull(),
+  providerType: text('provider_type').notNull(),
+  providerName: text('provider_name').notNull(),
+  issuerUrl: text('issuer_url').notNull(),
+  clientId: text('client_id').notNull(),
+  loginUrl: text('login_url').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 // Append-only audit log (IDs + metadata only — never content/secrets). RLS + grants in 0002.
 export const auditEvents = pgTable('audit_events', {
   id: uuid('id').primaryKey().defaultRandom(),

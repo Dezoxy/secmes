@@ -144,11 +144,14 @@ services:
       DATABASE_URL_FILE: /run/secrets/database_url
       S3_SECRET_ACCESS_KEY_FILE: /run/secrets/s3_secret_access_key
       REDIS_URL_FILE: /run/secrets/redis_url
+      # G2 SSO: Management PAT for Zitadel org+IdP provisioning. OPTIONAL — endpoints return 503 when absent.
+      ZITADEL_MANAGEMENT_PAT_FILE: /run/secrets/zitadel_management_pat
     secrets:
       - database_url
       - s3_secret_access_key
       - redis_url
       - sentry_dsn
+      - zitadel_management_pat
     depends_on:
       postgres:
         condition: service_healthy
@@ -743,6 +746,11 @@ secrets:
     # Key Vault (argus-zitadel-login-pat); the fetch script seeds an EMPTY file on first boot (before it's
     # provisioned) so the mount always resolves — login is degraded until the operator stores the real PAT.
     file: ${ARGUS_SECRETS_DIR:-./secrets}/zitadel_login_pat
+  zitadel_management_pat:
+    # G2 SSO: Zitadel Management API PAT for org+IdP provisioning. OPTIONAL — api reads it via
+    # ZITADEL_MANAGEMENT_PAT_FILE; SSO endpoints return 503 when absent, everything else is unaffected.
+    # Seeded EMPTY on first boot (fetch script). Provision from Key Vault (argus-zitadel-management-pat).
+    file: ${ARGUS_SECRETS_DIR:-./secrets}/zitadel_management_pat
   grafana_admin_password:
     # Grafana admin password — Grafana reads it via GF_SECURITY_ADMIN_PASSWORD__FILE (native `__FILE` support).
     # Delivered from Key Vault (argus-grafana-admin-password); set it before the first deploy.
