@@ -71,6 +71,13 @@ OPTIONAL_SECRETS=(
   # G2 SSO: Zitadel Management API PAT for org+IdP provisioning. Seeded EMPTY until the operator runs
   # provision.sh and stores the admin PAT in Key Vault. SSO endpoints return 503 when empty.
   "argus-zitadel-management-pat=zitadel_management_pat"
+  # G8 Billing: Stripe API key + webhook signing secret. Seeded EMPTY until the operator stores them
+  # in Key Vault. BillingService starts in no-op mode (logs a warning) when the key file is empty.
+  "argus-stripe-secret-key=stripe_secret_key"
+  "argus-stripe-webhook-secret=stripe_webhook_secret"
+  # G8 Operator: API key for /operator/* plan-management endpoints. Seeded EMPTY until provisioned.
+  # OperatorGuard returns 401 when the file is empty.
+  "argus-operator-api-key=operator_api_key"
 )
 
 log() { printf 'argus-secrets: %s\n' "$*" >&2; } # names/status only — NEVER a secret value
