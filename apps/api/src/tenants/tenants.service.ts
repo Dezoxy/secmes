@@ -9,6 +9,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 
+import { AuditService } from '../audit/audit.service.js';
 import type { MaybeUnboundAuth, VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withRouting, withTenant } from '../db/index.js';
 import { generateHandle } from '../users/handle-words.js';
@@ -83,6 +84,7 @@ export interface AcceptInviteResult {
 
 @Injectable()
 export class TenantsService {
+  constructor(private readonly audit: AuditService) {}
   /**
    * Create a new tenant and its first admin user atomically.
    * Three rows are inserted: `tenants`, `users` (role: admin), `user_tenant_index`.
@@ -102,7 +104,7 @@ export class TenantsService {
       const tenantId = randomUUID();
       const displayName = generate();
       try {
-        return await withTenant(tenantId, async (tx) => {
+        const result = await withTenant(tenantId, async (tx) => {
           await tx.insert(schema.tenants).values({ id: tenantId, name });
           const [user] = await tx
             .insert(schema.users)
@@ -112,6 +114,8 @@ export class TenantsService {
           await tx.insert(schema.userTenantIndex).values({ sub, tenantId });
           return { tenantId, userId: user.id };
         });
+        await this.audit.record(result.tenantId, { eventType: 'tenant.created', actorSub: sub });
+        return result;
       } catch (err) {
         if (isHandleCollision(err) && attempt < MAX_HANDLE_ATTEMPTS - 1) continue;
         if (isSubCollision(err)) throw new ConflictException('already bound to a tenant');
@@ -213,7 +217,7 @@ export class TenantsService {
     for (let attempt = 0; attempt < MAX_HANDLE_ATTEMPTS; attempt++) {
       const displayName = generate();
       try {
-        return await withTenant(invite.tenantId, async (tx) => {
+        const result = await withTenant(invite.tenantId, async (tx) => {
           // Mark invite accepted atomically — first committer wins for ALL callers (not just same-sub
           // races). The RETURNING check enforces single-use: if accepted_at is already set (another
           // user beat us here), this UPDATE matches 0 rows → uniform INVALID 403, no user is created.
@@ -252,6 +256,8 @@ export class TenantsService {
 
           return { tenantId: invite.tenantId, userId: user.id };
         });
+        await this.audit.record(result.tenantId, { eventType: 'invite.accepted', actorSub: sub });
+        return result;
       } catch (err) {
         if (isHandleCollision(err) && attempt < MAX_HANDLE_ATTEMPTS - 1) continue;
         if (isSubCollision(err)) throw new ConflictException('already bound to a tenant');
@@ -357,6 +363,10 @@ export class TenantsService {
         .returning({ id: schema.users.id });
       if (!updated) throw new NotFoundException('user not found');
     });
+    await this.audit.record(auth.tenantId, {
+      eventType: 'member.role_changed',
+      actorSub: auth.sub,
+    });
   }
 
   /** Revoke a member (soft-delete, v1). Cannot revoke the last admin. */
@@ -398,5 +408,6 @@ export class TenantsService {
         .set({ status: 'revoked' })
         .where(and(eq(schema.users.id, targetUserId), eq(schema.users.tenantId, auth.tenantId)));
     });
+    await this.audit.record(auth.tenantId, { eventType: 'member.revoked', actorSub: auth.sub });
   }
 }
