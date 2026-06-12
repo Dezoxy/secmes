@@ -148,8 +148,13 @@ check() {
 
     # ---- Claude, evaluated alone ------------------------------------------------------------
     (   ($comments | by_claude_bot
-          # The in-progress sticky is not a signal yet — the verdict arrives as an in-place edit.
-          | map(select(.body | test("^Claude Code is working") | not))
+          # The in-progress sticky is not a signal yet — the verdict arrives as an in-place
+          # edit. Its wording has already changed once ("Claude Code is working…" →
+          # "### PR Review in progress"), so match the known prefixes AND the spinner asset.
+          | map(select(.body |
+              (test("^(Claude Code is working|#+ PR Review in progress)")
+               or contains("user-attachments/assets/5ac382c7-e004-429b-8e35-7feb3e8f9c6f"))
+              | not))
           | map({kind: (.body | verdict_kind), at: (.updated_at // .created_at), url: .html_url}))
       + ($reviews  | by_claude_bot | map(select(.body != ""))
           | map({kind: (.body | verdict_kind), at: .submitted_at, url: .html_url}))
