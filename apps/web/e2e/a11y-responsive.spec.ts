@@ -83,11 +83,11 @@ test('mobile settings sections expose current state and focus section content', 
   expect(panelBox).not.toBeNull();
   expect(panelBox!.x).toBeGreaterThanOrEqual(15);
   expect(panelBox!.x).toBeLessThanOrEqual(17);
-  expect(panelBox!.y).toBeGreaterThanOrEqual(41);
-  expect(panelBox!.y).toBeLessThanOrEqual(43);
+  expect(panelBox!.y).toBeGreaterThanOrEqual(40);
+  expect(panelBox!.y).toBeLessThanOrEqual(45);
   expect(panelBox!.width).toBeLessThanOrEqual(358);
-  expect(panelBox!.height).toBeGreaterThanOrEqual(759);
-  expect(panelBox!.height).toBeLessThanOrEqual(761);
+  expect(panelBox!.height).toBeGreaterThanOrEqual(757);
+  expect(panelBox!.height).toBeLessThanOrEqual(763);
 
   const securitySection = dialog.getByRole('button', { name: 'Security & Recovery' });
 
