@@ -276,7 +276,7 @@ export class GdprService {
         id: e.id,
         eventType: e.eventType,
         createdAt: e.createdAt.toISOString(),
-        metadata: (e.metadata as Record<string, unknown> | null) ?? null,
+        metadata: (e.metadata as Record<string, string | number | boolean> | null) ?? null,
       })),
       invitesCreated: invitesCreated.map((i) => ({
         id: i.id,

@@ -21,7 +21,7 @@
             }
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -81,7 +81,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -132,7 +132,7 @@
             "description": "device revoked"
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -192,7 +192,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -217,7 +217,7 @@
             "bearer": []
           }
         ],
-        "summary": "Revoke a device (admin only) \u2014 hard-delete, cascades key packages",
+        "summary": "Revoke a device (admin only) — hard-delete, cascades key packages",
         "tags": [
           "admin"
         ]
@@ -324,7 +324,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -436,7 +436,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -486,7 +486,7 @@
             "description": "logout recorded"
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -546,7 +546,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -658,7 +658,7 @@
             }
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -718,7 +718,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -769,7 +769,7 @@
             "description": "account deleted"
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -829,7 +829,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -854,7 +854,7 @@
             "bearer": []
           }
         ],
-        "summary": "Delete account (GDPR Art. 17 \u2014 right to erasure)",
+        "summary": "Delete account (GDPR Art. 17 — right to erasure)",
         "tags": [
           "users"
         ]
@@ -893,7 +893,7 @@
             }
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -953,7 +953,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1001,7 +1001,7 @@
             }
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1061,7 +1061,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1178,7 +1178,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1237,7 +1237,7 @@
             }
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1267,7 +1267,7 @@
             }
           },
           "404": {
-            "description": "no key package available \u2014 ask the user to replenish",
+            "description": "no key package available — ask the user to replenish",
             "content": {
               "application/json": {
                 "schema": {
@@ -1297,7 +1297,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1414,7 +1414,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1524,7 +1524,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1569,7 +1569,7 @@
             }
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1629,7 +1629,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1746,7 +1746,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1875,7 +1875,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1929,7 +1929,7 @@
               "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
               "maxLength": 36
             },
-            "description": "exclusive cursor \u2014 a message id (use the previous page nextCursor)"
+            "description": "exclusive cursor — a message id (use the previous page nextCursor)"
           },
           {
             "name": "limit",
@@ -1956,7 +1956,7 @@
             }
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2016,7 +2016,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2060,7 +2060,7 @@
               "maxLength": 256,
               "pattern": "^[A-Za-z0-9_-]+$"
             },
-            "description": "opaque cursor \u2014 echo the previous page nextCursor"
+            "description": "opaque cursor — echo the previous page nextCursor"
           },
           {
             "name": "limit",
@@ -2147,7 +2147,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2269,7 +2269,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2330,7 +2330,7 @@
             }
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2390,7 +2390,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2519,7 +2519,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2577,7 +2577,7 @@
               "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
               "maxLength": 36
             },
-            "description": "the calling device's id \u2014 returns only welcomes sealed to its KeyPackage"
+            "description": "the calling device's id — returns only welcomes sealed to its KeyPackage"
           }
         ],
         "responses": {
@@ -2656,7 +2656,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2723,7 +2723,7 @@
               "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
               "maxLength": 36
             },
-            "description": "the calling device's id \u2014 the welcome must be sealed to it"
+            "description": "the calling device's id — the welcome must be sealed to it"
           }
         ],
         "responses": {
@@ -2798,7 +2798,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2865,7 +2865,7 @@
               "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
               "maxLength": 36
             },
-            "description": "the calling device's id \u2014 the welcome must be sealed to it"
+            "description": "the calling device's id — the welcome must be sealed to it"
           }
         ],
         "responses": {
@@ -2933,7 +2933,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3050,7 +3050,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3177,7 +3177,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3287,7 +3287,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3398,7 +3398,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3506,7 +3506,7 @@
             }
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3566,7 +3566,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3621,7 +3621,7 @@
             }
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3691,7 +3691,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3756,7 +3756,7 @@
             }
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3816,7 +3816,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3864,7 +3864,7 @@
             "description": "SSO config deleted"
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3924,7 +3924,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3974,7 +3974,7 @@
             "description": "secret rotated"
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4034,7 +4034,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4091,7 +4091,7 @@
             }
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4161,7 +4161,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4208,7 +4208,7 @@
             }
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4268,7 +4268,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4317,7 +4317,7 @@
             }
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4377,7 +4377,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4428,7 +4428,7 @@
             "description": "invite revoked"
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4488,7 +4488,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4535,7 +4535,7 @@
             }
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4605,7 +4605,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4656,7 +4656,7 @@
             }
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4716,7 +4716,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4767,7 +4767,7 @@
             "description": "role updated"
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4827,7 +4827,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4878,7 +4878,7 @@
             "description": "member revoked"
           },
           "400": {
-            "description": "Validation failed \u2014 malformed or out-of-bounds request.",
+            "description": "Validation failed — malformed or out-of-bounds request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4938,7 +4938,7 @@
             }
           },
           "429": {
-            "description": "Rate limit exceeded \u2014 too many requests; retry after the `Retry-After` interval.",
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5373,7 +5373,7 @@
               "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
               "maxLength": 65536
             },
-            "description": "non-sensitive metadata IDs only \u2014 never content or keys"
+            "description": "non-sensitive metadata IDs only — never content or keys"
           }
         },
         "required": [
@@ -5458,8 +5458,8 @@
             "maxLength": 65536
           },
           "profile": {
-            "nullable": true,
             "type": "object",
+            "nullable": true,
             "properties": {
               "id": {
                 "type": "string",
@@ -5566,7 +5566,6 @@
           "schemaVersion",
           "exportedAt",
           "notice",
-          "profile",
           "devices",
           "keyBackup",
           "conversations",
@@ -5588,7 +5587,7 @@
             "pattern": "^[A-Za-z0-9+/]+={0,2}$"
           },
           "keyPackages": {
-            "description": "base64 one-time-use MLS KeyPackages (1\u2013100)",
+            "description": "base64 one-time-use MLS KeyPackages (1–100)",
             "minItems": 1,
             "maxItems": 100,
             "items": {
@@ -5643,7 +5642,7 @@
           },
           "signaturePublicKey": {
             "type": "string",
-            "description": "base64 MLS signature public key \u2014 verify its fingerprint out-of-band",
+            "description": "base64 MLS signature public key — verify its fingerprint out-of-band",
             "pattern": "^[A-Za-z0-9+/]+={0,2}$",
             "maxLength": 65536
           },
@@ -5711,7 +5710,7 @@
         "type": "object",
         "properties": {
           "memberUserIds": {
-            "description": "other participant user ids (the caller is added automatically); 1\u2013256",
+            "description": "other participant user ids (the caller is added automatically); 1–256",
             "minItems": 1,
             "maxItems": 256,
             "type": "array",
@@ -5755,7 +5754,7 @@
           },
           "ciphertext": {
             "type": "string",
-            "description": "opaque base64 MLS ciphertext \u2014 the server never decrypts it",
+            "description": "opaque base64 MLS ciphertext — the server never decrypts it",
             "maxLength": 65536,
             "pattern": "^[A-Za-z0-9+/]+={0,2}$"
           },
@@ -5839,7 +5838,7 @@
           },
           "ciphertext": {
             "type": "string",
-            "description": "opaque base64 MLS ciphertext \u2014 the server never decrypts it",
+            "description": "opaque base64 MLS ciphertext — the server never decrypts it",
             "pattern": "^[A-Za-z0-9+/]+={0,2}$",
             "maxLength": 65536
           },
@@ -5936,7 +5935,7 @@
           },
           "ciphertext": {
             "type": "string",
-            "description": "opaque base64 MLS ciphertext \u2014 the server never decrypts it",
+            "description": "opaque base64 MLS ciphertext — the server never decrypts it",
             "pattern": "^[A-Za-z0-9+/]+={0,2}$",
             "maxLength": 65536
           },
@@ -5992,7 +5991,7 @@
             "type": "string",
             "nullable": true,
             "maxLength": 256,
-            "description": "opaque resume cursor at the last message of this page \u2014 persist it; pass as `after` to continue or resume later. Keep paging while you receive a full page. Null only on an empty page.",
+            "description": "opaque resume cursor at the last message of this page — persist it; pass as `after` to continue or resume later. Keep paging while you receive a full page. Null only on an empty page.",
             "pattern": "^[A-Za-z0-9_-]+$"
           }
         },
@@ -6088,13 +6087,13 @@
           },
           "welcome": {
             "type": "string",
-            "description": "opaque base64 MLS Welcome \u2014 the server never decrypts it",
+            "description": "opaque base64 MLS Welcome — the server never decrypts it",
             "maxLength": 32768,
             "pattern": "^[A-Za-z0-9+/]+={0,2}$"
           },
           "ratchetTree": {
             "type": "string",
-            "description": "opaque base64 MLS RatchetTree \u2014 the server never decrypts it",
+            "description": "opaque base64 MLS RatchetTree — the server never decrypts it",
             "maxLength": 32768,
             "pattern": "^[A-Za-z0-9+/]+={0,2}$"
           }
@@ -6141,7 +6140,7 @@
           "senderUserId": {
             "type": "string",
             "format": "uuid",
-            "description": "the verified member who added you (set server-side at deliver) \u2014 resolve a display name via the directory",
+            "description": "the verified member who added you (set server-side at deliver) — resolve a display name via the directory",
             "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
             "maxLength": 36
           },
@@ -6165,13 +6164,13 @@
         "properties": {
           "welcome": {
             "type": "string",
-            "description": "opaque base64 MLS Welcome \u2014 the server never decrypts it",
+            "description": "opaque base64 MLS Welcome — the server never decrypts it",
             "maxLength": 32768,
             "pattern": "^[A-Za-z0-9+/]+={0,2}$"
           },
           "ratchetTree": {
             "type": "string",
-            "description": "opaque base64 MLS RatchetTree \u2014 the server never decrypts it",
+            "description": "opaque base64 MLS RatchetTree — the server never decrypts it",
             "maxLength": 32768,
             "pattern": "^[A-Za-z0-9+/]+={0,2}$"
           }
@@ -6212,12 +6211,12 @@
           "objectKey": {
             "type": "string",
             "maxLength": 512,
-            "description": "server-minted opaque object key (tenant-prefixed) \u2014 reference it in the message",
+            "description": "server-minted opaque object key (tenant-prefixed) — reference it in the message",
             "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
           },
           "uploadUrl": {
             "type": "string",
-            "description": "short-lived presigned PUT URL \u2014 upload the ciphertext directly; never log or store it",
+            "description": "short-lived presigned PUT URL — upload the ciphertext directly; never log or store it",
             "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
             "maxLength": 65536
           }
@@ -6248,7 +6247,7 @@
         "properties": {
           "url": {
             "type": "string",
-            "description": "short-lived presigned GET URL \u2014 download the ciphertext directly; never log or store it",
+            "description": "short-lived presigned GET URL — download the ciphertext directly; never log or store it",
             "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
             "maxLength": 65536
           }
@@ -6482,7 +6481,7 @@
           },
           "token": {
             "type": "string",
-            "description": "One-time plaintext token \u2014 returned once, never stored",
+            "description": "One-time plaintext token — returned once, never stored",
             "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
             "maxLength": 65536
           },

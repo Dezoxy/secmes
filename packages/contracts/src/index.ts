@@ -473,7 +473,7 @@ export const MeExportSchema = z.object({
       id: z.string().uuid(),
       eventType: z.string().max(64),
       createdAt: z.string().datetime(),
-      metadata: z.record(z.string(), z.unknown()).nullable(),
+      metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).nullable(),
     }),
   ),
   invitesCreated: z.array(
