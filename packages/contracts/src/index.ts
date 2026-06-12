@@ -343,6 +343,7 @@ export type CommitResponse = z.infer<typeof CommitResponseSchema>;
 // GET /conversations/:id/commits?afterEpoch=N — drain commits for epoch-advance / catch-up.
 export const FetchedCommitSchema = z.object({
   id: z.string().uuid(),
+  clientCommitId: z.string().uuid(),
   epoch: z.number().int().nonnegative(),
   /** null when sender exercised GDPR erasure. */
   senderUserId: z.string().uuid().nullable(),

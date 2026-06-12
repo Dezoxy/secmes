@@ -275,7 +275,9 @@ export class GroupConversationManager {
     await withLock(conversationLock(conversationId), async () => {
       // Persist the pending post-commit state BEFORE the POST — if the tab crashes after a successful
       // POST but before applyStaged/saveConversationState, the drain path (onSubscribed → drainCommits)
-      // re-syncs from the server on next load.
+      // re-syncs from the server on next load. clientCommitId is generated here (before the save) so it
+      // is stored in PENDING_STORE and available on reload to verify OUR commit won (not another member's).
+      const clientCommitId = crypto.randomUUID();
       const pendingBytes = conversation.serializeStaged(staged);
       await this.keystore.saveStagedCommit(
         this.device,
@@ -283,12 +285,13 @@ export class GroupConversationManager {
         this.sessionKey,
         pendingBytes,
         staged.epoch,
+        clientCommitId,
       );
       pendingBytes.fill(0); // wipe the transient plaintext — the sealed copy is in IDB
 
       try {
         await postCommit(conversationId, {
-          clientCommitId: crypto.randomUUID(),
+          clientCommitId,
           epoch: staged.epoch,
           commit: toBase64(staged.commit),
           welcomes,
@@ -382,6 +385,7 @@ export class GroupConversationManager {
         })),
       );
 
+      const clientCommitId = crypto.randomUUID();
       const pendingBytes = conversation.serializeStaged(staged);
       await this.keystore.saveStagedCommit(
         this.device,
@@ -389,12 +393,13 @@ export class GroupConversationManager {
         this.sessionKey,
         pendingBytes,
         staged.epoch,
+        clientCommitId,
       );
       pendingBytes.fill(0);
 
       try {
         await postCommit(conversationId, {
-          clientCommitId: crypto.randomUUID(),
+          clientCommitId,
           epoch: staged.epoch,
           commit: toBase64(staged.commit),
           welcomes,

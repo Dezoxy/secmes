@@ -1024,6 +1024,7 @@ export class MessagingService {
       const rows = await tx
         .select({
           id: schema.conversationCommits.id,
+          clientCommitId: schema.conversationCommits.clientCommitId,
           epoch: schema.conversationCommits.epoch,
           senderUserId: schema.conversationCommits.senderUserId,
           commit: schema.conversationCommits.commit,
@@ -1042,6 +1043,7 @@ export class MessagingService {
 
       return rows.map((r) => ({
         id: r.id,
+        clientCommitId: r.clientCommitId,
         epoch: Number(r.epoch),
         senderUserId: r.senderUserId,
         commit: r.commit,

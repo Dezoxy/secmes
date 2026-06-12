@@ -150,6 +150,8 @@ interface StoredPendingCommit {
   conversationId: string;
   /** The pre-commit epoch (staged.epoch) used to verify the commit landed on the server. */
   epoch: number;
+  /** The UUID sent to the server as clientCommitId — used to verify it was OUR commit that won. */
+  clientCommitId: string;
   sealed: SealedBlob;
 }
 
@@ -497,7 +499,11 @@ export class DeviceKeystore {
      * Returns true if the commit landed on the server (i.e., the epoch slot exists); false to discard.
      * Omit in tests — orphaned entries are promoted unconditionally.
      */
-    verifyCommitExists?: (conversationId: string, epoch: number) => Promise<boolean>,
+    verifyCommitExists?: (
+      conversationId: string,
+      epoch: number,
+      clientCommitId: string,
+    ) => Promise<boolean>,
   ): Promise<Map<string, Conversation>> {
     const identity = deviceIdentity(device);
     const signaturePublicKey = deviceSignaturePublicKeyB64(device);
@@ -530,9 +536,14 @@ export class DeviceKeystore {
         pendingRec.identity === identity &&
         pendingRec.signaturePublicKey === signaturePublicKey
       ) {
-        // Verify the commit actually landed on the server before promoting.
+        // Verify our commit (not another member's) actually landed on the server before promoting.
         const commitLanded =
-          !verifyCommitExists || (await verifyCommitExists(rec.conversationId, pendingRec.epoch));
+          !verifyCommitExists ||
+          (await verifyCommitExists(
+            rec.conversationId,
+            pendingRec.epoch,
+            pendingRec.clientCommitId,
+          ));
         if (!commitLanded) {
           // POST failed before reaching the server — discard pending slot, load pre-commit state.
           await this.db.delete(PENDING_STORE, rec.conversationId);
@@ -580,7 +591,10 @@ export class DeviceKeystore {
       // (network drop before the request left the browser), the pending state is epoch N+1 while
       // the server is still at epoch N; promoting it would strand this device at a phantom epoch
       // where messages are stored but undecryptable by peers. Skip the entry if unconfirmed.
-      if (verifyCommitExists && !(await verifyCommitExists(conversationId, pendingRec.epoch))) {
+      if (
+        verifyCommitExists &&
+        !(await verifyCommitExists(conversationId, pendingRec.epoch, pendingRec.clientCommitId))
+      ) {
         await this.db.delete(PENDING_STORE, conversationId);
         continue;
       }
@@ -637,6 +651,8 @@ export class DeviceKeystore {
     pendingBytes: Uint8Array,
     /** The pre-commit epoch (staged.epoch) — used on reload to verify the commit landed. */
     epoch: number,
+    /** The clientCommitId sent to the server — used to verify OUR commit won (not another member's). */
+    clientCommitId: string,
   ): Promise<void> {
     const sealed = await sealWithKey(sessionKey, pendingBytes, pendingCommitAad(conversationId));
     await this.db.put(
@@ -646,6 +662,7 @@ export class DeviceKeystore {
         signaturePublicKey: deviceSignaturePublicKeyB64(device),
         conversationId,
         epoch,
+        clientCommitId,
         sealed,
       } satisfies StoredPendingCommit,
       conversationId,
