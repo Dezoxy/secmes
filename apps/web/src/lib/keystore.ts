@@ -92,6 +92,9 @@ interface StoredGroupState {
   // Monotonic per-conversation version for the cross-instance CAS (see saveConversationState). Bumped on
   // every successful save; a write is only committed if the store still holds the version the writer last saw.
   version: number;
+  /** The userId of the member who created this group — persisted by the creator only. Used to gate
+   * "Add member" so the button survives page reload (in-memory creatorId is lost on unmount). */
+  creatorId?: string;
 }
 
 /** One decrypted message in the local history log — PLAINTEXT, only ever stored SEALED (see StoredMessageLog). */
@@ -424,6 +427,8 @@ export class DeviceKeystore {
             conversationId,
             sealed,
             version,
+            // Preserve creatorId across ratchet saves (set once by confirmCreate; never cleared here).
+            ...(current?.creatorId !== undefined ? { creatorId: current.creatorId } : {}),
           } satisfies StoredGroupState,
           conversationId,
         );
@@ -443,6 +448,40 @@ export class DeviceKeystore {
     await conversation.persistVia(
       this.makeConversationPersister(device, conversationId, sessionKey),
     );
+  }
+
+  /**
+   * Record that this device's user is the creator of `conversationId`. Called once by
+   * `GroupConversationManager.confirmCreate` so the "Add member" gate survives page reload.
+   * No-op if the group-state record doesn't exist yet (the caller must ensure the conversation
+   * has been persisted first — `saveConversationState` is idempotent, so call order is safe).
+   */
+  async saveGroupCreatorId(
+    device: DeviceKeys,
+    conversationId: string,
+    creatorId: string,
+  ): Promise<void> {
+    const identity = deviceIdentity(device);
+    const signaturePublicKey = deviceSignaturePublicKeyB64(device);
+    const rec = (await this.db.get(GROUP_STORE, conversationId)) as StoredGroupState | undefined;
+    if (!rec || rec.identity !== identity || rec.signaturePublicKey !== signaturePublicKey) return;
+    await this.db.put(GROUP_STORE, { ...rec, creatorId }, conversationId);
+  }
+
+  /**
+   * Return a `conversationId → creatorId` map for all conversations on this device where the
+   * creator was recorded (only conversations created — not joined — by this device have an entry).
+   */
+  async getGroupCreatorIds(device: DeviceKeys): Promise<Map<string, string>> {
+    const identity = deviceIdentity(device);
+    const signaturePublicKey = deviceSignaturePublicKeyB64(device);
+    const recs = (await this.db.getAll(GROUP_STORE)) as StoredGroupState[];
+    const out = new Map<string, string>();
+    for (const rec of recs) {
+      if (rec.identity !== identity || rec.signaturePublicKey !== signaturePublicKey) continue;
+      if (rec.creatorId) out.set(rec.conversationId, rec.creatorId);
+    }
+    return out;
   }
 
   /** Rehydrate ALL of THIS device's persisted conversations (on unlock) → conversationId → Conversation. */

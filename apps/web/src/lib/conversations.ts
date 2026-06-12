@@ -309,6 +309,9 @@ export class GroupConversationManager {
       await this.keystore.clearStagedCommit(conversationId);
     });
 
+    // Record this device as the creator so the "Add member" gate survives page reload.
+    await this.keystore.saveGroupCreatorId(this.device, conversationId, this.selfUserId);
+
     if (pending.groupName) {
       // sendLiveMessage acquires the conversation lock itself — safe to call after the commit lock releases.
       const ack = await sendLiveMessage(

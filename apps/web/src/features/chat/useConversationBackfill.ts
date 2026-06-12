@@ -247,6 +247,7 @@ export function useConversationHistoryRehydration({
       try {
         const restored = await keystore.loadConversations(device, passphrase, sKey);
         const logs = await keystore.loadAllMessageLogs(device, sKey);
+        const creatorIds = await keystore.getGroupCreatorIds(device);
         for (const [conversationId, conversation] of restored) {
           addLive(conversationId, conversation);
           const stored = logs.get(conversationId) ?? [];
@@ -255,11 +256,13 @@ export function useConversationHistoryRehydration({
             .at(-1)
             ?.content.trim();
           const history = stored.filter((m) => m.kind !== 'group-meta').map(storedToMessage);
+          const creatorId = creatorIds.get(conversationId);
           setConversations((prev) =>
             prependConversationIfMissing(prev, {
               ...liveConversationShell(conversationId, currentUserProfile),
               messages: history,
               ...(groupName ? { name: groupName, type: 'group' as const } : {}),
+              ...(creatorId ? { creatorId } : {}),
             }),
           );
           // Name the peer: try the persisted mapping first (set at creation — survives a no-reply
