@@ -2,17 +2,24 @@
 // Zod validation, and safe error classification live in `api-client.ts`.
 
 import {
+  AcceptInviteBodySchema,
   BackupResponseSchema,
   ClaimedKeyPackageSchema,
   ConversationReceiptsSchema,
   CreateConversationRequestSchema,
+  CreateInviteBodySchema,
+  CreateInviteResponseSchema,
+  CreateTenantBodySchema,
+  CreateTenantResponseSchema,
   CreatedConversationSchema,
   CreateDownloadGrantRequestSchema,
   CreateUploadGrantRequestSchema,
   DeliverWelcomeRequestSchema,
   DeliveredWelcomeSchema,
   DownloadGrantSchema,
+  InviteSummarySchema,
   MeSchema,
+  MemberSummarySchema,
   MessagePageSchema,
   PendingWelcomesSchema,
   PublishKeyPackagesRequestSchema,
@@ -28,7 +35,11 @@ import {
   WelcomeMaterialSchema,
   type ClaimedKeyPackage as ContractClaimedKeyPackage,
   type ConversationReceipt as ContractConversationReceipt,
+  type CreateInviteResponse as ContractCreateInviteResponse,
+  type CreateTenantResponse as ContractCreateTenantResponse,
   type CreatedConversation,
+  type InviteSummary as ContractInviteSummary,
+  type MemberSummary as ContractMemberSummary,
   type ReceiptStatus,
   type DeliverWelcomeRequest,
   type FetchedMessage as ContractFetchedMessage,
@@ -55,6 +66,11 @@ export type Me = ContractMe;
 /** Narrowed /me response for a user already bound to a tenant. */
 export type MeBound = ContractMeBound;
 
+/** Fetch the caller's server profile (GET /me). Throws on non-OK. */
+export async function fetchMe(): Promise<Me> {
+  return unwrapApiResult(await requestJson({ path: '/me', responseSchema: MeSchema }));
+}
+
 /**
  * Record the login (POST /auth/session → JIT-provisions the user + audits `auth.login`), then fetch
  * the profile. Both run under the Bearer token, so the server derives identity + tenant from the
@@ -62,7 +78,7 @@ export type MeBound = ContractMeBound;
  */
 export async function establishSession(): Promise<Me> {
   unwrapApiResult(await requestStatus({ path: '/auth/session', method: 'POST' }));
-  return unwrapApiResult(await requestJson({ path: '/me', responseSchema: MeSchema }));
+  return fetchMe();
 }
 
 /** Result of publishing one-time KeyPackages to the directory. */
@@ -445,6 +461,106 @@ export async function deletePushSubscription(deviceId: string): Promise<void> {
   unwrapApiResult(
     await requestStatus({
       path: `/push/subscription?deviceId=${encodeURIComponent(deviceId)}`,
+      method: 'DELETE',
+    }),
+  );
+}
+
+// ── G1: self-serve tenant onboarding ──────────────────────────────────────────
+
+export type CreateTenantResponse = ContractCreateTenantResponse;
+export type CreateInviteResponse = ContractCreateInviteResponse;
+export type InviteSummary = ContractInviteSummary;
+export type MemberSummary = ContractMemberSummary;
+
+/** Create a new tenant with the caller as the first admin (POST /tenants → 201). */
+export async function createTenant(name: string): Promise<CreateTenantResponse> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/tenants',
+      method: 'POST',
+      body: { name },
+      requestSchema: CreateTenantBodySchema,
+      responseSchema: CreateTenantResponseSchema,
+    }),
+  );
+}
+
+/** Accept an invite by its one-time plaintext token (POST /tenants/invites/accept → 201). */
+export async function acceptInvite(token: string): Promise<CreateTenantResponse> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/tenants/invites/accept',
+      method: 'POST',
+      body: { token },
+      requestSchema: AcceptInviteBodySchema,
+      responseSchema: CreateTenantResponseSchema,
+    }),
+  );
+}
+
+/** List active members of the caller's tenant (GET /tenants/members). */
+export async function listMembers(): Promise<MemberSummary[]> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/tenants/members',
+      responseSchema: MemberSummarySchema.array(),
+    }),
+  );
+}
+
+/**
+ * Create an invite for this tenant (POST /tenants/invites → 201).
+ * Returns the plaintext token — shown once, never stored.
+ */
+export async function createInvite(inviteeEmail?: string): Promise<CreateInviteResponse> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/tenants/invites',
+      method: 'POST',
+      body: inviteeEmail ? { inviteeEmail } : {},
+      requestSchema: CreateInviteBodySchema,
+      responseSchema: CreateInviteResponseSchema,
+    }),
+  );
+}
+
+/** List pending (not accepted, not revoked, not expired) invites (GET /tenants/invites). */
+export async function listInvites(): Promise<InviteSummary[]> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/tenants/invites',
+      responseSchema: InviteSummarySchema.array(),
+    }),
+  );
+}
+
+/** Revoke an invite (DELETE /tenants/invites/:id → 204). */
+export async function revokeInvite(inviteId: string): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: `/tenants/invites/${encodeURIComponent(inviteId)}`,
+      method: 'DELETE',
+    }),
+  );
+}
+
+/** Change a member's role (PATCH /tenants/members/:userId/role → 204). */
+export async function setMemberRole(userId: string, role: 'admin' | 'member'): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: `/tenants/members/${encodeURIComponent(userId)}/role`,
+      method: 'PATCH',
+      body: { role },
+    }),
+  );
+}
+
+/** Revoke (soft-delete) a member (DELETE /tenants/members/:userId → 204). */
+export async function revokeMember(userId: string): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: `/tenants/members/${encodeURIComponent(userId)}`,
       method: 'DELETE',
     }),
   );

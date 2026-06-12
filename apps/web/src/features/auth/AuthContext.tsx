@@ -1,4 +1,12 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { Navigate } from 'react-router-dom';
 import type { User } from 'oidc-client-ts';
 import {
@@ -8,7 +16,7 @@ import {
   logout as oidcLogout,
   profileScopeFromAuth,
 } from '../../lib/auth';
-import { establishSession, type MeBound } from '../../lib/api';
+import { establishSession, fetchMe, type MeBound } from '../../lib/api';
 
 interface AuthState {
   /** Whether OIDC is configured (VITE_OIDC_*). When false the app runs in demo mode (no real auth). */
@@ -22,6 +30,8 @@ interface AuthState {
   profile: MeBound | null;
   login: () => Promise<void>;
   logout: () => Promise<void>;
+  /** Re-fetch /me and update profile state — call after createTenant or acceptInvite. */
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthCtx = createContext<AuthState | null>(null);
@@ -70,6 +80,11 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
       });
   }, [user]);
 
+  const refreshProfile = useCallback(async (): Promise<void> => {
+    const me = await fetchMe();
+    setProfile(me.bound ? me : null);
+  }, []);
+
   const value: AuthState = {
     configured: oidcConfigured,
     ready,
@@ -78,6 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
     profile,
     login: oidcLogin,
     logout: oidcLogout,
+    refreshProfile,
   };
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
 }
