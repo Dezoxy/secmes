@@ -1,6 +1,6 @@
 -- G8: Billing / plan gating — plan tier + Stripe subscription columns on tenants.
--- `tenants` has no per-row RLS (it is the root entity), so withRouting / direct queries can write
--- to these columns cross-tenant for the operator endpoint and the Stripe webhook handler.
+-- `tenants` has FORCE ROW LEVEL SECURITY (tenants_self_isolation policy, keyed on app.tenant_id).
+-- All reads and writes must run inside withTenant(tenantId) which sets the session variable.
 
 ALTER TABLE tenants
   ADD COLUMN plan_tier              text        NOT NULL DEFAULT 'free'

@@ -27,7 +27,7 @@ Trust boundaries:
 
 **Spoofing:**
 - Fake Stripe webhook: mitigated by `constructEvent` HMAC-SHA256 signature verification using `STRIPE_WEBHOOK_SECRET`. A 400 is returned on any mismatch; the event is never processed.
-- Operator impersonation: OPERATOR_API_KEY must be a long-lived secret from Key Vault. Timing-safe comparison is not used (string `===`); acceptable because the key is sufficiently long (≥ 32 bytes) and the comparison is not on a timing-observable hot path.
+- Operator impersonation: OPERATOR_API_KEY must be a long-lived secret from Key Vault. `timingSafeEqual` from `node:crypto` is used for the comparison, eliminating timing oracle attacks.
 
 **Tampering:**
 - Limit bypass via race on member creation: member-limit is checked at BOTH `createInvite` and `acceptInvite`. The second check (inside the `withTenant` transaction) is the true race-safe gate.
@@ -46,7 +46,7 @@ Trust boundaries:
 
 1. **Crypto-blind server** — billing touches only plan metadata columns and Stripe IDs; no content or keys involved.
 2. **No secret logging** — `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` are never logged. Only price IDs (non-secret) and config-missing warnings are emitted.
-3. **RLS** — `tenants` has no per-row RLS (it is the root table; this is existing design). Plan columns are updated via `WHERE id = :tenantId` — no cross-tenant reads possible. Stripe `tenantIdFromCustomer` lookup is similarly scoped.
+3. **RLS** — `tenants` has FORCE ROW LEVEL SECURITY (`tenants_self_isolation` policy keyed on `app.tenant_id`); all reads and writes run inside `withTenant(tenantId)` which sets this session variable. No cross-tenant reads possible. Stripe `tenantIdFromCustomer` uses Stripe metadata instead of a DB lookup, avoiding the need for a tenant-less transaction.
 4. **No hand-rolled crypto** — Stripe's `constructEvent` uses the official SDK's HMAC; no primitives in application code.
 5. **Secrets via Key Vault** — `STRIPE_SECRET_KEY_FILE`, `STRIPE_WEBHOOK_SECRET_FILE`, `OPERATOR_API_KEY_FILE` follow the credential-file pattern.
 6. **No admin content access** — billing surfaces expose plan metadata only; no message content, attachments, or keys involved.
@@ -64,6 +64,6 @@ Reviewer gates: `security-boundary-auditor` (plan enforcement paths, operator en
 
 ## 6. Residual risk
 
-- **Operator key timing-safety**: `===` comparison is not constant-time. Acceptable — the key is long, the endpoint is internal-only, and the attack surface for timing attacks is negligible on a single-tenant operator path.
+- **Operator key timing-safety**: `timingSafeEqual` (constant-time) is used — no timing oracle risk.
 - **Webhook replay window**: Stripe's `constructEvent` rejects events with a timestamp more than 300 seconds old by default. Events within that window that are replayed would re-run `setPlan` idempotently (same data) — no harm.
 - **Stripe outage**: if Stripe is down, checkout/portal fail gracefully; the plan stays as-is. No plan data is lost.

@@ -5,13 +5,9 @@ import type { Request } from 'express';
 
 function resolveOperatorKey(): string {
   const file = process.env.OPERATOR_API_KEY_FILE;
-  if (file) {
-    // eslint-disable-next-line security/detect-non-literal-fs-filename
-    return readFileSync(file, 'utf8').trim();
-  }
-  const key = process.env.OPERATOR_API_KEY;
-  if (!key) throw new Error('OPERATOR_API_KEY (or OPERATOR_API_KEY_FILE) is not set');
-  return key;
+  if (!file) throw new Error('OPERATOR_API_KEY_FILE is not set');
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  return readFileSync(file, 'utf8').trim();
 }
 
 /** Protects operator endpoints with a long-lived API key from Key Vault. Not JWT. */
