@@ -24,7 +24,7 @@ import {
   type ClaimedKeyPackage,
 } from './api';
 import { toBase64 } from './base64';
-import type { DeviceKeystore } from './keystore';
+import type { DeviceKeystore, StoredMessage } from './keystore';
 import { sendLiveMessage, type MessagingDeps } from './messaging';
 
 /** The peer device a conversation is being started with — ids + the signature key (no private material). */
@@ -262,6 +262,18 @@ export class GroupConversationManager {
       })),
     );
 
+    // Persist the pending post-commit state BEFORE the POST — if the tab crashes after a successful
+    // POST but before applyStaged/saveConversationState, the loader promotes this entry on reload
+    // so the device is never left at the old epoch while the server/peers are at the new one.
+    const pendingBytes = conversation.serializeStaged(staged);
+    await this.keystore.saveStagedCommit(
+      this.device,
+      conversationId,
+      this.sessionKey,
+      pendingBytes,
+    );
+    pendingBytes.fill(0); // wipe the transient plaintext — the sealed copy is in IDB
+
     try {
       await postCommit(conversationId, {
         clientCommitId: crypto.randomUUID(),
@@ -273,6 +285,7 @@ export class GroupConversationManager {
       });
     } catch (err) {
       conversation.discardStaged(staged);
+      await this.keystore.clearStagedCommit(conversationId);
       throw err;
     }
 
@@ -283,9 +296,10 @@ export class GroupConversationManager {
       conversation,
       this.sessionKey,
     );
+    await this.keystore.clearStagedCommit(conversationId);
 
     if (pending.groupName) {
-      await sendLiveMessage(
+      const ack = await sendLiveMessage(
         deps,
         conversationId,
         conversation,
@@ -293,6 +307,19 @@ export class GroupConversationManager {
         [],
         'group-meta',
       );
+      // Persist the group-meta so the creator sees the group name on page reload.
+      // (Backfill skips own messages, so without this the creator loses the name after a reload.)
+      void this.keystore.appendMessages(this.device, conversationId, this.sessionKey, [
+        {
+          id: ack.serverId,
+          senderId: this.selfUserId,
+          content: pending.groupName,
+          timestamp: ack.createdAt,
+          status: 'read',
+          encrypted: true,
+          kind: 'group-meta',
+        } satisfies StoredMessage,
+      ]);
     }
 
     return {
@@ -327,6 +354,15 @@ export class GroupConversationManager {
       })),
     );
 
+    const pendingBytes = conversation.serializeStaged(staged);
+    await this.keystore.saveStagedCommit(
+      this.device,
+      conversationId,
+      this.sessionKey,
+      pendingBytes,
+    );
+    pendingBytes.fill(0);
+
     try {
       await postCommit(conversationId, {
         clientCommitId: crypto.randomUUID(),
@@ -338,6 +374,7 @@ export class GroupConversationManager {
       });
     } catch (err) {
       conversation.discardStaged(staged);
+      await this.keystore.clearStagedCommit(conversationId);
       throw err;
     }
 
@@ -348,6 +385,7 @@ export class GroupConversationManager {
       conversation,
       this.sessionKey,
     );
+    await this.keystore.clearStagedCommit(conversationId);
 
     // Re-send the group name so the new member can read it (they can't see pre-join history).
     if (pending.groupName) {
