@@ -17,3 +17,16 @@ for (const route of routeShells) {
     await expect(page.getByRole('link', { name: 'Chat', exact: true })).toBeVisible();
   });
 }
+
+test('/transparency renders the public security page without auth', async ({ page }) => {
+  await page.goto('/transparency');
+
+  await expect(page.getByRole('main', { name: 'Security and transparency' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Security & Transparency' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'End-to-end encryption' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Bundle integrity' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /sub-processors/i })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'Microsoft Azure' })).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'Backblaze B2' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Back to Argus' })).toBeVisible();
+});

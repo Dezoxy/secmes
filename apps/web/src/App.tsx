@@ -1,5 +1,5 @@
 import { Suspense, lazy, useState, useEffect, useCallback } from 'react';
-import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Fingerprint, RefreshCw } from 'lucide-react';
 import { useAuth } from './features/auth/AuthContext';
 import { prefersReducedMotion } from './lib/pref';
@@ -13,6 +13,7 @@ const DevicesRoute = lazy(() => import('./routes/DevicesRoute'));
 const SecurityRoute = lazy(() => import('./routes/SecurityRoute'));
 const SettingsRoute = lazy(() => import('./routes/SettingsRoute'));
 const StorageRoute = lazy(() => import('./routes/StorageRoute'));
+const TransparencyRoute = lazy(() => import('./routes/TransparencyRoute'));
 
 /**
  * Landing / sign-in screen. Argus exposes one primary passkey entry point and delegates login,
@@ -170,20 +171,28 @@ function LandingRoute() {
               </button>
             </div>
 
-            <p
-              className={`mt-8 text-center text-xs text-white/60 transition-all duration-500 delay-[600ms] ${
+            <div
+              className={`mt-8 flex flex-col items-center gap-2 text-center transition-all duration-500 delay-[600ms] ${
                 mounted ? 'opacity-100' : 'opacity-0'
               }`}
             >
-              By continuing, you agree to our{' '}
-              <span aria-disabled="true" className="text-purple-400 underline underline-offset-2">
-                Terms of Service
-              </span>{' '}
-              and{' '}
-              <span aria-disabled="true" className="text-purple-400 underline underline-offset-2">
-                Privacy Policy
-              </span>
-            </p>
+              <p className="text-xs text-white/60">
+                By continuing, you agree to our{' '}
+                <span aria-disabled="true" className="text-purple-400 underline underline-offset-2">
+                  Terms of Service
+                </span>{' '}
+                and{' '}
+                <span aria-disabled="true" className="text-purple-400 underline underline-offset-2">
+                  Privacy Policy
+                </span>
+              </p>
+              <Link
+                to="/transparency"
+                className="text-xs text-white/40 transition-colors hover:text-white/70"
+              >
+                Security &amp; transparency ↗
+              </Link>
+            </div>
           </div>
         </div>
       </section>
@@ -233,6 +242,7 @@ export default function App() {
           <Route path="/storage" element={<StorageRoute />} />
           <Route path="/invite" element={<InviteRoute />} />
           <Route path="/auth/callback" element={<AuthCallbackRoute />} />
+          <Route path="/transparency" element={<TransparencyRoute />} />
         </Routes>
       </Suspense>
       <RouteUpdateAction />
