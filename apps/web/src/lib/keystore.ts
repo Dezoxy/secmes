@@ -148,6 +148,8 @@ interface StoredPendingCommit {
   identity: string;
   signaturePublicKey: string;
   conversationId: string;
+  /** The pre-commit epoch (staged.epoch) used to verify the commit landed on the server. */
+  epoch: number;
   sealed: SealedBlob;
 }
 
@@ -489,6 +491,13 @@ export class DeviceKeystore {
     device: DeviceKeys,
     passphrase: string,
     sessionKey: CryptoKey,
+    /**
+     * Optional server verifier for orphaned pending-commit recovery (brand-new group crash window).
+     * Called before promoting a PENDING_STORE entry that has no matching GROUP_STORE record.
+     * Returns true if the commit landed on the server (i.e., the epoch slot exists); false to discard.
+     * Omit in tests — orphaned entries are promoted unconditionally.
+     */
+    verifyCommitExists?: (conversationId: string, epoch: number) => Promise<boolean>,
   ): Promise<Map<string, Conversation>> {
     const identity = deviceIdentity(device);
     const signaturePublicKey = deviceSignaturePublicKeyB64(device);
@@ -557,6 +566,14 @@ export class DeviceKeystore {
         continue;
       const { conversationId } = pendingRec;
       if (out.has(conversationId)) continue; // already handled by the GROUP_STORE loop
+      // Before promoting, verify the commit actually landed on the server. If the POST failed
+      // (network drop before the request left the browser), the pending state is epoch N+1 while
+      // the server is still at epoch N; promoting it would strand this device at a phantom epoch
+      // where messages are stored but undecryptable by peers. Skip the entry if unconfirmed.
+      if (verifyCommitExists && !(await verifyCommitExists(conversationId, pendingRec.epoch))) {
+        await this.db.delete(PENDING_STORE, conversationId);
+        continue;
+      }
       try {
         const pendingBytes = await openWithKey(
           sessionKey,
@@ -608,6 +625,8 @@ export class DeviceKeystore {
     conversationId: string,
     sessionKey: CryptoKey,
     pendingBytes: Uint8Array,
+    /** The pre-commit epoch (staged.epoch) — used on reload to verify the commit landed. */
+    epoch: number,
   ): Promise<void> {
     const sealed = await sealWithKey(sessionKey, pendingBytes, pendingCommitAad(conversationId));
     await this.db.put(
@@ -616,6 +635,7 @@ export class DeviceKeystore {
         identity: deviceIdentity(device),
         signaturePublicKey: deviceSignaturePublicKeyB64(device),
         conversationId,
+        epoch,
         sealed,
       } satisfies StoredPendingCommit,
       conversationId,

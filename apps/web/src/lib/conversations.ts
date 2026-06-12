@@ -282,6 +282,7 @@ export class GroupConversationManager {
         conversationId,
         this.sessionKey,
         pendingBytes,
+        staged.epoch,
       );
       pendingBytes.fill(0); // wipe the transient plaintext — the sealed copy is in IDB
 
@@ -387,6 +388,7 @@ export class GroupConversationManager {
         conversationId,
         this.sessionKey,
         pendingBytes,
+        staged.epoch,
       );
       pendingBytes.fill(0);
 

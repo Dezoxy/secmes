@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } fr
 import type { Conversation as MlsGroup } from '@argus/crypto';
 import type { StoredMessage } from '../../lib/keystore';
 import type { AttachmentRef } from '../../lib/message-envelope';
+import { listCommits } from '../../lib/api';
 import {
   backfillConversation,
   type DecryptedMessage,
@@ -245,7 +246,16 @@ export function useConversationHistoryRehydration({
     const sKey = sessionKey;
     void (async () => {
       try {
-        const restored = await keystore.loadConversations(device, passphrase, sKey);
+        const restored = await keystore.loadConversations(
+          device,
+          passphrase,
+          sKey,
+          async (conversationId, epoch) => {
+            // Verify the orphaned pending-commit actually landed on the server before promoting.
+            const commits = await listCommits(conversationId, { afterEpoch: epoch - 1, limit: 1 });
+            return commits.some((c) => c.epoch === epoch);
+          },
+        );
         const logs = await keystore.loadAllMessageLogs(device, sKey);
         const creatorIds = await keystore.getGroupCreatorIds(device);
         for (const [conversationId, conversation] of restored) {
