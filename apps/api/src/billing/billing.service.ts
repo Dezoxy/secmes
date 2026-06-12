@@ -116,6 +116,22 @@ export class BillingService implements OnModuleInit {
       await this.plans.setPlan(tenantId, { stripeCustomerId: customerId }, 'billing');
     }
 
+    // If there is already an active subscription, update its price in-place so the
+    // tenant is never billed for two concurrent subscriptions.
+    if (plan.stripeSubscriptionId) {
+      const existing = await stripe.subscriptions.retrieve(plan.stripeSubscriptionId);
+      if (existing.status === 'active' || existing.status === 'trialing') {
+        const itemId = existing.items.data[0]?.id;
+        if (!itemId) throw new Error('existing subscription has no line items');
+        await stripe.subscriptions.update(plan.stripeSubscriptionId, {
+          items: [{ id: itemId, price: priceId }],
+          proration_behavior: 'create_prorations',
+        });
+        // Return successUrl directly; customer.subscription.updated webhook will set the new tier.
+        return successUrl;
+      }
+    }
+
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       line_items: [{ price: priceId, quantity: 1 }],

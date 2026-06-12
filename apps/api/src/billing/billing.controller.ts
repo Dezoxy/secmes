@@ -19,7 +19,7 @@ import { BillingService } from './billing.service.js';
 
 /** Validate that a URL's origin matches the app base URL to prevent open redirects. */
 function sameAppOrigin(url: string): boolean {
-  const appBase = (process.env.APP_BASE_URL ?? 'https://app.4rgus.com').replace(/\/$/, '');
+  const appBase = (process.env.APP_BASE_URL ?? 'https://4rgus.com').replace(/\/$/, '');
   try {
     const parsed = new URL(url);
     const expected = new URL(appBase);

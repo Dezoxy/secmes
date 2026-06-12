@@ -181,7 +181,7 @@ export class UserService {
       ...user,
       plan: {
         tier: (tenantRow?.planTier ?? 'free') as TenantPlan['tier'],
-        memberLimit: tenantRow?.memberLimit ?? 10,
+        memberLimit: tenantRow?.memberLimit ?? null,
         ssoEnabled: tenantRow?.ssoEnabled ?? false,
         memberCount: countRow?.count ?? 0,
         subscriptionStatus:
