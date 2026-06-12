@@ -479,6 +479,9 @@ export class MessagingService {
       // encrypted at an old epoch is undecryptable (MLS FS); one at a future epoch indicates the
       // client is ahead of the server-committed state and would be stored but undecryptable by peers.
       // Both are rejected so the client knows to drain commits or re-sync before retrying.
+      // Gate applies ONLY to conversations that have at least one commit row (i.e. groups using the
+      // staged-commit API). 1:1 conversations never write to conversation_commits — their MLS epoch
+      // advances to 1 via addMember without a commit row, so maxEpoch stays -1 and the gate is skipped.
       const [epochRow] = await tx
         .select({ maxEpoch: max(schema.conversationCommits.epoch) })
         .from(schema.conversationCommits)
@@ -492,16 +495,18 @@ export class MessagingService {
         epochRow?.maxEpoch !== null && epochRow?.maxEpoch !== undefined
           ? Number(epochRow.maxEpoch)
           : -1;
-      const expectedEpoch = maxEpoch + 1; // commit at N → group at N+1
-      if (body.epoch !== expectedEpoch) {
-        const direction = body.epoch < expectedEpoch ? 'stale' : 'future';
-        throw new ConflictException(
-          `${direction} epoch: client at ${String(body.epoch)}, group at ${String(expectedEpoch)} — ${
-            direction === 'stale'
-              ? 'drain commits before sending'
-              : 'group has not yet advanced to this epoch'
-          }`,
-        );
+      if (maxEpoch !== -1) {
+        const expectedEpoch = maxEpoch + 1; // commit at N → group at N+1
+        if (body.epoch !== expectedEpoch) {
+          const direction = body.epoch < expectedEpoch ? 'stale' : 'future';
+          throw new ConflictException(
+            `${direction} epoch: client at ${String(body.epoch)}, group at ${String(expectedEpoch)} — ${
+              direction === 'stale'
+                ? 'drain commits before sending'
+                : 'group has not yet advanced to this epoch'
+            }`,
+          );
+        }
       }
 
       const inserted = await tx
