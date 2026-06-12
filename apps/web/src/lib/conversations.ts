@@ -220,6 +220,10 @@ export class GroupConversationManager {
       if (claimed.length === 0) {
         throw new Error(`user ${userId} has no key packages available — ask them to sign in first`);
       }
+      // B1 assumes one device per user — `claimAllKeyPackages` returns that one package (or 0 if
+      // exhausted). Multi-device (B2) will need a device-count endpoint to detect partial pools
+      // where some devices have packages and others don't; those omitted devices would miss the
+      // Welcome and be unable to join. That gap is out of scope for B1.
       const keyPackages = claimed.map((c) => deserializeKeyPackage(c.keyPackage));
       // One safety number per device — a swapped key on ANY device is a MITM; per-device SN is the
       // only way to catch it. The UI shows each one sequentially before confirm() is reachable.
