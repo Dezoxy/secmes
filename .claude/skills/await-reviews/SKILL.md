@@ -22,6 +22,7 @@ Within one reviewer the newest signal wins (a clean re-review supersedes earlier
      @claude review this PR.
      Apply the AGENTS.md review criteria (crypto / server boundary / infra) to the full diff at head <sha>.
      Treat P1/P2 findings like CI failures and list them with file:line.
+     In your reply, never write the two bot mention strings verbatim (say "codex-bot" / "claude-bot" instead) — the literal strings summon the bots and can cause review cross-fire.
      End your review with exactly one line: `VERDICT: PASS` or `VERDICT: FINDINGS`.
      ```
 
