@@ -164,10 +164,12 @@ export class SsoService {
 
     const cfg = existing[0];
     // PUT is a full replace in Zitadel — always send the complete config.
+    // scopes must be re-sent each time; omitted repeated fields default to [] in protobuf.
     await this.zitadel.updateOidcIdp(cfg.zitadelOrgId, cfg.zitadelIdpId, {
       name: body.providerName ?? cfg.providerName,
       issuer: body.issuerUrl ?? cfg.issuerUrl,
       clientId: body.clientId ?? cfg.clientId,
+      scopes: ['openid', 'profile', 'email'],
     });
 
     const rows = await withTenant(auth.tenantId, (tx) =>
