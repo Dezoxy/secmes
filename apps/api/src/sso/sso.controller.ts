@@ -79,6 +79,7 @@ export class SsoController {
       type: 'object',
       properties: {
         id: { type: 'string', format: 'uuid' },
+        providerType: { type: 'string', enum: ['oidc_generic', 'google', 'entra', 'okta'] },
         providerName: { type: 'string', maxLength: 100 },
         issuerUrl: { type: 'string', maxLength: 512 },
         clientId: { type: 'string', maxLength: 256 },
@@ -88,6 +89,7 @@ export class SsoController {
       },
       required: [
         'id',
+        'providerType',
         'providerName',
         'issuerUrl',
         'clientId',

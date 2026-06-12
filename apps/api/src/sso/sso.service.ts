@@ -163,12 +163,12 @@ export class SsoService {
     if (!existing[0]) throw new NotFoundException('SSO not configured for this tenant');
 
     const cfg = existing[0];
-    const patch: Partial<{ name: string; issuer: string; clientId: string; scopes: string[] }> = {};
-    if (body.providerName) patch.name = body.providerName;
-    if (body.issuerUrl) patch.issuer = body.issuerUrl;
-    if (body.clientId) patch.clientId = body.clientId;
-
-    await this.zitadel.updateOidcIdp(cfg.zitadelOrgId, cfg.zitadelIdpId, patch);
+    // PUT is a full replace in Zitadel — always send the complete config.
+    await this.zitadel.updateOidcIdp(cfg.zitadelOrgId, cfg.zitadelIdpId, {
+      name: body.providerName ?? cfg.providerName,
+      issuer: body.issuerUrl ?? cfg.issuerUrl,
+      clientId: body.clientId ?? cfg.clientId,
+    });
 
     const rows = await withTenant(auth.tenantId, (tx) =>
       tx
