@@ -98,7 +98,7 @@ class ExportAuditEventDto {
     additionalProperties: { type: 'string' },
     description: 'non-sensitive metadata IDs only — never content or keys',
   })
-  metadata!: Record<string, unknown> | null;
+  metadata!: Record<string, string | number | boolean> | null;
 }
 
 class ExportInviteDto {

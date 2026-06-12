@@ -362,28 +362,20 @@ export class GdprService {
           ),
         );
 
-      // 1e. Collect attachment object keys inside the transaction so any attachment uploaded
-      //     between the start of this call and step 1f is included in blob cleanup.
-      const attachmentRows = await tx
-        .select({ objectKey: schema.attachments.objectKey })
-        .from(schema.attachments)
-        .where(
-          and(
-            eq(schema.attachments.tenantId, auth.tenantId),
-            eq(schema.attachments.uploadedBy, user.id),
-          ),
-        );
-      const objectKeys = attachmentRows.map((r) => r.objectKey);
-
-      // 1f. Delete attachment metadata rows — NO-ACTION FK on uploaded_by.
-      await tx
+      // 1e+1f. Delete attachment rows and collect object keys atomically via RETURNING.
+      //        A single DELETE...RETURNING is atomic — no READ COMMITTED race between
+      //        a separate SELECT and DELETE where a concurrently committed row could be
+      //        deleted but its key missed from the collection list.
+      const deletedAttachments = await tx
         .delete(schema.attachments)
         .where(
           and(
             eq(schema.attachments.tenantId, auth.tenantId),
             eq(schema.attachments.uploadedBy, user.id),
           ),
-        );
+        )
+        .returning({ objectKey: schema.attachments.objectKey });
+      const objectKeys = deletedAttachments.map((r) => r.objectKey);
 
       // 1g. Delete the user row — cascades:
       //     • devices → key_packages (cascade), push_subscriptions (cascade)
