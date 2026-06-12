@@ -25,6 +25,7 @@ describe.skipIf(!DB_URL)('GdprService', () => {
   let bobId: string;
   let convId: string;
   let deviceId: string;
+  let bobDeviceId: string;
   let msgId: string;
   let attachmentObjectKey: string;
   let welcomeId: string;
@@ -60,10 +61,14 @@ describe.skipIf(!DB_URL)('GdprService', () => {
     // Routing index
     await sql`insert into user_tenant_index (sub, tenant_id) values (${aliceSub}, ${tenantA})`;
 
-    // Device
+    // Devices (one per user — welcome FK requires recipient_device_id belongs to recipient_user_id)
     [{ id: deviceId }] = await sql`
       insert into devices (tenant_id, user_id, signature_public_key)
       values (${tenantA}, ${aliceId}, 'pk-alice')
+      returning id`;
+    [{ id: bobDeviceId }] = await sql`
+      insert into devices (tenant_id, user_id, signature_public_key)
+      values (${tenantA}, ${bobId}, 'pk-bob')
       returning id`;
 
     // Key backup
@@ -98,7 +103,7 @@ describe.skipIf(!DB_URL)('GdprService', () => {
     // Welcome (alice sent to bob)
     [{ id: welcomeId }] = await sql`
       insert into conversation_welcomes (tenant_id, conversation_id, recipient_user_id, recipient_device_id, sender_user_id, welcome, ratchet_tree)
-      values (${tenantA}, ${convId}, ${bobId}, ${deviceId}, ${aliceId}, 'welcome-ct', 'rt-ct')
+      values (${tenantA}, ${convId}, ${bobId}, ${bobDeviceId}, ${aliceId}, 'welcome-ct', 'rt-ct')
       returning id`;
 
     // Push subscription on alice's device
