@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type UIEvent } from 'react';
 import { ServiceInfoSchema } from '@argus/contracts';
-import { RefreshCw } from 'lucide-react';
+import { ExternalLink, RefreshCw } from 'lucide-react';
 import { requestJson, type ApiResult } from '../../lib/api-client';
 import { releaseNotes } from '../../lib/release-notes';
 import { usePwaUpdate, type PwaUpdateStatus } from '../pwa/PwaUpdateContext';
@@ -137,6 +137,14 @@ export function AboutSettings() {
           {statusLabel(backendStatus)}
         </span>
       </div>
+
+      <a
+        href="/transparency"
+        className="mt-3 flex items-center justify-between gap-4 rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3 transition-colors hover:border-white/10 hover:bg-white/[0.05]"
+      >
+        <span className="text-sm font-medium text-white">Security &amp; transparency</span>
+        <ExternalLink className="h-4 w-4 shrink-0 text-white/40" />
+      </a>
 
       <div className="mt-3 rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3">
         <div className="flex items-center justify-between gap-3">
