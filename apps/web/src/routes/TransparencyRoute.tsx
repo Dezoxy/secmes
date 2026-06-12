@@ -28,9 +28,13 @@ export default function TransparencyRoute() {
     fetch('/bundle-manifest.json')
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json() as Promise<BundleManifest>;
+        return r.json() as Promise<unknown>;
       })
-      .then((manifest) => {
+      .then((raw) => {
+        const manifest = raw as BundleManifest;
+        if (typeof manifest?.bundleDigest !== 'string' || !Array.isArray(manifest?.files)) {
+          throw new Error('unexpected shape');
+        }
         if (!cancelled) setManifestState({ status: 'ok', manifest });
       })
       .catch(() => {
