@@ -74,7 +74,7 @@ test.skip('Fingerprint mismatch: wrong code blocks approval', async ({ browser }
   await d1Page.goto('/chat');
 
   const d1Dialog = d1Page.getByRole('dialog', { name: 'Approve new device' });
-  await d1Dialog.getByLabel('Code shown on new device').fill('000 000');
+  await d1Dialog.getByLabel('Code shown on new device').fill('000 000 000');
   await d1Dialog.getByRole('button', { name: 'Approve' }).click();
 
   await expect(d1Dialog.getByText("Code doesn't match")).toBeVisible();

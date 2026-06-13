@@ -160,8 +160,8 @@ export function ApproveDevicePanel({
               type="text"
               value={input}
               onChange={(e) => handleInputChange(e.target.value)}
-              placeholder="123 456"
-              maxLength={7}
+              placeholder="123 456 789"
+              maxLength={11}
               autoComplete="off"
               spellCheck={false}
               inputMode="numeric"
@@ -192,7 +192,7 @@ export function ApproveDevicePanel({
               variant="primary"
               size="lg"
               onClick={() => void handleApprove()}
-              disabled={normalizedInput.length < 6 || state === 'approving'}
+              disabled={normalizedInput.length < 9 || state === 'approving'}
               loading={state === 'approving'}
               loadingLabel="Approving…"
               className="flex-1"
