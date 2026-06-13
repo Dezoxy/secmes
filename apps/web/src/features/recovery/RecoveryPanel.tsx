@@ -235,6 +235,10 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
     setBusy(true);
     try {
       const restoreIdentity = await peekArtifactIdentity(serverArtifact, importPassphrase);
+      const { userId: artifactUserId } = parseDeviceIdentity(restoreIdentity);
+      if (profile && artifactUserId !== profile.userId) {
+        throw new Error('recovery artifact belongs to a different account');
+      }
       if (device.keystore) {
         await restoreAndProvision(
           device.keystore,
