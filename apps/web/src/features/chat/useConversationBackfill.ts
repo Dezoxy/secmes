@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } fr
 import type { Conversation as MlsGroup } from '@argus/crypto';
 import type { StoredMessage } from '../../lib/keystore';
 import type { AttachmentRef } from '../../lib/message-envelope';
+import { listCommits } from '../../lib/api';
 import {
   backfillConversation,
   type DecryptedMessage,
@@ -26,7 +27,7 @@ interface SelectedBackfillOptions {
     conversationId: string,
     group: MlsGroup,
     selfUserId: string,
-  ) => void | Promise<void>;
+  ) => Promise<{ nextEpoch: number | undefined }> | void;
 }
 
 interface HistoryRehydrationOptions {
@@ -42,7 +43,11 @@ interface HistoryRehydrationOptions {
 interface ConversationBackfillResult {
   appendHistory: (conversationId: string, entries: StoredMessage[]) => void;
   mergeIncoming: (conversationId: string, incoming: DecryptedMessage[]) => void;
-  backfillInto: (conversationId: string, group: MlsGroup, selfUserId: string) => Promise<void>;
+  backfillInto: (
+    conversationId: string,
+    group: MlsGroup,
+    selfUserId: string,
+  ) => Promise<{ nextEpoch: number | undefined }>;
 }
 
 // A live (E2E) attachment ref -> a UI attachment. Images download+decrypt lazily from `ref` (no URL).
@@ -91,6 +96,7 @@ export function decryptedToStoredMessage(message: DecryptedMessage): StoredMessa
     timestamp: message.createdAt,
     status: 'read',
     encrypted: true,
+    kind: message.kind,
     attachments: message.attachments.length ? message.attachments : undefined,
   };
 }
@@ -102,15 +108,26 @@ export function mergeIncomingMessages(
 ): Conversation[] {
   if (incoming.length === 0) return conversations;
 
+  // group-meta messages carry the group name (not shown as chat bubbles); app messages go to the
+  // transcript. Latest group-meta text wins (they arrive in epoch order, so the last one is newest).
+  const appMessages = incoming.filter((m) => m.kind !== 'group-meta');
+  const latestGroupName = incoming
+    .filter((m) => m.kind === 'group-meta' && m.text.trim())
+    .at(-1)
+    ?.text.trim();
+
   return conversations.map((conversation) => {
     if (conversation.id !== conversationId) return conversation;
     const existing = new Set(conversation.messages.map((message) => message.id));
-    const fresh = incoming.filter((message) => !existing.has(message.serverId));
-    if (fresh.length === 0) return conversation;
+    const fresh = appMessages.filter((message) => !existing.has(message.serverId));
+    const base: Conversation = latestGroupName
+      ? { ...conversation, name: latestGroupName, type: 'group' }
+      : conversation;
+    if (fresh.length === 0) return base;
 
     return {
-      ...conversation,
-      messages: [...conversation.messages, ...fresh.map(decryptedToMessage)].sort(
+      ...base,
+      messages: [...base.messages, ...fresh.map(decryptedToMessage)].sort(
         (a, b) => a.timestamp.getTime() - b.timestamp.getTime(),
       ),
     };
@@ -151,10 +168,10 @@ export function useConversationBackfill({
     (conversationId: string, incoming: DecryptedMessage[]): void => {
       if (incoming.length === 0) return;
       setConversations((prev) => mergeIncomingMessages(prev, conversationId, incoming));
+      // Persist all messages including group-meta so group name survives page reload.
       appendHistory(conversationId, incoming.map(decryptedToStoredMessage));
-      // Name a still-placeholder peer from the (server-verified) sender — every incoming DecryptedMessage
-      // is a PEER message (own sends are skipped upstream), so any sender id here identifies the peer.
-      const peerSender = incoming[0]?.senderUserId;
+      // Name a still-placeholder peer from the (server-verified) sender of any non-meta message.
+      const peerSender = incoming.find((m) => m.kind !== 'group-meta')?.senderUserId;
       if (peerSender && !peerNamingTried.current.has(conversationId)) {
         peerNamingTried.current.add(conversationId);
         void resolvePeerUser(peerSender).then((peer) => {
@@ -166,24 +183,30 @@ export function useConversationBackfill({
   );
 
   const backfillInto = useCallback(
-    async (conversationId: string, group: MlsGroup, selfUserId: string): Promise<void> => {
-      if (!messagingDeps) return;
+    async (
+      conversationId: string,
+      group: MlsGroup,
+      selfUserId: string,
+    ): Promise<{ nextEpoch: number | undefined }> => {
+      if (!messagingDeps) return { nextEpoch: undefined };
       if (backfilling.current.has(conversationId)) {
         backfillPending.current.add(conversationId);
-        return;
+        return { nextEpoch: undefined };
       }
       backfilling.current.add(conversationId);
+      let lastNextEpoch: number | undefined;
       try {
         do {
           backfillPending.current.delete(conversationId);
           const after = fetchCursors.current.get(conversationId);
-          const { messages, cursor } = await backfillConversation(
+          const { messages, cursor, nextEpoch } = await backfillConversation(
             messagingDeps,
             conversationId,
             group,
             selfUserId,
             after,
           );
+          lastNextEpoch = nextEpoch;
           if (cursor) fetchCursors.current.set(conversationId, cursor);
           mergeIncoming(conversationId, messages);
         } while (backfillPending.current.has(conversationId));
@@ -194,6 +217,7 @@ export function useConversationBackfill({
         backfilling.current.delete(conversationId);
         backfillPending.current.delete(conversationId);
       }
+      return { nextEpoch: lastNextEpoch };
     },
     [messagingDeps, mergeIncoming],
   );
@@ -233,16 +257,36 @@ export function useConversationHistoryRehydration({
     const sKey = sessionKey;
     void (async () => {
       try {
-        const restored = await keystore.loadConversations(device, passphrase, sKey);
+        const restored = await keystore.loadConversations(
+          device,
+          passphrase,
+          sKey,
+          async (conversationId, epoch, clientCommitId) => {
+            // Verify OUR commit (identified by clientCommitId) won the epoch slot — not another
+            // member's. Epoch-only checks are insufficient: if two clients staged at the same epoch
+            // and ours lost the race (409), another commit exists at that epoch but our post-commit
+            // state would be on a divergent ratchet branch.
+            const commits = await listCommits(conversationId, { afterEpoch: epoch - 1, limit: 1 });
+            return commits.some((c) => c.epoch === epoch && c.clientCommitId === clientCommitId);
+          },
+        );
         const logs = await keystore.loadAllMessageLogs(device, sKey);
+        const creatorIds = await keystore.getGroupCreatorIds(device);
         for (const [conversationId, conversation] of restored) {
           addLive(conversationId, conversation);
           const stored = logs.get(conversationId) ?? [];
-          const history = stored.map(storedToMessage);
+          const groupName = stored
+            .filter((m) => m.kind === 'group-meta')
+            .at(-1)
+            ?.content.trim();
+          const history = stored.filter((m) => m.kind !== 'group-meta').map(storedToMessage);
+          const creatorId = creatorIds.get(conversationId);
           setConversations((prev) =>
             prependConversationIfMissing(prev, {
               ...liveConversationShell(conversationId, currentUserProfile),
               messages: history,
+              ...(groupName ? { name: groupName, type: 'group' as const } : {}),
+              ...(creatorId ? { creatorId } : {}),
             }),
           );
           // Name the peer: try the persisted mapping first (set at creation — survives a no-reply

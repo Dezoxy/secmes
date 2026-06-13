@@ -336,6 +336,18 @@ export class GdprService {
           ),
         );
 
+      // 1b-bis. Pseudonymize sent commits — same pattern as messages: keep the ciphertext
+      //         accessible (other members are entitled to it) but erase the sender identity.
+      await tx
+        .update(schema.conversationCommits)
+        .set({ senderUserId: sql`NULL` })
+        .where(
+          and(
+            eq(schema.conversationCommits.tenantId, auth.tenantId),
+            eq(schema.conversationCommits.senderUserId, user.id),
+          ),
+        );
+
       // 1c. Null accepted_by on invites — nullable FK with no ON DELETE clause.
       await tx
         .update(schema.tenantInvites)

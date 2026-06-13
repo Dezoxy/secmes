@@ -60,6 +60,8 @@ export type Conversation = {
   participants: User[];
   messages: Message[];
   unreadCount: number;
+  /** The userId of the member who created this group (live only; absent for seed/demo conversations). */
+  creatorId?: string;
 };
 
 function hueFromString(s: string): number {

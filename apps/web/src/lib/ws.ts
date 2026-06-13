@@ -27,6 +27,17 @@ export interface IncomingReceipt {
   throughMessageId: string;
 }
 
+/**
+ * A group membership commit was posted in a subscribed conversation (B1). Metadata only — no ciphertext;
+ * the encrypted commit bytes ride a separate REST fetch (`GET /conversations/:id/commits`). The client
+ * drains commits >= `epoch` to advance the local MLS epoch and decrypt subsequent messages.
+ */
+export interface IncomingCommit {
+  conversationId: string;
+  epoch: number;
+  senderUserId: string;
+}
+
 export type MessageSocketStatus = 'connecting' | 'connected' | 'reconnecting' | 'offline';
 
 export interface MessageSocketOptions {
@@ -55,6 +66,18 @@ export interface MessageSocketOptions {
    * until the next reconnect. The frame carries ids only; the sealed join material rides the REST fetch.
    */
   onWelcome?: (conversationId: string) => void;
+  /**
+   * A membership commit was posted in a subscribed conversation (B1 group chat). The client must fetch
+   * and apply commits >= `event.epoch` to advance to the new MLS epoch. Encrypted commit bytes ride a
+   * separate `GET /conversations/:id/commits` fetch; only metadata crosses the WebSocket.
+   */
+  onCommit?: (event: IncomingCommit) => void;
+  /**
+   * The current user has been removed from a conversation by a group commit. The server has already
+   * evicted the socket from the room — no further messages will arrive. The UI should remove the
+   * conversation from the visible list.
+   */
+  onRemoved?: (conversationId: string) => void;
   /** Injectable WebSocket constructor (tests). Defaults to the global. */
   WebSocketImpl?: typeof WebSocket;
   /** Reconnect backoff knobs (tests tune these down). */
@@ -163,6 +186,29 @@ export function createMessageSocket(opts: MessageSocketOptions): MessageSocket {
       if (!authed) return; // same defence in depth as 'message' — never act on a pre-auth frame
       const id = (frame.data as { conversationId?: unknown } | null)?.conversationId;
       if (typeof id === 'string') opts.onWelcome?.(id);
+      return;
+    }
+    if (frame.event === 'commit') {
+      if (!authed) return; // same defence in depth as 'message' — never act on a pre-auth frame
+      const d = frame.data as Partial<IncomingCommit> | null;
+      if (
+        d &&
+        typeof d.conversationId === 'string' &&
+        typeof d.epoch === 'number' &&
+        typeof d.senderUserId === 'string'
+      ) {
+        opts.onCommit?.({
+          conversationId: d.conversationId,
+          epoch: d.epoch,
+          senderUserId: d.senderUserId,
+        });
+      }
+      return;
+    }
+    if (frame.event === 'removed') {
+      if (!authed) return;
+      const id = (frame.data as { conversationId?: unknown } | null)?.conversationId;
+      if (typeof id === 'string') opts.onRemoved?.(id);
       return;
     }
     // 'error' frames need no client action (membership/authz is server-enforced; the keys gate content).

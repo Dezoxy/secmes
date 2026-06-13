@@ -5,6 +5,9 @@ import {
   AcceptInviteBodySchema,
   BackupResponseSchema,
   ClaimedKeyPackageSchema,
+  CommitBodySchema,
+  CommitPageSchema,
+  CommitResponseSchema,
   ConversationReceiptsSchema,
   CreateConversationRequestSchema,
   CreateInviteBodySchema,
@@ -40,6 +43,9 @@ import {
   UploadGrantSchema,
   WelcomeMaterialSchema,
   type ClaimedKeyPackage as ContractClaimedKeyPackage,
+  type CommitBody as ContractCommitBody,
+  type CommitPage as ContractCommitPage,
+  type CommitResponse as ContractCommitResponse,
   type ConversationReceipt as ContractConversationReceipt,
   type CreateInviteResponse as ContractCreateInviteResponse,
   type CreateTenantResponse as ContractCreateTenantResponse,
@@ -48,6 +54,7 @@ import {
   type AuditEventSummary as ContractAuditEventSummary,
   type CreateSsoConfigBody as ContractCreateSsoConfigBody,
   type DeviceSummary as ContractDeviceSummary,
+  type FetchedCommit as ContractFetchedCommit,
   type RotateSsoSecretBody as ContractRotateSsoSecretBody,
   type SsoConfig as ContractSsoConfig,
   type TenantPlan as ContractTenantPlan,
@@ -378,6 +385,88 @@ export async function getAttachmentBlob(url: string): Promise<Uint8Array> {
 // NOTE: cross-conversation catch-up (`GET /sync`) lands with the WebSocket client in 5C (reconnect → /sync →
 // dedup), where its caller lives. 5B back-fills per-conversation on open (fetchMessages), so /sync would be
 // unused dead code here — added in 5C with its consumer + tests.
+
+// --- MLS group commits (POST/GET /conversations/:id/commits) ----------------------------------------
+// Epoch-locked commit fan-out. First POST wins the epoch slot (200); a concurrent POST at the same epoch
+// loses (409 — the client rebases). Metadata only on the WS push; full bytes fetched via GET.
+
+/** The commit body — opaque ciphertext + declared membership delta + per-device Welcomes. */
+export type CommitBody = ContractCommitBody;
+
+/** Server ack for a commit POST (first win or own idempotent retry). */
+export type CommitResponse = ContractCommitResponse;
+
+/** A commit row as returned by GET /commits — ciphertext + epoch metadata. */
+export type FetchedCommit = ContractFetchedCommit;
+
+/** An array of commits, ordered by epoch ascending. */
+export type CommitPage = ContractCommitPage;
+
+/**
+ * Thrown by `postCommit` when another member already won the epoch slot (409).
+ * The caller should discard the staged commit and rebase from the new epoch.
+ */
+export class CommitEpochConflictError extends Error {
+  constructor() {
+    super('epoch slot already claimed by another member — discard staged and rebase');
+    this.name = 'CommitEpochConflictError';
+  }
+}
+
+/**
+ * Submit a staged MLS commit (POST /conversations/:id/commits). First caller wins the epoch slot (200).
+ * Throws `CommitEpochConflictError` if another member won (409). Own idempotent retry returns 200
+ * with `deduplicated: true`. Server applies the declared membership delta server-side.
+ */
+export async function postCommit(
+  conversationId: string,
+  body: CommitBody,
+): Promise<CommitResponse> {
+  const result = await requestJson({
+    path: `/conversations/${encodeURIComponent(conversationId)}/commits`,
+    method: 'POST',
+    body,
+    requestSchema: CommitBodySchema,
+    responseSchema: CommitResponseSchema,
+  });
+  if (!result.ok && result.error.status === 409) throw new CommitEpochConflictError();
+  return unwrapApiResult(result);
+}
+
+/**
+ * Fetch commits after `afterEpoch` in ascending epoch order (GET /conversations/:id/commits).
+ * Used by the commit drain state machine to catch up after a commit event or reconnect.
+ */
+export async function listCommits(
+  conversationId: string,
+  opts: { afterEpoch?: number; limit?: number } = {},
+): Promise<FetchedCommit[]> {
+  const params = new URLSearchParams();
+  if (opts.afterEpoch !== undefined) params.set('afterEpoch', String(opts.afterEpoch));
+  if (opts.limit !== undefined) params.set('limit', String(opts.limit));
+  const qs = params.toString();
+  return unwrapApiResult(
+    await requestJson({
+      path: `/conversations/${encodeURIComponent(conversationId)}/commits${qs ? `?${qs}` : ''}`,
+      responseSchema: CommitPageSchema,
+    }),
+  );
+}
+
+/**
+ * Claim one unclaimed KeyPackage per device of `userId` (POST /users/:userId/key-packages/claim-all).
+ * Used for group adds — each device of the new member needs its own Welcome. Returns an empty array
+ * if the user has no devices or all pools are empty.
+ */
+export async function claimAllKeyPackages(userId: string): Promise<ClaimedKeyPackage[]> {
+  return unwrapApiResult(
+    await requestJson({
+      path: `/users/${encodeURIComponent(userId)}/key-packages/claim-all`,
+      method: 'POST',
+      responseSchema: ClaimedKeyPackageSchema.array(),
+    }),
+  );
+}
 
 // --- Key backup (PUT/GET /backups/me) ---------------------------------------------------------------
 // The server holds an opaque copy of the IDENTITY-ONLY recovery artifact (passphrase-sealed client-side

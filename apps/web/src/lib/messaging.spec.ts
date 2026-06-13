@@ -72,6 +72,7 @@ describe('sendLiveMessage', () => {
     expect(typeof body.clientMessageId).toBe('string');
     // The wire we POSTed is REAL ciphertext — the peer decrypts + decodes it to the message (proves E2EE).
     expect(decodeEnvelope(await bobConv.decrypt(fromBase64(body.ciphertext)))).toEqual({
+      kind: 'app',
       text: 'hello bob',
       attachments: [],
     });
@@ -106,13 +107,14 @@ describe('sendLiveMessage', () => {
     await sendLiveMessage(deps, 'c1', aliceConv, 'look', [ref]);
     // The peer decrypts the wire → the JSON envelope carries the content key/iv (E2E), never the server.
     const withAtt = await bobConv.decrypt(fromBase64(send.mock.calls[0]![1].ciphertext));
-    expect(decodeEnvelope(withAtt)).toEqual({ text: 'look', attachments: [ref] });
+    expect(decodeEnvelope(withAtt)).toEqual({ kind: 'app', text: 'look', attachments: [ref] });
 
     // Text-only is ALSO wrapped (so the wire is unambiguous); the peer decodes it back to the text.
     await sendLiveMessage(deps, 'c1', aliceConv, 'just text');
     expect(
       decodeEnvelope(await bobConv.decrypt(fromBase64(send.mock.calls[1]![1].ciphertext))),
     ).toEqual({
+      kind: 'app',
       text: 'just text',
       attachments: [],
     });
@@ -123,6 +125,7 @@ describe('sendLiveMessage', () => {
     expect(
       decodeEnvelope(await bobConv.decrypt(fromBase64(send.mock.calls[2]![1].ciphertext))),
     ).toEqual({
+      kind: 'app',
       text: tricky,
       attachments: [],
     });

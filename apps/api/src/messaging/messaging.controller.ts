@@ -3,6 +3,7 @@ import {
   ApiBadRequestResponse,
   ApiBearerAuth,
   ApiBody,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -19,13 +20,18 @@ import { CurrentAuth } from '../auth/current-auth.decorator.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { MessagingService } from './messaging.service.js';
 import {
+  CommitBodySchema,
   CreateConversationSchema,
+  ListCommitsQuerySchema,
   ListMessagesQuerySchema,
   SendMessageSchema,
+  type CommitBody,
   type CreateConversation,
+  type ListCommitsQuery,
   type ListMessagesQuery,
   type SendMessage,
 } from './messaging.schemas.js';
+import { type FetchedCommit } from './messaging.service.js';
 
 const BASE64_PATTERN = '^[A-Za-z0-9+/]+={0,2}$';
 
@@ -119,6 +125,95 @@ class FetchedMessageDto {
   createdAt!: string;
 }
 
+class CommitWelcomeBodyDto {
+  @ApiProperty({ format: 'uuid' })
+  recipientUserId!: string;
+  @ApiProperty({ format: 'uuid' })
+  recipientDeviceId!: string;
+  @ApiProperty({
+    description: 'HPKE-sealed MLS Welcome (base64)',
+    maxLength: 32768,
+    pattern: BASE64_PATTERN,
+  })
+  welcome!: string;
+  @ApiProperty({
+    description: 'Serialized RatchetTree (base64)',
+    maxLength: 32768,
+    pattern: BASE64_PATTERN,
+  })
+  ratchetTree!: string;
+}
+
+class CommitBodyDto {
+  @ApiProperty({
+    format: 'uuid',
+    description: 'client-generated id; idempotency key per sender+epoch',
+  })
+  clientCommitId!: string;
+  @ApiProperty({
+    description: 'MLS epoch at which this commit was staged (server slot key)',
+    minimum: 0,
+  })
+  epoch!: number;
+  @ApiProperty({
+    description: 'opaque base64 mls_private_message commit frame — server never decrypts',
+    maxLength: 65536,
+    pattern: BASE64_PATTERN,
+  })
+  commit!: string;
+  @ApiProperty({
+    type: [CommitWelcomeBodyDto],
+    description: 'one Welcome per added member device (max 64)',
+    maxItems: 64,
+  })
+  welcomes!: CommitWelcomeBodyDto[];
+  @ApiProperty({
+    type: [String],
+    format: 'uuid',
+    description: 'declared added user ids (max 32)',
+    maxItems: 32,
+  })
+  addedUserIds!: string[];
+  @ApiProperty({
+    type: [String],
+    format: 'uuid',
+    description: 'declared removed user ids (max 32)',
+    maxItems: 32,
+  })
+  removedUserIds!: string[];
+}
+
+class CommitResultDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+  @ApiProperty({ minimum: 0 })
+  epoch!: number;
+  @ApiProperty({ description: 'true if own idempotent retry matched an existing commit' })
+  deduplicated!: boolean;
+}
+
+class FetchedCommitDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+  @ApiProperty({ format: 'uuid', description: 'client-generated idempotency key for this commit' })
+  clientCommitId!: string;
+  @ApiProperty({ minimum: 0 })
+  epoch!: number;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    format: 'uuid',
+    description: 'null after GDPR erasure',
+  })
+  senderUserId!: string | null;
+  @ApiProperty({
+    description: 'opaque base64 mls_private_message commit frame — server never decrypts',
+  })
+  commit!: string;
+  @ApiProperty({ format: 'date-time' })
+  createdAt!: string;
+}
+
 class MessagePageDto {
   @ApiProperty({ type: [FetchedMessageDto] })
   messages!: FetchedMessageDto[];
@@ -175,6 +270,60 @@ export class MessagingController {
     @Body(new ZodValidationPipe(SendMessageSchema)) body: SendMessage,
   ): Promise<SentMessageDto> {
     return this.messaging.sendMessage(auth, conversationId, body);
+  }
+
+  @Post(':conversationId/commits')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Submit a staged MLS membership commit to win the epoch slot',
+    operationId: 'postCommit',
+    description:
+      'First POST for a given epoch wins (200). Concurrent POST at the same epoch loses (409). Own idempotent retry returns 200 deduplicated:true. The `commit` field is opaque — the server never decrypts it.',
+  })
+  @ApiParam({ name: 'conversationId', format: 'uuid' })
+  @ApiBody({ type: CommitBodyDto })
+  @ApiOkResponse({ type: CommitResultDto, description: '200 on first win or own idempotent retry' })
+  @ApiBadRequestResponse({ description: 'invalid body or user not provisioned' })
+  @ApiNotFoundResponse({ description: 'conversation not found or caller is not a member' })
+  @ApiConflictResponse({
+    description: 'epoch slot already occupied by another member (409 — rebase and retry)',
+  })
+  @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
+  async postCommit(
+    @CurrentAuth() auth: VerifiedAuth,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @Body(new ZodValidationPipe(CommitBodySchema)) body: CommitBody,
+  ): Promise<CommitResultDto> {
+    return this.messaging.postCommit(auth, conversationId, body);
+  }
+
+  @Get(':conversationId/commits')
+  @ApiOperation({
+    summary: "Drain a conversation's commits after a given epoch (member-only)",
+    operationId: 'listCommits',
+    description:
+      'Returns commits in epoch-ascending order. Pass the current local epoch as `afterEpoch` to fetch only commits not yet applied. Clients must call this on connect and on every `commit` WS event.',
+  })
+  @ApiParam({ name: 'conversationId', format: 'uuid' })
+  @ApiQuery({
+    name: 'afterEpoch',
+    required: false,
+    schema: { type: 'integer', minimum: 0, default: 0 },
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    schema: { type: 'integer', minimum: 1, maximum: 50, default: 50 },
+  })
+  @ApiOkResponse({ type: [FetchedCommitDto] })
+  @ApiNotFoundResponse({ description: 'conversation not found or caller is not a member' })
+  @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
+  async listCommits(
+    @CurrentAuth() auth: VerifiedAuth,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+    @Query(new ZodValidationPipe(ListCommitsQuerySchema)) query: ListCommitsQuery,
+  ): Promise<FetchedCommit[]> {
+    return this.messaging.listCommits(auth, conversationId, query);
   }
 
   @Get(':conversationId/messages')

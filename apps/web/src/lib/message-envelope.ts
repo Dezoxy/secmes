@@ -21,8 +21,13 @@ export interface AttachmentRef {
   size: number;
 }
 
-/** A decoded message: the text plus any attachment refs. */
+/**
+ * A decoded message. `kind` defaults to `'app'` (back-compat with pre-B1 messages that have no kind field).
+ * `'group-meta'` messages carry an in-stream encrypted group name; they are filtered out of the transcript
+ * and never displayed as chat bubbles — the latest one drives the conversation's display name.
+ */
 export interface MessageEnvelope {
+  kind: 'app' | 'group-meta';
   text: string;
   attachments: AttachmentRef[];
 }
@@ -31,12 +36,17 @@ const ENVELOPE_VERSION = 1;
 
 /** Serialize an envelope to the plaintext string that gets MLS-encrypted. */
 export function encodeEnvelope(env: MessageEnvelope): string {
-  return JSON.stringify({ v: ENVELOPE_VERSION, text: env.text, attachments: env.attachments });
+  return JSON.stringify({
+    v: ENVELOPE_VERSION,
+    kind: env.kind,
+    text: env.text,
+    attachments: env.attachments,
+  });
 }
 
 /**
  * Parse a decrypted plaintext into an envelope. Back-compat: anything that isn't a recognizable v1 envelope
- * (an old bare-string message, or non-envelope JSON) is returned as plain text with no attachments.
+ * (an old bare-string message, or non-envelope JSON) is returned as a plain-text app message.
  * Malformed attachment entries are dropped rather than throwing — a bad ref shouldn't sink the whole message.
  */
 export function decodeEnvelope(plaintext: string): MessageEnvelope {
@@ -44,15 +54,18 @@ export function decodeEnvelope(plaintext: string): MessageEnvelope {
   try {
     parsed = JSON.parse(plaintext);
   } catch {
-    return { text: plaintext, attachments: [] }; // not JSON → old plain-text message
+    return { kind: 'app', text: plaintext, attachments: [] }; // not JSON → old plain-text message
   }
   if (!isV1Envelope(parsed)) {
-    return { text: plaintext, attachments: [] }; // JSON, but not our envelope → treat the raw string as text
+    return { kind: 'app', text: plaintext, attachments: [] }; // JSON, but not our envelope → treat the raw string as text
   }
-  return { text: parsed.text, attachments: parsed.attachments.filter(isAttachmentRef) };
+  const kind = parsed.kind === 'group-meta' ? 'group-meta' : 'app';
+  return { kind, text: parsed.text, attachments: parsed.attachments.filter(isAttachmentRef) };
 }
 
-function isV1Envelope(x: unknown): x is { v: number; text: string; attachments: unknown[] } {
+function isV1Envelope(
+  x: unknown,
+): x is { v: number; kind?: string; text: string; attachments: unknown[] } {
   if (typeof x !== 'object' || x === null) return false;
   const o = x as Record<string, unknown>;
   return o.v === ENVELOPE_VERSION && typeof o.text === 'string' && Array.isArray(o.attachments);

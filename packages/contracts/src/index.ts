@@ -304,6 +304,68 @@ export const ReceiptEventSchema = z.object({
 });
 export type ReceiptEvent = z.infer<typeof ReceiptEventSchema>;
 
+// ── B1: MLS group commit fan-out ─────────────────────────────────────────────
+
+// POST /conversations/:id/commits — submit a staged membership commit to win the epoch slot.
+// `commit` is the opaque base64 mls_private_message frame. `welcomes` carries the HPKE-sealed
+// join material for each added member, one per device. The server stores + forwards; never decrypts.
+// `removedUserIds` is the declared delta — server applies it to conversation_members (see threat model
+// §T2: the server trusts this assertion; the cryptographic truth is in the commit frame itself).
+export const CommitWelcomeSchema = z
+  .object({
+    recipientUserId: z.string().uuid(),
+    recipientDeviceId: z.string().uuid(),
+    welcome: base64.max(32768),
+    ratchetTree: base64.max(32768),
+  })
+  .strict();
+
+export const CommitBodySchema = z
+  .object({
+    clientCommitId: z.string().uuid(),
+    epoch: z.number().int().nonnegative(),
+    commit: base64.max(65536),
+    welcomes: z.array(CommitWelcomeSchema).max(64),
+    addedUserIds: z.array(z.string().uuid()).max(32),
+    removedUserIds: z.array(z.string().uuid()).max(32),
+  })
+  .strict();
+export type CommitBody = z.infer<typeof CommitBodySchema>;
+
+// 200 on first win; also 200 on own retry (deduplicated: true).
+export const CommitResponseSchema = z.object({
+  id: z.string().uuid(),
+  epoch: z.number().int().nonnegative(),
+  deduplicated: z.boolean(),
+});
+export type CommitResponse = z.infer<typeof CommitResponseSchema>;
+
+// GET /conversations/:id/commits?afterEpoch=N — drain commits for epoch-advance / catch-up.
+export const FetchedCommitSchema = z.object({
+  id: z.string().uuid(),
+  clientCommitId: z.string().uuid(),
+  epoch: z.number().int().nonnegative(),
+  /** null when sender exercised GDPR erasure. */
+  senderUserId: z.string().uuid().nullable(),
+  commit: base64.max(65536),
+  createdAt: z.string().datetime(),
+});
+export type FetchedCommit = z.infer<typeof FetchedCommitSchema>;
+
+export const CommitPageSchema = z.array(FetchedCommitSchema);
+export type CommitPage = z.infer<typeof CommitPageSchema>;
+
+// The `commit` WS frame the gateway pushes when a commit wins its epoch slot. Metadata only —
+// the commit ciphertext is NOT included; clients fetch it via GET /commits?afterEpoch=N.
+export const CommitEventSchema = z.object({
+  conversationId: z.string().uuid(),
+  epoch: z.number().int().nonnegative(),
+  senderUserId: z.string().uuid().nullable(),
+  commitId: z.string().uuid(),
+  createdAt: z.string().datetime(),
+});
+export type CommitEvent = z.infer<typeof CommitEventSchema>;
+
 // ── G1: self-serve tenant onboarding ────────────────────────────────────────
 
 export const CreateTenantBodySchema = z
