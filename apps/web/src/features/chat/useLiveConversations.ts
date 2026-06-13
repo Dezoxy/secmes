@@ -8,7 +8,7 @@ import {
 } from 'react';
 import type { Conversation as MlsGroup, DeviceKeys } from '@argus/crypto';
 import { accessToken } from '../../lib/auth';
-import { fetchReceipts } from '../../lib/api';
+import { fetchReceipts, listEnrollments } from '../../lib/api';
 import { joinPendingConversations } from '../../lib/join';
 import {
   receiveLiveMessage,
@@ -272,6 +272,17 @@ export function useLiveConversations({
     const socket = createMessageSocket({
       token: accessToken,
       onStatus: setConnectionStatus,
+      // On every (re)connect, poll for enrollment requests that arrived while offline — the WS
+      // push only fires while connected, so D1 would miss pending approvals across disconnects.
+      onReady: () => {
+        void listEnrollments('pending')
+          .then((rows) => {
+            for (const row of rows) onEnrollmentPending?.(row.id);
+          })
+          .catch(() => {
+            /* best-effort — missed enrollments reappear on the next reconnect */
+          });
+      },
       onMessage: ({ conversationId, message }) => {
         const group = liveGroups.current.get(conversationId);
         if (!group) return;

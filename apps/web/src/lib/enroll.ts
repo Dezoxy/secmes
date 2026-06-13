@@ -82,9 +82,25 @@ export async function enrollDevice(
 
         const inv = serializeInvite(staged.invite);
 
+        // Persist staged BEFORE posting: if the app crashes after a successful POST but before
+        // applyStaged/saveConversationState, the drain path (onSubscribed → drainCommits) re-syncs
+        // from the server on next load. clientCommitId is fixed here so the PENDING_STORE slot can
+        // verify which commit we sent (same pattern as conversations.ts multi-device path).
+        const clientCommitId = crypto.randomUUID();
+        const pendingBytes = conversation.serializeStaged(staged);
+        await deps.keystore.saveStagedCommit(
+          deps.device,
+          conversationId,
+          deps.sessionKey,
+          pendingBytes,
+          staged.epoch,
+          clientCommitId,
+        );
+        pendingBytes.fill(0);
+
         try {
           await postCommit(conversationId, {
-            clientCommitId: crypto.randomUUID(),
+            clientCommitId,
             epoch: staged.epoch,
             commit: toBase64(staged.commit),
             welcomes: [
@@ -103,7 +119,8 @@ export async function enrollDevice(
         } catch (err) {
           conversation.discardStaged(staged);
           if (err instanceof CommitEpochConflictError && attempt < MAX_RETRIES - 1) {
-            // Signal to drain outside the lock (drainCommits re-acquires the same lock).
+            // Clear the pending slot and signal to drain outside the lock (drainCommits re-acquires).
+            await deps.keystore.clearStagedCommit(conversationId);
             epochConflict = true;
             return;
           }
@@ -117,6 +134,7 @@ export async function enrollDevice(
           conversation,
           deps.sessionKey,
         );
+        await deps.keystore.clearStagedCommit(conversationId);
       });
 
       if (epochConflict) {
