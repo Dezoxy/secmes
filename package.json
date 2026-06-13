@@ -20,6 +20,11 @@
     "comment:prepare": "build:packages emits packages/*/dist so consumers (apps/web) can typecheck against the libs' .d.ts — CI typechecks before building and dist is gitignored.",
     "prepare": "lefthook install || true && pnpm run build:packages"
   },
+  "pnpm": {
+    "overrides": {
+      "esbuild": "^0.28.1"
+    }
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "eslint": "^10.4.1",

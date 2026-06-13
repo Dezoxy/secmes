@@ -9,11 +9,16 @@
 
 import type { Conversation, DeviceKeys } from '@argus/crypto';
 
-import { fetchMessages, sendMessage, type FetchedMessage } from './api';
+import { fetchMessages, listCommits, sendMessage, type FetchedMessage } from './api';
 import { fromBase64, toBase64 } from './base64';
 import type { DeviceKeystore } from './keystore';
 import { conversationLock, withLock } from './locks';
-import { decodeEnvelope, encodeEnvelope, type AttachmentRef } from './message-envelope';
+import {
+  decodeEnvelope,
+  encodeEnvelope,
+  type AttachmentRef,
+  type MessageEnvelope,
+} from './message-envelope';
 
 // Non-secret AEAD/version tag stored alongside the ciphertext (server metadata only; it stays crypto-blind).
 const WIRE_ALG = 'MLS_1.0';
@@ -55,12 +60,13 @@ export async function sendLiveMessage(
   conversation: Conversation,
   text: string,
   attachments: AttachmentRef[] = [],
+  kind: MessageEnvelope['kind'] = 'app',
 ): Promise<SentLiveMessage> {
   // ALWAYS wrap in the versioned envelope — including text-only — so a user message that itself looks like
   // envelope JSON (e.g. `{"v":1,"text":"x","attachments":[]}`) is unambiguous on the wire: it becomes the
   // `text` field, never re-parsed as an envelope. `decodeEnvelope` still reads pre-A3 bare-string messages as
   // plain text (back-compat for already-sent history).
-  const plaintext = encodeEnvelope({ text, attachments });
+  const plaintext = encodeEnvelope({ kind, text, attachments });
   return withLock(conversationLock(conversationId), async () => {
     const wire = await conversation.encrypt(plaintext);
     // Persist the advanced ratchet BEFORE the ciphertext leaves the device (rollback/nonce-reuse guard).
@@ -97,6 +103,12 @@ export interface DecryptedMessage {
   /** Attachment refs carried E2E in the envelope (empty for text-only / pre-A3 messages). */
   attachments: AttachmentRef[];
   createdAt: string;
+  /**
+   * 'group-meta' for in-stream group-name updates (the text field carries the name); absent for
+   * regular chat messages. Callers filter this out of the transcript but use the text to update
+   * the conversation's display name.
+   */
+  kind?: 'group-meta';
 }
 
 /** Decrypted peer messages from a backfill, plus the high-water cursor to resume from next time. */
@@ -104,6 +116,13 @@ export interface BackfillResult {
   messages: DecryptedMessage[];
   /** The last server message id observed (pass as `after` next time to fetch only newer rows). */
   cursor: string | undefined;
+  /**
+   * Set to the epoch of the first un-decryptable message when the backfill stopped early because a
+   * future-epoch message was encountered. The caller MUST drain commits to exactly this epoch (not
+   * beyond) and then call backfillConversation again from the same cursor. Draining past this epoch
+   * would advance the MLS ratchet state and make messages at this epoch permanently undecryptable.
+   */
+  nextEpoch: number | undefined;
 }
 
 /**
@@ -129,10 +148,19 @@ export async function backfillConversation(
     let cursor = after;
     let advanced = false;
 
+    let nextEpoch: number | undefined; // set to the gap epoch when we stop early
     for (let page = 0; page < MAX_BACKFILL_PAGES; page += 1) {
       const res = await fetchMessages(conversationId, { after: cursor, limit: FETCH_PAGE });
       for (const m of res.messages) {
-        cursor = m.id; // high-water mark — advance past everything, even what we skip
+        // Stop WITHOUT advancing cursor if the message is at a future epoch. The caller MUST drain
+        // commits to exactly this epoch (not beyond) and then call backfillConversation again —
+        // draining further advances the ratchet past this epoch and makes these messages permanently
+        // undecryptable (MLS forward secrecy).
+        if (m.epoch > conversation.epoch) {
+          nextEpoch = m.epoch;
+          break;
+        }
+        cursor = m.id; // high-water mark — advance past everything at the current epoch
         if (m.senderUserId === selfUserId) continue; // can't decrypt our own; shown via local echo
         try {
           const plaintext = await conversation.decrypt(fromBase64(m.ciphertext));
@@ -142,11 +170,14 @@ export async function backfillConversation(
             serverId: m.id,
             senderUserId: m.senderUserId,
             clientMessageId: m.clientMessageId,
+            kind: env.kind === 'group-meta' ? 'group-meta' : undefined,
             text: env.text,
             attachments: env.attachments,
             createdAt: m.createdAt,
           });
         } catch (err) {
+          // Truly undecryptable (e.g. pre-join message, already-consumed ratchet generation) —
+          // advance past it so the cursor doesn't stall on the same message forever.
           // eslint-disable-next-line no-console
           console.warn(
             'backfill: skipped undecryptable message',
@@ -155,7 +186,7 @@ export async function backfillConversation(
           );
         }
       }
-      if (!res.nextCursor || res.messages.length === 0) break;
+      if (nextEpoch !== undefined || !res.nextCursor || res.messages.length === 0) break;
       cursor = res.nextCursor;
     }
 
@@ -167,7 +198,7 @@ export async function backfillConversation(
         deps.sessionKey,
       );
     }
-    return { messages, cursor };
+    return { messages, cursor, nextEpoch };
   });
 }
 
@@ -210,9 +241,90 @@ export async function receiveLiveMessage(
       serverId: message.id,
       senderUserId: message.senderUserId,
       clientMessageId: message.clientMessageId,
+      kind: env.kind === 'group-meta' ? 'group-meta' : undefined,
       text: env.text,
       attachments: env.attachments,
       createdAt: message.createdAt,
     };
   });
+}
+
+// --- MLS commit drain state machine (B1 group chat) -------------------------------------------------
+// On a `commit` WS event or reconnect, the client fetches + applies all unapplied commits in epoch order
+// under the conversation's single-writer lock (same lock as sends/receives). Each commit is processed
+// via `conversation.processCommit`, which advances the ratchet and persists the new state immediately
+// via the keystore persister (built outside the conversation's op queue to avoid re-entering it).
+
+/**
+ * Fetch and apply commits after `afterEpoch` under the conversation lock, in epoch-ascending order.
+ * Stops at the first unprocessable commit (subsequent epochs are unreachable without it).
+ *
+ * `maxEpoch` — when set, stops BEFORE applying any commit whose epoch exceeds this value. Use this
+ * to advance the MLS ratchet to exactly the epoch needed to decrypt the next queued message — never
+ * beyond it — so intermediate messages remain decryptable (MLS forward secrecy removes those keys
+ * once the epoch is surpassed).
+ */
+export async function drainCommits(
+  deps: MessagingDeps,
+  conversationId: string,
+  conversation: Conversation,
+  afterEpoch: number,
+  maxEpoch?: number,
+): Promise<void> {
+  return withLock(conversationLock(conversationId), async () => {
+    const persister = deps.keystore.makeConversationPersister(
+      deps.device,
+      conversationId,
+      deps.sessionKey,
+    );
+    const LIMIT = 50;
+    let cursor = afterEpoch;
+    for (;;) {
+      const commits = await listCommits(conversationId, { afterEpoch: cursor, limit: LIMIT });
+      for (const c of commits) {
+        // Stop BEFORE the commit that would advance the group past maxEpoch. A commit stored with
+        // epoch N takes the group from N → N+1, so to decrypt a message at epoch maxEpoch the group
+        // must be at maxEpoch — meaning only commits with epoch < maxEpoch should be applied.
+        if (maxEpoch !== undefined && c.epoch >= maxEpoch) return;
+        try {
+          await conversation.processCommit(fromBase64(c.commit), persister);
+          cursor = c.epoch; // advance past this commit so the next page starts here
+        } catch (err) {
+          // Subsequent epochs can't be processed without this one — bail out entirely.
+          // eslint-disable-next-line no-console
+          console.warn(
+            'drainCommits: stopped at unprocessable commit',
+            c.id,
+            'epoch',
+            c.epoch,
+            err instanceof Error ? err.message : err,
+          );
+          return;
+        }
+      }
+      if (commits.length < LIMIT) break; // last page — no more commits to fetch
+    }
+  });
+}
+
+/**
+ * Handle a `commit` WS event: if the event's epoch is ahead of the local epoch, drain from
+ * the current epoch. If already past (stale event), ignore. Runs under the conversation lock.
+ *
+ * `maxEpoch` — passed through to `drainCommits`; callers on the message path should set this to
+ * the message's epoch so the ratchet stops exactly there, keeping intermediate messages decryptable.
+ */
+export async function processCommitEvent(
+  deps: MessagingDeps,
+  conversationId: string,
+  conversation: Conversation,
+  event: { epoch: number },
+  maxEpoch?: number,
+): Promise<void> {
+  const convEpoch = conversation.epoch;
+  if (event.epoch < convEpoch) return; // stale — already at a later epoch
+  // afterEpoch = convEpoch - 1 → returns commits with epoch > (convEpoch-1), i.e. epoch >= convEpoch.
+  // No floor at 0: a group at epoch 0 passes -1 so the server returns epoch-0 commits too.
+  const afterEpoch = convEpoch - 1;
+  await drainCommits(deps, conversationId, conversation, afterEpoch, maxEpoch);
 }

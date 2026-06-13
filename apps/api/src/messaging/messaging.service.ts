@@ -1,15 +1,27 @@
 import { verifyWelcomeConsume, verifyWelcomeFetch } from '@argus/crypto/device-proof';
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { and, asc, eq, sql } from 'drizzle-orm';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { and, asc, eq, gt, inArray, max, sql } from 'drizzle-orm';
 import { z } from 'zod';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant, type Tx } from '../db/index.js';
 import { requireMembership, requireUser } from './membership.js';
 import { PushService } from '../push/push.service.js';
-import { RealtimeBus, type MessageCreatedEvent } from '../realtime/realtime-bus.js';
+import {
+  RealtimeBus,
+  type CommitCreatedEvent,
+  type MemberRemovedEvent,
+  type MessageCreatedEvent,
+} from '../realtime/realtime-bus.js';
 import type {
+  CommitBody,
   DeliverWelcome,
+  ListCommitsQuery,
   ListMessagesQuery,
   RecordReceipt,
   SendMessage,
@@ -42,6 +54,22 @@ export interface SentMessage {
   createdAt: string;
   /** true when an idempotent retry matched an existing (sender, clientMessageId) — nothing new stored. */
   deduplicated: boolean;
+}
+
+export interface CommitResult {
+  id: string;
+  epoch: number;
+  deduplicated: boolean;
+}
+
+/** One fetched commit — opaque mls_private_message base64 + routing metadata. Server never decrypts. */
+export interface FetchedCommit {
+  id: string;
+  clientCommitId: string;
+  epoch: number;
+  senderUserId: string | null;
+  commit: string;
+  createdAt: string;
 }
 
 /** One fetched message — CIPHERTEXT ONLY plus routing metadata; the server never decrypts `ciphertext`. */
@@ -422,6 +450,66 @@ export class MessagingService {
       const sender = await requireUser(tx, auth.sub);
       await requireMembership(tx, conversationId, sender);
 
+      // Idempotent-retry fast path: if this (conversation, sender, clientMessageId) was already
+      // stored, return it immediately BEFORE the stale-epoch check. This prevents a retry from
+      // being rejected with 409 simply because a commit advanced the epoch after the first send
+      // succeeded but before the client received the acknowledgement.
+      const [alreadyStored] = await tx
+        .select({ id: schema.messages.id, createdAt: schema.messages.createdAt })
+        .from(schema.messages)
+        .where(
+          and(
+            eq(schema.messages.conversationId, conversationId),
+            eq(schema.messages.senderUserId, sender),
+            eq(schema.messages.clientMessageId, body.clientMessageId),
+          ),
+        )
+        .limit(1);
+      if (alreadyStored) {
+        return {
+          result: {
+            messageId: alreadyStored.id,
+            createdAt: alreadyStored.createdAt.toISOString(),
+            deduplicated: true,
+          },
+          event: null,
+        };
+      }
+
+      // Epoch gate: reject messages at any epoch other than the current group epoch. A message
+      // encrypted at an old epoch is undecryptable (MLS FS); one at a future epoch indicates the
+      // client is ahead of the server-committed state and would be stored but undecryptable by peers.
+      // Both are rejected so the client knows to drain commits or re-sync before retrying.
+      // Gate applies ONLY to conversations that have at least one commit row (i.e. groups using the
+      // staged-commit API). 1:1 conversations never write to conversation_commits — their MLS epoch
+      // advances to 1 via addMember without a commit row, so maxEpoch stays -1 and the gate is skipped.
+      const [epochRow] = await tx
+        .select({ maxEpoch: max(schema.conversationCommits.epoch) })
+        .from(schema.conversationCommits)
+        .where(
+          and(
+            eq(schema.conversationCommits.tenantId, auth.tenantId),
+            eq(schema.conversationCommits.conversationId, conversationId),
+          ),
+        );
+      const maxEpoch =
+        epochRow?.maxEpoch !== null && epochRow?.maxEpoch !== undefined
+          ? Number(epochRow.maxEpoch)
+          : -1;
+      if (maxEpoch !== -1) {
+        const expectedEpoch = maxEpoch + 1; // commit at N → group at N+1
+        if (body.epoch !== expectedEpoch) {
+          const direction = body.epoch < expectedEpoch ? 'stale' : 'future';
+          throw new ConflictException(
+            `${direction} epoch: client at ${String(body.epoch)}, group at ${String(expectedEpoch)} — ${
+              direction === 'stale'
+                ? 'drain commits before sending'
+                : 'group has not yet advanced to this epoch'
+            }`,
+          );
+        }
+      }
+
       const inserted = await tx
         .insert(schema.messages)
         .values({
@@ -677,6 +765,294 @@ export class MessagingService {
       userId,
       status: body.status,
       throughMessageId: body.throughMessageId,
+    });
+  }
+
+  /**
+   * Submit a staged membership commit to win the epoch slot for `conversationId`.
+   *
+   * Invariant #1: the `commit` field is an opaque base64 mls_private_message — the server never
+   * decrypts it. Membership changes are applied to `conversation_members` via the DECLARED delta
+   * (`addedUserIds`, `removedUserIds`); the cryptographic truth is in the commit frame itself
+   * (see threat model §T2).
+   *
+   * Returns 200 on first win or on own idempotent retry. Throws ConflictException (409) if another
+   * member won the slot at this epoch first.
+   */
+  async postCommit(
+    auth: VerifiedAuth,
+    conversationId: string,
+    body: CommitBody,
+  ): Promise<CommitResult> {
+    const { result, event, removedSubs } = await withTenant(auth.tenantId, async (tx) => {
+      const sender = await requireUser(tx, auth.sub);
+      await requireMembership(tx, conversationId, sender);
+
+      // Contiguity guard: reject commits that skip epochs. A gap commit would poison MAX(epoch) for
+      // the sendMessage stale-epoch gate, cause peer drain loops to halt at a missing slot, and let
+      // a malicious member inject an arbitrarily large epoch that blocks all future messaging.
+      // body.epoch === expectedEpoch → normal new commit; body.epoch < expectedEpoch → handled by
+      // the unique constraint below (own idempotent retry or 409).
+      const [slotRow] = await tx
+        .select({ currentMax: max(schema.conversationCommits.epoch) })
+        .from(schema.conversationCommits)
+        .where(
+          and(
+            eq(schema.conversationCommits.tenantId, auth.tenantId),
+            eq(schema.conversationCommits.conversationId, conversationId),
+          ),
+        );
+      const nextEpoch =
+        slotRow?.currentMax !== null && slotRow?.currentMax !== undefined
+          ? Number(slotRow.currentMax) + 1
+          : 0;
+      if (body.epoch > nextEpoch) {
+        throw new ConflictException(
+          `non-contiguous epoch: expected ${String(nextEpoch)}, got ${String(body.epoch)}`,
+        );
+      }
+
+      // Attempt to insert — the UNIQUE (tenant_id, conversation_id, epoch) constraint is the server-side
+      // epoch lock. onConflictDoNothing is used here because we need to distinguish two conflict types:
+      // (a) epoch slot occupied by another member → 409; (b) own idempotent retry → 200 deduplicated.
+      // We distinguish them by checking the rows-inserted count and then querying for the own row.
+      const inserted = await tx
+        .insert(schema.conversationCommits)
+        .values({
+          tenantId: auth.tenantId,
+          conversationId,
+          senderUserId: sender,
+          clientCommitId: body.clientCommitId,
+          epoch: BigInt(body.epoch),
+          commit: body.commit,
+        })
+        .onConflictDoNothing()
+        .returning({
+          id: schema.conversationCommits.id,
+          createdAt: schema.conversationCommits.createdAt,
+        });
+
+      if (inserted[0]) {
+        // Pre-validate added user IDs to avoid FK violations that abort the tx. A PostgreSQL FK
+        // violation puts the connection in an error state; a JS catch only handles the Node error,
+        // not the Postgres tx-aborted state — all subsequent statements would fail. Unknown /
+        // cross-tenant IDs are silently skipped (crypto truth is in the MLS commit frame, §T2).
+        const validAddedUsers =
+          body.addedUserIds.length > 0
+            ? await tx
+                .select({ id: schema.users.id })
+                .from(schema.users)
+                .where(
+                  and(
+                    eq(schema.users.tenantId, auth.tenantId),
+                    inArray(schema.users.id, body.addedUserIds),
+                  ),
+                )
+            : [];
+        const validAddedIds = new Set(validAddedUsers.map((u) => u.id));
+        for (const userId of body.addedUserIds) {
+          if (!validAddedIds.has(userId)) continue;
+          await tx
+            .insert(schema.conversationMembers)
+            .values({ tenantId: auth.tenantId, conversationId, userId })
+            .onConflictDoNothing();
+        }
+
+        // Look up removed members' external subs BEFORE deleting them (needed to evict their live
+        // WS room subscriptions via MemberRemovedEvent post-commit).
+        const removedSubs: string[] =
+          body.removedUserIds.length > 0
+            ? (
+                await tx
+                  .select({ sub: schema.users.externalIdentityId })
+                  .from(schema.users)
+                  .where(
+                    and(
+                      eq(schema.users.tenantId, auth.tenantId),
+                      inArray(schema.users.id, body.removedUserIds),
+                    ),
+                  )
+              ).map((u) => u.sub)
+            : [];
+        if (body.removedUserIds.length > 0) {
+          await tx.delete(schema.conversationMembers).where(
+            and(
+              eq(schema.conversationMembers.tenantId, auth.tenantId),
+              eq(schema.conversationMembers.conversationId, conversationId),
+              sql`${schema.conversationMembers.userId} = ANY(ARRAY[${sql.join(
+                body.removedUserIds.map((id) => sql`${id}::uuid`),
+                sql`, `,
+              )}])`,
+            ),
+          );
+        }
+
+        // Validate each welcome: the device must exist in this tenant AND belong to the stated
+        // recipient user. Skipping either check would let a member pair an arbitrary device with
+        // a victim's userId, creating inconsistent membership state or misdirected join material.
+        const welcomeDeviceIds = body.welcomes.map((w) => w.recipientDeviceId);
+        const validDevices =
+          welcomeDeviceIds.length > 0
+            ? await tx
+                .select({ id: schema.devices.id, userId: schema.devices.userId })
+                .from(schema.devices)
+                .where(
+                  and(
+                    eq(schema.devices.tenantId, auth.tenantId),
+                    inArray(schema.devices.id, welcomeDeviceIds),
+                  ),
+                )
+            : [];
+        // Map deviceId → owning userId for O(1) cross-check below.
+        const deviceOwner = new Map(validDevices.map((d) => [d.id, d.userId]));
+        for (const w of body.welcomes) {
+          if (deviceOwner.get(w.recipientDeviceId) !== w.recipientUserId) continue;
+          await tx
+            .insert(schema.conversationWelcomes)
+            .values({
+              tenantId: auth.tenantId,
+              conversationId,
+              recipientUserId: w.recipientUserId,
+              recipientDeviceId: w.recipientDeviceId,
+              senderUserId: sender,
+              welcome: w.welcome,
+              ratchetTree: w.ratchetTree,
+            })
+            .onConflictDoNothing();
+        }
+
+        const createdAt = inserted[0].createdAt.toISOString();
+        return {
+          result: { id: inserted[0].id, epoch: body.epoch, deduplicated: false },
+          event: {
+            tenantId: auth.tenantId,
+            conversationId,
+            epoch: body.epoch,
+            senderUserId: sender,
+            commitId: inserted[0].id,
+            createdAt,
+          } satisfies CommitCreatedEvent,
+          removedSubs,
+        };
+      }
+
+      // Conflict — check if it's our own retry or another member's win.
+      const [existing] = await tx
+        .select({
+          id: schema.conversationCommits.id,
+          senderUserId: schema.conversationCommits.senderUserId,
+          clientCommitId: schema.conversationCommits.clientCommitId,
+        })
+        .from(schema.conversationCommits)
+        .where(
+          and(
+            eq(schema.conversationCommits.tenantId, auth.tenantId),
+            eq(schema.conversationCommits.conversationId, conversationId),
+            eq(schema.conversationCommits.epoch, BigInt(body.epoch)),
+          ),
+        )
+        .limit(1);
+
+      if (
+        existing &&
+        existing.senderUserId !== null &&
+        existing.senderUserId === sender &&
+        existing.clientCommitId === body.clientCommitId
+      ) {
+        // Own idempotent retry.
+        return {
+          result: { id: existing.id, epoch: body.epoch, deduplicated: true },
+          event: null,
+          removedSubs: [],
+        };
+      }
+
+      // Another member won this epoch slot.
+      throw new ConflictException('epoch slot already occupied');
+    });
+
+    // Post-commit: notify all conversation members about the new commit (metadata only, no ciphertext).
+    if (event) {
+      this.bus.emitCommitCreated(event);
+      void this.push.notifyConversationMembers(auth.tenantId, conversationId, auth.sub);
+
+      // Nudge welcome recipients — one WS push per unique added user (batch to a single query).
+      const uniqueRecipientIds = [...new Set(body.welcomes.map((w) => w.recipientUserId))];
+      if (uniqueRecipientIds.length > 0) {
+        const recipients = await withTenant(auth.tenantId, (tx) =>
+          tx
+            .select({ id: schema.users.id, sub: schema.users.externalIdentityId })
+            .from(schema.users)
+            .where(
+              and(
+                eq(schema.users.tenantId, auth.tenantId),
+                inArray(schema.users.id, uniqueRecipientIds),
+              ),
+            ),
+        );
+        for (const r of recipients) {
+          this.bus.emitWelcomeCreated({
+            tenantId: auth.tenantId,
+            conversationId,
+            recipientSub: r.sub,
+          });
+        }
+      }
+
+      // Evict removed members from their live WS room subscriptions so they stop receiving
+      // metadata pushes immediately after the commit lands (no wait for disconnect/reconnect).
+      if (removedSubs.length > 0) {
+        this.bus.emitMemberRemoved({
+          tenantId: auth.tenantId,
+          conversationId,
+          removedSubs,
+        } satisfies MemberRemovedEvent);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Drain commits after `afterEpoch` for a conversation (the client's catch-up / epoch-advance path).
+   * OPAQUE COMMIT BYTES ONLY — ciphertext only, server never decrypts. Member-only.
+   */
+  async listCommits(
+    auth: VerifiedAuth,
+    conversationId: string,
+    query: ListCommitsQuery,
+  ): Promise<FetchedCommit[]> {
+    return withTenant(auth.tenantId, async (tx) => {
+      const user = await requireUser(tx, auth.sub);
+      await requireMembership(tx, conversationId, user);
+
+      const rows = await tx
+        .select({
+          id: schema.conversationCommits.id,
+          clientCommitId: schema.conversationCommits.clientCommitId,
+          epoch: schema.conversationCommits.epoch,
+          senderUserId: schema.conversationCommits.senderUserId,
+          commit: schema.conversationCommits.commit,
+          createdAt: schema.conversationCommits.createdAt,
+        })
+        .from(schema.conversationCommits)
+        .where(
+          and(
+            eq(schema.conversationCommits.tenantId, auth.tenantId),
+            eq(schema.conversationCommits.conversationId, conversationId),
+            gt(schema.conversationCommits.epoch, BigInt(query.afterEpoch)),
+          ),
+        )
+        .orderBy(asc(schema.conversationCommits.epoch))
+        .limit(query.limit);
+
+      return rows.map((r) => ({
+        id: r.id,
+        clientCommitId: r.clientCommitId,
+        epoch: Number(r.epoch),
+        senderUserId: r.senderUserId,
+        commit: r.commit,
+        createdAt: r.createdAt.toISOString(),
+      }));
     });
   }
 

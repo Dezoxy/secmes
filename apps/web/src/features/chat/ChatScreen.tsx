@@ -1,7 +1,12 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { MessageCircle, X } from 'lucide-react';
 import type { UserSummary } from '../../lib/api';
-import { ConversationManager, type ConversationSession } from '../../lib/conversations';
+import {
+  ConversationManager,
+  GroupConversationManager,
+  type ConversationSession,
+  type GroupConversationSession,
+} from '../../lib/conversations';
 import type { MessagingDeps } from '../../lib/messaging';
 import { getMlsSession } from '../../lib/mls';
 import { prefersReducedMotion } from '../../lib/pref';
@@ -15,6 +20,7 @@ import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import { StartConversation } from './StartConversation';
+import { GroupCreateDialog } from './GroupCreateDialog';
 import { contactDisplayName } from './user-label';
 import { VerifySecurity } from './VerifySecurity';
 import {
@@ -44,6 +50,7 @@ import { dicebearAvatar, isCustomPhoto } from '../../lib/dicebear';
 import {
   conversations as initialConversations,
   currentUser,
+  generatedAvatar,
   MAX_AVATAR_DATA_URI_LENGTH,
   getConversationDisplayName,
   safeAvatarSrc,
@@ -177,7 +184,21 @@ export default function ChatScreen() {
         : null,
     [messagingDeps, profile],
   );
+  const groupManager = useMemo(
+    () =>
+      messagingDeps && profile?.userId
+        ? new GroupConversationManager(
+            messagingDeps.device,
+            profile.userId,
+            messagingDeps.keystore,
+            messagingDeps.sessionKey,
+          )
+        : null,
+    [messagingDeps, profile],
+  );
   const [startOpen, setStartOpen] = useState(false);
+  const [groupCreateOpen, setGroupCreateOpen] = useState(false);
+  const [addMemberOpen, setAddMemberOpen] = useState(false);
   const { appendHistory, mergeIncoming, backfillInto } = useConversationBackfill({
     messagingDeps,
     sessionKey,
@@ -299,6 +320,43 @@ export default function ChatScreen() {
     setStartOpen(false);
   };
 
+  const handleGroupCreated = (session: GroupConversationSession): void => {
+    addLive(session.conversationId, session.conversation);
+    const participants: User[] = [
+      currentUserProfile,
+      ...session.addedUserIds.map((id) => ({
+        id,
+        name: 'Group member',
+        avatar: dicebearAvatar(id),
+      })),
+    ];
+    setConversations((prev) =>
+      prev.some((c) => c.id === session.conversationId)
+        ? prev
+        : [
+            {
+              id: session.conversationId,
+              type: 'group' as const,
+              name: session.groupName || undefined,
+              avatar: session.groupName ? generatedAvatar(session.groupName) : undefined,
+              participants,
+              messages: [],
+              unreadCount: 0,
+              creatorId: profile?.userId,
+            },
+            ...prev,
+          ],
+    );
+    setSelectedId(session.conversationId);
+    setGroupCreateOpen(false);
+  };
+
+  const handleOpenAddMember = (): void => {
+    if (!selectedId) return;
+    if (!liveGroups.current.has(selectedId)) return;
+    setAddMemberOpen(true);
+  };
+
   useConversationHistoryRehydration({
     messagingDeps,
     sessionKey,
@@ -411,6 +469,7 @@ export default function ChatScreen() {
             currentUserProfile={currentUserProfile}
             onSettings={openSettings}
             onNewConversation={manager ? () => setStartOpen(true) : undefined}
+            onNewGroup={groupManager ? () => setGroupCreateOpen(true) : undefined}
             updateReady={updateReady}
             onApplyUpdate={applyUpdate}
           />
@@ -436,6 +495,13 @@ export default function ChatScreen() {
                 onBack={handleBackToConversations}
                 verified={verified}
                 onVerify={isDirect && currentNumber ? () => setVerifyOpen(true) : undefined}
+                onAddMember={
+                  selectedConversation.type === 'group' &&
+                  selectedConversation.creatorId === profile?.userId &&
+                  groupManager !== null
+                    ? handleOpenAddMember
+                    : undefined
+                }
                 updateReady={updateReady}
                 onApplyUpdate={applyUpdate}
               />
@@ -483,6 +549,50 @@ export default function ChatScreen() {
           onOpenExisting={handleOpenExisting}
           onStarted={handleStarted}
           onClose={() => setStartOpen(false)}
+        />
+      )}
+      {groupCreateOpen && groupManager && messagingDeps && (
+        <GroupCreateDialog
+          mode="create"
+          manager={groupManager}
+          deps={messagingDeps}
+          selfUserId={profile?.userId}
+          onCreated={handleGroupCreated}
+          onClose={() => setGroupCreateOpen(false)}
+        />
+      )}
+      {addMemberOpen && selectedId && groupManager && messagingDeps && (
+        <GroupCreateDialog
+          mode="add"
+          manager={groupManager}
+          deps={messagingDeps}
+          selfUserId={profile?.userId}
+          conversationId={selectedId}
+          existingConversation={liveGroups.current.get(selectedId)}
+          existingMemberIds={new Set(selectedConversation?.participants.map((p) => p.id) ?? [])}
+          existingGroupName={selectedConversation?.name}
+          onAdded={(addedUsers) => {
+            setAddMemberOpen(false);
+            if (addedUsers.length > 0 && selectedId) {
+              setConversations((prev) =>
+                prev.map((c) => {
+                  if (c.id !== selectedId) return c;
+                  const existingIds = new Set(c.participants.map((p) => p.id));
+                  const fresh = addedUsers
+                    .filter((u) => !existingIds.has(u.id))
+                    .map((u) => ({
+                      id: u.id,
+                      name: contactDisplayName(u),
+                      avatar: dicebearAvatar(u.id),
+                    }));
+                  return fresh.length === 0
+                    ? c
+                    : { ...c, participants: [...c.participants, ...fresh] };
+                }),
+              );
+            }
+          }}
+          onClose={() => setAddMemberOpen(false)}
         />
       )}
       {verifyOpen && isDirect && (

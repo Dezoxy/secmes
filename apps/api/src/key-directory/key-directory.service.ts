@@ -15,6 +15,13 @@ const ClaimRowSchema = z.object({
   key_package: z.string(),
 });
 
+/** Validates a claim-all row — includes the device's stable signature key (fetched via JOIN). */
+const ClaimAllRowSchema = z.object({
+  device_id: z.string().uuid(),
+  key_package: z.string(),
+  signature_public_key: z.string(),
+});
+
 export interface PublishResult {
   deviceId: string;
   /** Net-new KeyPackages inserted by THIS call (already-published dups are skipped). */
@@ -209,5 +216,58 @@ export class KeyDirectoryService {
       });
     }
     return { revoked };
+  }
+
+  /**
+   * Claim one unclaimed KeyPackage per device for `targetUserId` (B1 group add). Used when staging
+   * a membership commit that adds a multi-device user — each device needs its own Welcome sealed to
+   * its own claimed KeyPackage. Returns one entry per device that has available packages; devices with
+   * an empty pool are omitted (caller must check coverage and prompt for replenishment if needed).
+   * `FOR UPDATE SKIP LOCKED` per device so concurrent claims pick different rows.
+   */
+  async claimAll(auth: VerifiedAuth, targetUserId: string): Promise<ClaimedKeyPackage[]> {
+    const claimed = await withTenant(auth.tenantId, async (tx) => {
+      // LATERAL JOIN: for each device of the target user, select the oldest unclaimed package with
+      // FOR UPDATE SKIP LOCKED, then UPDATE (claim) it in one statement. This avoids DISTINCT ON +
+      // FOR UPDATE, which PostgreSQL rejects (DISTINCT ON is not allowed with locking clauses). The
+      // LATERAL subquery runs once per device; SKIP LOCKED means concurrent claimAll calls pick
+      // different packages rather than blocking. Defense-in-depth: explicit tenant_id filter on top of RLS.
+      const rows = (await tx.execute(sql`
+        update key_packages kp set claimed_at = now()
+        from devices d
+        join lateral (
+          select kp2.id
+          from key_packages kp2
+          where kp2.device_id = d.id
+            and kp2.claimed_at is null
+          order by kp2.created_at asc
+          limit 1
+          for update skip locked
+        ) chosen on true
+        where d.user_id = ${targetUserId}
+          and d.tenant_id = ${auth.tenantId}
+          and kp.id = chosen.id
+        returning kp.device_id, kp.key_package, d.signature_public_key
+      `)) as unknown as unknown[];
+
+      return rows.map((r) => {
+        const parsed = ClaimAllRowSchema.parse(r);
+        return {
+          deviceId: parsed.device_id,
+          signaturePublicKey: parsed.signature_public_key,
+          keyPackage: parsed.key_package,
+        };
+      });
+    });
+
+    // Audit bulk claims so pool-drain attempts (repeated group-adds) are detectable, matching
+    // the per-claim audit trail on the single-claim path. Separate tx (same pattern as claimKeyPackage).
+    if (claimed.length > 0) {
+      await this.audit.record(auth.tenantId, {
+        eventType: 'keydir.key_packages_claimed_bulk',
+        actorSub: auth.sub,
+      });
+    }
+    return claimed;
   }
 }

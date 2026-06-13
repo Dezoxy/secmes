@@ -10,7 +10,12 @@ import type { Conversation as MlsGroup, DeviceKeys } from '@argus/crypto';
 import { accessToken } from '../../lib/auth';
 import { fetchReceipts } from '../../lib/api';
 import { joinPendingConversations } from '../../lib/join';
-import { receiveLiveMessage, type DecryptedMessage, type MessagingDeps } from '../../lib/messaging';
+import {
+  receiveLiveMessage,
+  processCommitEvent,
+  type DecryptedMessage,
+  type MessagingDeps,
+} from '../../lib/messaging';
 import {
   createMessageSocket,
   type IncomingReceipt,
@@ -35,7 +40,7 @@ interface UseLiveConversationsOptions {
     conversationId: string,
     group: MlsGroup,
     selfUserId: string,
-  ) => void | Promise<void>;
+  ) => Promise<{ nextEpoch: number | undefined }> | void;
   setConversations: Dispatch<SetStateAction<Conversation[]>>;
 }
 
@@ -267,28 +272,98 @@ export function useLiveConversations({
       onMessage: ({ conversationId, message }) => {
         const group = liveGroups.current.get(conversationId);
         if (!group) return;
-        void receiveLiveMessage(deps, conversationId, group, message, selfUserId)
-          .then((decrypted) => {
-            if (decrypted) mergeIncoming(conversationId, [decrypted]);
-          })
-          .catch((err: unknown) => {
-            // eslint-disable-next-line no-console
-            console.warn(
-              'ws receive failed',
+        void (async () => {
+          // If the message was encrypted at a newer epoch, drain commits to EXACTLY that epoch
+          // before decrypting. Passing maxEpoch = message.epoch prevents the drain from overshooting
+          // and consuming keys that belong to messages still in-flight at intermediate epochs.
+          if (message.epoch > group.epoch) {
+            await processCommitEvent(
+              deps,
               conversationId,
-              err instanceof Error ? err.message : err,
+              group,
+              { epoch: message.epoch },
+              message.epoch,
             );
-          });
+          }
+          const decrypted = await receiveLiveMessage(
+            deps,
+            conversationId,
+            group,
+            message,
+            selfUserId,
+          );
+          if (decrypted) mergeIncoming(conversationId, [decrypted]);
+        })().catch((err: unknown) => {
+          // eslint-disable-next-line no-console
+          console.warn(
+            'ws receive failed',
+            conversationId,
+            err instanceof Error ? err.message : err,
+          );
+        });
       },
       onReceipt: applyReceipt,
       onSubscribed: (conversationId) => {
         const group = liveGroups.current.get(conversationId);
-        if (group) void backfillInto(conversationId, group, selfUserId);
+        if (group) {
+          // Interleaved catch-up: backfill at the current epoch, then — if messages at a future
+          // epoch were encountered — drain commits to EXACTLY that epoch (not beyond), then backfill
+          // again. Repeat until the backfill sees no further epoch gaps. This preserves forward
+          // secrecy: keys for epoch N are consumed only after all epoch-N messages are decrypted.
+          void (async () => {
+            for (;;) {
+              const result = await backfillInto(conversationId, group, selfUserId);
+              const nextEpoch = result?.nextEpoch;
+              if (nextEpoch === undefined) break;
+              await processCommitEvent(
+                deps,
+                conversationId,
+                group,
+                { epoch: nextEpoch },
+                nextEpoch,
+              );
+            }
+          })().catch((err: unknown) => {
+            // eslint-disable-next-line no-console
+            console.warn(
+              'subscribe: catch-up failed',
+              conversationId,
+              err instanceof Error ? err.message : err,
+            );
+          });
+        }
         seedReceipts(conversationId); // seed historical delivered/read ticks once in the room
       },
       // A Welcome is waiting (added to a conversation while connected): drain now — join → subscribe →
       // backfill ride the existing onJoined → addLive path, so the conversation + its messages appear live.
       onWelcome: () => drainRef.current(),
+      onRemoved: (conversationId) => {
+        liveGroups.current.delete(conversationId);
+        setLiveIds((prev) => {
+          if (!prev.has(conversationId)) return prev;
+          const next = new Set(prev);
+          next.delete(conversationId);
+          return next;
+        });
+        setConversations((prev) => prev.filter((c) => c.id !== conversationId));
+      },
+      // A membership commit was posted: drain to exactly this commit (epoch+1 ceiling) so the group
+      // advances to epoch+1 but no further. An unbounded drain would consume forward-secret keys for
+      // messages still in-flight at epoch+1, making them permanently undecryptable on arrival.
+      onCommit: ({ conversationId, epoch }) => {
+        const group = liveGroups.current.get(conversationId);
+        if (!group) return;
+        void processCommitEvent(deps, conversationId, group, { epoch }, epoch + 1).catch(
+          (err: unknown) => {
+            // eslint-disable-next-line no-console
+            console.warn(
+              'commit drain failed',
+              conversationId,
+              err instanceof Error ? err.message : err,
+            );
+          },
+        );
+      },
     });
     socketRef.current = socket;
     for (const id of liveGroups.current.keys()) socket.subscribe(id);

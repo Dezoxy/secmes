@@ -41,11 +41,12 @@ const DB_NAME = 'argus-keystore';
 // GROUP-STATE store (live messaging, Slice 5). Shapes are incompatible across v1→v2: a stale v1 record
 // would be misread as a sealed device and fail to unlock, so the upgrade drops the legacy store;
 // v2→v3 and v3→v4 only ADD a store.
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 const STORE = 'device';
 const POOL_STORE = 'key-package-pool'; // sealed one-time KeyPackage pool (privates retained for join)
 const GROUP_STORE = 'group-state'; // sealed MLS group state per conversation (ratchet secrets — Slice 5)
 const MSGLOG_STORE = 'message-log'; // sealed decrypted message history per conversation (session-key, history)
+const PENDING_STORE = 'pending-commit'; // sealed pending post-commit state — written BEFORE POST, cleared on apply/discard
 const META_STORE = 'meta'; // small non-secret per-profile values (the session-key salt)
 const SESSION_SALT_KEY = 'session-salt'; // META_STORE key — the per-profile Argon2 salt for the session key
 const SELF = 'self'; // single device per user in v1 (multi-device is deferred, B2)
@@ -91,6 +92,9 @@ interface StoredGroupState {
   // Monotonic per-conversation version for the cross-instance CAS (see saveConversationState). Bumped on
   // every successful save; a write is only committed if the store still holds the version the writer last saw.
   version: number;
+  /** The userId of the member who created this group — persisted by the creator only. Used to gate
+   * "Add member" so the button survives page reload (in-memory creatorId is lost on unmount). */
+  creatorId?: string;
 }
 
 /** One decrypted message in the local history log — PLAINTEXT, only ever stored SEALED (see StoredMessageLog). */
@@ -101,6 +105,9 @@ export interface StoredMessage {
   timestamp: string; // ISO 8601
   status: string; // 'sending' | 'sent' | 'delivered' | 'read' | 'failed'
   encrypted?: boolean;
+  /** 'group-meta' for in-stream group-name updates — filtered from the transcript but persisted so the
+   * group name survives page reload (extracted during history rehydration). Absent for chat messages. */
+  kind?: 'group-meta';
   // E2E attachment refs (objectKey + content key/iv). Sealed at rest with the rest of the log, like `content`.
   attachments?: AttachmentRef[];
 }
@@ -126,6 +133,26 @@ interface StoredMessageLog {
  */
 function groupStateAad(conversationId: string): Uint8Array {
   return te.encode(`group-state:${conversationId}`);
+}
+
+/** AAD for a pending-commit blob — domain-separates from group-state and message-log blobs. */
+function pendingCommitAad(conversationId: string): Uint8Array {
+  return te.encode(`pending-commit:${conversationId}`);
+}
+
+// A pending post-commit state persisted BEFORE the POST, so a crash between a successful POST and
+// applyStaged/saveConversationState doesn't desync the device (the device reloads at the old epoch
+// while the server/peers are already at the new epoch). On reload, loadConversations promotes the
+// pending state to the live group-state slot and clears this entry.
+interface StoredPendingCommit {
+  identity: string;
+  signaturePublicKey: string;
+  conversationId: string;
+  /** The pre-commit epoch (staged.epoch) used to verify the commit landed on the server. */
+  epoch: number;
+  /** The UUID sent to the server as clientCommitId — used to verify it was OUR commit that won. */
+  clientCommitId: string;
+  sealed: SealedBlob;
 }
 
 /** Shape-check a server-provided sealed blob before storing it (it's still GCM-authenticated on unseal). */
@@ -212,6 +239,9 @@ export class DeviceKeystore {
         if (!database.objectStoreNames.contains(MSGLOG_STORE))
           database.createObjectStore(MSGLOG_STORE);
         if (!database.objectStoreNames.contains(META_STORE)) database.createObjectStore(META_STORE);
+        // v6: the sealed pending-commit slot — written before POST, cleared on successful applyStaged.
+        if (!database.objectStoreNames.contains(PENDING_STORE))
+          database.createObjectStore(PENDING_STORE);
       },
     });
     return new DeviceKeystore(db, engine ?? (await MlsEngine.create()), argon);
@@ -374,19 +404,20 @@ export class DeviceKeystore {
    * Bound to the device identity + signature key. (CAS keeps the *durable* state monotonic; it does not gate
    * two tabs *sending* concurrently — that needs single-writer send coordination, wired with the send path.)
    */
-  async saveConversationState(
+  /**
+   * Build a persister function for a conversation that seals + CAS-writes a raw snapshot.
+   * The returned function runs OUTSIDE the conversation's op queue — pass it directly to
+   * `conversation.processCommit(wire, persister)`, which calls it from WITHIN its own `run()`.
+   * (Calling `saveConversationState` from there would re-enter `run()` and deadlock.)
+   */
+  makeConversationPersister(
     device: DeviceKeys,
     conversationId: string,
-    conversation: Conversation,
     sessionKey: CryptoKey,
-  ): Promise<void> {
-    await conversation.persistVia(async (snapshot) => {
-      // Session-key seal (one Argon2id at unlock, cheap AES-GCM per save) — the state advances on every
-      // send/receive, so a per-save KDF here made each delivered message cost seconds. The AAD pins the
-      // blob to its slot AND domain-separates it from the message log (same key, different stores).
+  ): (snapshot: Uint8Array) => Promise<void> {
+    return async (snapshot) => {
       const sealed = await sealWithKey(sessionKey, snapshot, groupStateAad(conversationId));
-      snapshot.fill(0); // wipe the transient unsealed group-state bytes after sealing
-
+      snapshot.fill(0);
       const base = this.groupStateVersions.get(conversationId) ?? -1;
       const tx = this.db.transaction(GROUP_STORE, 'readwrite');
       const current = (await tx.store.get(conversationId)) as StoredGroupState | undefined;
@@ -400,6 +431,8 @@ export class DeviceKeystore {
             conversationId,
             sealed,
             version,
+            // Preserve creatorId across ratchet saves (set once by confirmCreate; never cleared here).
+            ...(current?.creatorId !== undefined ? { creatorId: current.creatorId } : {}),
           } satisfies StoredGroupState,
           conversationId,
         );
@@ -407,7 +440,52 @@ export class DeviceKeystore {
       await tx.done;
       if (conflict) throw new GroupStateConflict(conversationId);
       this.groupStateVersions.set(conversationId, version);
-    });
+    };
+  }
+
+  async saveConversationState(
+    device: DeviceKeys,
+    conversationId: string,
+    conversation: Conversation,
+    sessionKey: CryptoKey,
+  ): Promise<void> {
+    await conversation.persistVia(
+      this.makeConversationPersister(device, conversationId, sessionKey),
+    );
+  }
+
+  /**
+   * Record that this device's user is the creator of `conversationId`. Called once by
+   * `GroupConversationManager.confirmCreate` so the "Add member" gate survives page reload.
+   * No-op if the group-state record doesn't exist yet (the caller must ensure the conversation
+   * has been persisted first — `saveConversationState` is idempotent, so call order is safe).
+   */
+  async saveGroupCreatorId(
+    device: DeviceKeys,
+    conversationId: string,
+    creatorId: string,
+  ): Promise<void> {
+    const identity = deviceIdentity(device);
+    const signaturePublicKey = deviceSignaturePublicKeyB64(device);
+    const rec = (await this.db.get(GROUP_STORE, conversationId)) as StoredGroupState | undefined;
+    if (!rec || rec.identity !== identity || rec.signaturePublicKey !== signaturePublicKey) return;
+    await this.db.put(GROUP_STORE, { ...rec, creatorId }, conversationId);
+  }
+
+  /**
+   * Return a `conversationId → creatorId` map for all conversations on this device where the
+   * creator was recorded (only conversations created — not joined — by this device have an entry).
+   */
+  async getGroupCreatorIds(device: DeviceKeys): Promise<Map<string, string>> {
+    const identity = deviceIdentity(device);
+    const signaturePublicKey = deviceSignaturePublicKeyB64(device);
+    const recs = (await this.db.getAll(GROUP_STORE)) as StoredGroupState[];
+    const out = new Map<string, string>();
+    for (const rec of recs) {
+      if (rec.identity !== identity || rec.signaturePublicKey !== signaturePublicKey) continue;
+      if (rec.creatorId) out.set(rec.conversationId, rec.creatorId);
+    }
+    return out;
   }
 
   /** Rehydrate ALL of THIS device's persisted conversations (on unlock) → conversationId → Conversation. */
@@ -415,6 +493,17 @@ export class DeviceKeystore {
     device: DeviceKeys,
     passphrase: string,
     sessionKey: CryptoKey,
+    /**
+     * Optional server verifier for orphaned pending-commit recovery (brand-new group crash window).
+     * Called before promoting a PENDING_STORE entry that has no matching GROUP_STORE record.
+     * Returns true if the commit landed on the server (i.e., the epoch slot exists); false to discard.
+     * Omit in tests — orphaned entries are promoted unconditionally.
+     */
+    verifyCommitExists?: (
+      conversationId: string,
+      epoch: number,
+      clientCommitId: string,
+    ) => Promise<boolean>,
   ): Promise<Map<string, Conversation>> {
     const identity = deviceIdentity(device);
     const signaturePublicKey = deviceSignaturePublicKeyB64(device);
@@ -431,11 +520,101 @@ export class DeviceKeystore {
       const opened = isSealedBackup(rec.sealed)
         ? await openBackup(rec.sealed, passphrase)
         : await openWithKey(sessionKey, rec.sealed, groupStateAad(rec.conversationId));
-      out.set(rec.conversationId, this.engine.deserializeConversation(opened));
-      // Record the loaded version as this instance's CAS base; a later save by another tab bumps the store
-      // past it and is caught (see saveConversationState).
-      this.groupStateVersions.set(rec.conversationId, rec.version ?? -1);
+
+      // Crash recovery: if a pending-commit slot exists, a prior session staged a commit and POSTed
+      // it successfully but crashed before applyStaged/saveConversationState ran. `serializeStaged`
+      // produces the POST-COMMIT state (epoch N+1), so promoting it is the only way to recover the
+      // committed ratchet — the sender cannot re-apply their own commit wire via processCommit.
+      // If the POST failed (ambiguous network error), the pending state is epoch N+1 while the server
+      // is still at epoch N; promoting would strand the device at a phantom epoch. `verifyCommitExists`
+      // (passed by the production caller) guards against this by confirming the slot exists on the server.
+      const pendingRec = (await this.db.get(PENDING_STORE, rec.conversationId)) as
+        | StoredPendingCommit
+        | undefined;
+      if (
+        pendingRec &&
+        pendingRec.identity === identity &&
+        pendingRec.signaturePublicKey === signaturePublicKey
+      ) {
+        // Verify our commit (not another member's) actually landed on the server before promoting.
+        const commitLanded =
+          !verifyCommitExists ||
+          (await verifyCommitExists(
+            rec.conversationId,
+            pendingRec.epoch,
+            pendingRec.clientCommitId,
+          ));
+        if (!commitLanded) {
+          // POST failed before reaching the server — discard pending slot, load pre-commit state.
+          await this.db.delete(PENDING_STORE, rec.conversationId);
+          out.set(rec.conversationId, this.engine.deserializeConversation(opened));
+          this.groupStateVersions.set(rec.conversationId, rec.version ?? -1);
+          continue;
+        }
+        // CAS base must be set BEFORE saveConversationState so its persister sees the right version.
+        this.groupStateVersions.set(rec.conversationId, rec.version ?? -1);
+        try {
+          const pendingBytes = await openWithKey(
+            sessionKey,
+            pendingRec.sealed,
+            pendingCommitAad(rec.conversationId),
+          );
+          const advanced = this.engine.deserializeConversation(pendingBytes);
+          await this.saveConversationState(device, rec.conversationId, advanced, sessionKey);
+          await this.db.delete(PENDING_STORE, rec.conversationId);
+          out.set(rec.conversationId, advanced);
+        } catch {
+          // Pending state corrupt or wrong key — fall back; the drain path re-syncs from the server.
+          await this.db.delete(PENDING_STORE, rec.conversationId);
+          out.set(rec.conversationId, this.engine.deserializeConversation(opened));
+        }
+      } else {
+        out.set(rec.conversationId, this.engine.deserializeConversation(opened));
+        // Record the loaded version as this instance's CAS base; a later save by another tab bumps the
+        // store past it and is caught (see saveConversationState).
+        this.groupStateVersions.set(rec.conversationId, rec.version ?? -1);
+      }
     }
+
+    // Orphaned-pending scan: when a new-group create crashes between saveStagedCommit (PENDING_STORE
+    // written) and the first saveConversationState (GROUP_STORE never written), the GROUP_STORE loop
+    // above never visits the PENDING_STORE entry. Scan all pending entries and promote any whose
+    // conversationId is NOT already in `out` — bootstrapping the GROUP_STORE record from the sealed
+    // post-commit state so the creator recovers the group on reload.
+    const allPending = (await this.db.getAll(PENDING_STORE)) as StoredPendingCommit[];
+    for (const pendingRec of allPending) {
+      if (pendingRec.identity !== identity || pendingRec.signaturePublicKey !== signaturePublicKey)
+        continue;
+      const { conversationId } = pendingRec;
+      if (out.has(conversationId)) continue; // already handled by the GROUP_STORE loop
+      // Before promoting, verify the commit actually landed on the server. If the POST failed
+      // (network drop before the request left the browser), the pending state is epoch N+1 while
+      // the server is still at epoch N; promoting it would strand this device at a phantom epoch
+      // where messages are stored but undecryptable by peers. Skip the entry if unconfirmed.
+      if (
+        verifyCommitExists &&
+        !(await verifyCommitExists(conversationId, pendingRec.epoch, pendingRec.clientCommitId))
+      ) {
+        await this.db.delete(PENDING_STORE, conversationId);
+        continue;
+      }
+      try {
+        const pendingBytes = await openWithKey(
+          sessionKey,
+          pendingRec.sealed,
+          pendingCommitAad(conversationId),
+        );
+        const conversation = this.engine.deserializeConversation(pendingBytes);
+        this.groupStateVersions.set(conversationId, -1); // no prior GROUP_STORE record
+        await this.saveConversationState(device, conversationId, conversation, sessionKey);
+        await this.db.delete(PENDING_STORE, conversationId);
+        out.set(conversationId, conversation);
+      } catch {
+        // Pending bytes corrupt or wrong key — discard; the creator will need a re-invite.
+        await this.db.delete(PENDING_STORE, conversationId);
+      }
+    }
+
     return out;
   }
 
@@ -457,6 +636,42 @@ export class DeviceKeystore {
   async deleteConversationState(conversationId: string): Promise<void> {
     await this.db.delete(GROUP_STORE, conversationId);
     this.groupStateVersions.delete(conversationId);
+  }
+
+  /**
+   * Persist the PENDING post-commit state (from `conversation.serializeStaged(staged)`) to the
+   * pending-commit slot, sealed under the session key. Must be called BEFORE POSTing the commit
+   * to the server so a crash between a successful POST and `applyStaged`/`saveConversationState`
+   * doesn't strand the device at the old epoch while peers are at the new one.
+   */
+  async saveStagedCommit(
+    device: DeviceKeys,
+    conversationId: string,
+    sessionKey: CryptoKey,
+    pendingBytes: Uint8Array,
+    /** The pre-commit epoch (staged.epoch) — used on reload to verify the commit landed. */
+    epoch: number,
+    /** The clientCommitId sent to the server — used to verify OUR commit won (not another member's). */
+    clientCommitId: string,
+  ): Promise<void> {
+    const sealed = await sealWithKey(sessionKey, pendingBytes, pendingCommitAad(conversationId));
+    await this.db.put(
+      PENDING_STORE,
+      {
+        identity: deviceIdentity(device),
+        signaturePublicKey: deviceSignaturePublicKeyB64(device),
+        conversationId,
+        epoch,
+        clientCommitId,
+        sealed,
+      } satisfies StoredPendingCommit,
+      conversationId,
+    );
+  }
+
+  /** Remove the pending-commit slot after a successful `applyStaged`/`saveConversationState`. */
+  async clearStagedCommit(conversationId: string): Promise<void> {
+    await this.db.delete(PENDING_STORE, conversationId);
   }
 
   // ---- Message history (local, sealed under the per-unlock session key) ----------------------------------
@@ -694,6 +909,7 @@ export class DeviceKeystore {
     await this.db.delete(POOL_STORE, SELF);
     await this.db.clear(GROUP_STORE); // drop this profile's persisted conversations too (Slice 5)
     await this.db.clear(MSGLOG_STORE); // drop this profile's message history (history feature)
+    await this.db.clear(PENDING_STORE); // drop any pending-commit slots
     await this.db.clear(META_STORE); // drop the session-key salt → a fresh account derives a fresh key
     this.groupStateVersions.clear();
     this.appendChains.clear();

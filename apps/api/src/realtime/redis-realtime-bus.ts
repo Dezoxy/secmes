@@ -2,10 +2,14 @@ import { type OnModuleDestroy } from '@nestjs/common';
 import { Redis } from 'ioredis';
 
 import {
+  CommitCreatedEventSchema,
+  MemberRemovedEventSchema,
   MessageCreatedEventSchema,
   ReceiptAdvancedEventSchema,
   RealtimeBus,
   WelcomeCreatedEventSchema,
+  type CommitCreatedEvent,
+  type MemberRemovedEvent,
   type MessageCreatedEvent,
   type ReceiptAdvancedEvent,
   type WelcomeCreatedEvent,
@@ -14,6 +18,8 @@ import {
 export const CHANNEL = 'argus:realtime:message-created';
 export const WELCOME_CHANNEL = 'argus:realtime:welcome-created';
 export const RECEIPT_CHANNEL = 'argus:realtime:receipt-advanced';
+export const COMMIT_CHANNEL = 'argus:realtime:commit-created';
+export const MEMBER_REMOVED_CHANNEL = 'argus:realtime:member-removed';
 
 /**
  * Cross-pod bus (checkpoint 29): each send PUBLISHES the event to a Redis channel, and every gateway
@@ -29,6 +35,8 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
   private readonly listeners: Array<(event: MessageCreatedEvent) => void> = [];
   private readonly welcomeListeners: Array<(event: WelcomeCreatedEvent) => void> = [];
   private readonly receiptListeners: Array<(event: ReceiptAdvancedEvent) => void> = [];
+  private readonly commitListeners: Array<(event: CommitCreatedEvent) => void> = [];
+  private readonly memberRemovedListeners: Array<(event: MemberRemovedEvent) => void> = [];
   /** Resolves once the subscriptions are active — await before relying on receipt (readiness/tests). */
   readonly ready: Promise<void>;
 
@@ -47,7 +55,7 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
     this.sub.on('error', () => {});
     this.sub.on('message', (channel, payload) => this.onPayload(channel, payload));
     this.ready = this.sub
-      .subscribe(CHANNEL, WELCOME_CHANNEL, RECEIPT_CHANNEL)
+      .subscribe(CHANNEL, WELCOME_CHANNEL, RECEIPT_CHANNEL, COMMIT_CHANNEL, MEMBER_REMOVED_CHANNEL)
       .then(() => undefined);
   }
 
@@ -75,6 +83,18 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
       const parsed = ReceiptAdvancedEventSchema.safeParse(raw);
       if (!parsed.success) return;
       for (const listener of this.receiptListeners) listener(parsed.data);
+      return;
+    }
+    if (channel === COMMIT_CHANNEL) {
+      const parsed = CommitCreatedEventSchema.safeParse(raw);
+      if (!parsed.success) return;
+      for (const listener of this.commitListeners) listener(parsed.data);
+      return;
+    }
+    if (channel === MEMBER_REMOVED_CHANNEL) {
+      const parsed = MemberRemovedEventSchema.safeParse(raw);
+      if (!parsed.success) return;
+      for (const listener of this.memberRemovedListeners) listener(parsed.data);
     }
   }
 
@@ -105,6 +125,22 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
 
   onReceiptAdvanced(listener: (event: ReceiptAdvancedEvent) => void): void {
     this.receiptListeners.push(listener);
+  }
+
+  emitCommitCreated(event: CommitCreatedEvent): void {
+    this.pub.publish(COMMIT_CHANNEL, JSON.stringify(event)).catch(() => {});
+  }
+
+  onCommitCreated(listener: (event: CommitCreatedEvent) => void): void {
+    this.commitListeners.push(listener);
+  }
+
+  emitMemberRemoved(event: MemberRemovedEvent): void {
+    this.pub.publish(MEMBER_REMOVED_CHANNEL, JSON.stringify(event)).catch(() => {});
+  }
+
+  onMemberRemoved(listener: (event: MemberRemovedEvent) => void): void {
+    this.memberRemovedListeners.push(listener);
   }
 
   async onModuleDestroy(): Promise<void> {

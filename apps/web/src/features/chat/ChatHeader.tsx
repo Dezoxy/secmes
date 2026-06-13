@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   Trash2,
   UserMinus,
+  UserPlus,
   Users,
   Video,
   X,
@@ -48,6 +49,8 @@ interface ChatHeaderProps {
   onVerify?: () => void;
   updateReady?: boolean;
   onApplyUpdate?: () => void | Promise<void>;
+  /** Open the add-member dialog. Provided only for group conversations where the current user is creator. */
+  onAddMember?: () => void;
 }
 
 type HeaderPanel = 'info' | 'members' | 'search' | 'media' | 'notifications' | 'security';
@@ -115,6 +118,7 @@ export function ChatHeader({
   onVerify,
   updateReady,
   onApplyUpdate,
+  onAddMember,
 }: ChatHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [activePanel, setActivePanel] = useState<HeaderPanel | null>(null);
@@ -309,6 +313,17 @@ export function ChatHeader({
               tabIndex={menuTabIndex}
               onClick={() => openPanel('members')}
             />
+            {conversation.type === 'group' && onAddMember && (
+              <MenuItem
+                icon={UserPlus}
+                label="Add member"
+                tabIndex={menuTabIndex}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onAddMember();
+                }}
+              />
+            )}
             <MenuItem
               icon={Search}
               label="Search in conversation"
