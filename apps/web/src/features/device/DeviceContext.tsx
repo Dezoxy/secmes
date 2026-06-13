@@ -30,9 +30,10 @@ export type DeviceStatus =
  */
 function statusForStored(stored: string | undefined, userId: string): DeviceStatus {
   if (!stored) return 'needs-create';
-  const { userId: storedUserId, deviceUuid } = parseDeviceIdentity(stored);
-  // Legacy format (pre-B2, no deviceUuid): force re-provision so the keystore gets a composite identity.
-  if (deviceUuid === undefined) return 'needs-switch';
+  const { userId: storedUserId } = parseDeviceIdentity(stored);
+  // Legacy pre-B2 format (no deviceUuid): storedUserId still matches the current user, so fall through
+  // to 'needs-unlock'. The unlock() callback detects the missing deviceUuid and upgrades to composite
+  // identity automatically. Only a genuinely different storedUserId reaches 'needs-switch'.
   return storedUserId === userId ? 'needs-unlock' : 'needs-switch';
 }
 

@@ -7,6 +7,11 @@
 -- 15-minute expires_at bounds the enrollment window; expired rows are GC'd async.
 -- See docs/threat-models/multi-device-enrollment.md T1–T4.
 
+-- FKs below reference devices (tenant_id, id). PostgreSQL requires the referenced column set to
+-- match a unique constraint exactly; the existing devices_tenant_user_id_uidx covers (tenant_id, user_id, id)
+-- which is a superset and does not satisfy a (tenant_id, id) reference. Add the missing unique index.
+create unique index if not exists devices_tenant_id_uidx on devices (tenant_id, id);
+
 create table if not exists device_enrollments (
   id                     uuid        primary key default gen_random_uuid(),
   tenant_id              uuid        not null,
