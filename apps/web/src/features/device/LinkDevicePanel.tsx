@@ -1,4 +1,4 @@
-// D2 side of B2 multi-device linking. Displays the device fingerprint as a 6-digit code,
+// D2 side of B2 multi-device linking. Displays the device fingerprint as a 9-digit code,
 // registers an enrollment request, and polls until the other device approves.
 import { useEffect, useState } from 'react';
 import { CheckCircle, Link2, X } from 'lucide-react';
@@ -103,7 +103,7 @@ export function LinkDevicePanel({ onClose }: LinkDevicePanelProps) {
             aria-label={`Device code: ${code ?? ''}`}
           >
             <span className="font-mono text-4xl font-bold tracking-[0.3em] text-white">
-              {code ?? '--- ---'}
+              {code ?? '--- --- ---'}
             </span>
           </div>
           <p className="flex items-center justify-center gap-2 text-sm text-white/40">

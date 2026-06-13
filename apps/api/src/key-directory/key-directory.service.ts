@@ -63,6 +63,11 @@ export class KeyDirectoryService {
         .limit(1);
       if (!user) throw new BadRequestException('user not provisioned; sign in first');
 
+      // Serialize concurrent first-device provisioning: lock the user row so two simultaneous
+      // publish() calls for a new user cannot both read no existing trusted device and both
+      // compute isProvisional = false, producing two "genesis" devices without enrollment.
+      await tx.execute(sql`select 1 from users where id = ${user.id} for update`);
+
       // Provisional = true when the user already has at least one trusted (non-provisional) device,
       // meaning this is a new secondary device that must go through the enrollment ceremony before
       // it may approve further enrollments. First-ever device for a user is non-provisional.

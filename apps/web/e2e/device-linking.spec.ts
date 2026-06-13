@@ -43,11 +43,11 @@ test.skip('Full link flow: D2 shows code, D1 approves, D2 joins pre-existing con
   await d2Page.getByRole('button', { name: 'Devices' }).click();
   await d2Page.getByRole('button', { name: 'Link another device' }).click();
 
-  // D2: dialog appears and shows a 6-digit code
+  // D2: dialog appears and shows a 9-digit code
   const d2Dialog = d2Page.getByRole('dialog', { name: 'Link this device' });
   await expect(d2Dialog).toBeVisible();
   const codeEl = d2Dialog.locator('[aria-live]');
-  await expect(codeEl).not.toHaveText('--- ---');
+  await expect(codeEl).not.toHaveText('--- --- ---');
   const code = await codeEl.innerText();
 
   // D1: enrollment_pending WS event triggers approval dialog

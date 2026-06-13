@@ -207,8 +207,11 @@ export async function safetyNumber(local: KeyPackage, remote: KeyPackage): Promi
 }
 
 /**
- * Six-digit numeric display code shown on D2 during enrollment so D1 can verify the device fingerprint
- * out-of-band. Derived as `SHA-256(signaturePublicKey)[0..4] as uint32 % 1_000_000`, formatted "XXX XXX".
+ * Nine-digit numeric display code shown on D2 during enrollment so D1 can verify the device fingerprint
+ * out-of-band. Derived as `SHA-256(signaturePublicKey)[0..8] as uint64 % 1_000_000_000`, formatted
+ * "XXX XXX XXX". Using 8 bytes (64 bits) of SHA-256 gives 10^9 possible codes — brute-forcing a matching
+ * key requires ~10^9 Ed25519 key generations (~1000× harder than a 6-digit code).
+ *
  * Both D2 (computing from its own key) and D1 (computing from the server-stored fingerprint) must use
  * this function — matching algorithms is required for the codes to agree.
  *
@@ -219,9 +222,12 @@ export async function enrollmentDisplayCode(signaturePublicKeyB64: string): Prom
   const raw = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i);
   const hash = await sha256(raw);
-  const n = new DataView(hash.buffer).getUint32(0) % 1_000_000;
-  const d = n.toString().padStart(6, '0');
-  return `${d.slice(0, 3)} ${d.slice(3)}`;
+  const v = new DataView(hash.buffer);
+  const hi = BigInt(v.getUint32(0));
+  const lo = BigInt(v.getUint32(4));
+  const n = Number(((hi << 32n) | lo) % 1_000_000_000n);
+  const d = n.toString().padStart(9, '0');
+  return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
 }
 
 /**

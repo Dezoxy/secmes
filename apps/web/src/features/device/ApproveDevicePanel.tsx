@@ -145,7 +145,7 @@ export function ApproveDevicePanel({
       {(state === 'ready' || state === 'approving') && (
         <div className="space-y-5">
           <p className="text-sm leading-relaxed text-white/55">
-            A new device wants to join your account. Enter the 6-digit code shown on that device to
+            A new device wants to join your account. Enter the 9-digit code shown on that device to
             confirm it is yours.
           </p>
           <div>
