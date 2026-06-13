@@ -140,11 +140,19 @@ export class DevicesService {
         throw new NotFoundException('enrollment not found');
       }
 
-      // Load D1's signature public key (must belong to the same user).
+      // Load D1's signature public key. D1 must be non-provisional — provisional devices
+      // have not themselves been verified, so allowing them to approve would let a stolen bearer
+      // token publish two fresh key pairs and use one to approve the other.
       const [d1Device] = await tx
         .select({ signaturePublicKey: schema.devices.signaturePublicKey })
         .from(schema.devices)
-        .where(and(eq(schema.devices.id, approvingDeviceId), eq(schema.devices.userId, userId)))
+        .where(
+          and(
+            eq(schema.devices.id, approvingDeviceId),
+            eq(schema.devices.userId, userId),
+            eq(schema.devices.isProvisional, false),
+          ),
+        )
         .limit(1);
       if (!d1Device) throw new NotFoundException('enrollment not found');
 
@@ -175,6 +183,14 @@ export class DevicesService {
         )
         .returning();
       if (!updated) throw new NotFoundException('enrollment not found');
+
+      // Promote D2: it has now been cryptographically verified by D1's enroll-proof, so it may
+      // participate in approving future enrollments from here on.
+      await tx
+        .update(schema.devices)
+        .set({ isProvisional: false })
+        .where(eq(schema.devices.id, enrollment.requestingDeviceId));
+
       return updated;
     });
 

@@ -156,10 +156,18 @@ export class ConversationManager {
       ? await claimEnrolledOwnDevices(this.selfUserId, this.selfDeviceId)
       : [];
 
+    // Claim peer secondary devices so all of the peer's devices receive a Welcome in the same epoch.
+    // The primary peer device package was already claimed in prepare(); exclude it here.
+    const peerOtherClaimed = this.selfDeviceId
+      ? (await claimAllKeyPackages(pending.peer.userId)).filter(
+          (p) => p.deviceId !== pending.peer.deviceId,
+        )
+      : [];
+
     // Create a SOLO conversation (just me — my own id dedups to the creator server-side).
     const { conversationId } = await createConversation([this.selfUserId]);
 
-    if (ownOtherClaimed.length === 0) {
+    if (ownOtherClaimed.length === 0 && peerOtherClaimed.length === 0) {
       // Single-device path: add peer + deliver Welcome directly. The peer is added as a member of
       // the server conversation in the same deliverWelcome transaction, so a delivery failure leaves
       // only a benign self-only conversation, not a peer-visible orphan.
@@ -170,11 +178,12 @@ export class ConversationManager {
         ...serializeInvite(invite),
       });
     } else {
-      // Multi-device path (B2): batch-add peer + own other devices in one epoch-0 commit so they
+      // Multi-device path (B2): batch-add peer + all other devices in one epoch-0 commit so they
       // all join from the same epoch and forward secrecy is not split across commits.
       const ownOtherPackages = ownOtherClaimed.map((p) => deserializeKeyPackage(p.keyPackage));
+      const peerOtherPackages = peerOtherClaimed.map((p) => deserializeKeyPackage(p.keyPackage));
       const staged = await conversation.stageMembershipCommit({
-        add: [pending.peerKeyPackage, ...ownOtherPackages],
+        add: [pending.peerKeyPackage, ...peerOtherPackages, ...ownOtherPackages],
       });
       if (!staged.invite) throw new Error('epoch-0 commit produced no Welcome');
       const inv = serializeInvite(staged.invite);
@@ -207,6 +216,12 @@ export class ConversationManager {
               welcome: inv.welcome,
               ratchetTree: inv.ratchetTree,
             },
+            ...peerOtherClaimed.map((p) => ({
+              recipientUserId: pending.peer.userId,
+              recipientDeviceId: p.deviceId,
+              welcome: inv.welcome,
+              ratchetTree: inv.ratchetTree,
+            })),
             ...ownOtherClaimed.map((p) => ({
               recipientUserId: this.selfUserId,
               recipientDeviceId: p.deviceId,
@@ -237,7 +252,7 @@ export class ConversationManager {
       this.sessionKey,
     );
     // Multi-device path: staged commit has been applied and persisted — remove the pending slot.
-    if (ownOtherClaimed.length > 0) {
+    if (ownOtherClaimed.length > 0 || peerOtherClaimed.length > 0) {
       await this.keystore.clearStagedCommit(conversationId);
     }
     const session: ConversationSession = {

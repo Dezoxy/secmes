@@ -178,14 +178,19 @@ describe('ConversationManager', () => {
 
     beforeEach(async () => {
       d2 = await engine.generateDeviceKeys('me:d2-uuid');
-      // Simulate own D2 being in the key directory (server device id = 'd2-server-id').
-      claimAll.mockResolvedValue([
-        {
-          deviceId: 'd2-server-id',
-          signaturePublicKey: deviceSignaturePublicKeyB64(d2),
-          keyPackage: serializeKeyPackage(d2.publicPackage),
-        },
-      ]);
+      // Simulate own D2 in the key directory for self-user only; peer-user has no secondary devices.
+      // Using mockImplementation so confirm()'s two claimAll calls are distinguished by userId.
+      claimAll.mockImplementation(async (userId: string) =>
+        userId === 'me-user'
+          ? [
+              {
+                deviceId: 'd2-server-id',
+                signaturePublicKey: deviceSignaturePublicKeyB64(d2),
+                keyPackage: serializeKeyPackage(d2.publicPackage),
+              },
+            ]
+          : [],
+      );
       // D2 has completed the enrollment trust flow — must be in the approved list for self-add.
       // fingerprint must match deviceSignaturePublicKeyB64(d2) so the leaf-key MITM check passes.
       vi.mocked(listEnrollments).mockResolvedValue([

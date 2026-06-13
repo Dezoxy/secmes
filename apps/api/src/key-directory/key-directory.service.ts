@@ -63,9 +63,19 @@ export class KeyDirectoryService {
         .limit(1);
       if (!user) throw new BadRequestException('user not provisioned; sign in first');
 
+      // Provisional = true when the user already has at least one trusted (non-provisional) device,
+      // meaning this is a new secondary device that must go through the enrollment ceremony before
+      // it may approve further enrollments. First-ever device for a user is non-provisional.
+      const [existingTrusted] = await tx
+        .select({ id: schema.devices.id })
+        .from(schema.devices)
+        .where(and(eq(schema.devices.userId, user.id), eq(schema.devices.isProvisional, false)))
+        .limit(1);
+      const isProvisional = existingTrusted !== undefined;
+
       const [device] = await tx
         .insert(schema.devices)
-        .values({ tenantId: auth.tenantId, userId: user.id, signaturePublicKey })
+        .values({ tenantId: auth.tenantId, userId: user.id, signaturePublicKey, isProvisional })
         .onConflictDoUpdate({
           target: [
             schema.devices.tenantId,
@@ -195,6 +205,14 @@ export class KeyDirectoryService {
         )
         .limit(1);
       if (!device) return 0;
+
+      // Reset to provisional so the device may re-provision with fresh key material. Without this,
+      // a revoked device would retain its non-provisional status and could still approve enrollments
+      // with its (now-replaced) old key pair if it somehow retained access.
+      await tx
+        .update(schema.devices)
+        .set({ isProvisional: true })
+        .where(eq(schema.devices.id, device.id));
 
       // Delete ONLY the unclaimed packages for this device. claimed_at IS NULL = available; a set value =
       // consumed (one-time-use), which we must keep (a recipient may still be joining via its sealed Welcome).

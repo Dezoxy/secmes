@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { ShieldCheck, X } from 'lucide-react';
 import type { Conversation as MlsGroup } from '@argus/crypto';
-import { enrollmentDisplayCode } from '@argus/crypto';
+import { deviceSignatureSeed, enrollmentDisplayCode } from '@argus/crypto';
 import { signEnrollApproval } from '@argus/crypto/device-proof';
 import {
   approveEnrollment,
@@ -94,11 +94,7 @@ export function ApproveDevicePanel({
     setState('approving');
 
     try {
-      const proofBytes = signEnrollApproval(
-        device.privatePackage.signaturePrivateKey,
-        deviceId,
-        enrollmentId,
-      );
+      const proofBytes = signEnrollApproval(deviceSignatureSeed(device), deviceId, enrollmentId);
       const proof = toBase64Url(proofBytes);
       await approveEnrollment(enrollmentId, deviceId, proof);
 

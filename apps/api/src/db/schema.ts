@@ -49,6 +49,9 @@ export const devices = pgTable('devices', {
   tenantId: uuid('tenant_id').notNull(),
   userId: uuid('user_id').notNull(),
   signaturePublicKey: text('signature_public_key').notNull(),
+  /** Provisional = freshly published, not yet verified by enrollment approval. Only non-provisional
+   * devices may approve new enrollments. Promoted to false by approveEnrollment. */
+  isProvisional: boolean('is_provisional').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
