@@ -347,18 +347,22 @@ export function useLiveConversations({
         });
         setConversations((prev) => prev.filter((c) => c.id !== conversationId));
       },
-      // A membership commit was posted: drain commits >= event.epoch to advance the local MLS state.
+      // A membership commit was posted: drain to exactly this commit (epoch+1 ceiling) so the group
+      // advances to epoch+1 but no further. An unbounded drain would consume forward-secret keys for
+      // messages still in-flight at epoch+1, making them permanently undecryptable on arrival.
       onCommit: ({ conversationId, epoch }) => {
         const group = liveGroups.current.get(conversationId);
         if (!group) return;
-        void processCommitEvent(deps, conversationId, group, { epoch }).catch((err: unknown) => {
-          // eslint-disable-next-line no-console
-          console.warn(
-            'commit drain failed',
-            conversationId,
-            err instanceof Error ? err.message : err,
-          );
-        });
+        void processCommitEvent(deps, conversationId, group, { epoch }, epoch + 1).catch(
+          (err: unknown) => {
+            // eslint-disable-next-line no-console
+            console.warn(
+              'commit drain failed',
+              conversationId,
+              err instanceof Error ? err.message : err,
+            );
+          },
+        );
       },
     });
     socketRef.current = socket;
