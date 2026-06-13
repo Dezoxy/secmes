@@ -464,10 +464,14 @@ export async function listCommits(
  * Used for group adds — each device of the new member needs its own Welcome. Returns an empty array
  * if the user has no devices or all pools are empty.
  */
-export async function claimAllKeyPackages(userId: string): Promise<ClaimedKeyPackage[]> {
+export async function claimAllKeyPackages(
+  userId: string,
+  deviceId?: string,
+): Promise<ClaimedKeyPackage[]> {
+  const qs = deviceId ? `?deviceId=${encodeURIComponent(deviceId)}` : '';
   return unwrapApiResult(
     await requestJson({
-      path: `/users/${encodeURIComponent(userId)}/key-packages/claim-all`,
+      path: `/users/${encodeURIComponent(userId)}/key-packages/claim-all${qs}`,
       method: 'POST',
       responseSchema: ClaimedKeyPackageSchema.array(),
     }),

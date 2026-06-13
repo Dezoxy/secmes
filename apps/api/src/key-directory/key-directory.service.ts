@@ -87,10 +87,11 @@ export class KeyDirectoryService {
             schema.devices.userId,
             schema.devices.signaturePublicKey,
           ],
-          // Only re-promote (false) on conflict — never demote an existing trusted device. Spreading
-          // an empty object when isProvisional=true leaves the existing DB column untouched, which is
-          // correct for re-registrations where another trusted device determined the provisional flag.
-          set: { signaturePublicKey, ...(isProvisional ? {} : { isProvisional }) },
+          // Never change isProvisional on re-registration. Only the initial INSERT may set it based on
+          // whether a trusted device already exists. Allowing the conflict handler to set isProvisional=false
+          // would let an attacker promote a provisional device by first revoking the only trusted device
+          // (via revokeUnclaimed) and then re-publishing — racing back to a "no trusted devices" state.
+          set: { signaturePublicKey },
         })
         .returning({ id: schema.devices.id });
       if (!device) throw new Error('device upsert returned no row');
@@ -253,13 +254,19 @@ export class KeyDirectoryService {
    * an empty pool are omitted (caller must check coverage and prompt for replenishment if needed).
    * `FOR UPDATE SKIP LOCKED` per device so concurrent claims pick different rows.
    */
-  async claimAll(auth: VerifiedAuth, targetUserId: string): Promise<ClaimedKeyPackage[]> {
+  async claimAll(
+    auth: VerifiedAuth,
+    targetUserId: string,
+    deviceId?: string,
+  ): Promise<ClaimedKeyPackage[]> {
     const claimed = await withTenant(auth.tenantId, async (tx) => {
       // LATERAL JOIN: for each device of the target user, select the oldest unclaimed package with
       // FOR UPDATE SKIP LOCKED, then UPDATE (claim) it in one statement. This avoids DISTINCT ON +
       // FOR UPDATE, which PostgreSQL rejects (DISTINCT ON is not allowed with locking clauses). The
       // LATERAL subquery runs once per device; SKIP LOCKED means concurrent claimAll calls pick
       // different packages rather than blocking. Defense-in-depth: explicit tenant_id filter on top of RLS.
+      // When deviceId is provided, the WHERE clause limits the UPDATE to that specific device so only
+      // its pool is depleted (used during enrollment fan-out to avoid burning other devices' packages).
       const rows = (await tx.execute(sql`
         update key_packages kp set claimed_at = now()
         from devices d
@@ -275,6 +282,7 @@ export class KeyDirectoryService {
         where d.user_id = ${targetUserId}
           and d.tenant_id = ${auth.tenantId}
           and d.is_provisional = false
+          ${deviceId ? sql`and d.id = ${deviceId}` : sql``}
           and kp.id = chosen.id
         returning kp.device_id, kp.key_package, d.signature_public_key
       `)) as unknown as unknown[];

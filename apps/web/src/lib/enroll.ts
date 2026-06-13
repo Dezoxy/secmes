@@ -18,8 +18,6 @@ const MAX_RETRIES = 2;
  *
  * @param deps          - Messaging context for the approving device (D1).
  * @param selfUserId    - The shared user ID (same for D1 and D2).
- * @param selfDeviceId  - D1's server-assigned device UUID; used to filter D1's own package from
- *   the batch claim so D1's pool is not unnecessarily depleted.
  * @param approvedDeviceId  - Server-assigned UUID of D2 (from the enrollment record).
  * @param d2SignaturePublicKeyB64 - D2's signature public key (base64); verified against the
  *   claimed KeyPackage to catch server-key-swap MITM. Obtained from the enrollment record.
@@ -29,7 +27,6 @@ const MAX_RETRIES = 2;
 export async function enrollDevice(
   deps: MessagingDeps,
   selfUserId: string,
-  selfDeviceId: string,
   approvedDeviceId: string,
   d2SignaturePublicKeyB64: string,
   conversationIds: string[],
@@ -49,13 +46,9 @@ export async function enrollDevice(
     });
     if (d2AlreadyPresent) continue;
 
-    // Claim one of D2's key packages for this conversation.
-    // Note: claimAllKeyPackages is a batch call — it also claims (and burns) packages for other
-    // devices. Filter out D1's own package to avoid depleting its pool. A targeted single-device
-    // claim endpoint would fully fix this; tracked as a follow-up.
-    const packages = (await claimAllKeyPackages(selfUserId)).filter(
-      (p) => p.deviceId !== selfDeviceId,
-    );
+    // Claim one of D2's key packages for this conversation. The deviceId filter ensures only D2's
+    // pool is depleted — other devices' packages are not burned as collateral.
+    const packages = await claimAllKeyPackages(selfUserId, approvedDeviceId);
     const d2Claimed = packages.find((p) => p.deviceId === approvedDeviceId);
     if (!d2Claimed) continue; // pool exhausted — skip this conversation (best-effort)
 
