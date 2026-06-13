@@ -1,4 +1,14 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+} from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -129,8 +139,13 @@ export class DevicesController {
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async list(
     @CurrentAuth() auth: VerifiedAuth,
-    @Query('status') status?: string,
+    @Query('status') rawStatus?: string,
   ): Promise<EnrollmentDto[]> {
+    const VALID = ['pending', 'approved', 'rejected'] as const;
+    if (rawStatus !== undefined && !(VALID as readonly string[]).includes(rawStatus)) {
+      throw new BadRequestException(`status must be one of: ${VALID.join(', ')}`);
+    }
+    const status = rawStatus as (typeof VALID)[number] | undefined;
     const rows = await this.devices.listEnrollments(auth, status);
     return rows.map(toDto);
   }

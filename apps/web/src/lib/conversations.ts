@@ -21,6 +21,7 @@ import {
   claimKeyPackage,
   createConversation,
   deliverWelcome,
+  listEnrollments,
   postCommit,
   type ClaimedKeyPackage,
 } from './api';
@@ -28,6 +29,23 @@ import { toBase64 } from './base64';
 import type { DeviceKeystore, StoredMessage } from './keystore';
 import { conversationLock, withLock } from './locks';
 import { sendLiveMessage, type MessagingDeps } from './messaging';
+
+/**
+ * Claim key packages for the caller's own secondary devices that have completed the enrollment trust
+ * flow. Unenrolled devices (packages uploaded but never verified via D1 approval) are excluded so a
+ * stolen session that uploads a rogue device cannot slip into new conversations automatically.
+ */
+async function claimEnrolledOwnDevices(
+  selfUserId: string,
+  selfDeviceId: string,
+): Promise<ClaimedKeyPackage[]> {
+  const [packages, enrollments] = await Promise.all([
+    claimAllKeyPackages(selfUserId),
+    listEnrollments('approved'),
+  ]);
+  const enrolledIds = new Set(enrollments.map((e) => e.requestingDeviceId));
+  return packages.filter((p) => p.deviceId !== selfDeviceId && enrolledIds.has(p.deviceId));
+}
 
 /** The peer device a conversation is being started with — ids + the signature key (no private material). */
 export interface PeerRef {
@@ -112,9 +130,11 @@ export class ConversationManager {
     // the group + Welcome locally before touching the server so a bad package can't orphan a conversation.
     const conversation = await engine.createConversation(crypto.randomUUID(), this.device);
 
-    // Claim own other devices for B2 self-add. Skipped when selfDeviceId is unknown (single-device path).
+    // Claim own other devices for B2 self-add. Only include devices that completed the enrollment
+    // trust flow (approved status) — unenrolled devices uploaded packages but have not been verified
+    // by D1 and must not receive conversation keys. Skipped when selfDeviceId is unknown.
     const ownOtherClaimed = this.selfDeviceId
-      ? (await claimAllKeyPackages(this.selfUserId)).filter((p) => p.deviceId !== this.selfDeviceId)
+      ? await claimEnrolledOwnDevices(this.selfUserId, this.selfDeviceId)
       : [];
 
     // Create a SOLO conversation (just me — my own id dedups to the creator server-side).
@@ -301,9 +321,9 @@ export class GroupConversationManager {
 
     const peerPackages = pending.members.flatMap((m) => m.keyPackages);
 
-    // Self-add own other devices (B2) so they join from epoch 0 alongside the initial members.
+    // Self-add own other devices (B2) so they join from epoch 0. Only enrolled (approved) devices.
     const ownOtherClaimed = this.selfDeviceId
-      ? (await claimAllKeyPackages(this.selfUserId)).filter((p) => p.deviceId !== this.selfDeviceId)
+      ? await claimEnrolledOwnDevices(this.selfUserId, this.selfDeviceId)
       : [];
     const ownOtherPackages = ownOtherClaimed.map((p) => deserializeKeyPackage(p.keyPackage));
 

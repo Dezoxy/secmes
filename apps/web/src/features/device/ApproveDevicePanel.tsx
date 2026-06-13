@@ -106,6 +106,7 @@ export function ApproveDevicePanel({
       await enrollDevice(
         messagingDeps,
         selfUserId,
+        deviceId,
         enrollment.requestingDeviceId,
         enrollment.fingerprint,
         conversationIds,

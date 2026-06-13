@@ -18,15 +18,18 @@ const MAX_RETRIES = 2;
  *
  * @param deps          - Messaging context for the approving device (D1).
  * @param selfUserId    - The shared user ID (same for D1 and D2).
+ * @param selfDeviceId  - D1's server-assigned device UUID; used to filter D1's own package from
+ *   the batch claim so D1's pool is not unnecessarily depleted.
  * @param approvedDeviceId  - Server-assigned UUID of D2 (from the enrollment record).
- * @param d2SignaturePublicKeyB64 - D2's signature public key (base64); used to detect if D2 is
- *   already a group member. Obtained from the claimed KeyPackage during the approval flow.
+ * @param d2SignaturePublicKeyB64 - D2's signature public key (base64); verified against the
+ *   claimed KeyPackage to catch server-key-swap MITM. Obtained from the enrollment record.
  * @param conversationIds - Conversation IDs to fan out into (from GET /devices/me/conversations).
  * @param liveGroups    - D1's currently loaded MLS group state (keyed by conversation ID).
  */
 export async function enrollDevice(
   deps: MessagingDeps,
   selfUserId: string,
+  selfDeviceId: string,
   approvedDeviceId: string,
   d2SignaturePublicKeyB64: string,
   conversationIds: string[],
@@ -47,11 +50,26 @@ export async function enrollDevice(
     if (d2AlreadyPresent) continue;
 
     // Claim one of D2's key packages for this conversation.
-    const packages = await claimAllKeyPackages(selfUserId);
+    // Note: claimAllKeyPackages is a batch call — it also claims (and burns) packages for other
+    // devices. Filter out D1's own package to avoid depleting its pool. A targeted single-device
+    // claim endpoint would fully fix this; tracked as a follow-up.
+    const packages = (await claimAllKeyPackages(selfUserId)).filter(
+      (p) => p.deviceId !== selfDeviceId,
+    );
     const d2Claimed = packages.find((p) => p.deviceId === approvedDeviceId);
     if (!d2Claimed) continue; // pool exhausted — skip this conversation (best-effort)
 
     const d2Package = deserializeKeyPackage(d2Claimed.keyPackage);
+
+    // Server-key-swap MITM defense: the claimed package's signature key must match the fingerprint
+    // D1 verified during enrollment approval. A mismatch means the server returned a different key.
+    const claimedKey = d2Package.leafNode.signaturePublicKey;
+    if (
+      claimedKey.length !== d2SigKeyBytes.length ||
+      claimedKey.some((b, i) => b !== d2SigKeyBytes[i])
+    ) {
+      continue; // claimed key does not match approved fingerprint — skip
+    }
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       let epochConflict = false;

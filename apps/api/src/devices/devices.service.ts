@@ -149,6 +149,8 @@ export class DevicesService {
       );
       if (!proven) throw new NotFoundException('enrollment not found');
 
+      // Add status = 'pending' to the WHERE so a concurrent approve on the same row gets 0 rows
+      // and throws NotFoundException instead of double-emitting audit + WS events.
       const [updated] = await tx
         .update(schema.deviceEnrollments)
         .set({
@@ -156,9 +158,14 @@ export class DevicesService {
           approvedByDeviceId: approvingDeviceId,
           resolvedAt: new Date(),
         })
-        .where(eq(schema.deviceEnrollments.id, enrollmentId))
+        .where(
+          and(
+            eq(schema.deviceEnrollments.id, enrollmentId),
+            eq(schema.deviceEnrollments.status, 'pending'),
+          ),
+        )
         .returning();
-      if (!updated) throw new Error('enrollment update returned no row');
+      if (!updated) throw new NotFoundException('enrollment not found');
       return updated;
     });
 

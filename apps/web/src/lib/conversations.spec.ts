@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('./api', () => ({
   claimKeyPackage: vi.fn(),
   claimAllKeyPackages: vi.fn(),
+  listEnrollments: vi.fn().mockResolvedValue([]),
   createConversation: vi.fn(),
   deliverWelcome: vi.fn(),
   postCommit: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock('./api', () => ({
 import {
   claimKeyPackage,
   claimAllKeyPackages,
+  listEnrollments,
   createConversation,
   deliverWelcome,
   postCommit,
@@ -184,6 +186,10 @@ describe('ConversationManager', () => {
           keyPackage: serializeKeyPackage(d2.publicPackage),
         },
       ]);
+      // D2 has completed the enrollment trust flow — must be in the approved list for self-add.
+      vi.mocked(listEnrollments).mockResolvedValue([
+        { requestingDeviceId: 'd2-server-id' },
+      ] as never);
     });
 
     it('confirm() uses postCommit to batch-add peer + own other device when selfDeviceId is provided', async () => {

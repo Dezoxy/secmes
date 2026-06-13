@@ -8,7 +8,7 @@ import { toBase64 } from '../../lib/base64';
 import { Button, ErrorState, IconButton, LoadingState, Modal } from '../ui';
 import { useDevice } from './DeviceContext';
 
-type LinkState = 'registering' | 'awaiting' | 'linked' | 'error';
+type LinkState = 'registering' | 'awaiting' | 'linked' | 'rejected' | 'error';
 
 interface LinkDevicePanelProps {
   onClose: () => void;
@@ -50,13 +50,20 @@ export function LinkDevicePanel({ onClose }: LinkDevicePanelProps) {
     };
   }, [device, deviceId]);
 
-  // Poll every 3 s: when the enrollment disappears from pending it was resolved (approved or expired).
+  // Poll every 3 s. When the enrollment disappears from pending, confirm it was approved before
+  // showing success — it may have been rejected or expired instead.
   useEffect(() => {
     if (state !== 'awaiting' || !enrollmentId) return;
     const t = setInterval(() => {
       void listEnrollments('pending')
-        .then((list: Enrollment[]) => {
-          if (!list.some((e) => e.id === enrollmentId)) setState('linked');
+        .then(async (list: Enrollment[]) => {
+          if (list.some((e) => e.id === enrollmentId)) return; // still pending
+          const approved = await listEnrollments('approved');
+          if (approved.some((e) => e.id === enrollmentId)) {
+            setState('linked');
+          } else {
+            setState('rejected'); // expired or rejected by D1
+          }
         })
         .catch(() => {});
     }, 3_000);
@@ -67,7 +74,7 @@ export function LinkDevicePanel({ onClose }: LinkDevicePanelProps) {
     <Modal
       ariaLabel="Link this device"
       onClose={onClose}
-      closeOnBackdrop={state === 'error' || state === 'linked'}
+      closeOnBackdrop={state === 'error' || state === 'linked' || state === 'rejected'}
       className="items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
       contentClassName="w-full max-w-sm rounded-3xl border border-white/5 bg-[#12121a] p-6 shadow-2xl shadow-black/50"
     >
@@ -120,6 +127,21 @@ export function LinkDevicePanel({ onClose }: LinkDevicePanelProps) {
           </div>
           <Button variant="subtle" size="lg" onClick={onClose} className="w-full">
             Done
+          </Button>
+        </div>
+      )}
+
+      {state === 'rejected' && (
+        <div className="flex flex-col items-center gap-4 py-4 text-center">
+          <X className="h-12 w-12 text-rose-400" aria-hidden="true" />
+          <div>
+            <p className="text-lg font-semibold text-white">Enrollment expired or rejected</p>
+            <p className="mt-1 text-sm text-white/55">
+              The request was not approved in time or was rejected. Try linking again.
+            </p>
+          </div>
+          <Button variant="subtle" size="lg" onClick={onClose} className="w-full">
+            Close
           </Button>
         </div>
       )}
