@@ -887,12 +887,14 @@ export class MessagingService {
           );
         }
 
-        // Pre-validate welcome device IDs (same FK posture as addedUserIds above).
+        // Validate each welcome: the device must exist in this tenant AND belong to the stated
+        // recipient user. Skipping either check would let a member pair an arbitrary device with
+        // a victim's userId, creating inconsistent membership state or misdirected join material.
         const welcomeDeviceIds = body.welcomes.map((w) => w.recipientDeviceId);
         const validDevices =
           welcomeDeviceIds.length > 0
             ? await tx
-                .select({ id: schema.devices.id })
+                .select({ id: schema.devices.id, userId: schema.devices.userId })
                 .from(schema.devices)
                 .where(
                   and(
@@ -901,9 +903,10 @@ export class MessagingService {
                   ),
                 )
             : [];
-        const validDeviceIds = new Set(validDevices.map((d) => d.id));
+        // Map deviceId → owning userId for O(1) cross-check below.
+        const deviceOwner = new Map(validDevices.map((d) => [d.id, d.userId]));
         for (const w of body.welcomes) {
-          if (!validDeviceIds.has(w.recipientDeviceId)) continue;
+          if (deviceOwner.get(w.recipientDeviceId) !== w.recipientUserId) continue;
           await tx
             .insert(schema.conversationWelcomes)
             .values({
