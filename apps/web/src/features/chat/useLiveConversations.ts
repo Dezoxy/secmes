@@ -8,7 +8,8 @@ import {
 } from 'react';
 import type { Conversation as MlsGroup, DeviceKeys } from '@argus/crypto';
 import { accessToken } from '../../lib/auth';
-import { fetchReceipts } from '../../lib/api';
+import { fetchReceipts, listEnrollments, listMyConversations } from '../../lib/api';
+import { enrollDevice } from '../../lib/enroll';
 import { joinPendingConversations } from '../../lib/join';
 import {
   receiveLiveMessage,
@@ -42,6 +43,8 @@ interface UseLiveConversationsOptions {
     selfUserId: string,
   ) => Promise<{ nextEpoch: number | undefined }> | void;
   setConversations: Dispatch<SetStateAction<Conversation[]>>;
+  /** Called when another device of this user registers a pending enrollment request (D1 side). */
+  onEnrollmentPending?: (enrollmentId: string) => void;
 }
 
 interface UseLiveConversationsResult {
@@ -94,6 +97,7 @@ export function useLiveConversations({
   mergeIncoming,
   backfillInto,
   setConversations,
+  onEnrollmentPending,
 }: UseLiveConversationsOptions): UseLiveConversationsResult {
   const [liveIds, setLiveIds] = useState<Set<string>>(() => new Set());
   const [connectionStatus, setConnectionStatus] = useState<MessageSocketStatus>('offline');
@@ -269,6 +273,37 @@ export function useLiveConversations({
     const socket = createMessageSocket({
       token: accessToken,
       onStatus: setConnectionStatus,
+      // On every (re)connect, poll for enrollment requests that arrived while offline — the WS
+      // push only fires while connected, so D1 would miss pending approvals across disconnects.
+      onReady: () => {
+        void listEnrollments('pending')
+          .then((rows) => {
+            for (const row of rows) onEnrollmentPending?.(row.id);
+          })
+          .catch(() => {
+            /* best-effort — missed enrollments reappear on the next reconnect */
+          });
+        // Retry fan-out for approved enrollments whose fan-out may have been partial (D1 side).
+        // enrollDevice is idempotent: it skips conversations where D2 is already a leaf.
+        if (messagingDeps) {
+          void Promise.all([listEnrollments('approved'), listMyConversations()])
+            .then(([approved, conversationIds]) => {
+              for (const row of approved) {
+                void enrollDevice(
+                  messagingDeps,
+                  selfUserId,
+                  row.requestingDeviceId,
+                  row.fingerprint,
+                  conversationIds,
+                  liveGroups.current,
+                ).catch(() => {
+                  /* best-effort retry */
+                });
+              }
+            })
+            .catch(() => {});
+        }
+      },
       onMessage: ({ conversationId, message }) => {
         const group = liveGroups.current.get(conversationId);
         if (!group) return;
@@ -347,6 +382,16 @@ export function useLiveConversations({
         });
         setConversations((prev) => prev.filter((c) => c.id !== conversationId));
       },
+      // B2: another device of this user registered a pending enrollment — D1 should show approval UI.
+      // Filter: skip the event on the requesting device itself (D2 should not see its own enrollment prompt).
+      onEnrollmentPending: (enrollmentId, requestingDeviceId) => {
+        if (requestingDeviceId === deviceId) return;
+        onEnrollmentPending?.(enrollmentId);
+      },
+      // B2: this user's enrollment was approved — D2 drains Welcomes to join conversations D1 added it to.
+      onEnrollmentApproved: () => {
+        drainRef.current();
+      },
       // A membership commit was posted: drain to exactly this commit (epoch+1 ceiling) so the group
       // advances to epoch+1 but no further. An unbounded drain would consume forward-secret keys for
       // messages still in-flight at epoch+1, making them permanently undecryptable on arrival.
@@ -371,7 +416,15 @@ export function useLiveConversations({
       socket.close();
       socketRef.current = null;
     };
-  }, [applyReceipt, backfillInto, mergeIncoming, messagingDeps, seedReceipts, selfUserId]);
+  }, [
+    applyReceipt,
+    backfillInto,
+    mergeIncoming,
+    messagingDeps,
+    onEnrollmentPending,
+    seedReceipts,
+    selfUserId,
+  ]);
 
   return { liveIds, liveGroups, addLive, connectionStatus };
 }

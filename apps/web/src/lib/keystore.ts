@@ -275,6 +275,26 @@ export class DeviceKeystore {
   }
 
   /**
+   * Re-seal an existing device's key material under a new identity string without changing the
+   * underlying keys. Used for the legacy pre-B2 identity migration (bare userId → userId:deviceUuid):
+   * keeping the same keys means the server device row (`isProvisional = false`) is unchanged when
+   * `provisionDevice` re-publishes — the publish hits `onConflictDoUpdate` and leaves the flag alone.
+   * A completely new key would be published as provisional because the old device row still exists.
+   */
+  async reidentifyDevice(
+    oldIdentity: string,
+    newIdentity: string,
+    passphrase: string,
+  ): Promise<DeviceKeys> {
+    const stored = (await this.db.get(STORE, SELF)) as StoredDevice | undefined;
+    if (!stored) throw new Error('no device to reidentify');
+    const keys = await this.unseal(stored, oldIdentity, passphrase);
+    const sealed = await sealBackup(serializeDeviceKeys(keys), passphrase, this.argon);
+    await this.db.put(STORE, { identity: newIdentity, sealed } satisfies StoredDevice, SELF);
+    return keys;
+  }
+
+  /**
    * Read + unseal THIS device's sealed pool record (a stale pool from a re-created/recovered device — same
    * identity string, different signature key — is discarded; its retained privates are orphaned). Returns
    * the record (to detect a concurrent write for the CAS) + the unsealed pool. The transient unsealed
@@ -860,6 +880,16 @@ export class DeviceKeystore {
    * wrong-identity artifact is rejected without stranding the profile. Refuses to clobber an existing
    * device (use `clearDevice` first). Returns the recovered working device; it must re-publish + re-join.
    */
+  /** Read the identity embedded in a recovery artifact without side effects. Used by restore callers
+   * that need the identity before calling importRecoveryArtifact (the composite userId:uuid is encoded
+   * in the artifact and not known to the caller beforehand in B2 multi-device scenarios). */
+  async peekRecoveryArtifactIdentity(artifactJson: string, passphrase: string): Promise<string> {
+    const parsed: unknown = JSON.parse(artifactJson);
+    if (!isSealedBackup(parsed)) throw new Error('invalid recovery artifact');
+    const recovered = deserializeDeviceIdentity(await openBackup(parsed, passphrase));
+    return recovered.identity;
+  }
+
   async importRecoveryArtifact(
     identity: string,
     sealedJson: string,

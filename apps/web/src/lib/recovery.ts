@@ -38,6 +38,14 @@ export async function setUpRecovery(identity: string, passphrase: string): Promi
   return artifact;
 }
 
+/** Read the identity embedded in a recovery artifact without modifying any state. */
+export async function peekArtifactIdentity(
+  artifactJson: string,
+  passphrase: string,
+): Promise<string> {
+  return (await keystore()).peekRecoveryArtifactIdentity(artifactJson, passphrase);
+}
+
 /** Re-download the artifact for an already-set-up device (verifies the passphrase). */
 export async function exportRecovery(identity: string, passphrase: string): Promise<string> {
   const artifact = await (await keystore()).exportRecoveryArtifact(identity, passphrase);

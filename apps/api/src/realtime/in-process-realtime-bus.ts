@@ -3,6 +3,8 @@ import { EventEmitter } from 'node:events';
 import {
   RealtimeBus,
   type CommitCreatedEvent,
+  type DeviceEnrollmentApprovedEvent,
+  type DeviceEnrollmentPendingEvent,
   type MemberRemovedEvent,
   type MessageCreatedEvent,
   type ReceiptAdvancedEvent,
@@ -54,5 +56,21 @@ export class InProcessRealtimeBus extends RealtimeBus {
 
   onMemberRemoved(listener: (event: MemberRemovedEvent) => void): void {
     this.emitter.on('member.removed', listener);
+  }
+
+  emitDeviceEnrollmentPending(event: DeviceEnrollmentPendingEvent): void {
+    this.emitter.emit('device.enrollment.pending', event);
+  }
+
+  onDeviceEnrollmentPending(listener: (event: DeviceEnrollmentPendingEvent) => void): void {
+    this.emitter.on('device.enrollment.pending', listener);
+  }
+
+  emitDeviceEnrollmentApproved(event: DeviceEnrollmentApprovedEvent): void {
+    this.emitter.emit('device.enrollment.approved', event);
+  }
+
+  onDeviceEnrollmentApproved(listener: (event: DeviceEnrollmentApprovedEvent) => void): void {
+    this.emitter.on('device.enrollment.approved', listener);
   }
 }

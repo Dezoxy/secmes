@@ -12,16 +12,29 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Mock the directory/server calls; the crypto + the keystore (real sealed IndexedDB) are real.
 vi.mock('./api', () => ({
   claimKeyPackage: vi.fn(),
+  claimAllKeyPackages: vi.fn(),
+  listEnrollments: vi.fn().mockResolvedValue([]),
   createConversation: vi.fn(),
   deliverWelcome: vi.fn(),
+  postCommit: vi.fn(),
+  CommitEpochConflictError: class CommitEpochConflictError extends Error {},
 }));
-import { claimKeyPackage, createConversation, deliverWelcome } from './api';
+import {
+  claimKeyPackage,
+  claimAllKeyPackages,
+  listEnrollments,
+  createConversation,
+  deliverWelcome,
+  postCommit,
+} from './api';
 import { ConversationManager } from './conversations';
 import { DeviceKeystore } from './keystore';
 
 const claim = vi.mocked(claimKeyPackage);
+const claimAll = vi.mocked(claimAllKeyPackages);
 const create = vi.mocked(createConversation);
 const deliver = vi.mocked(deliverWelcome);
+const post = vi.mocked(postCommit);
 const FAST: Argon2Params = { m: 8192, t: 2, p: 1 };
 
 describe('ConversationManager', () => {
@@ -37,16 +50,21 @@ describe('ConversationManager', () => {
     peer = await engine.generateDeviceKeys('peer');
     keystore = await DeviceKeystore.open(engine, FAST);
     claim.mockReset();
+    claimAll.mockReset();
     create.mockReset();
     deliver.mockReset();
+    post.mockReset();
     // The directory hands back the peer's PUBLIC KeyPackage (what a real claim returns).
     claim.mockResolvedValue({
       deviceId: 'peer-device',
       signaturePublicKey: deviceSignaturePublicKeyB64(peer),
       keyPackage: serializeKeyPackage(peer.publicPackage),
     });
+    // Default: no own other devices (single-device path).
+    claimAll.mockResolvedValue([]);
     create.mockResolvedValue({ conversationId: 'conv-1' });
     deliver.mockResolvedValue({ welcomeId: 'welcome-1' });
+    post.mockResolvedValue({ id: 'commit-1', epoch: 1, deduplicated: false });
   });
 
   it('prepare() claims + derives the safety number but creates NOTHING server-side (the #20 gate)', async () => {
@@ -153,5 +171,98 @@ describe('ConversationManager', () => {
     expect(
       (await keystore.loadConversations(me, 'pw', await keystore.deriveSessionKey('pw'))).size,
     ).toBe(0);
+  });
+
+  describe('B2 multi-device self-add', () => {
+    let d2: DeviceKeys;
+
+    beforeEach(async () => {
+      d2 = await engine.generateDeviceKeys('me:d2-uuid');
+      // Simulate own D2 being in the key directory (server device id = 'd2-server-id').
+      claimAll.mockResolvedValue([
+        {
+          deviceId: 'd2-server-id',
+          signaturePublicKey: deviceSignaturePublicKeyB64(d2),
+          keyPackage: serializeKeyPackage(d2.publicPackage),
+        },
+      ]);
+      // D2 has completed the enrollment trust flow — must be in the approved list for self-add.
+      // fingerprint must match deviceSignaturePublicKeyB64(d2) so the leaf-key MITM check passes.
+      vi.mocked(listEnrollments).mockResolvedValue([
+        { requestingDeviceId: 'd2-server-id', fingerprint: deviceSignaturePublicKeyB64(d2) },
+      ] as never);
+    });
+
+    it('confirm() uses postCommit to batch-add peer + own other device when selfDeviceId is provided', async () => {
+      const mgr = new ConversationManager(
+        me,
+        'me-user',
+        keystore,
+        await keystore.deriveSessionKey('pw'),
+        'my-server-id', // selfDeviceId — causes claimAllKeyPackages to run
+      );
+      const session = await mgr.confirm(await mgr.prepare('peer-user'));
+
+      // claimAllKeyPackages called for self-user, deliverWelcome NOT used (multi-device path uses postCommit).
+      expect(claimAll).toHaveBeenCalledWith('me-user', undefined, 'my-server-id');
+      expect(deliver).not.toHaveBeenCalled();
+      expect(post).toHaveBeenCalledTimes(1);
+
+      const [convId, body] = post.mock.calls[0]!;
+      expect(convId).toBe('conv-1');
+      // Peer receives a Welcome.
+      expect(body.welcomes).toContainEqual(
+        expect.objectContaining({ recipientUserId: 'peer-user', recipientDeviceId: 'peer-device' }),
+      );
+      // Own D2 also receives a Welcome.
+      expect(body.welcomes).toContainEqual(
+        expect.objectContaining({ recipientUserId: 'me-user', recipientDeviceId: 'd2-server-id' }),
+      );
+      // Only the peer is added to conversation_members (self is already a member).
+      expect(body.addedUserIds).toEqual(['peer-user']);
+
+      // The conversation session is still returned correctly.
+      expect(session.conversationId).toBe('conv-1');
+    });
+
+    it('confirm() peer can join from the multi-device Welcome', async () => {
+      const mgr = new ConversationManager(
+        me,
+        'me-user',
+        keystore,
+        await keystore.deriveSessionKey('pw'),
+        'my-server-id',
+      );
+      await mgr.confirm(await mgr.prepare('peer-user'));
+
+      const body = post.mock.calls[0]![1];
+      const peerWelcome = body.welcomes.find((w) => w.recipientUserId === 'peer-user')!;
+
+      const peerConversation = await engine.joinConversation(
+        peer,
+        deserializeInvite({ welcome: peerWelcome.welcome, ratchetTree: peerWelcome.ratchetTree }),
+      );
+      const session = mgr.get('conv-1')!;
+      const SECRET = 'hello from multi-device epoch';
+      expect(await peerConversation.decrypt(await session.conversation.encrypt(SECRET))).toBe(
+        SECRET,
+      );
+    });
+
+    it('confirm() falls back to single-device path when selfDeviceId is null', async () => {
+      const mgr = new ConversationManager(
+        me,
+        'me-user',
+        keystore,
+        await keystore.deriveSessionKey('pw'),
+        // selfDeviceId omitted → single-device path
+      );
+      await mgr.confirm(await mgr.prepare('peer-user'));
+
+      // Single-device path: deliverWelcome used, postCommit not used, claimAllKeyPackages not called.
+      expect(deliver).toHaveBeenCalledTimes(1);
+      expect(post).not.toHaveBeenCalled();
+      expect(claimAll).not.toHaveBeenCalled();
+    });
   });
 });
