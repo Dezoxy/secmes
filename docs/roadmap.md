@@ -129,8 +129,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (ro
 - [~] G4. **🔒 Independent cryptography review** of the MLS integration *(external, paid — deferred; not blocking GA for now)*
 - [~] G5. **🔒 Third-party pen test** + remediation *(external, paid — deferred; not blocking GA for now)*
 - [x] G6. **GDPR pack** — DPA, processing records, residency doc, deletion/export (metadata) — _PR #184: `GET /me/export` (Art. 20 portability — metadata-only JSON snapshot, rate-limited 2/hr) + `DELETE /me` (Art. 17 erasure — `X-Confirm-Delete` header required, rate-limited 3/day). Deletion cascade: welcomes → pseudonymize `messages.sender_user_id NULL` (preserves offline recipients' ciphertext access) → NULL `tenant_invites.accepted_by` → explicit attachment rows → `users` cascade → `user_tenant_index` → attachment blobs best-effort. Migration `0020_gdpr_account_deletion.sql`. Article 30 processing records + threat model. 42Crunch 100/100._
-- [ ] G7. **Security page** — protocol, bundle hashes, sub-processors
-- [ ] G8. **Billing/plan gating** *(if monetizing now; else defer)*
+- [x] G7. **Security page** — protocol, bundle hashes, sub-processors — _PR #185: public `/transparency` route (no auth) — security model (crypto-blind server, MLS RFC 9420, Argon2id key backup), live bundle-integrity display fetching `/bundle-manifest.json`, sub-processors table (Azure germanywestcentral, Backblaze B2 eu-central-003, Cloudflare ingress-only), GDPR rights note. Linked from footer + AboutSettings. E2E test added._
+- [x] G8. **Billing/plan gating** — _PR #186: Free/Pro/Enterprise plan tiers; `member_limit` + `sso_enabled` enforced at create-invite + accept-invite + SSO config; `PaymentRequiredException` (HTTP 402); Stripe Checkout + Portal + full 8-status webhook fanout; operator API (`PATCH /operator/tenants/:id/plan`) with timing-safe key auth + SSO teardown on downgrade; plan badge + upgrade CTAs in TeamSettings + AdminPanel; Stripe added to sub-processors; Caddy proxies `/webhooks/*` → api. 42Crunch 100/100._
 
 ## Beyond GA — backlog (the deferred hard stuff)
 
