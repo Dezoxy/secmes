@@ -54,14 +54,25 @@ describe('ConversationManager', () => {
     create.mockReset();
     deliver.mockReset();
     post.mockReset();
-    // The directory hands back the peer's PUBLIC KeyPackage (what a real claim returns).
+    // claim (claimKeyPackage) is no longer called by prepare(); keep the mock for any residual callers.
     claim.mockResolvedValue({
       deviceId: 'peer-device',
       signaturePublicKey: deviceSignaturePublicKeyB64(peer),
       keyPackage: serializeKeyPackage(peer.publicPackage),
     });
-    // Default: no own other devices (single-device path).
-    claimAll.mockResolvedValue([]);
+    // prepare() now calls claimAll for the peer; confirm() calls claimAll for self.
+    // Default: peer has one device, self has no other devices (single-device path).
+    claimAll.mockImplementation(async (userId: string) =>
+      userId === 'peer-user'
+        ? [
+            {
+              deviceId: 'peer-device',
+              signaturePublicKey: deviceSignaturePublicKeyB64(peer),
+              keyPackage: serializeKeyPackage(peer.publicPackage),
+            },
+          ]
+        : [],
+    );
     create.mockResolvedValue({ conversationId: 'conv-1' });
     deliver.mockResolvedValue({ welcomeId: 'welcome-1' });
     post.mockResolvedValue({ id: 'commit-1', epoch: 1, deduplicated: false });
@@ -76,7 +87,7 @@ describe('ConversationManager', () => {
     );
     const pending = await mgr.prepare('peer-user');
 
-    expect(claim).toHaveBeenCalledWith('peer-user');
+    expect(claimAll).toHaveBeenCalledWith('peer-user');
     expect(pending.peer).toEqual({
       userId: 'peer-user',
       deviceId: 'peer-device',
@@ -178,19 +189,27 @@ describe('ConversationManager', () => {
 
     beforeEach(async () => {
       d2 = await engine.generateDeviceKeys('me:d2-uuid');
-      // Simulate own D2 in the key directory for self-user only; peer-user has no secondary devices.
-      // Using mockImplementation so confirm()'s two claimAll calls are distinguished by userId.
-      claimAll.mockImplementation(async (userId: string) =>
-        userId === 'me-user'
-          ? [
-              {
-                deviceId: 'd2-server-id',
-                signaturePublicKey: deviceSignaturePublicKeyB64(d2),
-                keyPackage: serializeKeyPackage(d2.publicPackage),
-              },
-            ]
-          : [],
-      );
+      // prepare() calls claimAll('peer-user'); confirm() calls claimAll('me-user').
+      // Peer-user: primary device only. Self-user: D2 secondary device.
+      claimAll.mockImplementation(async (userId: string) => {
+        if (userId === 'me-user')
+          return [
+            {
+              deviceId: 'd2-server-id',
+              signaturePublicKey: deviceSignaturePublicKeyB64(d2),
+              keyPackage: serializeKeyPackage(d2.publicPackage),
+            },
+          ];
+        if (userId === 'peer-user')
+          return [
+            {
+              deviceId: 'peer-device',
+              signaturePublicKey: deviceSignaturePublicKeyB64(peer),
+              keyPackage: serializeKeyPackage(peer.publicPackage),
+            },
+          ];
+        return [];
+      });
       // D2 has completed the enrollment trust flow — must be in the approved list for self-add.
       // fingerprint must match deviceSignaturePublicKeyB64(d2) so the leaf-key MITM check passes.
       vi.mocked(listEnrollments).mockResolvedValue([
@@ -264,10 +283,13 @@ describe('ConversationManager', () => {
       );
       await mgr.confirm(await mgr.prepare('peer-user'));
 
-      // Single-device path: deliverWelcome used, postCommit not used, claimAllKeyPackages not called.
+      // Single-device path: deliverWelcome used, postCommit not used.
+      // claimAll IS called by prepare() for the peer, but confirm() uses pending.allPeerClaimed (no re-claim).
       expect(deliver).toHaveBeenCalledTimes(1);
       expect(post).not.toHaveBeenCalled();
-      expect(claimAll).not.toHaveBeenCalled();
+      expect(claimAll).toHaveBeenCalledWith('peer-user');
+      // claimAll is NOT called for self (no selfDeviceId set).
+      expect(claimAll).not.toHaveBeenCalledWith('me-user');
     });
   });
 });

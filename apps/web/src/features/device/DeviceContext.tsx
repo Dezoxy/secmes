@@ -171,16 +171,17 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         return;
       }
       const userId = profile.userId;
-      // Read the identity that was sealed inside the artifact — importRecoveryArtifact requires an exact
-      // match, so we must use the artifact's own identity rather than generating a fresh UUID here.
-      const identity = await keystore.peekRecoveryArtifactIdentity(artifactJson, passphrase);
-      const { userId: artifactUserId, deviceUuid: uuid } = parseDeviceIdentity(identity);
-      if (artifactUserId !== userId)
-        throw new Error('recovery artifact belongs to a different account');
-      if (!uuid) throw new Error('invalid identity in recovery artifact');
       setStatus('unlocking');
       setError(null);
       try {
+        // Read the identity sealed inside the artifact — importRecoveryArtifact requires an exact match,
+        // so we use the artifact's own identity rather than generating a fresh UUID. This also validates
+        // the passphrase up front; a wrong passphrase throws here and is caught below.
+        const identity = await keystore.peekRecoveryArtifactIdentity(artifactJson, passphrase);
+        const { userId: artifactUserId, deviceUuid: uuid } = parseDeviceIdentity(identity);
+        if (artifactUserId !== userId)
+          throw new Error('recovery artifact belongs to a different account');
+        if (!uuid) throw new Error('invalid identity in recovery artifact');
         // Shared with the Settings recovery panel: restore → revoke now-stale packages → publish fresh (#20).
         const {
           device: dev,

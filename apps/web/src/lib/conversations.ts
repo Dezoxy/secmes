@@ -18,7 +18,6 @@ import {
 import {
   CommitEpochConflictError,
   claimAllKeyPackages,
-  claimKeyPackage,
   createConversation,
   deliverWelcome,
   listEnrollments,
@@ -79,6 +78,9 @@ export interface PendingConversation {
   peer: PeerRef;
   /** The claimed package — UNTRUSTED until `safetyNumber` is verified out-of-band. Held for phase 2 only. */
   peerKeyPackage: KeyPackage;
+  /** ALL peer device packages claimed in prepare() (primary + secondary). confirm() uses these directly —
+   * no re-claim — so every secondary device package is tied to the same safety-number gate. */
+  allPeerClaimed: ClaimedKeyPackage[];
   /** The #20 safety number the user must confirm out-of-band BEFORE `confirm()`. */
   safetyNumber: string;
 }
@@ -121,19 +123,28 @@ export class ConversationManager {
     return this.enginePromise;
   }
 
-  /** Phase 1: claim the peer's one-time KeyPackage and derive the safety number. Trusts nothing yet. */
+  /** Phase 1: claim all of the peer's KeyPackages and derive the safety number. Trusts nothing yet.
+   *  Claiming ALL peer packages here (not just the primary) ensures that peer secondary device packages
+   *  used in confirm() are bound to the same safety-number gate as the primary device. */
   async prepare(peerUserId: string): Promise<PendingConversation> {
-    const claimed = await claimKeyPackage(peerUserId);
-    const peerKeyPackage = deserializeKeyPackage(claimed.keyPackage);
+    const allClaimed = await claimAllKeyPackages(peerUserId);
+    if (allClaimed.length === 0) {
+      throw new Error(
+        `peer ${peerUserId} has no key packages available — ask them to sign in first`,
+      );
+    }
+    const primary = allClaimed[0]!;
+    const peerKeyPackage = deserializeKeyPackage(primary.keyPackage);
     // safetyNumber is over the STABLE signature keys (#20) — a swapped package shifts it, exposing a MITM.
     const sn = await safetyNumber(this.device.publicPackage, peerKeyPackage);
     return {
       peer: {
         userId: peerUserId,
-        deviceId: claimed.deviceId,
-        signaturePublicKey: claimed.signaturePublicKey,
+        deviceId: primary.deviceId,
+        signaturePublicKey: primary.signaturePublicKey,
       },
       peerKeyPackage,
+      allPeerClaimed: allClaimed,
       safetyNumber: sn,
     };
   }
@@ -156,13 +167,11 @@ export class ConversationManager {
       ? await claimEnrolledOwnDevices(this.selfUserId, this.selfDeviceId)
       : [];
 
-    // Claim peer secondary devices so all of the peer's devices receive a Welcome in the same epoch.
-    // The primary peer device package was already claimed in prepare(); exclude it here.
-    const peerOtherClaimed = this.selfDeviceId
-      ? (await claimAllKeyPackages(pending.peer.userId)).filter(
-          (p) => p.deviceId !== pending.peer.deviceId,
-        )
-      : [];
+    // Use peer packages from prepare() — no re-claim. Secondary packages are already bound to the
+    // same safety-number gate as the primary device (claimed together in prepare()).
+    const peerOtherClaimed = pending.allPeerClaimed.filter(
+      (p) => p.deviceId !== pending.peer.deviceId,
+    );
 
     // Create a SOLO conversation (just me — my own id dedups to the creator server-side).
     const { conversationId } = await createConversation([this.selfUserId]);

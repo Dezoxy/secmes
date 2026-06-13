@@ -82,7 +82,9 @@ export class KeyDirectoryService {
             schema.devices.userId,
             schema.devices.signaturePublicKey,
           ],
-          set: { signaturePublicKey }, // no-op update so the existing row is returned (idempotent re-register)
+          // Re-apply the computed isProvisional on conflict so a device that was revoked to provisional
+          // and then re-registers as the user's last/only trusted device gets re-promoted correctly.
+          set: { signaturePublicKey, isProvisional },
         })
         .returning({ id: schema.devices.id });
       if (!device) throw new Error('device upsert returned no row');
