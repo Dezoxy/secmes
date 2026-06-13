@@ -860,6 +860,16 @@ export class DeviceKeystore {
    * wrong-identity artifact is rejected without stranding the profile. Refuses to clobber an existing
    * device (use `clearDevice` first). Returns the recovered working device; it must re-publish + re-join.
    */
+  /** Read the identity embedded in a recovery artifact without side effects. Used by restore callers
+   * that need the identity before calling importRecoveryArtifact (the composite userId:uuid is encoded
+   * in the artifact and not known to the caller beforehand in B2 multi-device scenarios). */
+  async peekRecoveryArtifactIdentity(artifactJson: string, passphrase: string): Promise<string> {
+    const parsed: unknown = JSON.parse(artifactJson);
+    if (!isSealedBackup(parsed)) throw new Error('invalid recovery artifact');
+    const recovered = deserializeDeviceIdentity(await openBackup(parsed, passphrase));
+    return recovered.identity;
+  }
+
   async importRecoveryArtifact(
     identity: string,
     sealedJson: string,

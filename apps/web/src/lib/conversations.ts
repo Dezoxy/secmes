@@ -43,14 +43,18 @@ async function claimEnrolledOwnDevices(
     claimAllKeyPackages(selfUserId),
     listEnrollments('approved'),
   ]);
-  // Map deviceId → stored fingerprint so we can verify the claimed package's leaf key matches what
-  // D2 displayed during the verified-linking ceremony. A server key-swap would produce a different
-  // leaf key — same defense as enroll.ts stageMembershipCommit.
+  // Map requestingDeviceId → stored fingerprint for the leaf-key MITM check on D2.
   const enrollmentByDeviceId = new Map(
     enrollments.map((e) => [e.requestingDeviceId, e.fingerprint]),
   );
+  // approvedByDeviceId (D1) is a trusted already-provisioned device — no fingerprint stored for it.
+  // Include it so D2 can self-add D1 when D2 creates a new conversation.
+  const approverDeviceIds = new Set(
+    enrollments.map((e) => e.approvedByDeviceId).filter((id): id is string => id !== null),
+  );
   return packages.filter((p) => {
     if (p.deviceId === selfDeviceId) return false;
+    if (approverDeviceIds.has(p.deviceId)) return true; // D1: trusted approver, skip fingerprint check
     const fingerprint = enrollmentByDeviceId.get(p.deviceId);
     if (!fingerprint) return false;
     const expectedBytes = fromBase64(fingerprint);

@@ -10,6 +10,7 @@ import {
   approveEnrollment,
   listEnrollments,
   listMyConversations,
+  rejectEnrollment,
   type Enrollment,
 } from '../../lib/api';
 import { enrollDevice } from '../../lib/enroll';
@@ -182,7 +183,10 @@ export function ApproveDevicePanel({
             <Button
               variant="ghost"
               size="lg"
-              onClick={onClose}
+              onClick={() => {
+                void rejectEnrollment(enrollmentId).catch(() => {});
+                onClose();
+              }}
               disabled={state === 'approving'}
               className="flex-1 border border-white/5"
             >
