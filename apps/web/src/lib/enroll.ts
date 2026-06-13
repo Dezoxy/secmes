@@ -132,9 +132,11 @@ export async function enrollDevice(
 
       if (epochConflict) {
         // Lock released — drain the winning commit so we can retry at the new epoch.
-        // conversation.epoch (after discardStaged) = staged epoch E; the winning commit moved
-        // the server to E+1, so maxEpoch = E+1 = conversation.epoch + 1 (same pattern as onCommit).
-        await drainCommits(deps, conversationId, conversation, conversation.epoch + 1);
+        // after discardStaged: conversation.epoch = E (pre-staged). The winning commit moved
+        // the server to E+1, so we need to process the commit stored at epoch E.
+        // afterEpoch is an exclusive lower bound: afterEpoch = E-1 fetches commits with epoch > E-1,
+        // i.e. epoch E and higher (same pattern as processCommitEvent in messaging.ts).
+        await drainCommits(deps, conversationId, conversation, conversation.epoch - 1);
         continue;
       }
       break;

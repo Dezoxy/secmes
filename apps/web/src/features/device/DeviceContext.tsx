@@ -148,10 +148,11 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         }
         let dev: DeviceKeys | undefined;
         if (isLegacyMigration) {
-          dev = await keystore.loadDevice(storedIdent!, passphrase);
-          if (!dev) throw new Error('no device found to unlock');
-          await keystore.clearDevice();
-          dev = await keystore.getOrCreateDevice(identity, passphrase);
+          // Re-seal the SAME keys under the new composite identity without changing the underlying
+          // key material. This keeps the server device row unchanged (isProvisional = false) —
+          // provisionDevice below will hit onConflictDoUpdate and leave the flag alone. Creating a
+          // new key would publish a new device row as provisional (old row still exists as trusted).
+          dev = await keystore.reidentifyDevice(storedIdent!, identity, passphrase);
         } else if (creating) {
           dev = await keystore.getOrCreateDevice(identity, passphrase);
         } else {
