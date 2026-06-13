@@ -93,8 +93,11 @@ export class DevicesService {
           and(
             eq(schema.deviceEnrollments.userId, userId),
             eq(schema.deviceEnrollments.status, effectiveStatus),
-            // Only surface non-expired pending requests.
-            gt(schema.deviceEnrollments.expiresAt, sql`now()`),
+            // Expiry filter only applies to pending rows; approved/rejected rows are terminal
+            // and must remain visible indefinitely (e.g. claimEnrolledOwnDevices checks 'approved').
+            effectiveStatus === 'pending'
+              ? gt(schema.deviceEnrollments.expiresAt, sql`now()`)
+              : undefined,
           ),
         )
         .orderBy(schema.deviceEnrollments.createdAt);
