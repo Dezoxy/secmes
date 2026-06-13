@@ -282,9 +282,10 @@ export async function drainCommits(
     for (;;) {
       const commits = await listCommits(conversationId, { afterEpoch: cursor, limit: LIMIT });
       for (const c of commits) {
-        // Do not advance past the requested ceiling — the caller will decrypt messages at maxEpoch
-        // before calling again for later epochs.
-        if (maxEpoch !== undefined && c.epoch > maxEpoch) return;
+        // Stop BEFORE the commit that would advance the group past maxEpoch. A commit stored with
+        // epoch N takes the group from N → N+1, so to decrypt a message at epoch maxEpoch the group
+        // must be at maxEpoch — meaning only commits with epoch < maxEpoch should be applied.
+        if (maxEpoch !== undefined && c.epoch >= maxEpoch) return;
         try {
           await conversation.processCommit(fromBase64(c.commit), persister);
           cursor = c.epoch; // advance past this commit so the next page starts here
