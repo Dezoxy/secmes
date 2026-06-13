@@ -117,11 +117,12 @@ export interface BackfillResult {
   /** The last server message id observed (pass as `after` next time to fetch only newer rows). */
   cursor: string | undefined;
   /**
-   * True if backfill stopped early because a future-epoch message was encountered. The caller
-   * should drain pending commits and then call backfillConversation again with the same cursor —
-   * the epoch-gap messages will be decryptable at the advanced epoch.
+   * Set to the epoch of the first un-decryptable message when the backfill stopped early because a
+   * future-epoch message was encountered. The caller MUST drain commits to exactly this epoch (not
+   * beyond) and then call backfillConversation again from the same cursor. Draining past this epoch
+   * would advance the MLS ratchet state and make messages at this epoch permanently undecryptable.
    */
-  epochGap: boolean;
+  nextEpoch: number | undefined;
 }
 
 /**
@@ -147,15 +148,16 @@ export async function backfillConversation(
     let cursor = after;
     let advanced = false;
 
-    let epochGap = false; // true if we stopped early at a future-epoch message
+    let nextEpoch: number | undefined; // set to the gap epoch when we stop early
     for (let page = 0; page < MAX_BACKFILL_PAGES; page += 1) {
       const res = await fetchMessages(conversationId, { after: cursor, limit: FETCH_PAGE });
       for (const m of res.messages) {
-        // Stop WITHOUT advancing cursor if the message is at a future epoch. The caller can drain
-        // commits first and then call backfillConversation again with the same cursor to resume —
-        // otherwise the cursor advances past these messages and they're lost permanently.
+        // Stop WITHOUT advancing cursor if the message is at a future epoch. The caller MUST drain
+        // commits to exactly this epoch (not beyond) and then call backfillConversation again —
+        // draining further advances the ratchet past this epoch and makes these messages permanently
+        // undecryptable (MLS forward secrecy).
         if (m.epoch > conversation.epoch) {
-          epochGap = true;
+          nextEpoch = m.epoch;
           break;
         }
         cursor = m.id; // high-water mark — advance past everything at the current epoch
@@ -184,7 +186,7 @@ export async function backfillConversation(
           );
         }
       }
-      if (epochGap || !res.nextCursor || res.messages.length === 0) break;
+      if (nextEpoch !== undefined || !res.nextCursor || res.messages.length === 0) break;
       cursor = res.nextCursor;
     }
 
@@ -196,7 +198,7 @@ export async function backfillConversation(
         deps.sessionKey,
       );
     }
-    return { messages, cursor, epochGap };
+    return { messages, cursor, nextEpoch };
   });
 }
 
@@ -254,14 +256,20 @@ export async function receiveLiveMessage(
 // via the keystore persister (built outside the conversation's op queue to avoid re-entering it).
 
 /**
- * Fetch and apply all commits after `afterEpoch` under the conversation lock, in epoch-ascending order.
+ * Fetch and apply commits after `afterEpoch` under the conversation lock, in epoch-ascending order.
  * Stops at the first unprocessable commit (subsequent epochs are unreachable without it).
+ *
+ * `maxEpoch` — when set, stops BEFORE applying any commit whose epoch exceeds this value. Use this
+ * to advance the MLS ratchet to exactly the epoch needed to decrypt the next queued message — never
+ * beyond it — so intermediate messages remain decryptable (MLS forward secrecy removes those keys
+ * once the epoch is surpassed).
  */
 export async function drainCommits(
   deps: MessagingDeps,
   conversationId: string,
   conversation: Conversation,
   afterEpoch: number,
+  maxEpoch?: number,
 ): Promise<void> {
   return withLock(conversationLock(conversationId), async () => {
     const persister = deps.keystore.makeConversationPersister(
@@ -274,6 +282,9 @@ export async function drainCommits(
     for (;;) {
       const commits = await listCommits(conversationId, { afterEpoch: cursor, limit: LIMIT });
       for (const c of commits) {
+        // Do not advance past the requested ceiling — the caller will decrypt messages at maxEpoch
+        // before calling again for later epochs.
+        if (maxEpoch !== undefined && c.epoch > maxEpoch) return;
         try {
           await conversation.processCommit(fromBase64(c.commit), persister);
           cursor = c.epoch; // advance past this commit so the next page starts here
@@ -298,17 +309,21 @@ export async function drainCommits(
 /**
  * Handle a `commit` WS event: if the event's epoch is ahead of the local epoch, drain from
  * the current epoch. If already past (stale event), ignore. Runs under the conversation lock.
+ *
+ * `maxEpoch` — passed through to `drainCommits`; callers on the message path should set this to
+ * the message's epoch so the ratchet stops exactly there, keeping intermediate messages decryptable.
  */
 export async function processCommitEvent(
   deps: MessagingDeps,
   conversationId: string,
   conversation: Conversation,
   event: { epoch: number },
+  maxEpoch?: number,
 ): Promise<void> {
   const convEpoch = conversation.epoch;
   if (event.epoch < convEpoch) return; // stale — already at a later epoch
   // afterEpoch = convEpoch - 1 → returns commits with epoch > (convEpoch-1), i.e. epoch >= convEpoch.
   // No floor at 0: a group at epoch 0 passes -1 so the server returns epoch-0 commits too.
   const afterEpoch = convEpoch - 1;
-  await drainCommits(deps, conversationId, conversation, afterEpoch);
+  await drainCommits(deps, conversationId, conversation, afterEpoch, maxEpoch);
 }

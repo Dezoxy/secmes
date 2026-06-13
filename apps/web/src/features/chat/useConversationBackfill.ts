@@ -27,7 +27,7 @@ interface SelectedBackfillOptions {
     conversationId: string,
     group: MlsGroup,
     selfUserId: string,
-  ) => void | Promise<void>;
+  ) => Promise<{ nextEpoch: number | undefined }> | void;
 }
 
 interface HistoryRehydrationOptions {
@@ -43,7 +43,11 @@ interface HistoryRehydrationOptions {
 interface ConversationBackfillResult {
   appendHistory: (conversationId: string, entries: StoredMessage[]) => void;
   mergeIncoming: (conversationId: string, incoming: DecryptedMessage[]) => void;
-  backfillInto: (conversationId: string, group: MlsGroup, selfUserId: string) => Promise<void>;
+  backfillInto: (
+    conversationId: string,
+    group: MlsGroup,
+    selfUserId: string,
+  ) => Promise<{ nextEpoch: number | undefined }>;
 }
 
 // A live (E2E) attachment ref -> a UI attachment. Images download+decrypt lazily from `ref` (no URL).
@@ -179,24 +183,30 @@ export function useConversationBackfill({
   );
 
   const backfillInto = useCallback(
-    async (conversationId: string, group: MlsGroup, selfUserId: string): Promise<void> => {
-      if (!messagingDeps) return;
+    async (
+      conversationId: string,
+      group: MlsGroup,
+      selfUserId: string,
+    ): Promise<{ nextEpoch: number | undefined }> => {
+      if (!messagingDeps) return { nextEpoch: undefined };
       if (backfilling.current.has(conversationId)) {
         backfillPending.current.add(conversationId);
-        return;
+        return { nextEpoch: undefined };
       }
       backfilling.current.add(conversationId);
+      let lastNextEpoch: number | undefined;
       try {
         do {
           backfillPending.current.delete(conversationId);
           const after = fetchCursors.current.get(conversationId);
-          const { messages, cursor } = await backfillConversation(
+          const { messages, cursor, nextEpoch } = await backfillConversation(
             messagingDeps,
             conversationId,
             group,
             selfUserId,
             after,
           );
+          lastNextEpoch = nextEpoch;
           if (cursor) fetchCursors.current.set(conversationId, cursor);
           mergeIncoming(conversationId, messages);
         } while (backfillPending.current.has(conversationId));
@@ -207,6 +217,7 @@ export function useConversationBackfill({
         backfilling.current.delete(conversationId);
         backfillPending.current.delete(conversationId);
       }
+      return { nextEpoch: lastNextEpoch };
     },
     [messagingDeps, mergeIncoming],
   );

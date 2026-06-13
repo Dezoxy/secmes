@@ -40,7 +40,7 @@ interface UseLiveConversationsOptions {
     conversationId: string,
     group: MlsGroup,
     selfUserId: string,
-  ) => void | Promise<void>;
+  ) => Promise<{ nextEpoch: number | undefined }> | void;
   setConversations: Dispatch<SetStateAction<Conversation[]>>;
 }
 
@@ -273,12 +273,17 @@ export function useLiveConversations({
         const group = liveGroups.current.get(conversationId);
         if (!group) return;
         void (async () => {
-          // If the message was encrypted at a newer epoch, drain commits first so the MLS ratchet
-          // is at the right epoch before decrypting. Without this, a commit-then-message sequence
-          // can arrive with the message processed before the async onCommit drain completes —
-          // decrypt fails silently (returns null) and the message is lost from the live UI.
+          // If the message was encrypted at a newer epoch, drain commits to EXACTLY that epoch
+          // before decrypting. Passing maxEpoch = message.epoch prevents the drain from overshooting
+          // and consuming keys that belong to messages still in-flight at intermediate epochs.
           if (message.epoch > group.epoch) {
-            await processCommitEvent(deps, conversationId, group, { epoch: message.epoch });
+            await processCommitEvent(
+              deps,
+              conversationId,
+              group,
+              { epoch: message.epoch },
+              message.epoch,
+            );
           }
           const decrypted = await receiveLiveMessage(
             deps,
@@ -301,16 +306,23 @@ export function useLiveConversations({
       onSubscribed: (conversationId) => {
         const group = liveGroups.current.get(conversationId);
         if (group) {
-          // Process messages and commits in epoch order:
-          // 1. Backfill at the current epoch first — so any messages sent before a pending commit
-          //    are decrypted while the key schedule is still at the right epoch (MLS FS means they
-          //    become undecryptable once the commit is applied).
-          // 2. Drain commits to catch up any membership changes posted while offline.
-          // 3. Backfill again to pick up messages encrypted at the new (post-commit) epoch.
+          // Interleaved catch-up: backfill at the current epoch, then — if messages at a future
+          // epoch were encountered — drain commits to EXACTLY that epoch (not beyond), then backfill
+          // again. Repeat until the backfill sees no further epoch gaps. This preserves forward
+          // secrecy: keys for epoch N are consumed only after all epoch-N messages are decrypted.
           void (async () => {
-            await backfillInto(conversationId, group, selfUserId);
-            await processCommitEvent(deps, conversationId, group, { epoch: group.epoch });
-            await backfillInto(conversationId, group, selfUserId);
+            for (;;) {
+              const result = await backfillInto(conversationId, group, selfUserId);
+              const nextEpoch = result?.nextEpoch;
+              if (nextEpoch === undefined) break;
+              await processCommitEvent(
+                deps,
+                conversationId,
+                group,
+                { epoch: nextEpoch },
+                nextEpoch,
+              );
+            }
           })().catch((err: unknown) => {
             // eslint-disable-next-line no-console
             console.warn(
