@@ -187,8 +187,9 @@ describe('ConversationManager', () => {
         },
       ]);
       // D2 has completed the enrollment trust flow — must be in the approved list for self-add.
+      // fingerprint must match deviceSignaturePublicKeyB64(d2) so the leaf-key MITM check passes.
       vi.mocked(listEnrollments).mockResolvedValue([
-        { requestingDeviceId: 'd2-server-id' },
+        { requestingDeviceId: 'd2-server-id', fingerprint: deviceSignaturePublicKeyB64(d2) },
       ] as never);
     });
 

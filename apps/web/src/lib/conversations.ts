@@ -25,7 +25,7 @@ import {
   postCommit,
   type ClaimedKeyPackage,
 } from './api';
-import { toBase64 } from './base64';
+import { fromBase64, toBase64 } from './base64';
 import type { DeviceKeystore, StoredMessage } from './keystore';
 import { conversationLock, withLock } from './locks';
 import { sendLiveMessage, type MessagingDeps } from './messaging';
@@ -43,8 +43,23 @@ async function claimEnrolledOwnDevices(
     claimAllKeyPackages(selfUserId),
     listEnrollments('approved'),
   ]);
-  const enrolledIds = new Set(enrollments.map((e) => e.requestingDeviceId));
-  return packages.filter((p) => p.deviceId !== selfDeviceId && enrolledIds.has(p.deviceId));
+  // Map deviceId → stored fingerprint so we can verify the claimed package's leaf key matches what
+  // D2 displayed during the verified-linking ceremony. A server key-swap would produce a different
+  // leaf key — same defense as enroll.ts stageMembershipCommit.
+  const enrollmentByDeviceId = new Map(
+    enrollments.map((e) => [e.requestingDeviceId, e.fingerprint]),
+  );
+  return packages.filter((p) => {
+    if (p.deviceId === selfDeviceId) return false;
+    const fingerprint = enrollmentByDeviceId.get(p.deviceId);
+    if (!fingerprint) return false;
+    const expectedBytes = fromBase64(fingerprint);
+    const claimedKey = deserializeKeyPackage(p.keyPackage).leafNode.signaturePublicKey;
+    return (
+      claimedKey.length === expectedBytes.length &&
+      claimedKey.every((b, i) => b === expectedBytes[i])
+    );
+  });
 }
 
 /** The peer device a conversation is being started with — ids + the signature key (no private material). */
@@ -159,9 +174,26 @@ export class ConversationManager {
       });
       if (!staged.invite) throw new Error('epoch-0 commit produced no Welcome');
       const inv = serializeInvite(staged.invite);
+
+      // Persist staged BEFORE posting: if the tab crashes after a successful POST but before
+      // applyStaged/saveConversationState, the drain path (onSubscribed → drainCommits) re-syncs
+      // from the server on next load. clientCommitId is generated here so it is in PENDING_STORE
+      // and available on reload to verify OUR commit won (same pattern as confirmCreate).
+      const clientCommitId = crypto.randomUUID();
+      const pendingBytes = conversation.serializeStaged(staged);
+      await this.keystore.saveStagedCommit(
+        this.device,
+        conversationId,
+        this.sessionKey,
+        pendingBytes,
+        staged.epoch,
+        clientCommitId,
+      );
+      pendingBytes.fill(0);
+
       try {
         await postCommit(conversationId, {
-          clientCommitId: crypto.randomUUID(),
+          clientCommitId,
           epoch: staged.epoch,
           commit: toBase64(staged.commit),
           welcomes: [
@@ -183,6 +215,9 @@ export class ConversationManager {
         });
       } catch (err) {
         conversation.discardStaged(staged);
+        if (err instanceof CommitEpochConflictError) {
+          await this.keystore.clearStagedCommit(conversationId);
+        }
         throw err;
       }
       await conversation.applyStaged(staged);
@@ -197,6 +232,10 @@ export class ConversationManager {
       conversation,
       this.sessionKey,
     );
+    // Multi-device path: staged commit has been applied and persisted — remove the pending slot.
+    if (ownOtherClaimed.length > 0) {
+      await this.keystore.clearStagedCommit(conversationId);
+    }
     const session: ConversationSession = {
       conversationId,
       conversation,
