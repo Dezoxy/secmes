@@ -217,14 +217,6 @@ export class KeyDirectoryService {
         .limit(1);
       if (!device) return 0;
 
-      // Reset to provisional so the device may re-provision with fresh key material. Without this,
-      // a revoked device would retain its non-provisional status and could still approve enrollments
-      // with its (now-replaced) old key pair if it somehow retained access.
-      await tx
-        .update(schema.devices)
-        .set({ isProvisional: true })
-        .where(eq(schema.devices.id, device.id));
-
       // Delete ONLY the unclaimed packages for this device. claimed_at IS NULL = available; a set value =
       // consumed (one-time-use), which we must keep (a recipient may still be joining via its sealed Welcome).
       const deleted = await tx
