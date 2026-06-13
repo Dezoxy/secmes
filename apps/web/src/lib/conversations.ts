@@ -75,6 +75,8 @@ export class ConversationManager {
     private readonly keystore: DeviceKeystore,
     /** The per-unlock session key — seals the persisted group state (cheap AES-GCM). Memory only. */
     private readonly sessionKey: CryptoKey,
+    /** Server-assigned device UUID for this device (B2: filter self from own-device claims). Null = single-device path. */
+    private readonly selfDeviceId: string | null = null,
   ) {}
 
   private engine(): Promise<MlsEngine> {
@@ -109,22 +111,66 @@ export class ConversationManager {
     // The MLS group id is internal (random, CSPRNG); the server assigns the routing/conversation id. Build
     // the group + Welcome locally before touching the server so a bad package can't orphan a conversation.
     const conversation = await engine.createConversation(crypto.randomUUID(), this.device);
-    const invite = await conversation.addMember(pending.peerKeyPackage); // trust granted by the #20 gate
-    // Create a SOLO conversation (just me — my own id dedups to the creator server-side), then let
-    // deliverWelcome add the peer in the SAME transaction that stores the Welcome. So if delivery fails,
-    // the peer is never left a member of a conversation with no Welcome — no peer-visible / undecryptable
-    // orphan and no duplicate-on-retry for the peer; only a benign empty self-conversation remains.
+
+    // Claim own other devices for B2 self-add. Skipped when selfDeviceId is unknown (single-device path).
+    const ownOtherClaimed = this.selfDeviceId
+      ? (await claimAllKeyPackages(this.selfUserId)).filter((p) => p.deviceId !== this.selfDeviceId)
+      : [];
+
+    // Create a SOLO conversation (just me — my own id dedups to the creator server-side).
     const { conversationId } = await createConversation([this.selfUserId]);
-    await deliverWelcome(conversationId, {
-      recipientUserId: pending.peer.userId,
-      recipientDeviceId: pending.peer.deviceId,
-      ...serializeInvite(invite),
-    });
-    // Persist the group state only AFTER delivery SUCCEEDS — the durable state must exist before `confirm()`
-    // returns (so a reload before the first send recovers it), but NOT on a delivery failure: persisting
-    // first would leave a phantom conversation (rehydrated on next unlock) whose peer was never added
-    // server-side, so its sends would go nowhere. `deliverWelcome` doesn't touch the local MLS state
-    // (`addMember` already advanced it), so this persists the same post-add state, just gated on delivery.
+
+    if (ownOtherClaimed.length === 0) {
+      // Single-device path: add peer + deliver Welcome directly. The peer is added as a member of
+      // the server conversation in the same deliverWelcome transaction, so a delivery failure leaves
+      // only a benign self-only conversation, not a peer-visible orphan.
+      const invite = await conversation.addMember(pending.peerKeyPackage);
+      await deliverWelcome(conversationId, {
+        recipientUserId: pending.peer.userId,
+        recipientDeviceId: pending.peer.deviceId,
+        ...serializeInvite(invite),
+      });
+    } else {
+      // Multi-device path (B2): batch-add peer + own other devices in one epoch-0 commit so they
+      // all join from the same epoch and forward secrecy is not split across commits.
+      const ownOtherPackages = ownOtherClaimed.map((p) => deserializeKeyPackage(p.keyPackage));
+      const staged = await conversation.stageMembershipCommit({
+        add: [pending.peerKeyPackage, ...ownOtherPackages],
+      });
+      if (!staged.invite) throw new Error('epoch-0 commit produced no Welcome');
+      const inv = serializeInvite(staged.invite);
+      try {
+        await postCommit(conversationId, {
+          clientCommitId: crypto.randomUUID(),
+          epoch: staged.epoch,
+          commit: toBase64(staged.commit),
+          welcomes: [
+            {
+              recipientUserId: pending.peer.userId,
+              recipientDeviceId: pending.peer.deviceId,
+              welcome: inv.welcome,
+              ratchetTree: inv.ratchetTree,
+            },
+            ...ownOtherClaimed.map((p) => ({
+              recipientUserId: this.selfUserId,
+              recipientDeviceId: p.deviceId,
+              welcome: inv.welcome,
+              ratchetTree: inv.ratchetTree,
+            })),
+          ],
+          addedUserIds: [pending.peer.userId],
+          removedUserIds: [],
+        });
+      } catch (err) {
+        conversation.discardStaged(staged);
+        throw err;
+      }
+      await conversation.applyStaged(staged);
+    }
+
+    // Persist the group state only AFTER delivery SUCCEEDS — the durable state must exist before
+    // `confirm()` returns (so a reload before the first send recovers it), but NOT on a delivery
+    // failure (persisting first would leave a phantom conversation whose peer was never added).
     await this.keystore.saveConversationState(
       this.device,
       conversationId,
@@ -207,6 +253,8 @@ export class GroupConversationManager {
     private readonly selfUserId: string,
     private readonly keystore: DeviceKeystore,
     private readonly sessionKey: CryptoKey,
+    /** Server-assigned device UUID for this device (B2: filter self from own-device claims). Null = single-device path. */
+    private readonly selfDeviceId: string | null = null,
   ) {}
 
   private engine(): Promise<MlsEngine> {
@@ -251,22 +299,39 @@ export class GroupConversationManager {
     const engine = await this.engine();
     const conversation = await engine.createConversation(crypto.randomUUID(), this.device);
 
-    const allPackages = pending.members.flatMap((m) => m.keyPackages);
-    const staged = await conversation.stageMembershipCommit({ add: allPackages });
+    const peerPackages = pending.members.flatMap((m) => m.keyPackages);
+
+    // Self-add own other devices (B2) so they join from epoch 0 alongside the initial members.
+    const ownOtherClaimed = this.selfDeviceId
+      ? (await claimAllKeyPackages(this.selfUserId)).filter((p) => p.deviceId !== this.selfDeviceId)
+      : [];
+    const ownOtherPackages = ownOtherClaimed.map((p) => deserializeKeyPackage(p.keyPackage));
+
+    const staged = await conversation.stageMembershipCommit({
+      add: [...peerPackages, ...ownOtherPackages],
+    });
     if (!staged.invite)
       throw new Error('group commit produced no Welcome — check that members have packages');
 
     const inv = serializeInvite(staged.invite);
     const { conversationId } = await createConversation([this.selfUserId]);
 
-    const welcomes = pending.members.flatMap((m) =>
-      m.allDevices.map((d) => ({
-        recipientUserId: m.userId,
-        recipientDeviceId: d.deviceId,
+    const welcomes = [
+      ...pending.members.flatMap((m) =>
+        m.allDevices.map((d) => ({
+          recipientUserId: m.userId,
+          recipientDeviceId: d.deviceId,
+          welcome: inv.welcome,
+          ratchetTree: inv.ratchetTree,
+        })),
+      ),
+      ...ownOtherClaimed.map((p) => ({
+        recipientUserId: this.selfUserId,
+        recipientDeviceId: p.deviceId,
         welcome: inv.welcome,
         ratchetTree: inv.ratchetTree,
       })),
-    );
+    ];
 
     // Hold the conversation lock for the full stage→post→apply→persist sequence so concurrent sends,
     // receives, or commit drains cannot interleave (same lock as sendLiveMessage/receiveLiveMessage/

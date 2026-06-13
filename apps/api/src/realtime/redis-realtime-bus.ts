@@ -3,12 +3,16 @@ import { Redis } from 'ioredis';
 
 import {
   CommitCreatedEventSchema,
+  DeviceEnrollmentApprovedEventSchema,
+  DeviceEnrollmentPendingEventSchema,
   MemberRemovedEventSchema,
   MessageCreatedEventSchema,
   ReceiptAdvancedEventSchema,
   RealtimeBus,
   WelcomeCreatedEventSchema,
   type CommitCreatedEvent,
+  type DeviceEnrollmentApprovedEvent,
+  type DeviceEnrollmentPendingEvent,
   type MemberRemovedEvent,
   type MessageCreatedEvent,
   type ReceiptAdvancedEvent,
@@ -20,6 +24,8 @@ export const WELCOME_CHANNEL = 'argus:realtime:welcome-created';
 export const RECEIPT_CHANNEL = 'argus:realtime:receipt-advanced';
 export const COMMIT_CHANNEL = 'argus:realtime:commit-created';
 export const MEMBER_REMOVED_CHANNEL = 'argus:realtime:member-removed';
+export const ENROLLMENT_PENDING_CHANNEL = 'argus:realtime:device-enrollment-pending';
+export const ENROLLMENT_APPROVED_CHANNEL = 'argus:realtime:device-enrollment-approved';
 
 /**
  * Cross-pod bus (checkpoint 29): each send PUBLISHES the event to a Redis channel, and every gateway
@@ -37,6 +43,12 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
   private readonly receiptListeners: Array<(event: ReceiptAdvancedEvent) => void> = [];
   private readonly commitListeners: Array<(event: CommitCreatedEvent) => void> = [];
   private readonly memberRemovedListeners: Array<(event: MemberRemovedEvent) => void> = [];
+  private readonly enrollmentPendingListeners: Array<
+    (event: DeviceEnrollmentPendingEvent) => void
+  > = [];
+  private readonly enrollmentApprovedListeners: Array<
+    (event: DeviceEnrollmentApprovedEvent) => void
+  > = [];
   /** Resolves once the subscriptions are active — await before relying on receipt (readiness/tests). */
   readonly ready: Promise<void>;
 
@@ -55,7 +67,15 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
     this.sub.on('error', () => {});
     this.sub.on('message', (channel, payload) => this.onPayload(channel, payload));
     this.ready = this.sub
-      .subscribe(CHANNEL, WELCOME_CHANNEL, RECEIPT_CHANNEL, COMMIT_CHANNEL, MEMBER_REMOVED_CHANNEL)
+      .subscribe(
+        CHANNEL,
+        WELCOME_CHANNEL,
+        RECEIPT_CHANNEL,
+        COMMIT_CHANNEL,
+        MEMBER_REMOVED_CHANNEL,
+        ENROLLMENT_PENDING_CHANNEL,
+        ENROLLMENT_APPROVED_CHANNEL,
+      )
       .then(() => undefined);
   }
 
@@ -95,6 +115,18 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
       const parsed = MemberRemovedEventSchema.safeParse(raw);
       if (!parsed.success) return;
       for (const listener of this.memberRemovedListeners) listener(parsed.data);
+      return;
+    }
+    if (channel === ENROLLMENT_PENDING_CHANNEL) {
+      const parsed = DeviceEnrollmentPendingEventSchema.safeParse(raw);
+      if (!parsed.success) return;
+      for (const listener of this.enrollmentPendingListeners) listener(parsed.data);
+      return;
+    }
+    if (channel === ENROLLMENT_APPROVED_CHANNEL) {
+      const parsed = DeviceEnrollmentApprovedEventSchema.safeParse(raw);
+      if (!parsed.success) return;
+      for (const listener of this.enrollmentApprovedListeners) listener(parsed.data);
     }
   }
 
@@ -141,6 +173,22 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
 
   onMemberRemoved(listener: (event: MemberRemovedEvent) => void): void {
     this.memberRemovedListeners.push(listener);
+  }
+
+  emitDeviceEnrollmentPending(event: DeviceEnrollmentPendingEvent): void {
+    this.pub.publish(ENROLLMENT_PENDING_CHANNEL, JSON.stringify(event)).catch(() => {});
+  }
+
+  onDeviceEnrollmentPending(listener: (event: DeviceEnrollmentPendingEvent) => void): void {
+    this.enrollmentPendingListeners.push(listener);
+  }
+
+  emitDeviceEnrollmentApproved(event: DeviceEnrollmentApprovedEvent): void {
+    this.pub.publish(ENROLLMENT_APPROVED_CHANNEL, JSON.stringify(event)).catch(() => {});
+  }
+
+  onDeviceEnrollmentApproved(listener: (event: DeviceEnrollmentApprovedEvent) => void): void {
+    this.enrollmentApprovedListeners.push(listener);
   }
 
   async onModuleDestroy(): Promise<void> {

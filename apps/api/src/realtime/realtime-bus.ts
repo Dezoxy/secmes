@@ -119,6 +119,41 @@ export const MemberRemovedEventSchema = z.object({
 });
 
 /**
+ * D2 has registered a pending enrollment and is waiting for D1 to approve. Nudges D1's connected
+ * sockets to show the approval UI. METADATA ONLY: ids + the user's verified subject — never key
+ * material or the fingerprint bytes (those come from REST GET /devices/enrollments). Invariant #2.
+ */
+export interface DeviceEnrollmentPendingEvent {
+  tenantId: string;
+  enrollmentId: string;
+  /** The user's external subject — D1's connected sockets filter on (tenant, userSub). */
+  userSub: string;
+}
+
+export const DeviceEnrollmentPendingEventSchema = z.object({
+  tenantId: z.string().min(1),
+  enrollmentId: z.string().uuid(),
+  userSub: z.string().min(1),
+});
+
+/**
+ * D1 approved D2's enrollment — nudges D2's connected sockets to drain Welcomes now. Metadata only.
+ * D2 identifies itself by (tenant, userSub) — D1 and D2 share the same OIDC subject.
+ */
+export interface DeviceEnrollmentApprovedEvent {
+  tenantId: string;
+  enrollmentId: string;
+  /** The user's external subject — D2's connected sockets filter on (tenant, userSub). */
+  userSub: string;
+}
+
+export const DeviceEnrollmentApprovedEventSchema = z.object({
+  tenantId: z.string().min(1),
+  enrollmentId: z.string().uuid(),
+  userSub: z.string().min(1),
+});
+
+/**
  * Realtime fan-out bus — decouples the HTTP send path (publisher) from the WebSocket gateway
  * (subscriber). Abstract so it can be in-process (single-pod / dev / tests) or Redis-backed for
  * cross-pod delivery (checkpoint 29). Only the opaque ciphertext envelope ever crosses it.
@@ -134,4 +169,10 @@ export abstract class RealtimeBus {
   abstract onCommitCreated(listener: (event: CommitCreatedEvent) => void): void;
   abstract emitMemberRemoved(event: MemberRemovedEvent): void;
   abstract onMemberRemoved(listener: (event: MemberRemovedEvent) => void): void;
+  abstract emitDeviceEnrollmentPending(event: DeviceEnrollmentPendingEvent): void;
+  abstract onDeviceEnrollmentPending(listener: (event: DeviceEnrollmentPendingEvent) => void): void;
+  abstract emitDeviceEnrollmentApproved(event: DeviceEnrollmentApprovedEvent): void;
+  abstract onDeviceEnrollmentApproved(
+    listener: (event: DeviceEnrollmentApprovedEvent) => void,
+  ): void;
 }

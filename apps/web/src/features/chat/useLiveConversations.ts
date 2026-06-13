@@ -42,6 +42,8 @@ interface UseLiveConversationsOptions {
     selfUserId: string,
   ) => Promise<{ nextEpoch: number | undefined }> | void;
   setConversations: Dispatch<SetStateAction<Conversation[]>>;
+  /** Called when another device of this user registers a pending enrollment request (D1 side). */
+  onEnrollmentPending?: (enrollmentId: string) => void;
 }
 
 interface UseLiveConversationsResult {
@@ -94,6 +96,7 @@ export function useLiveConversations({
   mergeIncoming,
   backfillInto,
   setConversations,
+  onEnrollmentPending,
 }: UseLiveConversationsOptions): UseLiveConversationsResult {
   const [liveIds, setLiveIds] = useState<Set<string>>(() => new Set());
   const [connectionStatus, setConnectionStatus] = useState<MessageSocketStatus>('offline');
@@ -347,6 +350,14 @@ export function useLiveConversations({
         });
         setConversations((prev) => prev.filter((c) => c.id !== conversationId));
       },
+      // B2: another device of this user registered a pending enrollment — D1 should show approval UI.
+      onEnrollmentPending: (enrollmentId) => {
+        onEnrollmentPending?.(enrollmentId);
+      },
+      // B2: this user's enrollment was approved — D2 drains Welcomes to join conversations D1 added it to.
+      onEnrollmentApproved: () => {
+        drainRef.current();
+      },
       // A membership commit was posted: drain to exactly this commit (epoch+1 ceiling) so the group
       // advances to epoch+1 but no further. An unbounded drain would consume forward-secret keys for
       // messages still in-flight at epoch+1, making them permanently undecryptable on arrival.
@@ -371,7 +382,15 @@ export function useLiveConversations({
       socket.close();
       socketRef.current = null;
     };
-  }, [applyReceipt, backfillInto, mergeIncoming, messagingDeps, seedReceipts, selfUserId]);
+  }, [
+    applyReceipt,
+    backfillInto,
+    mergeIncoming,
+    messagingDeps,
+    onEnrollmentPending,
+    seedReceipts,
+    selfUserId,
+  ]);
 
   return { liveIds, liveGroups, addLive, connectionStatus };
 }

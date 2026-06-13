@@ -108,6 +108,30 @@ export function deviceIdentity(keys: DeviceKeys): string {
   return tdStrict.decode(cred.identity);
 }
 
+/**
+ * Format a composite MLS device identity from a userId and a per-device UUID (CSPRNG, client-minted).
+ * The string is stored as the BasicCredential identity bytes in the KeyPackage and sealed into the
+ * device keystore. Two devices for the same user get distinct credential bytes, preventing identity
+ * collision in multi-device group trees (B2).
+ */
+export function formatDeviceIdentity(userId: string, deviceUuid: string): string {
+  return `${userId}:${deviceUuid}`;
+}
+
+/**
+ * Parse a composite device identity back into its components. Returns `deviceUuid: undefined` for
+ * pre-B2 keystores that stored only the raw userId — callers should treat that as a signal to
+ * re-provision (clear + recreate) since the old identity byte sequence is no longer valid.
+ */
+export function parseDeviceIdentity(identity: string): {
+  userId: string;
+  deviceUuid: string | undefined;
+} {
+  const sep = identity.indexOf(':');
+  if (sep === -1) return { userId: identity, deviceUuid: undefined };
+  return { userId: identity.slice(0, sep), deviceUuid: identity.slice(sep + 1) };
+}
+
 // ---- Out-of-band fingerprint / safety number (checkpoint 20) ------------------------------------
 // A short, comparable number derived from two devices' STABLE identity (signature) public keys.
 // Compared out-of-band, a mismatch reveals a MITM key-swap during member-add (which MLS `addMember`
@@ -180,6 +204,24 @@ export async function safetyNumber(local: KeyPackage, remote: KeyPackage): Promi
   const b = await deviceFingerprint(remote);
   const [first, second] = compareBytes(a, b) <= 0 ? [a, b] : [b, a];
   return renderSafetyNumber(await sha256(concatBytes(first, second)));
+}
+
+/**
+ * Six-digit numeric display code shown on D2 during enrollment so D1 can verify the device fingerprint
+ * out-of-band. Derived as `SHA-256(signaturePublicKey)[0..4] as uint32 % 1_000_000`, formatted "XXX XXX".
+ * Both D2 (computing from its own key) and D1 (computing from the server-stored fingerprint) must use
+ * this function — matching algorithms is required for the codes to agree.
+ *
+ * Accepts the key as a base64-standard string (what the key directory and enrollment API store).
+ */
+export async function enrollmentDisplayCode(signaturePublicKeyB64: string): Promise<string> {
+  const bin = atob(signaturePublicKeyB64);
+  const raw = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i);
+  const hash = await sha256(raw);
+  const n = new DataView(hash.buffer).getUint32(0) % 1_000_000;
+  const d = n.toString().padStart(6, '0');
+  return `${d.slice(0, 3)} ${d.slice(3)}`;
 }
 
 /**

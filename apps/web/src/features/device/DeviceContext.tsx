@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 
 import type { DeviceKeys } from '@argus/crypto';
+import { formatDeviceIdentity, parseDeviceIdentity } from '@argus/crypto';
 
 import { restoreAndProvision } from '../../lib/device-restore';
 import { DeviceKeystore } from '../../lib/keystore';
@@ -29,7 +30,10 @@ export type DeviceStatus =
  */
 function statusForStored(stored: string | undefined, userId: string): DeviceStatus {
   if (!stored) return 'needs-create';
-  return stored === userId ? 'needs-unlock' : 'needs-switch';
+  const { userId: storedUserId, deviceUuid } = parseDeviceIdentity(stored);
+  // Legacy format (pre-B2, no deviceUuid): force re-provision so the keystore gets a composite identity.
+  if (deviceUuid === undefined) return 'needs-switch';
+  return storedUserId === userId ? 'needs-unlock' : 'needs-switch';
 }
 
 interface DeviceState {
@@ -38,6 +42,8 @@ interface DeviceState {
   pool: DeviceKeys[] | null;
   /** This device's server id (from provisioning) — needed to list/fetch/consume Welcomes (Slice 4). */
   deviceId: string | null;
+  /** The per-device UUID component of the composite MLS identity (userId:deviceUuid). Used by B2 enrollment. */
+  deviceUuid: string | null;
   keystore: DeviceKeystore | null;
   /**
    * The session passphrase, retained IN MEMORY only — it seals each advanced MLS group state on send/receive
@@ -77,6 +83,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
   const [device, setDevice] = useState<DeviceKeys | null>(null);
   const [pool, setPool] = useState<DeviceKeys[] | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
+  const [deviceUuid, setDeviceUuid] = useState<string | null>(null);
   const [passphrase, setPassphrase] = useState<string | null>(null);
   const [sessionKey, setSessionKey] = useState<CryptoKey | null>(null);
   // Demo mode has no real device — render the chat (seed-driven) without a gate.
@@ -117,13 +124,23 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         setError('still loading your profile — try again in a moment');
         return;
       }
-      const identity = profile.userId; // stable per-user MLS device identity
+      const userId = profile.userId;
       setStatus('unlocking');
       setError(null);
       try {
-        // "Creating" iff this browser holds NO device for ME (none, or another account's) — identity-keyed,
-        // not mere presence, so a foreign slot never forces us into a doomed loadDevice.
-        const creating = (await keystore.storedIdentity()) !== identity;
+        const storedIdent = await keystore.storedIdentity();
+        const parsed = storedIdent ? parseDeviceIdentity(storedIdent) : null;
+        // Create if: no stored device, stored device is legacy format, or stored device belongs to a different user.
+        const creating = !parsed || parsed.deviceUuid === undefined || parsed.userId !== userId;
+        let identity: string;
+        let uuid: string;
+        if (creating) {
+          uuid = crypto.randomUUID();
+          identity = formatDeviceIdentity(userId, uuid);
+        } else {
+          identity = storedIdent!; // composite identity already validated above
+          uuid = parsed.deviceUuid!;
+        }
         const dev = creating
           ? await keystore.getOrCreateDevice(identity, passphrase)
           : await keystore.loadDevice(identity, passphrase);
@@ -132,6 +149,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         setDevice(dev);
         setPool(provisioned);
         setDeviceId(result.deviceId);
+        setDeviceUuid(uuid);
         setPassphrase(passphrase); // retained in memory to seal advanced group state on send/receive (Slice 5)
         setSessionKey(await keystore.deriveSessionKey(passphrase)); // message-history seal key (memory only)
         setStatus('ready');
@@ -139,7 +157,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         // openBackup fails closed on a wrong passphrase (GCM auth) — surface that distinctly.
         const wrong = err instanceof Error && /passphrase|decrypt/i.test(err.message);
         setError(wrong ? 'wrong passphrase' : 'could not unlock the device');
-        setStatus(statusForStored(await keystore.storedIdentity(), identity));
+        setStatus(statusForStored(await keystore.storedIdentity(), userId));
       }
     },
     [keystore, profile],
@@ -152,7 +170,10 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         setError('still loading your profile — try again in a moment');
         return;
       }
-      const identity = profile.userId;
+      const userId = profile.userId;
+      // Restore always re-creates the device (clears + reimports), so generate a fresh deviceUuid.
+      const uuid = crypto.randomUUID();
+      const identity = formatDeviceIdentity(userId, uuid);
       setStatus('unlocking');
       setError(null);
       try {
@@ -165,6 +186,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         setDevice(dev);
         setPool(provisioned);
         setDeviceId(result.deviceId);
+        setDeviceUuid(uuid);
         setPassphrase(passphrase); // see unlock — sealing key for advanced group state (Slice 5)
         setSessionKey(await keystore.deriveSessionKey(passphrase)); // message-history seal key (memory only)
         setStatus('ready');
@@ -174,7 +196,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
           err instanceof Error &&
           /passphrase|decrypt|identity|artifact|recovery/i.test(err.message);
         setError(bad ? 'wrong passphrase or recovery file' : 'could not restore the device');
-        setStatus(statusForStored(await keystore.storedIdentity(), identity));
+        setStatus(statusForStored(await keystore.storedIdentity(), userId));
       }
     },
     [keystore, profile],
@@ -193,6 +215,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
     device,
     pool,
     deviceId,
+    deviceUuid,
     keystore,
     passphrase,
     sessionKey,

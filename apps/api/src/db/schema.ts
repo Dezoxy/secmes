@@ -218,6 +218,22 @@ export const conversationCommits = pgTable('conversation_commits', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+// B2: multi-device enrollment coordination. Metadata only — the server never makes the trust decision.
+// fingerprint is public (derived from D2's published signature key); status drives D1 inbox routing.
+// DDL, RLS, indexes and grants live in 0024_device_enrollments.sql.
+export const deviceEnrollments = pgTable('device_enrollments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  userId: uuid('user_id').notNull(),
+  requestingDeviceId: uuid('requesting_device_id').notNull(),
+  approvedByDeviceId: uuid('approved_by_device_id'),
+  fingerprint: text('fingerprint').notNull(),
+  status: text('status').notNull().default('pending'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+});
+
 // Append-only audit log (IDs + metadata only — never content/secrets). RLS + grants in 0002.
 export const auditEvents = pgTable('audit_events', {
   id: uuid('id').primaryKey().defaultRandom(),

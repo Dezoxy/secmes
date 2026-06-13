@@ -77,6 +77,12 @@ import {
   type UserSummary as ContractUserSummary,
   type WelcomeMaterial as ContractWelcomeMaterial,
   UserDirectorySchema,
+  EnrollmentRegisterBodySchema,
+  EnrollmentApproveBodySchema,
+  EnrollmentSchema,
+  ConversationListSchema,
+  type Enrollment as ContractEnrollment,
+  type ConversationList as ContractConversationList,
 } from '@argus/contracts';
 import { requestJson, requestStatus, unwrapApiResult } from './api-client';
 
@@ -835,4 +841,72 @@ export async function getBillingStatus(): Promise<TenantPlan> {
   return unwrapApiResult(
     await requestJson({ path: '/billing/status', responseSchema: TenantPlanSchema }),
   );
+}
+
+// ── Device enrollment (B2 — multi-device linking) ───────────────────────────
+
+export type Enrollment = ContractEnrollment;
+export type ConversationList = ContractConversationList;
+
+/** D2 registers a pending enrollment request (shows its fingerprint for D1 to verify). */
+export async function registerEnrollment(
+  deviceId: string,
+  fingerprint: string,
+): Promise<Enrollment> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/devices/me/enrollment',
+      method: 'POST',
+      body: { deviceId, fingerprint },
+      requestSchema: EnrollmentRegisterBodySchema,
+      responseSchema: EnrollmentSchema,
+    }),
+  );
+}
+
+/** D1 lists its pending (or resolved) enrollment requests. */
+export async function listEnrollments(status = 'pending'): Promise<Enrollment[]> {
+  return unwrapApiResult(
+    await requestJson({
+      path: `/devices/enrollments?status=${encodeURIComponent(status)}`,
+      responseSchema: EnrollmentSchema.array(),
+    }),
+  );
+}
+
+/** D1 approves D2's enrollment with an Ed25519 enroll-proof. */
+export async function approveEnrollment(
+  enrollmentId: string,
+  approvingDeviceId: string,
+  proof: string,
+): Promise<Enrollment> {
+  return unwrapApiResult(
+    await requestJson({
+      path: `/devices/enrollments/${encodeURIComponent(enrollmentId)}/approve`,
+      method: 'POST',
+      body: { approvingDeviceId, proof },
+      requestSchema: EnrollmentApproveBodySchema,
+      responseSchema: EnrollmentSchema,
+    }),
+  );
+}
+
+/** D1 rejects D2's enrollment. */
+export async function rejectEnrollment(enrollmentId: string): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: `/devices/enrollments/${encodeURIComponent(enrollmentId)}/reject`,
+      method: 'POST',
+    }),
+  );
+}
+
+/** Return the caller's conversation IDs (for enrollment fan-out diff). */
+export async function listMyConversations(): Promise<string[]> {
+  return unwrapApiResult(
+    await requestJson<ConversationList>({
+      path: '/devices/me/conversations',
+      responseSchema: ConversationListSchema,
+    }),
+  ).conversationIds;
 }
