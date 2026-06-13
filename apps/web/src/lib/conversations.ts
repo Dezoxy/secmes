@@ -18,6 +18,7 @@ import {
 import {
   CommitEpochConflictError,
   claimAllKeyPackages,
+  claimKeyPackage,
   createConversation,
   deliverWelcome,
   listEnrollments,
@@ -78,9 +79,6 @@ export interface PendingConversation {
   peer: PeerRef;
   /** The claimed package — UNTRUSTED until `safetyNumber` is verified out-of-band. Held for phase 2 only. */
   peerKeyPackage: KeyPackage;
-  /** ALL peer device packages claimed in prepare() (primary + secondary). confirm() uses these directly —
-   * no re-claim — so every secondary device package is tied to the same safety-number gate. */
-  allPeerClaimed: ClaimedKeyPackage[];
   /** The #20 safety number the user must confirm out-of-band BEFORE `confirm()`. */
   safetyNumber: string;
 }
@@ -123,28 +121,22 @@ export class ConversationManager {
     return this.enginePromise;
   }
 
-  /** Phase 1: claim all of the peer's KeyPackages and derive the safety number. Trusts nothing yet.
-   *  Claiming ALL peer packages here (not just the primary) ensures that peer secondary device packages
-   *  used in confirm() are bound to the same safety-number gate as the primary device. */
+  /** Phase 1: claim the peer's one-time KeyPackage and derive the safety number. Trusts nothing yet.
+   *  Only the PRIMARY peer device is claimed here — its key is the one the user verifies OOB.
+   *  Peer secondary devices join via the enrollment fan-out after the peer links them; adding them
+   *  here without individual safety-number confirmation would bypass the #20 MITM defense. */
   async prepare(peerUserId: string): Promise<PendingConversation> {
-    const allClaimed = await claimAllKeyPackages(peerUserId);
-    if (allClaimed.length === 0) {
-      throw new Error(
-        `peer ${peerUserId} has no key packages available — ask them to sign in first`,
-      );
-    }
-    const primary = allClaimed[0]!;
-    const peerKeyPackage = deserializeKeyPackage(primary.keyPackage);
+    const claimed = await claimKeyPackage(peerUserId);
+    const peerKeyPackage = deserializeKeyPackage(claimed.keyPackage);
     // safetyNumber is over the STABLE signature keys (#20) — a swapped package shifts it, exposing a MITM.
     const sn = await safetyNumber(this.device.publicPackage, peerKeyPackage);
     return {
       peer: {
         userId: peerUserId,
-        deviceId: primary.deviceId,
-        signaturePublicKey: primary.signaturePublicKey,
+        deviceId: claimed.deviceId,
+        signaturePublicKey: claimed.signaturePublicKey,
       },
       peerKeyPackage,
-      allPeerClaimed: allClaimed,
       safetyNumber: sn,
     };
   }
@@ -167,16 +159,10 @@ export class ConversationManager {
       ? await claimEnrolledOwnDevices(this.selfUserId, this.selfDeviceId)
       : [];
 
-    // Use peer packages from prepare() — no re-claim. Secondary packages are already bound to the
-    // same safety-number gate as the primary device (claimed together in prepare()).
-    const peerOtherClaimed = pending.allPeerClaimed.filter(
-      (p) => p.deviceId !== pending.peer.deviceId,
-    );
-
     // Create a SOLO conversation (just me — my own id dedups to the creator server-side).
     const { conversationId } = await createConversation([this.selfUserId]);
 
-    if (ownOtherClaimed.length === 0 && peerOtherClaimed.length === 0) {
+    if (ownOtherClaimed.length === 0) {
       // Single-device path: add peer + deliver Welcome directly. The peer is added as a member of
       // the server conversation in the same deliverWelcome transaction, so a delivery failure leaves
       // only a benign self-only conversation, not a peer-visible orphan.
@@ -187,12 +173,11 @@ export class ConversationManager {
         ...serializeInvite(invite),
       });
     } else {
-      // Multi-device path (B2): batch-add peer + all other devices in one epoch-0 commit so they
+      // Multi-device path (B2): batch-add peer + own other devices in one epoch-0 commit so they
       // all join from the same epoch and forward secrecy is not split across commits.
       const ownOtherPackages = ownOtherClaimed.map((p) => deserializeKeyPackage(p.keyPackage));
-      const peerOtherPackages = peerOtherClaimed.map((p) => deserializeKeyPackage(p.keyPackage));
       const staged = await conversation.stageMembershipCommit({
-        add: [pending.peerKeyPackage, ...peerOtherPackages, ...ownOtherPackages],
+        add: [pending.peerKeyPackage, ...ownOtherPackages],
       });
       if (!staged.invite) throw new Error('epoch-0 commit produced no Welcome');
       const inv = serializeInvite(staged.invite);
@@ -225,12 +210,6 @@ export class ConversationManager {
               welcome: inv.welcome,
               ratchetTree: inv.ratchetTree,
             },
-            ...peerOtherClaimed.map((p) => ({
-              recipientUserId: pending.peer.userId,
-              recipientDeviceId: p.deviceId,
-              welcome: inv.welcome,
-              ratchetTree: inv.ratchetTree,
-            })),
             ...ownOtherClaimed.map((p) => ({
               recipientUserId: this.selfUserId,
               recipientDeviceId: p.deviceId,
@@ -261,7 +240,7 @@ export class ConversationManager {
       this.sessionKey,
     );
     // Multi-device path: staged commit has been applied and persisted — remove the pending slot.
-    if (ownOtherClaimed.length > 0 || peerOtherClaimed.length > 0) {
+    if (ownOtherClaimed.length > 0) {
       await this.keystore.clearStagedCommit(conversationId);
     }
     const session: ConversationSession = {

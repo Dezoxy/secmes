@@ -41,11 +41,18 @@ export class DevicesService {
 
       // Verify the requesting device belongs to this user (ownership authz — RLS + user_id check).
       const [device] = await tx
-        .select({ id: schema.devices.id })
+        .select({ id: schema.devices.id, signaturePublicKey: schema.devices.signaturePublicKey })
         .from(schema.devices)
         .where(and(eq(schema.devices.id, deviceId), eq(schema.devices.userId, userId)))
         .limit(1);
       if (!device) throw new BadRequestException('device not found or not owned by this user');
+
+      // The fingerprint is the device's signature public key in base64 (used by D1 to display a 6-digit
+      // code for OOB verification). Verify the client-provided value matches the server-stored key so
+      // D2 cannot supply a misleading code that would cause D1 to verify against a different device.
+      if (device.signaturePublicKey !== fingerprint) {
+        throw new BadRequestException('fingerprint does not match device key');
+      }
 
       const [enrollment] = await tx
         .insert(schema.deviceEnrollments)

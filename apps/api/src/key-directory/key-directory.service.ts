@@ -82,9 +82,10 @@ export class KeyDirectoryService {
             schema.devices.userId,
             schema.devices.signaturePublicKey,
           ],
-          // Re-apply the computed isProvisional on conflict so a device that was revoked to provisional
-          // and then re-registers as the user's last/only trusted device gets re-promoted correctly.
-          set: { signaturePublicKey, isProvisional },
+          // Only re-promote (false) on conflict — never demote an existing trusted device. Spreading
+          // an empty object when isProvisional=true leaves the existing DB column untouched, which is
+          // correct for re-registrations where another trusted device determined the provisional flag.
+          set: { signaturePublicKey, ...(isProvisional ? {} : { isProvisional }) },
         })
         .returning({ id: schema.devices.id });
       if (!device) throw new Error('device upsert returned no row');
