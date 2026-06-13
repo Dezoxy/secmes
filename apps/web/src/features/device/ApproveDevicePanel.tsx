@@ -97,19 +97,25 @@ export function ApproveDevicePanel({
       const proofBytes = signEnrollApproval(deviceSignatureSeed(device), deviceId, enrollmentId);
       const proof = toBase64Url(proofBytes);
       await approveEnrollment(enrollmentId, deviceId, proof);
-
-      // Fan-out: add D2 as an MLS leaf in every live conversation D1 participates in.
-      const conversationIds = await listMyConversations();
-      await enrollDevice(
-        messagingDeps,
-        selfUserId,
-        enrollment.requestingDeviceId,
-        enrollment.fingerprint,
-        conversationIds,
-        liveGroupsRef.current,
-      );
-
+      // Approval is now terminal — show done before fan-out so a partial fan-out failure doesn't
+      // strand D1 in an error state with no way to retry (the enrollment is already approved).
+      // Fan-out is best-effort: on D1 reconnect, useLiveConversations retries any approved
+      // enrollments that didn't fully fan-out.
       setState('done');
+      void listMyConversations()
+        .then((conversationIds) =>
+          enrollDevice(
+            messagingDeps,
+            selfUserId,
+            enrollment.requestingDeviceId,
+            enrollment.fingerprint,
+            conversationIds,
+            liveGroupsRef.current,
+          ),
+        )
+        .catch(() => {
+          /* best-effort — retry on D1 reconnect via useLiveConversations onReady */
+        });
     } catch (e) {
       setErr(e);
       setState('error');

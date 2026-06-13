@@ -467,8 +467,12 @@ export async function listCommits(
 export async function claimAllKeyPackages(
   userId: string,
   deviceId?: string,
+  excludeDeviceId?: string,
 ): Promise<ClaimedKeyPackage[]> {
-  const qs = deviceId ? `?deviceId=${encodeURIComponent(deviceId)}` : '';
+  const params = new URLSearchParams();
+  if (deviceId) params.set('deviceId', deviceId);
+  if (excludeDeviceId) params.set('excludeDeviceId', excludeDeviceId);
+  const qs = params.toString() ? `?${params.toString()}` : '';
   return unwrapApiResult(
     await requestJson({
       path: `/users/${encodeURIComponent(userId)}/key-packages/claim-all${qs}`,

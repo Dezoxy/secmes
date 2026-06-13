@@ -204,7 +204,7 @@ describe('ConversationManager', () => {
       const session = await mgr.confirm(await mgr.prepare('peer-user'));
 
       // claimAllKeyPackages called for self-user, deliverWelcome NOT used (multi-device path uses postCommit).
-      expect(claimAll).toHaveBeenCalledWith('me-user');
+      expect(claimAll).toHaveBeenCalledWith('me-user', undefined, 'my-server-id');
       expect(deliver).not.toHaveBeenCalled();
       expect(post).toHaveBeenCalledTimes(1);
 

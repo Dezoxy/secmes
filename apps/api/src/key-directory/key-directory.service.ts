@@ -250,6 +250,7 @@ export class KeyDirectoryService {
     auth: VerifiedAuth,
     targetUserId: string,
     deviceId?: string,
+    excludeDeviceId?: string,
   ): Promise<ClaimedKeyPackage[]> {
     const claimed = await withTenant(auth.tenantId, async (tx) => {
       // LATERAL JOIN: for each device of the target user, select the oldest unclaimed package with
@@ -275,6 +276,7 @@ export class KeyDirectoryService {
           and d.tenant_id = ${auth.tenantId}
           and d.is_provisional = false
           ${deviceId ? sql`and d.id = ${deviceId}` : sql``}
+          ${excludeDeviceId ? sql`and d.id <> ${excludeDeviceId}` : sql``}
           and kp.id = chosen.id
         returning kp.device_id, kp.key_package, d.signature_public_key
       `)) as unknown as unknown[];

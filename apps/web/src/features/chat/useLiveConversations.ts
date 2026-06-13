@@ -8,7 +8,8 @@ import {
 } from 'react';
 import type { Conversation as MlsGroup, DeviceKeys } from '@argus/crypto';
 import { accessToken } from '../../lib/auth';
-import { fetchReceipts, listEnrollments } from '../../lib/api';
+import { fetchReceipts, listEnrollments, listMyConversations } from '../../lib/api';
+import { enrollDevice } from '../../lib/enroll';
 import { joinPendingConversations } from '../../lib/join';
 import {
   receiveLiveMessage,
@@ -282,6 +283,26 @@ export function useLiveConversations({
           .catch(() => {
             /* best-effort — missed enrollments reappear on the next reconnect */
           });
+        // Retry fan-out for approved enrollments whose fan-out may have been partial (D1 side).
+        // enrollDevice is idempotent: it skips conversations where D2 is already a leaf.
+        if (messagingDeps) {
+          void Promise.all([listEnrollments('approved'), listMyConversations()])
+            .then(([approved, conversationIds]) => {
+              for (const row of approved) {
+                void enrollDevice(
+                  messagingDeps,
+                  selfUserId,
+                  row.requestingDeviceId,
+                  row.fingerprint,
+                  conversationIds,
+                  liveGroups.current,
+                ).catch(() => {
+                  /* best-effort retry */
+                });
+              }
+            })
+            .catch(() => {});
+        }
       },
       onMessage: ({ conversationId, message }) => {
         const group = liveGroups.current.get(conversationId);
@@ -362,7 +383,9 @@ export function useLiveConversations({
         setConversations((prev) => prev.filter((c) => c.id !== conversationId));
       },
       // B2: another device of this user registered a pending enrollment — D1 should show approval UI.
-      onEnrollmentPending: (enrollmentId) => {
+      // Filter: skip the event on the requesting device itself (D2 should not see its own enrollment prompt).
+      onEnrollmentPending: (enrollmentId, requestingDeviceId) => {
+        if (requestingDeviceId === deviceId) return;
         onEnrollmentPending?.(enrollmentId);
       },
       // B2: this user's enrollment was approved — D2 drains Welcomes to join conversations D1 added it to.

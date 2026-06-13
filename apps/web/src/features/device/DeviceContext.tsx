@@ -131,20 +131,32 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
       try {
         const storedIdent = await keystore.storedIdentity();
         const parsed = storedIdent ? parseDeviceIdentity(storedIdent) : null;
-        // Create if: no stored device, stored device is legacy format, or stored device belongs to a different user.
-        const creating = !parsed || parsed.deviceUuid === undefined || parsed.userId !== userId;
+        // Pre-B2 devices have a bare userId identity (no deviceUuid). Same user → migrate to composite
+        // identity: verify the passphrase against the old sealed record, clear it, then create fresh.
+        const isLegacyMigration =
+          parsed !== null && parsed.deviceUuid === undefined && parsed.userId === userId;
+        // Create if: first run or a different user's device occupies the slot.
+        const creating = !parsed || parsed.userId !== userId;
         let identity: string;
         let uuid: string;
-        if (creating) {
+        if (creating || isLegacyMigration) {
           uuid = crypto.randomUUID();
           identity = formatDeviceIdentity(userId, uuid);
         } else {
-          identity = storedIdent!; // composite identity already validated above
+          identity = storedIdent!;
           uuid = parsed.deviceUuid!;
         }
-        const dev = creating
-          ? await keystore.getOrCreateDevice(identity, passphrase)
-          : await keystore.loadDevice(identity, passphrase);
+        let dev: DeviceKeys | undefined;
+        if (isLegacyMigration) {
+          dev = await keystore.loadDevice(storedIdent!, passphrase);
+          if (!dev) throw new Error('no device found to unlock');
+          await keystore.clearDevice();
+          dev = await keystore.getOrCreateDevice(identity, passphrase);
+        } else if (creating) {
+          dev = await keystore.getOrCreateDevice(identity, passphrase);
+        } else {
+          dev = await keystore.loadDevice(identity, passphrase);
+        }
         if (!dev) throw new Error('no device found to unlock');
         const { pool: provisioned, result } = await provisionDevice(keystore, dev, passphrase);
         setDevice(dev);

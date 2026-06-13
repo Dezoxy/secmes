@@ -128,12 +128,15 @@ export interface DeviceEnrollmentPendingEvent {
   enrollmentId: string;
   /** The user's external subject — D1's connected sockets filter on (tenant, userSub). */
   userSub: string;
+  /** D2's device id — clients use this to skip the event on D2 itself (only D1 should see the prompt). */
+  requestingDeviceId: string;
 }
 
 export const DeviceEnrollmentPendingEventSchema = z.object({
   tenantId: z.string().min(1),
   enrollmentId: z.string().uuid(),
   userSub: z.string().min(1),
+  requestingDeviceId: z.string().uuid(),
 });
 
 /**

@@ -40,7 +40,7 @@ async function claimEnrolledOwnDevices(
   selfDeviceId: string,
 ): Promise<ClaimedKeyPackage[]> {
   const [packages, enrollments] = await Promise.all([
-    claimAllKeyPackages(selfUserId),
+    claimAllKeyPackages(selfUserId, undefined, selfDeviceId),
     listEnrollments('approved'),
   ]);
   // Map requestingDeviceId → stored fingerprint for the leaf-key MITM check on D2.

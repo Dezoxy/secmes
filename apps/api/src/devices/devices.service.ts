@@ -75,6 +75,7 @@ export class DevicesService {
       tenantId: auth.tenantId,
       enrollmentId: row.id,
       userSub: auth.sub,
+      requestingDeviceId: row.requestingDeviceId,
     });
 
     await this.audit.record(auth.tenantId, {

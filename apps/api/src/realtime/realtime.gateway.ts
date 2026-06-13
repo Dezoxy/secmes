@@ -283,7 +283,10 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       if (!state.authed || !state.auth) continue;
       if (state.auth.tenantId !== event.tenantId || state.auth.sub !== event.userSub) continue;
       if (client.readyState === WebSocket.OPEN) {
-        this.send(client, 'enrollment_pending', { enrollmentId: event.enrollmentId });
+        this.send(client, 'enrollment_pending', {
+          enrollmentId: event.enrollmentId,
+          requestingDeviceId: event.requestingDeviceId,
+        });
       }
     }
   }
