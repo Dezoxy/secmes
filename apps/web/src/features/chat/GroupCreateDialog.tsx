@@ -40,7 +40,7 @@ interface GroupCreateDialogProps {
   existingGroupName?: string;
   // Callbacks.
   onCreated?: (session: GroupConversationSession) => void;
-  onAdded?: () => void;
+  onAdded?: (addedUsers: UserSummary[]) => void;
   onClose: () => void;
 }
 
@@ -126,7 +126,10 @@ export function GroupCreateDialog({
       manager
         .confirmAdd(conversationId!, existingConversation!, pending, deps)
         .then(() => {
-          onAdded?.();
+          const addedUsers = pending.members
+            .map((m) => allUsers?.find((u) => u.id === m.userId))
+            .filter((u): u is UserSummary => u != null);
+          onAdded?.(addedUsers);
           onClose();
         })
         .catch((e: unknown) => {

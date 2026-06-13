@@ -571,7 +571,27 @@ export default function ChatScreen() {
           existingConversation={liveGroups.current.get(selectedId)}
           existingMemberIds={new Set(selectedConversation?.participants.map((p) => p.id) ?? [])}
           existingGroupName={selectedConversation?.name}
-          onAdded={() => setAddMemberOpen(false)}
+          onAdded={(addedUsers) => {
+            setAddMemberOpen(false);
+            if (addedUsers.length > 0 && selectedId) {
+              setConversations((prev) =>
+                prev.map((c) => {
+                  if (c.id !== selectedId) return c;
+                  const existingIds = new Set(c.participants.map((p) => p.id));
+                  const fresh = addedUsers
+                    .filter((u) => !existingIds.has(u.id))
+                    .map((u) => ({
+                      id: u.id,
+                      name: contactDisplayName(u),
+                      avatar: dicebearAvatar(u.id),
+                    }));
+                  return fresh.length === 0
+                    ? c
+                    : { ...c, participants: [...c.participants, ...fresh] };
+                }),
+              );
+            }
+          }}
           onClose={() => setAddMemberOpen(false)}
         />
       )}
