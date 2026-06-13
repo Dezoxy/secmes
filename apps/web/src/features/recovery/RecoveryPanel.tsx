@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, Cloud, Download, KeyRound, Loader2, Upload, X } from 'lucide-react';
-import { formatDeviceIdentity } from '@argus/crypto';
+import { formatDeviceIdentity, parseDeviceIdentity } from '@argus/crypto';
 import { RestoreCommittedError, restoreAndProvision } from '../../lib/device-restore';
 import { fetchBackup, storeBackup } from '../../lib/api';
 import {
@@ -178,6 +178,12 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
     try {
       const artifactText = await file.text();
       const restoreIdentity = await peekArtifactIdentity(artifactText, importPassphrase);
+      // Prevent restoring another user's artifact into this account (cross-account identity swap).
+      // Only enforced when signed in (profile present); unauthenticated fresh restores accept any artifact.
+      const { userId: artifactUserId } = parseDeviceIdentity(restoreIdentity);
+      if (profile && artifactUserId !== profile.userId) {
+        throw new Error('recovery artifact belongs to a different account');
+      }
       if (device.keystore) {
         await restoreAndProvision(device.keystore, restoreIdentity, artifactText, importPassphrase);
         setDone('Device restored — reloading…');

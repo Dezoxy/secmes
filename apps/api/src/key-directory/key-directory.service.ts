@@ -143,7 +143,9 @@ export class KeyDirectoryService {
           select kp.id
           from key_packages kp
           join devices d on d.id = kp.device_id
-          where d.user_id = ${targetUserId} and kp.claimed_at is null
+          where d.user_id = ${targetUserId}
+            and d.is_provisional = false
+            and kp.claimed_at is null
           order by kp.created_at asc
           limit 1
           for update skip locked
@@ -267,6 +269,7 @@ export class KeyDirectoryService {
         ) chosen on true
         where d.user_id = ${targetUserId}
           and d.tenant_id = ${auth.tenantId}
+          and d.is_provisional = false
           and kp.id = chosen.id
         returning kp.device_id, kp.key_package, d.signature_public_key
       `)) as unknown as unknown[];
