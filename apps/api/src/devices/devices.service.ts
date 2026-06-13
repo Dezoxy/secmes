@@ -134,6 +134,12 @@ export class DevicesService {
       // Opaque 404 — never reveal which enrollments exist to a caller who can't prove ownership.
       if (!enrollment) throw new NotFoundException('enrollment not found');
 
+      // A device cannot approve its own enrollment — that would bypass the verified-linking property
+      // entirely (D2 holds its own Ed25519 key and can trivially forge a valid enroll-proof for itself).
+      if (enrollment.requestingDeviceId === approvingDeviceId) {
+        throw new NotFoundException('enrollment not found');
+      }
+
       // Load D1's signature public key (must belong to the same user).
       const [d1Device] = await tx
         .select({ signaturePublicKey: schema.devices.signaturePublicKey })

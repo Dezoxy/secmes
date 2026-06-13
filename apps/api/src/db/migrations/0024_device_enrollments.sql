@@ -32,9 +32,10 @@ create table if not exists device_enrollments (
     foreign key (tenant_id, requesting_device_id)
     references devices (tenant_id, id) on delete cascade,
   -- SET NULL on approver delete: preserve the audit trail after a device is removed.
+  -- Column list required: without it PG nullifies the entire FK tuple (incl. tenant_id NOT NULL).
   constraint fk_enroll_approver
     foreign key (tenant_id, approved_by_device_id)
-    references devices (tenant_id, id) on delete set null
+    references devices (tenant_id, id) on delete set null (approved_by_device_id)
 );
 
 -- Invariant #3: tenant isolation + FORCE RLS so even the table owner hits the tenant filter.
