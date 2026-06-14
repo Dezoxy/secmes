@@ -3,6 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import type { DeviceKeys } from '@argus/crypto';
 import {
   deviceSignaturePublicKeyB64,
+  deviceSignatureSeed,
   formatDeviceIdentity,
   parseDeviceIdentity,
 } from '@argus/crypto';
@@ -163,7 +164,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
           const oldDev = await keystore.loadDevice(storedIdent!, passphrase);
           if (!oldDev) throw new Error('legacy device not found in keystore');
           const oldSpk = deviceSignaturePublicKeyB64(oldDev);
-          const proofBytes = signWithdraw(oldDev.privatePackage.signaturePrivateKey, oldSpk);
+          const proofBytes = signWithdraw(deviceSignatureSeed(oldDev), oldSpk);
           const proof = btoa(String.fromCharCode(...proofBytes))
             .replace(/\+/g, '-')
             .replace(/\//g, '_')

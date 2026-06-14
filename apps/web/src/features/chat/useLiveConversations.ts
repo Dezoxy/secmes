@@ -303,6 +303,10 @@ export function useLiveConversations({
             })
             .catch(() => {});
         }
+        // D2 side: drain any Welcomes that arrived while offline. The onEnrollmentApproved /
+        // onWelcome nudges are only delivered while connected, so a reconnect must re-poll.
+        // drainWelcomes is idempotent — it skips already-joined conversations.
+        drainRef.current();
       },
       onMessage: ({ conversationId, message }) => {
         const group = liveGroups.current.get(conversationId);
