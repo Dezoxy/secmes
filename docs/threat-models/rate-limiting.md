@@ -168,8 +168,13 @@ rule #3 to the auth zone or it throttles Zitadel's own console; rule #5 governs 
 | 4 | `4rgus.com` | `POST /api/tenants/invites/accept` (the edge sees the `/api` prefix — Caddy strips it only internally; order this rule ABOVE #3 so its tighter limit applies) | 10 / min | Block (5 min) | invite-token guessing before the caller is tenant-bound — complements the in-app per-user cap |
 | 5 | `auth.4rgus.com` | the login + `/oauth/v2/token` endpoints (incl. the `/api/*` Zitadel alias) | 30 / min | Managed Challenge | credential-stuffing / flood against Zitadel |
 
-Also enable Cloudflare **Bot Fight Mode** (Super Bot Fight Mode on Pro+) and keep **"Under Attack" mode** as
-break-glass.
+**Do NOT enable Bot Fight Mode / Super Bot Fight Mode (or "Under Attack" mode) on `/api/*`, `/ws`, or
+`/webhooks/*`.** Those modes issue JS/managed challenges to *every* request, which non-browser clients cannot
+solve — it would break **Stripe webhooks** and the PWA's own programmatic `fetch`/WebSocket calls. If you use
+bot protection, scope it to browser-facing HTML routes only (or add a WAF/Bot-Management **skip** exception
+for those three path prefixes). The per-IP rate-limit rules above already gate abuse without challenging
+normal traffic. Keep "Under Attack" mode strictly as break-glass, and even then exempt the webhook + API/WS
+paths.
 
 **In-repo follow-up (before public, code):** add a **pre-auth connection cap** to the realtime gateway —
 bound the number of concurrent *un-authenticated* sockets (and/or shorten the first-frame auth timeout) so a

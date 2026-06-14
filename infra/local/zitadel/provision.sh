@@ -164,7 +164,14 @@ OIDC_BODY="$(echo "$OIDC_CUR" | jq -c --arg ttl "$ACCESS_TOKEN_TTL" \
     idTokenLifetime:            (.idTokenLifetime            // "43200s"),
     refreshTokenIdleExpiration: (.refreshTokenIdleExpiration // "2592000s"),
     refreshTokenExpiration:     (.refreshTokenExpiration     // "7776000s")}')"
-zcurl PUT /admin/v1/settings/oidc "$OIDC_BODY" >/dev/null
+OIDC_RESP="$(zcurl PUT /admin/v1/settings/oidc "$OIDC_BODY")"
+# curl exits 0 even on an HTTP error, so verify by reading the value back — never claim success on a
+# silently-rejected PUT (that would leave the insecure 12h default in place). Fail closed if it didn't take.
+OIDC_NOW="$(zcurl GET /admin/v1/settings/oidc | jq -r '.settings.accessTokenLifetime // empty')"
+[ "$OIDC_NOW" = "$ACCESS_TOKEN_TTL" ] || {
+  log "FATAL: access-token lifetime not pinned (wanted $ACCESS_TOKEN_TTL, got '${OIDC_NOW:-none}'); resp: $OIDC_RESP"
+  exit 1
+}
 log "pinned access-token lifetime = $ACCESS_TOKEN_TTL (Zitadel default is 12h)"
 # PRODUCTION REQUIREMENT: this script runs LOCAL only. The prod Zitadel instance MUST get the same setting —
 # the identical PUT /admin/v1/settings/oidc against prod (with a prod admin token) is the binding control for
