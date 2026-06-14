@@ -42,7 +42,7 @@ repo-root-relative — matching the `terraform -chdir=infra/aws/terraform` form 
 6. **Wire GitHub:** `export S3_BUCKET=… S3_ACCESS_KEY_ID=… OIDC_ISSUER=… OIDC_AUDIENCE=… VITE_OIDC_ISSUER=…
    VITE_OIDC_CLIENT_ID=… VITE_OIDC_REDIRECT_URI=… [X42C_API_TOKEN=…]` then `infra/aws/scripts/setup-github-cicd.sh` (sets
    the cd-aws.yml vars from TF outputs + creates the gated Environment; leaves `ENABLE_DEPLOY_AWS=false`).
-7. **Deploy:** `gh variable set ENABLE_DEPLOY_AWS true`, then `git tag aws-v0.1.0 && git push origin aws-v0.1.0`
+7. **Deploy:** `gh variable set ENABLE_DEPLOY_AWS --body true`, then `git tag aws-v0.1.0 && git push origin aws-v0.1.0`
    → approve in the `aws-experiment` Environment → SSM rolls out `deploy.sh` (migrate → provision runtime role
    logins → bring the stack up).
 8. **Arm** the optional secrets after first boot (Stripe, operator key, Sentry DSN, Zitadel mgmt/login PATs)
