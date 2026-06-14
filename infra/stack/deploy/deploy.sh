@@ -319,6 +319,62 @@ if ! docker compose -f "$COMPOSE" run --rm --no-deps --user 0 \
 fi
 shred -u "$_migfile" 2>/dev/null || rm -f "$_migfile" # best-effort on tmpfs; the rm is the real cleanup
 
+# --- 5b. Provision LOGIN + password for the RUNTIME roles. Migrations create argus_app/argus_cleanup/
+#         argus_backup as NOLOGIN with NO password; nothing else gives them one, so the api (argus_app) and
+#         the backup/cleanup workers cannot authenticate until we set a password matching the Key Vault values.
+#         Do it here, right after migrate (the roles now exist) and before step 6 starts the api. Connect as
+#         the owner over the postgres container's LOCAL socket (the official image trusts local), so no
+#         connection password is passed anywhere; if local trust is ever disabled, psql fails and `set -e`
+#         aborts the deploy (fail-closed, never serve half-provisioned). Idempotent (ALTER ROLE). ---
+log "provisioning runtime role logins (argus_app/argus_cleanup/argus_backup)"
+# Existence prechecks — legible FATAL on a stale/partial secret set (matches the step-3b/step-6 convention).
+for _f in database_url cleanup-db-password backup-db-password; do
+  [ -s "$SECRETS_DIR/$_f" ] || {
+    log "FATAL: missing/empty secret file for role-login provisioning: $_f"
+    exit 1
+  }
+done
+# argus_app's password is embedded in the app DSN; cleanup/backup read their own delivered files.
+_dburl="$(cat "$SECRETS_DIR/database_url")"
+_app_pw="${_dburl#*://argus_app:}"
+_app_pw="${_app_pw%%@*}"
+_dburl=""
+_cleanup_pw="$(cat "$SECRETS_DIR/cleanup-db-password")"
+_backup_pw="$(cat "$SECRETS_DIR/backup-db-password")"
+# ENFORCE the URL-unreserved charset (the same contract the redis/glitchtip steps enforce) BEFORE building any
+# SQL. This (a) closes any single-quote -> psql syntax-error path that could echo a password fragment on
+# stderr, and (b) catches a misconfigured database_url — e.g. accidentally the OWNER DSN (no `argus_app:`
+# segment): the unstripped value would still contain `://` and fail here, rather than setting argus_app to a
+# junk password. Logs name the roles only, never a value.
+for _pw in "$_app_pw" "$_cleanup_pw" "$_backup_pw"; do
+  case "$_pw" in
+  '' | *[!A-Za-z0-9._~-]*)
+    log "FATAL: a runtime role password is missing or contains a non-URL-safe character"
+    exit 1
+    ;;
+  esac
+done
+_pw=""
+# Feed the SQL on STDIN (never argv/-v) so no password reaches /proc/<pid>/cmdline; psql echoes nothing of the
+# value. The owner connects over the postgres container's local socket (official-image trust) — no connection
+# secret is passed; if local trust is ever disabled, psql fails and `set -e` aborts (fail-closed).
+if ! docker compose -f "$COMPOSE" exec -T postgres \
+  psql -U argus -d argus -v ON_ERROR_STOP=1 -q >/dev/null <<SQL; then
+ALTER ROLE argus_app     WITH LOGIN PASSWORD '${_app_pw}';
+ALTER ROLE argus_cleanup WITH LOGIN PASSWORD '${_cleanup_pw}';
+ALTER ROLE argus_backup  WITH LOGIN PASSWORD '${_backup_pw}';
+SQL
+  _app_pw=""
+  _cleanup_pw=""
+  _backup_pw=""
+  log "FATAL: failed to provision runtime role logins"
+  exit 1
+fi
+_app_pw=""
+_cleanup_pw=""
+_backup_pw=""
+log "runtime role logins provisioned"
+
 # --- 6. Bring up the full stack. cloudflared's TUNNEL_TOKEN + Zitadel's DB/admin passwords are RUNTIME values
 #        read from the delivered Key Vault files (the accepted env exception — never a committed/on-disk env
 #        file; see vm-zitadel.md §4). ZITADEL_DB_PASSWORD also backs zitadel-db's POSTGRES_PASSWORD_FILE (same
