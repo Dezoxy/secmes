@@ -1,8 +1,16 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 
 import type { DeviceKeys } from '@argus/crypto';
+import {
+  deviceSignaturePublicKeyB64,
+  deviceSignatureSeed,
+  formatDeviceIdentity,
+  parseDeviceIdentity,
+} from '@argus/crypto';
 
+import { signWithdraw } from '@argus/crypto/device-proof';
 import { restoreAndProvision } from '../../lib/device-restore';
+import { migrateDevice } from '../../lib/api';
 import { DeviceKeystore } from '../../lib/keystore';
 import { provisionDevice } from '../../lib/provisioning';
 import { useAuth } from '../auth/AuthContext';
@@ -29,7 +37,11 @@ export type DeviceStatus =
  */
 function statusForStored(stored: string | undefined, userId: string): DeviceStatus {
   if (!stored) return 'needs-create';
-  return stored === userId ? 'needs-unlock' : 'needs-switch';
+  const { userId: storedUserId } = parseDeviceIdentity(stored);
+  // Legacy pre-B2 format (no deviceUuid): storedUserId still matches the current user, so fall through
+  // to 'needs-unlock'. The unlock() callback detects the missing deviceUuid and upgrades to composite
+  // identity automatically. Only a genuinely different storedUserId reaches 'needs-switch'.
+  return storedUserId === userId ? 'needs-unlock' : 'needs-switch';
 }
 
 interface DeviceState {
@@ -38,6 +50,8 @@ interface DeviceState {
   pool: DeviceKeys[] | null;
   /** This device's server id (from provisioning) — needed to list/fetch/consume Welcomes (Slice 4). */
   deviceId: string | null;
+  /** The per-device UUID component of the composite MLS identity (userId:deviceUuid). Used by B2 enrollment. */
+  deviceUuid: string | null;
   keystore: DeviceKeystore | null;
   /**
    * The session passphrase, retained IN MEMORY only — it seals each advanced MLS group state on send/receive
@@ -77,6 +91,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
   const [device, setDevice] = useState<DeviceKeys | null>(null);
   const [pool, setPool] = useState<DeviceKeys[] | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
+  const [deviceUuid, setDeviceUuid] = useState<string | null>(null);
   const [passphrase, setPassphrase] = useState<string | null>(null);
   const [sessionKey, setSessionKey] = useState<CryptoKey | null>(null);
   // Demo mode has no real device — render the chat (seed-driven) without a gate.
@@ -117,21 +132,59 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         setError('still loading your profile — try again in a moment');
         return;
       }
-      const identity = profile.userId; // stable per-user MLS device identity
+      const userId = profile.userId;
       setStatus('unlocking');
       setError(null);
       try {
-        // "Creating" iff this browser holds NO device for ME (none, or another account's) — identity-keyed,
-        // not mere presence, so a foreign slot never forces us into a doomed loadDevice.
-        const creating = (await keystore.storedIdentity()) !== identity;
-        const dev = creating
-          ? await keystore.getOrCreateDevice(identity, passphrase)
-          : await keystore.loadDevice(identity, passphrase);
+        const storedIdent = await keystore.storedIdentity();
+        const parsed = storedIdent ? parseDeviceIdentity(storedIdent) : null;
+        // Pre-B2 devices have a bare userId identity (no deviceUuid). Same user → migrate to composite
+        // identity: verify the passphrase against the old sealed record, clear it, then create fresh.
+        const isLegacyMigration =
+          parsed !== null && parsed.deviceUuid === undefined && parsed.userId === userId;
+        // Create if: first run or a different user's device occupies the slot.
+        const creating = !parsed || parsed.userId !== userId;
+        let identity: string;
+        let uuid: string;
+        if (creating || isLegacyMigration) {
+          uuid = crypto.randomUUID();
+          identity = formatDeviceIdentity(userId, uuid);
+        } else {
+          identity = storedIdent!;
+          uuid = parsed.deviceUuid!;
+        }
+        let dev: DeviceKeys | undefined;
+        if (isLegacyMigration) {
+          // Atomically migrate the old device to composite identity: migrateDevice deletes the old
+          // row and re-inserts it as isProvisional=false in one transaction, eliminating the race
+          // window that separate withdrawDevice + provisionDevice calls leave open.
+          const oldDev = await keystore.loadDevice(storedIdent!, passphrase);
+          if (!oldDev) throw new Error('legacy device not found in keystore');
+          const oldSpk = deviceSignaturePublicKeyB64(oldDev);
+          const proofBytes = signWithdraw(deviceSignatureSeed(oldDev), oldSpk);
+          const proof = btoa(String.fromCharCode(...proofBytes))
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=+$/, '');
+          await migrateDevice(oldSpk, proof);
+          // Reidentify: preserve the signing key under the new composite identity so existing
+          // MLS group states (which embed the private key internally) remain usable. Only the
+          // identity string metadata guards change — the ratchet and leaf-node key are the same.
+          dev = await keystore.reidentifyDevice(storedIdent!, identity, passphrase);
+          await keystore.clearPoolAndPending(); // old key packages are stale after server withdraw
+          await keystore.rebindGroupStates(dev); // update GROUP_STORE identity guards
+          await keystore.rebindMessageLogs(dev); // update MSGLOG identity guards
+        } else if (creating) {
+          dev = await keystore.getOrCreateDevice(identity, passphrase);
+        } else {
+          dev = await keystore.loadDevice(identity, passphrase);
+        }
         if (!dev) throw new Error('no device found to unlock');
         const { pool: provisioned, result } = await provisionDevice(keystore, dev, passphrase);
         setDevice(dev);
         setPool(provisioned);
         setDeviceId(result.deviceId);
+        setDeviceUuid(uuid);
         setPassphrase(passphrase); // retained in memory to seal advanced group state on send/receive (Slice 5)
         setSessionKey(await keystore.deriveSessionKey(passphrase)); // message-history seal key (memory only)
         setStatus('ready');
@@ -139,7 +192,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         // openBackup fails closed on a wrong passphrase (GCM auth) — surface that distinctly.
         const wrong = err instanceof Error && /passphrase|decrypt/i.test(err.message);
         setError(wrong ? 'wrong passphrase' : 'could not unlock the device');
-        setStatus(statusForStored(await keystore.storedIdentity(), identity));
+        setStatus(statusForStored(await keystore.storedIdentity(), userId));
       }
     },
     [keystore, profile],
@@ -152,10 +205,53 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         setError('still loading your profile — try again in a moment');
         return;
       }
-      const identity = profile.userId;
+      const userId = profile.userId;
       setStatus('unlocking');
       setError(null);
       try {
+        // Read the identity sealed inside the artifact — importRecoveryArtifact requires an exact match,
+        // so we use the artifact's own identity rather than generating a fresh UUID. This also validates
+        // the passphrase up front; a wrong passphrase throws here and is caught below.
+        const identity = await keystore.peekRecoveryArtifactIdentity(artifactJson, passphrase);
+        const { userId: artifactUserId, deviceUuid: uuid } = parseDeviceIdentity(identity);
+        if (artifactUserId !== userId)
+          throw new Error('recovery artifact belongs to a different account');
+        if (!uuid) {
+          // Legacy pre-B2 artifact (bare userId identity). Restore the old device onto the server
+          // so it can be cleanly withdrawn, then migrate to composite identity — same path as
+          // unlock()'s isLegacyMigration branch. Tolerates 404 from withdrawDevice if the old
+          // device was already withdrawn during migration on another browser.
+          const { device: oldDev } = await restoreAndProvision(
+            keystore,
+            identity,
+            artifactJson,
+            passphrase,
+          );
+          const oldSpk = deviceSignaturePublicKeyB64(oldDev);
+          const proofBytes = signWithdraw(deviceSignatureSeed(oldDev), oldSpk);
+          const proof = btoa(String.fromCharCode(...proofBytes))
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=+$/, '');
+          await migrateDevice(oldSpk, proof).catch(() => undefined);
+          const newUuid = crypto.randomUUID();
+          const newIdentity = formatDeviceIdentity(userId, newUuid);
+          // Reidentify: same signing key (from restoreAndProvision) under the new composite identity.
+          // On a fresh browser GROUP_STORE and MSGLOG_STORE are empty so rebind calls are no-ops.
+          const dev = await keystore.reidentifyDevice(identity, newIdentity, passphrase);
+          await keystore.clearPoolAndPending(); // discard the restored pool (will re-provision)
+          await keystore.rebindGroupStates(dev); // no-op on a fresh browser
+          await keystore.rebindMessageLogs(dev); // no-op on a fresh browser
+          const { pool: provisioned, result } = await provisionDevice(keystore, dev, passphrase);
+          setDevice(dev);
+          setPool(provisioned);
+          setDeviceId(result.deviceId);
+          setDeviceUuid(newUuid);
+          setPassphrase(passphrase);
+          setSessionKey(await keystore.deriveSessionKey(passphrase));
+          setStatus('ready');
+          return;
+        }
         // Shared with the Settings recovery panel: restore → revoke now-stale packages → publish fresh (#20).
         const {
           device: dev,
@@ -165,6 +261,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         setDevice(dev);
         setPool(provisioned);
         setDeviceId(result.deviceId);
+        setDeviceUuid(uuid);
         setPassphrase(passphrase); // see unlock — sealing key for advanced group state (Slice 5)
         setSessionKey(await keystore.deriveSessionKey(passphrase)); // message-history seal key (memory only)
         setStatus('ready');
@@ -174,7 +271,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
           err instanceof Error &&
           /passphrase|decrypt|identity|artifact|recovery/i.test(err.message);
         setError(bad ? 'wrong passphrase or recovery file' : 'could not restore the device');
-        setStatus(statusForStored(await keystore.storedIdentity(), identity));
+        setStatus(statusForStored(await keystore.storedIdentity(), userId));
       }
     },
     [keystore, profile],
@@ -193,6 +290,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
     device,
     pool,
     deviceId,
+    deviceUuid,
     keystore,
     passphrase,
     sessionKey,

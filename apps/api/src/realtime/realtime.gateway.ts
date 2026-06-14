@@ -14,6 +14,8 @@ import { MessagingService } from '../messaging/messaging.service.js';
 import {
   RealtimeBus,
   type CommitCreatedEvent,
+  type DeviceEnrollmentApprovedEvent,
+  type DeviceEnrollmentPendingEvent,
   type MemberRemovedEvent,
   type MessageCreatedEvent,
   type ReceiptAdvancedEvent,
@@ -68,6 +70,8 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.bus.onReceiptAdvanced((event) => this.deliverReceipt(event));
     this.bus.onCommitCreated((event) => this.deliverCommit(event));
     this.bus.onMemberRemoved((event) => this.notifyRemoved(event));
+    this.bus.onDeviceEnrollmentPending((event) => this.notifyEnrollmentPending(event));
+    this.bus.onDeviceEnrollmentApproved((event) => this.notifyEnrollmentApproved(event));
   }
 
   handleConnection(client: WebSocket): void {
@@ -272,6 +276,29 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
     const sockets = this.rooms.get(room);
     if (sockets && sockets.size === 0) this.rooms.delete(room);
+  }
+
+  private notifyEnrollmentPending(event: DeviceEnrollmentPendingEvent): void {
+    for (const [client, state] of this.conns) {
+      if (!state.authed || !state.auth) continue;
+      if (state.auth.tenantId !== event.tenantId || state.auth.sub !== event.userSub) continue;
+      if (client.readyState === WebSocket.OPEN) {
+        this.send(client, 'enrollment_pending', {
+          enrollmentId: event.enrollmentId,
+          requestingDeviceId: event.requestingDeviceId,
+        });
+      }
+    }
+  }
+
+  private notifyEnrollmentApproved(event: DeviceEnrollmentApprovedEvent): void {
+    for (const [client, state] of this.conns) {
+      if (!state.authed || !state.auth) continue;
+      if (state.auth.tenantId !== event.tenantId || state.auth.sub !== event.userSub) continue;
+      if (client.readyState === WebSocket.OPEN) {
+        this.send(client, 'enrollment_approved', { enrollmentId: event.enrollmentId });
+      }
+    }
   }
 
   private send(client: WebSocket, event: string, data: unknown): void {

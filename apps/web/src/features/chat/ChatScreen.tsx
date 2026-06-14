@@ -22,6 +22,7 @@ import { ImagePreviewModal } from './ImagePreviewModal';
 import { StartConversation } from './StartConversation';
 import { GroupCreateDialog } from './GroupCreateDialog';
 import { contactDisplayName } from './user-label';
+import { ApproveDevicePanel } from '../device/ApproveDevicePanel';
 import { VerifySecurity } from './VerifySecurity';
 import {
   useConversationBackfill,
@@ -138,6 +139,8 @@ export default function ChatScreen() {
   const mobileThreadBackTimerRef = useRef<number | undefined>(undefined);
   const mobileSidebarReturnTimerRef = useRef<number | undefined>(undefined);
   const [verifyOpen, setVerifyOpen] = useState(false);
+  // B2: set when D2 registers an enrollment on this user's account — triggers approval UI on D1.
+  const [pendingEnrollmentId, setPendingEnrollmentId] = useState<string | null>(null);
   // Each direct conversation has its own MLS session, so its own safety number (#20).
   const [numbersByConv, setNumbersByConv] = useState<Record<string, string>>({});
   // Per-conversation verification: conversationId → the safety number marked verified for it.
@@ -180,9 +183,10 @@ export default function ChatScreen() {
             profile.userId,
             messagingDeps.keystore,
             messagingDeps.sessionKey,
+            deviceId ?? null,
           )
         : null,
-    [messagingDeps, profile],
+    [messagingDeps, profile, deviceId],
   );
   const groupManager = useMemo(
     () =>
@@ -192,9 +196,10 @@ export default function ChatScreen() {
             profile.userId,
             messagingDeps.keystore,
             messagingDeps.sessionKey,
+            deviceId ?? null,
           )
         : null,
-    [messagingDeps, profile],
+    [messagingDeps, profile, deviceId],
   );
   const [startOpen, setStartOpen] = useState(false);
   const [groupCreateOpen, setGroupCreateOpen] = useState(false);
@@ -215,6 +220,7 @@ export default function ChatScreen() {
     mergeIncoming,
     backfillInto,
     setConversations,
+    onEnrollmentPending: (id) => setPendingEnrollmentId(id),
   });
 
   const { selectedConversation, isDirect, selectedIsLive, currentNumber, verified, isLive } =
@@ -593,6 +599,15 @@ export default function ChatScreen() {
             }
           }}
           onClose={() => setAddMemberOpen(false)}
+        />
+      )}
+      {pendingEnrollmentId && profile?.userId && (
+        <ApproveDevicePanel
+          enrollmentId={pendingEnrollmentId}
+          selfUserId={profile.userId}
+          messagingDeps={messagingDeps}
+          liveGroupsRef={liveGroups}
+          onClose={() => setPendingEnrollmentId(null)}
         />
       )}
       {verifyOpen && isDirect && (

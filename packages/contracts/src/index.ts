@@ -286,6 +286,51 @@ export const PushSubscriptionSchema = z
   .strict();
 export type PushSubscription = z.infer<typeof PushSubscriptionSchema>;
 
+// Device enrollment (B2 — multi-device linking). D2 registers a pending enrollment; D1 approves/rejects.
+const base64urlStrict = z.string().regex(/^[A-Za-z0-9_-]+$/, 'must be unpadded base64url');
+export const EnrollmentRegisterBodySchema = z
+  .object({
+    fingerprint: z.string().min(1).max(512),
+    deviceId: z.string().uuid(),
+  })
+  .strict();
+export type EnrollmentRegisterBody = z.infer<typeof EnrollmentRegisterBodySchema>;
+
+export const EnrollmentApproveBodySchema = z
+  .object({
+    approvingDeviceId: z.string().uuid(),
+    proof: base64urlStrict.max(256),
+  })
+  .strict();
+export type EnrollmentApproveBody = z.infer<typeof EnrollmentApproveBodySchema>;
+
+export const EnrollmentSchema = z
+  .object({
+    id: z.string().uuid(),
+    requestingDeviceId: z.string().uuid(),
+    approvedByDeviceId: z.string().uuid().nullable(),
+    fingerprint: z.string(),
+    status: z.string(),
+    createdAt: z.string().datetime(),
+    expiresAt: z.string().datetime(),
+    resolvedAt: z.string().datetime().nullable(),
+    /** D1's registered signature public key (base64) — used by D2 to verify D1's claimed key package. */
+    approverSignaturePublicKey: z.string().nullable().optional(),
+  })
+  .strip();
+export type Enrollment = z.infer<typeof EnrollmentSchema>;
+
+export const ConversationListSchema = z.object({ conversationIds: z.array(z.string().uuid()) });
+export type ConversationList = z.infer<typeof ConversationListSchema>;
+
+export const WithdrawDeviceBodySchema = z
+  .object({
+    signaturePublicKey: z.string().min(1).max(512),
+    proof: base64urlStrict.max(128),
+  })
+  .strict();
+export type WithdrawDeviceBody = z.infer<typeof WithdrawDeviceBodySchema>;
+
 export const SubscribePushRequestSchema = z
   .object({
     deviceId: z.string().uuid(),

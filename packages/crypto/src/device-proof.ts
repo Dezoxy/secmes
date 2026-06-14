@@ -92,6 +92,85 @@ export function verifyWelcomeFetch(
   return verify('fetch', signaturePublicKey, deviceId, welcomeId, signature);
 }
 
+// ---- Enrollment approval proof (B2 multi-device) ------------------------------------------------
+// D1 (the approving device) proves possession of its signature private key to authorize adding D2.
+// Domain `argus-enroll:v1` is intentionally distinct from `argus-welcome-*` — an enroll proof MUST
+// NOT verify as a consume/fetch proof, and vice versa (cross-domain non-reuse, least authority).
+// The enrollmentId is a fresh UUID minted per enrollment request; it plays the same anti-replay
+// role that welcomeId plays for welcome proofs. The proof is verified and discarded — never stored.
+function enrollProofMessage(approvingDeviceId: string, enrollmentId: string): Uint8Array {
+  return te.encode(`argus-enroll:v1\n${approvingDeviceId}\n${enrollmentId}`);
+}
+
+/**
+ * Sign an ENROLL APPROVAL proof with D1's Ed25519 signature private key. Returns the raw 64-byte
+ * signature; callers base64url-encode it for the wire. Authorizes adding D2 to all conversations
+ * (server verifies against D1's published signature public key).
+ */
+export function signEnrollApproval(
+  signaturePrivateKey: Uint8Array,
+  approvingDeviceId: string,
+  enrollmentId: string,
+): Uint8Array {
+  return ed25519.sign(enrollProofMessage(approvingDeviceId, enrollmentId), signaturePrivateKey);
+}
+
+/** Verify an ENROLL APPROVAL proof against D1's PUBLIC signature key (key directory). Total (never throws). */
+export function verifyEnrollApproval(
+  signaturePublicKey: Uint8Array,
+  approvingDeviceId: string,
+  enrollmentId: string,
+  signature: Uint8Array,
+): boolean {
+  try {
+    return ed25519.verify(
+      signature,
+      enrollProofMessage(approvingDeviceId, enrollmentId),
+      signaturePublicKey,
+    );
+  } catch {
+    return false;
+  }
+}
+
+// ---- Device withdrawal proof (B2 legacy migration) -----------------------------------------------
+// The device proves possession of its signature private key before the server deletes its row.
+// Domain `argus-withdraw:v1` is distinct from enroll/welcome proofs — cross-domain non-reuse.
+// The proof binds to the base64 `signaturePublicKey` string (same value sent in the request body),
+// which uniquely identifies the device row being deleted. Replay is harmless: the row is gone on
+// first receipt, so a replayed proof just hits the idempotent no-op path.
+function withdrawProofMessage(signaturePublicKeyB64: string): Uint8Array {
+  return te.encode(`argus-withdraw:v1\n${signaturePublicKeyB64}`);
+}
+
+/**
+ * Sign a WITHDRAW proof with the device's Ed25519 signature private key. Returns the raw 64-byte
+ * signature; callers base64url-encode it for the wire. Authorizes deleting this device's server row.
+ */
+export function signWithdraw(
+  signaturePrivateKey: Uint8Array,
+  signaturePublicKeyB64: string,
+): Uint8Array {
+  return ed25519.sign(withdrawProofMessage(signaturePublicKeyB64), signaturePrivateKey);
+}
+
+/** Verify a WITHDRAW proof against the device's PUBLIC signature key. Total (never throws). */
+export function verifyWithdraw(
+  signaturePublicKey: Uint8Array,
+  signaturePublicKeyB64: string,
+  signature: Uint8Array,
+): boolean {
+  try {
+    return ed25519.verify(
+      signature,
+      withdrawProofMessage(signaturePublicKeyB64),
+      signaturePublicKey,
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Generate an Ed25519 signature keypair (CSPRNG via @noble). PRODUCTION device keys come from MLS
  * (`MlsEngine.generateDeviceKeys` — use `privatePackage.signaturePrivateKey` /

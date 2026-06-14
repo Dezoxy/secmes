@@ -77,6 +77,13 @@ import {
   type UserSummary as ContractUserSummary,
   type WelcomeMaterial as ContractWelcomeMaterial,
   UserDirectorySchema,
+  EnrollmentRegisterBodySchema,
+  EnrollmentApproveBodySchema,
+  EnrollmentSchema,
+  ConversationListSchema,
+  WithdrawDeviceBodySchema,
+  type Enrollment as ContractEnrollment,
+  type ConversationList as ContractConversationList,
 } from '@argus/contracts';
 import { requestJson, requestStatus, unwrapApiResult } from './api-client';
 
@@ -458,10 +465,18 @@ export async function listCommits(
  * Used for group adds — each device of the new member needs its own Welcome. Returns an empty array
  * if the user has no devices or all pools are empty.
  */
-export async function claimAllKeyPackages(userId: string): Promise<ClaimedKeyPackage[]> {
+export async function claimAllKeyPackages(
+  userId: string,
+  deviceId?: string,
+  excludeDeviceId?: string,
+): Promise<ClaimedKeyPackage[]> {
+  const params = new URLSearchParams();
+  if (deviceId) params.set('deviceId', deviceId);
+  if (excludeDeviceId) params.set('excludeDeviceId', excludeDeviceId);
+  const qs = params.toString() ? `?${params.toString()}` : '';
   return unwrapApiResult(
     await requestJson({
-      path: `/users/${encodeURIComponent(userId)}/key-packages/claim-all`,
+      path: `/users/${encodeURIComponent(userId)}/key-packages/claim-all${qs}`,
       method: 'POST',
       responseSchema: ClaimedKeyPackageSchema.array(),
     }),
@@ -835,4 +850,105 @@ export async function getBillingStatus(): Promise<TenantPlan> {
   return unwrapApiResult(
     await requestJson({ path: '/billing/status', responseSchema: TenantPlanSchema }),
   );
+}
+
+// ── Device enrollment (B2 — multi-device linking) ───────────────────────────
+
+export type Enrollment = ContractEnrollment;
+export type ConversationList = ContractConversationList;
+
+/** D2 registers a pending enrollment request (shows its fingerprint for D1 to verify). */
+export async function registerEnrollment(
+  deviceId: string,
+  fingerprint: string,
+): Promise<Enrollment> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/devices/me/enrollment',
+      method: 'POST',
+      body: { deviceId, fingerprint },
+      requestSchema: EnrollmentRegisterBodySchema,
+      responseSchema: EnrollmentSchema,
+    }),
+  );
+}
+
+/** D1 lists its pending (or resolved) enrollment requests. */
+export async function listEnrollments(status = 'pending'): Promise<Enrollment[]> {
+  return unwrapApiResult(
+    await requestJson({
+      path: `/devices/enrollments?status=${encodeURIComponent(status)}`,
+      responseSchema: EnrollmentSchema.array(),
+    }),
+  );
+}
+
+/** D1 approves D2's enrollment with an Ed25519 enroll-proof. */
+export async function approveEnrollment(
+  enrollmentId: string,
+  approvingDeviceId: string,
+  proof: string,
+): Promise<Enrollment> {
+  return unwrapApiResult(
+    await requestJson({
+      path: `/devices/enrollments/${encodeURIComponent(enrollmentId)}/approve`,
+      method: 'POST',
+      body: { approvingDeviceId, proof },
+      requestSchema: EnrollmentApproveBodySchema,
+      responseSchema: EnrollmentSchema,
+    }),
+  );
+}
+
+/** D1 rejects D2's enrollment. */
+export async function rejectEnrollment(enrollmentId: string): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: `/devices/enrollments/${encodeURIComponent(enrollmentId)}/reject`,
+      method: 'POST',
+    }),
+  );
+}
+
+/**
+ * Permanently delete this device's server row (cascades to key packages). Used by the legacy
+ * pre-B2 migration to remove the old bare-userId device row so the new composite-identity device
+ * is published as non-provisional. Idempotent — no-ops if the device is already gone.
+ */
+export async function withdrawDevice(signaturePublicKey: string, proof: string): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: '/devices/me/withdraw',
+      method: 'POST',
+      body: { signaturePublicKey, proof },
+      requestSchema: WithdrawDeviceBodySchema,
+    }),
+  );
+}
+
+/**
+ * Atomically migrate the legacy bare-userId device to a composite-identity device: deletes the
+ * existing device row and re-inserts it as non-provisional in one transaction, closing the race
+ * window that withdrawDevice + publishKeyPackages leaves open. Use instead of withdrawDevice during
+ * the pre-B2 → B2 identity migration.
+ */
+export async function migrateDevice(signaturePublicKey: string, proof: string): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: '/devices/me/migrate',
+      method: 'POST',
+      body: { signaturePublicKey, proof },
+      requestSchema: WithdrawDeviceBodySchema,
+    }),
+  );
+}
+
+/** Return the caller's conversation IDs (for enrollment fan-out diff). */
+export async function listMyConversations(): Promise<string[]> {
+  return unwrapApiResult(
+    await requestJson<ConversationList>({
+      path: '/devices/me/conversations',
+      responseSchema: ConversationListSchema,
+    }),
+  ).conversationIds;
 }

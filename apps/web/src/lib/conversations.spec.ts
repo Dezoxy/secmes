@@ -12,16 +12,29 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Mock the directory/server calls; the crypto + the keystore (real sealed IndexedDB) are real.
 vi.mock('./api', () => ({
   claimKeyPackage: vi.fn(),
+  claimAllKeyPackages: vi.fn(),
+  listEnrollments: vi.fn().mockResolvedValue([]),
   createConversation: vi.fn(),
   deliverWelcome: vi.fn(),
+  postCommit: vi.fn(),
+  CommitEpochConflictError: class CommitEpochConflictError extends Error {},
 }));
-import { claimKeyPackage, createConversation, deliverWelcome } from './api';
+import {
+  claimKeyPackage,
+  claimAllKeyPackages,
+  listEnrollments,
+  createConversation,
+  deliverWelcome,
+  postCommit,
+} from './api';
 import { ConversationManager } from './conversations';
 import { DeviceKeystore } from './keystore';
 
 const claim = vi.mocked(claimKeyPackage);
+const claimAll = vi.mocked(claimAllKeyPackages);
 const create = vi.mocked(createConversation);
 const deliver = vi.mocked(deliverWelcome);
+const post = vi.mocked(postCommit);
 const FAST: Argon2Params = { m: 8192, t: 2, p: 1 };
 
 describe('ConversationManager', () => {
@@ -37,16 +50,21 @@ describe('ConversationManager', () => {
     peer = await engine.generateDeviceKeys('peer');
     keystore = await DeviceKeystore.open(engine, FAST);
     claim.mockReset();
+    claimAll.mockReset();
     create.mockReset();
     deliver.mockReset();
+    post.mockReset();
     // The directory hands back the peer's PUBLIC KeyPackage (what a real claim returns).
     claim.mockResolvedValue({
       deviceId: 'peer-device',
       signaturePublicKey: deviceSignaturePublicKeyB64(peer),
       keyPackage: serializeKeyPackage(peer.publicPackage),
     });
+    // Default: no own other devices (single-device path).
+    claimAll.mockResolvedValue([]);
     create.mockResolvedValue({ conversationId: 'conv-1' });
     deliver.mockResolvedValue({ welcomeId: 'welcome-1' });
+    post.mockResolvedValue({ id: 'commit-1', epoch: 1, deduplicated: false });
   });
 
   it('prepare() claims + derives the safety number but creates NOTHING server-side (the #20 gate)', async () => {
@@ -153,5 +171,171 @@ describe('ConversationManager', () => {
     expect(
       (await keystore.loadConversations(me, 'pw', await keystore.deriveSessionKey('pw'))).size,
     ).toBe(0);
+  });
+
+  describe('B2 multi-device self-add', () => {
+    let d2: DeviceKeys;
+
+    beforeEach(async () => {
+      d2 = await engine.generateDeviceKeys('me:d2-uuid');
+      // Simulate own D2 being in the key directory (server device id = 'd2-server-id').
+      // prepare() calls claimAll for the PEER to find secondary devices (returns [] — peer is single-device);
+      // confirm() calls claimAll for self ('me-user') to claim enrolled own devices (returns D2).
+      claimAll.mockImplementation(async (userId: string) => {
+        if (userId === 'me-user') {
+          return [
+            {
+              deviceId: 'd2-server-id',
+              signaturePublicKey: deviceSignaturePublicKeyB64(d2),
+              keyPackage: serializeKeyPackage(d2.publicPackage),
+            },
+          ];
+        }
+        return []; // peer has no secondary devices in these tests
+      });
+      // D2 has completed the enrollment trust flow — must be in the approved list for self-add.
+      // fingerprint must match deviceSignaturePublicKeyB64(d2) so the leaf-key MITM check passes.
+      vi.mocked(listEnrollments).mockResolvedValue([
+        { requestingDeviceId: 'd2-server-id', fingerprint: deviceSignaturePublicKeyB64(d2) },
+      ] as never);
+    });
+
+    it('confirm() uses postCommit to batch-add peer + own other device when selfDeviceId is provided', async () => {
+      const mgr = new ConversationManager(
+        me,
+        'me-user',
+        keystore,
+        await keystore.deriveSessionKey('pw'),
+        'my-server-id', // selfDeviceId — causes claimAllKeyPackages to run
+      );
+      const session = await mgr.confirm(await mgr.prepare('peer-user'));
+
+      // prepare() checks peer secondary devices (returns []), confirm() claims enrolled own devices (D2).
+      expect(claimAll).toHaveBeenCalledWith('peer-user', undefined, 'peer-device');
+      expect(claimAll).toHaveBeenCalledWith('me-user', undefined, 'my-server-id');
+      expect(deliver).not.toHaveBeenCalled();
+      expect(post).toHaveBeenCalledTimes(1);
+
+      const [convId, body] = post.mock.calls[0]!;
+      expect(convId).toBe('conv-1');
+      // Peer receives a Welcome.
+      expect(body.welcomes).toContainEqual(
+        expect.objectContaining({ recipientUserId: 'peer-user', recipientDeviceId: 'peer-device' }),
+      );
+      // Own D2 also receives a Welcome.
+      expect(body.welcomes).toContainEqual(
+        expect.objectContaining({ recipientUserId: 'me-user', recipientDeviceId: 'd2-server-id' }),
+      );
+      // Only the peer is added to conversation_members (self is already a member).
+      expect(body.addedUserIds).toEqual(['peer-user']);
+
+      // The conversation session is still returned correctly.
+      expect(session.conversationId).toBe('conv-1');
+    });
+
+    it('confirm() peer can join from the multi-device Welcome', async () => {
+      const mgr = new ConversationManager(
+        me,
+        'me-user',
+        keystore,
+        await keystore.deriveSessionKey('pw'),
+        'my-server-id',
+      );
+      await mgr.confirm(await mgr.prepare('peer-user'));
+
+      const body = post.mock.calls[0]![1];
+      const peerWelcome = body.welcomes.find((w) => w.recipientUserId === 'peer-user')!;
+
+      const peerConversation = await engine.joinConversation(
+        peer,
+        deserializeInvite({ welcome: peerWelcome.welcome, ratchetTree: peerWelcome.ratchetTree }),
+      );
+      const session = mgr.get('conv-1')!;
+      const SECRET = 'hello from multi-device epoch';
+      expect(await peerConversation.decrypt(await session.conversation.encrypt(SECRET))).toBe(
+        SECRET,
+      );
+    });
+
+    it('confirm() falls back to single-device path when selfDeviceId is null', async () => {
+      const mgr = new ConversationManager(
+        me,
+        'me-user',
+        keystore,
+        await keystore.deriveSessionKey('pw'),
+        // selfDeviceId omitted → single-device path
+      );
+      await mgr.confirm(await mgr.prepare('peer-user'));
+
+      // prepare() calls claimAll to check for peer secondary devices (returns []).
+      // confirm() skips claimAll (selfDeviceId omitted → single-device path).
+      expect(deliver).toHaveBeenCalledTimes(1);
+      expect(post).not.toHaveBeenCalled();
+      expect(claimAll).toHaveBeenCalledTimes(1); // only from prepare()
+      expect(claimAll).toHaveBeenCalledWith('peer-user', undefined, 'peer-device');
+      expect(claimAll).not.toHaveBeenCalledWith('me-user', expect.anything(), expect.anything());
+    });
+
+    it('prepare() returns per-device safety numbers; confirm() delivers Welcome to peer secondary device', async () => {
+      const peerD2 = await engine.generateDeviceKeys('peer:d2-uuid');
+      // Override B2 mock: return peerD2 for peer secondary claim; d2 for own secondary claim.
+      claimAll.mockImplementation(async (userId: string, _?: unknown, excludeDeviceId?: string) => {
+        if (userId === 'peer-user' && excludeDeviceId === 'peer-device') {
+          return [
+            {
+              deviceId: 'peer-d2-id',
+              signaturePublicKey: deviceSignaturePublicKeyB64(peerD2),
+              keyPackage: serializeKeyPackage(peerD2.publicPackage),
+            },
+          ];
+        }
+        if (userId === 'me-user') {
+          return [
+            {
+              deviceId: 'd2-server-id',
+              signaturePublicKey: deviceSignaturePublicKeyB64(d2),
+              keyPackage: serializeKeyPackage(d2.publicPackage),
+            },
+          ];
+        }
+        return [];
+      });
+
+      const mgr = new ConversationManager(
+        me,
+        'me-user',
+        keystore,
+        await keystore.deriveSessionKey('pw'),
+        'my-server-id',
+      );
+      const pending = await mgr.prepare('peer-user');
+
+      // prepare() must compute per-device safety numbers for peer secondary devices.
+      expect(pending.peerSecondaryDevices).toHaveLength(1);
+      expect(pending.peerSecondaryDevices[0]!.deviceId).toBe('peer-d2-id');
+      expect(pending.peerSecondaryDevices[0]!.safetyNumber).toMatch(/\d/);
+
+      const session = await mgr.confirm(pending);
+
+      // confirm() must include a Welcome for the peer secondary device in the commit.
+      const body = post.mock.calls[0]![1];
+      const peerD2Welcome = body.welcomes.find(
+        (w: { recipientDeviceId: string }) => w.recipientDeviceId === 'peer-d2-id',
+      );
+      expect(peerD2Welcome).toBeDefined();
+      expect(peerD2Welcome!.recipientUserId).toBe('peer-user');
+
+      // The peer's secondary device can actually join from the delivered Welcome and decrypt.
+      const joinedConv = await engine.joinConversation(
+        peerD2,
+        deserializeInvite({
+          welcome: peerD2Welcome!.welcome,
+          ratchetTree: peerD2Welcome!.ratchetTree,
+        }),
+      );
+      expect(await joinedConv.decrypt(await session.conversation.encrypt('hi from d1'))).toBe(
+        'hi from d1',
+      );
+    });
   });
 });

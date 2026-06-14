@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   generateSignatureKeypair,
+  signEnrollApproval,
   signWelcomeConsume,
   signWelcomeFetch,
+  verifyEnrollApproval,
   verifyWelcomeConsume,
   verifyWelcomeFetch,
 } from './device-proof.js';
@@ -73,6 +75,25 @@ describe('device-proof (welcome consume)', () => {
     const fetchSig = signWelcomeFetch(privateKey, deviceId, welcomeId);
     expect(verifyWelcomeFetch(publicKey, deviceId, welcomeId, consumeSig)).toBe(false); // can't reuse to fetch
     expect(verifyWelcomeConsume(publicKey, deviceId, welcomeId, fetchSig)).toBe(false); // can't reuse to delete
+  });
+
+  it('enroll proof is domain-separated from consume and fetch (cross-domain non-reuse)', () => {
+    const { privateKey, publicKey } = generateSignatureKeypair();
+    const approvingDeviceId = '55555555-5555-5555-5555-555555555555';
+    const enrollmentId = '66666666-6666-6666-6666-666666666666';
+    const enrollSig = signEnrollApproval(privateKey, approvingDeviceId, enrollmentId);
+    const consumeSig = signWelcomeConsume(privateKey, deviceId, welcomeId);
+    const fetchSig = signWelcomeFetch(privateKey, deviceId, welcomeId);
+    // Enroll proof must NOT verify as welcome consume or fetch.
+    expect(verifyWelcomeConsume(publicKey, deviceId, welcomeId, enrollSig)).toBe(false);
+    expect(verifyWelcomeFetch(publicKey, deviceId, welcomeId, enrollSig)).toBe(false);
+    // Welcome proofs must NOT verify as enroll approval.
+    expect(verifyEnrollApproval(publicKey, approvingDeviceId, enrollmentId, consumeSig)).toBe(
+      false,
+    );
+    expect(verifyEnrollApproval(publicKey, approvingDeviceId, enrollmentId, fetchSig)).toBe(false);
+    // The enroll proof itself must verify correctly.
+    expect(verifyEnrollApproval(publicKey, approvingDeviceId, enrollmentId, enrollSig)).toBe(true);
   });
 
   it('signs a verifiable proof from a REAL ts-mls device key (48-byte PKCS8 → 32-byte seed)', async () => {

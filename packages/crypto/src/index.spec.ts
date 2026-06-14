@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { MlsEngine } from './index.js';
+import { formatDeviceIdentity, MlsEngine, parseDeviceIdentity } from './index.js';
 
 // Smoke tests for checkpoint 17 — local MLS encrypt/decrypt over the ts-mls wrapper.
 describe('MLS wrapper (checkpoint 17)', () => {
@@ -83,5 +83,43 @@ describe('MLS wrapper (checkpoint 17)', () => {
     const wire = await alice.encrypt('hi');
     const tampered = new Uint8Array([...wire, 0, 0, 0]); // valid message + garbage suffix
     await expect(bob.decrypt(tampered)).rejects.toThrow();
+  });
+});
+
+describe('composite device identity (B2)', () => {
+  it('formatDeviceIdentity and parseDeviceIdentity round-trip', () => {
+    const userId = '550e8400-e29b-41d4-a716-446655440000';
+    const deviceUuid = 'f47ac10b-58cc-4372-a567-0e02b2c3d479';
+    const identity = formatDeviceIdentity(userId, deviceUuid);
+    expect(identity).toBe(`${userId}:${deviceUuid}`);
+    const parsed = parseDeviceIdentity(identity);
+    expect(parsed.userId).toBe(userId);
+    expect(parsed.deviceUuid).toBe(deviceUuid);
+  });
+
+  it('parseDeviceIdentity returns deviceUuid: undefined for legacy format (no colon)', () => {
+    const legacy = '550e8400-e29b-41d4-a716-446655440000';
+    const parsed = parseDeviceIdentity(legacy);
+    expect(parsed.userId).toBe(legacy);
+    expect(parsed.deviceUuid).toBeUndefined();
+  });
+
+  it('two leaves with same userId but different deviceUuid join the same group without collision', async () => {
+    const engine = await MlsEngine.create();
+    const userId = 'alice-user-id';
+    const aliceD1 = await engine.generateDeviceKeys(formatDeviceIdentity(userId, 'device-uuid-1'));
+    const aliceD2 = await engine.generateDeviceKeys(formatDeviceIdentity(userId, 'device-uuid-2'));
+
+    // D1 creates the group and adds D2 — ts-mls must accept both leaves.
+    const conv = await engine.createConversation('multi-device-conv', aliceD1);
+    const invite = await conv.addMember(aliceD2.publicPackage);
+    const d2Conv = await engine.joinConversation(aliceD2, invite);
+
+    // Both devices can encrypt/decrypt — no collision.
+    const fromD1 = await conv.encrypt('from d1');
+    expect(await d2Conv.decrypt(fromD1)).toBe('from d1');
+
+    const fromD2 = await d2Conv.encrypt('from d2');
+    expect(await conv.decrypt(fromD2)).toBe('from d2');
   });
 });

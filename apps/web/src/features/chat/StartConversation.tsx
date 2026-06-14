@@ -52,6 +52,8 @@ export function StartConversation({
   const [filter, setFilter] = useState('');
   const [peer, setPeer] = useState<UserSummary | null>(null);
   const [pending, setPending] = useState<PendingConversation | null>(null);
+  // -1 = showing primary SN; 0+ = showing secondary device SN at that index.
+  const [secondaryStep, setSecondaryStep] = useState(-1);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<SafeUiError | null>(null);
 
@@ -87,6 +89,7 @@ export function StartConversation({
       return;
     }
     setPeer(u);
+    setSecondaryStep(-1);
     setBusy(true);
     setActionError(null);
     manager
@@ -124,6 +127,35 @@ export function StartConversation({
   };
 
   if (pending && peer) {
+    // After primary SN is confirmed: step through each secondary device's safety number.
+    // A MITM swap on ANY secondary package produces a different SN — all must be verified OOB.
+    if (secondaryStep >= 0 && secondaryStep < pending.peerSecondaryDevices.length) {
+      const secDev = pending.peerSecondaryDevices[secondaryStep]!;
+      const total = pending.peerSecondaryDevices.length + 1;
+      return (
+        <VerifySecurity
+          mode="live"
+          peerName={`${contactDisplayName(peer)} (device ${String(secondaryStep + 2)} of ${String(total)})`}
+          safetyNumber={secDev.safetyNumber}
+          verified={false}
+          error={actionError}
+          onVerifiedChange={(v) => {
+            if (!v) return;
+            if (secondaryStep + 1 >= pending.peerSecondaryDevices.length) {
+              confirm();
+            } else {
+              setSecondaryStep(secondaryStep + 1);
+            }
+          }}
+          onClose={() => {
+            setSecondaryStep(-1);
+            setPending(null);
+            setPeer(null);
+            setActionError(null);
+          }}
+        />
+      );
+    }
     return (
       <VerifySecurity
         mode="live"
@@ -132,7 +164,12 @@ export function StartConversation({
         verified={false}
         error={actionError}
         onVerifiedChange={(v) => {
-          if (v) confirm();
+          if (!v) return;
+          if (pending.peerSecondaryDevices.length === 0) {
+            confirm();
+          } else {
+            setSecondaryStep(0);
+          }
         }}
         onClose={() => {
           setPending(null);

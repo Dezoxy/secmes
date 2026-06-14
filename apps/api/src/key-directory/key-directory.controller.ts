@@ -6,6 +6,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
 } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
@@ -17,6 +18,7 @@ import {
   ApiParam,
   ApiProperty,
   ApiTags,
+  ApiQuery,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
@@ -152,13 +154,29 @@ export class KeyDirectoryController {
       'Used when staging a group membership commit — one Welcome per device requires one claimed KeyPackage per device. Returns only devices with available packages; an empty array means the target has no packages (ask them to replenish).',
   })
   @ApiParam({ name: 'userId', format: 'uuid' })
+  @ApiQuery({
+    name: 'deviceId',
+    required: false,
+    schema: { type: 'string', format: 'uuid' },
+    description:
+      'When provided, only claim a package for this specific device (enrollment fan-out). Omit to claim one package per non-provisional device (group-add).',
+  })
+  @ApiQuery({
+    name: 'excludeDeviceId',
+    required: false,
+    schema: { type: 'string', format: 'uuid' },
+    description:
+      "When provided, skip this device's packages (caller's own device — avoids burning the caller's own key packages during self-claim for group-add).",
+  })
   @ApiOkResponse({ type: [ClaimedKeyPackageDto] })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async claimAll(
     @CurrentAuth() auth: VerifiedAuth,
     @Param('userId', ParseUUIDPipe) userId: string,
+    @Query('deviceId', new ParseUUIDPipe({ optional: true })) deviceId?: string,
+    @Query('excludeDeviceId', new ParseUUIDPipe({ optional: true })) excludeDeviceId?: string,
   ): Promise<ClaimedKeyPackageDto[]> {
-    return this.dir.claimAll(auth, userId);
+    return this.dir.claimAll(auth, userId, deviceId, excludeDeviceId);
   }
 
   // POST (a mutation): deletes the caller's own device's unclaimed packages. Idempotent — revoking again

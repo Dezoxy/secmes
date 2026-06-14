@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Check, Cloud, Download, KeyRound, Loader2, Upload, X } from 'lucide-react';
+import { formatDeviceIdentity, parseDeviceIdentity } from '@argus/crypto';
 import { RestoreCommittedError, restoreAndProvision } from '../../lib/device-restore';
 import { fetchBackup, storeBackup } from '../../lib/api';
 import {
   RECOVERY_IDENTITY,
   exportRecovery,
+  peekArtifactIdentity,
   recoveryIsSetUp,
   restoreFromArtifact,
   setUpRecovery,
@@ -92,9 +94,12 @@ interface RecoveryPanelProps {
 export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps) {
   const { profile } = useAuth();
   const device = useDevice();
-  // Back up the SIGNED-IN account's device under the same identity the unlock gate sealed it with.
-  // RECOVERY_IDENTITY is only the demo fallback when there is no real account.
-  const identity = profile?.userId ?? RECOVERY_IDENTITY;
+  // Export uses the composite identity the keystore was sealed under (userId:deviceUuid).
+  // RECOVERY_IDENTITY is only the demo fallback when no account or no device UUID is available.
+  const exportIdentity =
+    profile && device.deviceUuid
+      ? formatDeviceIdentity(profile.userId, device.deviceUuid)
+      : (profile?.userId ?? RECOVERY_IDENTITY);
   const [setUp, setSetUp] = useState<boolean | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [passphrase, setPassphrase] = useState('');
@@ -133,8 +138,8 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
     try {
       const artifact =
         setUp === true
-          ? await exportRecovery(identity, passphrase)
-          : await setUpRecovery(identity, passphrase);
+          ? await exportRecovery(exportIdentity, passphrase)
+          : await setUpRecovery(exportIdentity, passphrase);
       downloadFile('argus-recovery.json', artifact);
       // Server upload is a non-blocking safety-net (the downloaded file is the primary copy), but we
       // report the outcome honestly: claiming "saved to your account" when the upload failed would
@@ -171,12 +176,20 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
     }
     setBusy(true);
     try {
+      const artifactText = await file.text();
+      const restoreIdentity = await peekArtifactIdentity(artifactText, importPassphrase);
+      // Prevent restoring another user's artifact into this account (cross-account identity swap).
+      // Only enforced when signed in (profile present); unauthenticated fresh restores accept any artifact.
+      const { userId: artifactUserId } = parseDeviceIdentity(restoreIdentity);
+      if (profile && artifactUserId !== profile.userId) {
+        throw new Error('recovery artifact belongs to a different account');
+      }
       if (device.keystore) {
-        await restoreAndProvision(device.keystore, identity, await file.text(), importPassphrase);
+        await restoreAndProvision(device.keystore, restoreIdentity, artifactText, importPassphrase);
         setDone('Device restored — reloading…');
         window.location.reload();
       } else {
-        await restoreFromArtifact(identity, await file.text(), importPassphrase);
+        await restoreFromArtifact(restoreIdentity, artifactText, importPassphrase);
         setSetUp(true);
         setDone('This device was restored from your recovery file.');
         setFile(null);
@@ -221,12 +234,22 @@ export function RecoveryPanel({ embedded = false, onClose }: RecoveryPanelProps)
     }
     setBusy(true);
     try {
+      const restoreIdentity = await peekArtifactIdentity(serverArtifact, importPassphrase);
+      const { userId: artifactUserId } = parseDeviceIdentity(restoreIdentity);
+      if (profile && artifactUserId !== profile.userId) {
+        throw new Error('recovery artifact belongs to a different account');
+      }
       if (device.keystore) {
-        await restoreAndProvision(device.keystore, identity, serverArtifact, importPassphrase);
+        await restoreAndProvision(
+          device.keystore,
+          restoreIdentity,
+          serverArtifact,
+          importPassphrase,
+        );
         setDone('Device restored — reloading…');
         window.location.reload();
       } else {
-        await restoreFromArtifact(identity, serverArtifact, importPassphrase);
+        await restoreFromArtifact(restoreIdentity, serverArtifact, importPassphrase);
         setSetUp(true);
         setDone('This device was restored from your server backup.');
         setServerArtifact(null);
