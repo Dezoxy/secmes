@@ -3,9 +3,9 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { getDb } from '../db/index.js';
 import { StripeEventStore } from './stripe-event-store.js';
 
-// Integration test — exercises the REAL stripe_events grants as the argus_app role (claim/release run inside
-// withRouting → SET ROLE argus_app). The unit suite mocks StripeEventStore, so only this test would catch a
-// missing INSERT/SELECT/DELETE grant in migration 0029. Requires a live Postgres with migrations applied:
+// Integration test — exercises the REAL stripe_events grants as the argus_app role (isProcessed/markProcessed
+// run inside withRouting → SET ROLE argus_app). The unit suite mocks StripeEventStore, so only this test would
+// catch a missing INSERT/SELECT grant in migration 0029. Requires a live Postgres with migrations applied:
 //   make up && pnpm --filter @argus/api db:migrate
 // Auto-skips where no DATABASE_URL is set (the unit-only CI job has no DB service).
 const DB_URL = process.env.DATABASE_URL;
@@ -22,11 +22,12 @@ describe.skipIf(!DB_URL)(
       await sql.end({ timeout: 5 });
     });
 
-    it('claim is true for a new event, false on redelivery, and release (DELETE grant) makes it claimable again', async () => {
-      expect(await store.claim(EVENT_ID, 'test.event')).toBe(true); // INSERT grant — first delivery
-      expect(await store.claim(EVENT_ID, 'test.event')).toBe(false); // SELECT/conflict — redelivery deduped
-      await store.release(EVENT_ID); // DELETE grant — the release-on-failure path
-      expect(await store.claim(EVENT_ID, 'test.event')).toBe(true); // re-claimable, so Stripe's retry re-processes
+    it('isProcessed is false for a new event, true after markProcessed, and markProcessed is idempotent', async () => {
+      expect(await store.isProcessed(EVENT_ID)).toBe(false); // SELECT grant — new event
+      await store.markProcessed(EVENT_ID, 'test.event'); // INSERT grant — record after successful dispatch
+      expect(await store.isProcessed(EVENT_ID)).toBe(true); // dedup gate now trips
+      await store.markProcessed(EVENT_ID, 'test.event'); // ON CONFLICT DO NOTHING — safe under a race, no throw
+      expect(await store.isProcessed(EVENT_ID)).toBe(true);
     });
   },
 );

@@ -18,7 +18,8 @@ create table stripe_events (
   received_at timestamptz not null default now()
 );
 
--- INSERT (claim) + SELECT, and DELETE: the webhook RELEASES a claim (deletes the row) when dispatch throws
--- after claiming, so Stripe's at-least-once retry can re-process — without DELETE that release fails and the
--- retry would be silently deduped, losing the plan write.
-grant select, insert, delete on stripe_events to argus_app;
+-- argus_app: SELECT (the "already processed?" gate) + INSERT (record after successful dispatch). No UPDATE/
+-- DELETE — rows are immutable, and the webhook records an event only AFTER its handler succeeds, so there is
+-- no release/delete path: a crash or throw before recording simply lets Stripe's at-least-once retry
+-- re-process (handlers are idempotent). An event is never marked processed without having been processed.
+grant select, insert on stripe_events to argus_app;

@@ -179,49 +179,46 @@ export class BillingService implements OnModuleInit {
 
   /** Handle a verified Stripe webhook event — update plan tier and subscription status. */
   async handleWebhookEvent(event: Stripe.Event): Promise<void> {
-    // Idempotency (COMP-3): Stripe delivers at-least-once. Claim the event id first; a redelivery is skipped.
-    // The handlers below are also defensive (live re-fetch + stale-sub guards), so this prevents redundant work
-    // and duplicate audit rows rather than a correctness bug. stripe_events is a global no-RLS dedup log (0029).
-    if (!(await this.eventStore.claim(event.id, event.type))) {
+    // Idempotency (COMP-3): Stripe delivers at-least-once. Skip an event we've already fully processed; we
+    // record it AFTER successful dispatch (below), so a crash/throw mid-handler leaves it unrecorded and
+    // Stripe's retry re-processes it — handlers are idempotent (live re-fetch + stale-sub guards + absolute
+    // writes), so an event is never marked done without being done. stripe_events is a global no-RLS log (0029).
+    if (await this.eventStore.isProcessed(event.id)) {
       this.logger.log(`billing: duplicate stripe event ${event.id} (${event.type}) skipped`);
       return;
     }
 
-    // If dispatch throws AFTER the claim committed (a transient Stripe/DB fault), release the claim so
-    // Stripe's at-least-once retry can re-process the event — otherwise the dedup would suppress the retry
-    // and the plan write would be lost. (The claim must cover the same failure domain as the work it guards.)
-    try {
-      await this.dispatchEvent(event);
-    } catch (err) {
-      await this.eventStore
-        .release(event.id)
-        .catch((e) =>
-          this.logger.error(
-            `billing: failed to release stripe event ${event.id} after handler error`,
-            e instanceof Error ? e.stack : e,
-          ),
-        );
-      throw err;
-    }
+    await this.dispatchEvent(event);
+
+    // Reached only on success — a thrown handler propagates (→ 500 → Stripe retries) WITHOUT recording the
+    // event, so the retry re-processes rather than being silently deduped.
+    await this.eventStore.markProcessed(event.id, event.type);
   }
 
   private async dispatchEvent(event: Stripe.Event): Promise<void> {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session;
-        // Tenant context on a @Public webhook (COMP-4): metadata.tenantId is argus-written under a verified
-        // auth.tenantId at checkout creation, and the body is Stripe-signature-authenticated. As defense-in-depth
-        // — and to match the stronger customer-keyed paths — cross-check it against the customer's own metadata
-        // and require a valid UUID before it can open a withTenant transaction. Fail closed (skip) otherwise.
-        const fromCustomer = session.customer
-          ? await this.tenantIdFromCustomer(session.customer as string)
-          : null;
-        const tenantId = this.verifiedWebhookTenant(
-          session.metadata?.tenantId,
-          fromCustomer,
-          'checkout.session.completed',
-        );
-        if (!tenantId || !session.subscription) break;
+        // Tenant context on a @Public webhook (COMP-4): derive the tenant from the Stripe Customer's own
+        // (argus-written) metadata — re-fetched live + UUID-validated in tenantIdFromCustomer — and REQUIRE the
+        // session's relayed metadata.tenantId to match it. Fail closed (skip) if the customer can't confirm a
+        // tenant or the two disagree, so a withTenant transaction never opens on the relayed value alone.
+        const customerId =
+          typeof session.customer === 'string' ? session.customer : (session.customer?.id ?? null);
+        const tenantId = customerId ? await this.tenantIdFromCustomer(customerId) : null;
+        if (!tenantId) {
+          this.logger.warn(
+            'billing: checkout.session.completed has no resolvable tenant from customer — skipping',
+          );
+          break;
+        }
+        if (session.metadata?.tenantId !== tenantId) {
+          this.logger.warn(
+            'billing: checkout.session.completed tenantId mismatch (session metadata vs customer) — skipping',
+          );
+          break;
+        }
+        if (!session.subscription) break;
 
         const subscriptionId =
           typeof session.subscription === 'string' ? session.subscription : session.subscription.id;
@@ -362,29 +359,5 @@ export class BillingService implements OnModuleInit {
       return null;
     }
     return tenantId;
-  }
-
-  /**
-   * Validate a webhook-derived tenant id before it opens a withTenant transaction (COMP-4). Requires a valid
-   * UUID and, when a cross-check value is available (the Stripe customer's own metadata), that the two agree.
-   * Returns null + a metadata-only warning on any mismatch — fail closed. Never throws: a throw would 500 the
-   * webhook and make Stripe retry the same bad event indefinitely.
-   */
-  private verifiedWebhookTenant(
-    claimed: string | null | undefined,
-    crossCheck: string | null,
-    ctx: string,
-  ): string | null {
-    if (!isUuid(claimed)) {
-      this.logger.warn(`billing: ${ctx} has missing/invalid tenantId in metadata — skipping`);
-      return null;
-    }
-    if (crossCheck !== null && crossCheck !== claimed) {
-      this.logger.warn(
-        `billing: ${ctx} tenantId mismatch (session metadata vs customer) — skipping`,
-      );
-      return null;
-    }
-    return claimed;
   }
 }

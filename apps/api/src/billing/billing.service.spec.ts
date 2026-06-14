@@ -73,11 +73,12 @@ function makeSso(overrides?: Partial<SsoService>) {
   } as unknown as SsoService;
 }
 
-// Default: every event is new (claim → true), so handlers run. Override claim → false to simulate a redelivery.
+// Default: every event is new (isProcessed → false), so handlers run and the event is recorded afterwards.
+// Override isProcessed → true to simulate an already-processed redelivery.
 function makeStore(overrides?: Partial<StripeEventStore>) {
   return {
-    claim: vi.fn().mockResolvedValue(true),
-    release: vi.fn().mockResolvedValue(undefined),
+    isProcessed: vi.fn().mockResolvedValue(false),
+    markProcessed: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   } as unknown as StripeEventStore;
 }
@@ -136,9 +137,10 @@ describe('BillingService', () => {
     expect(plans.setPlan).not.toHaveBeenCalled();
   });
 
-  it('handleWebhookEvent checkout.session.completed upgrades plan to pro', async () => {
+  it('handleWebhookEvent checkout.session.completed upgrades plan to pro and records the event', async () => {
     const plans = makePlans();
-    const svc = new BillingService(plans, makeSso(), makeStore());
+    const store = makeStore();
+    const svc = new BillingService(plans, makeSso(), store);
 
     const event = {
       id: 'evt_checkout',
@@ -164,6 +166,8 @@ describe('BillingService', () => {
       }),
       'stripe-webhook',
     );
+    // Recorded only after successful dispatch.
+    expect(store.markProcessed).toHaveBeenCalledWith('evt_checkout', 'checkout.session.completed');
   });
 
   it('handleWebhookEvent customer.subscription.deleted reverts to free and disables SSO', async () => {
@@ -213,9 +217,9 @@ describe('BillingService', () => {
     );
   });
 
-  it('handleWebhookEvent skips a duplicate (redelivered) event without re-processing', async () => {
+  it('handleWebhookEvent skips an already-processed event without re-dispatching', async () => {
     const plans = makePlans();
-    const store = makeStore({ claim: vi.fn().mockResolvedValue(false) }); // already seen → redelivery
+    const store = makeStore({ isProcessed: vi.fn().mockResolvedValue(true) }); // already recorded
     const svc = new BillingService(plans, makeSso(), store);
 
     const event = {
@@ -232,32 +236,12 @@ describe('BillingService', () => {
 
     await svc.handleWebhookEvent(event);
 
-    expect(store.claim).toHaveBeenCalledWith('evt_checkout', 'checkout.session.completed');
+    expect(store.isProcessed).toHaveBeenCalledWith('evt_checkout');
     expect(plans.setPlan).not.toHaveBeenCalled();
+    expect(store.markProcessed).not.toHaveBeenCalled();
   });
 
-  it('handleWebhookEvent skips when the webhook tenantId is not a valid UUID', async () => {
-    const plans = makePlans();
-    const svc = new BillingService(plans, makeSso(), makeStore());
-
-    const event = {
-      id: 'evt_badtenant',
-      type: 'checkout.session.completed',
-      data: {
-        object: {
-          metadata: { tenantId: 'not-a-uuid' },
-          customer: 'cus_test',
-          subscription: 'sub_test',
-        } as unknown as Stripe.Checkout.Session,
-      },
-    } as Stripe.Event;
-
-    await svc.handleWebhookEvent(event);
-
-    expect(plans.setPlan).not.toHaveBeenCalled();
-  });
-
-  it('handleWebhookEvent releases the claimed event id when the handler throws (so Stripe retries re-process)', async () => {
+  it('handleWebhookEvent does NOT record the event when dispatch throws (so Stripe retries re-process it)', async () => {
     const plans = makePlans({
       setPlan: vi.fn().mockRejectedValue(new Error('transient db error')),
     });
@@ -277,7 +261,29 @@ describe('BillingService', () => {
     } as Stripe.Event;
 
     await expect(svc.handleWebhookEvent(event)).rejects.toThrow('transient db error');
-    expect(store.release).toHaveBeenCalledWith('evt_fail');
+    expect(store.markProcessed).not.toHaveBeenCalled();
+  });
+
+  it('handleWebhookEvent skips checkout.session.completed when session metadata disagrees with the customer', async () => {
+    const plans = makePlans();
+    const svc = new BillingService(plans, makeSso(), makeStore());
+
+    const event = {
+      id: 'evt_mismatch',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          // customer metadata resolves to TENANT_ID (mock), but the session claims a different tenant
+          metadata: { tenantId: '22222222-2222-2222-2222-222222222222' },
+          customer: 'cus_test',
+          subscription: 'sub_test',
+        } as unknown as Stripe.Checkout.Session,
+      },
+    } as Stripe.Event;
+
+    await svc.handleWebhookEvent(event);
+
+    expect(plans.setPlan).not.toHaveBeenCalled();
   });
 
   it('is a no-op when STRIPE_SECRET_KEY_FILE is not set', () => {
