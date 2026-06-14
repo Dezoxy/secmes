@@ -134,8 +134,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (ro
 
 ## Beyond GA — backlog (the deferred hard stuff)
 
-- [ ] B1. **Group chat** (MLS groups) — cheap-ish because MLS was chosen up front
-- [ ] B2. **Multi-device sync** — encrypt-to-all-devices + history sync (the nastiest E2EE problem)
+- [x] B1. **Group chat** (MLS groups) — cheap-ish because MLS was chosen up front — _Landed: composite `userId:deviceUuid` MLS identity, group `ConversationManager.confirmCreate()` (fan-out add-commit to all members + self-devices), `GroupConversationManager` UI (group name, multi-select contact picker), group WS routing by conversation room, group message-history persistence. Threat models `group-chat.md`. B1 branch merged._
+- [x] B2. **Multi-device sync** — encrypt-to-all-devices + history sync (the nastiest E2EE problem) — _Landed (PR #191): **composite `userId:deviceUuid` identity** (eliminates MLS leaf collision; `formatDeviceIdentity`/`parseDeviceIdentity`), **`device_enrollments` table** (RLS, FKs, 15-min TTL), **enrollment endpoints** (`POST /devices/me/enrollment`, `GET /devices/enrollments`, approve/reject, `GET /devices/me/conversations` fan-out diff), **`enroll` proof domain** (`argus-enroll:v1` — cross-domain non-reuse tested), **enrollment fan-out driver** (`lib/enroll.ts` — sequential add-commit per conversation, 409-rebase), **enrollment UI** (`LinkDevicePanel` D2 side, `ApproveDevicePanel` D1 side), **self-add on conversation create** (`confirm()`/`confirmCreate()` claim own-user's other-device packages), **atomic `POST /devices/me/migrate`** (delete + re-insert as non-provisional in one tx under `FOR UPDATE` — closes the race window that separate withdraw + provision leaves open), **legacy migration path** (pre-B2 bare-userId keystores auto-upgraded on unlock/restore). History: new device decrypts from its add-epoch forward only (forward secrecy; UX copy "History stays on your other device"). `crypto-reviewer` + `security-boundary-auditor` PASS; 42Crunch 100/100. Threat model `multi-device-enrollment.md`._
 - [ ] B3. **Per-tenant compliance mode** — opt-in escrow/journaling for regulated buyers
 - [ ] B4. **Multi-region / zone-redundant VM deploy**; Azure sovereign-operator option
-- [ ] B5. **SOC 2 / ISO 27001** path
+- [ ] B5. **SOC 2 / ISO 27001 / NIS2** path
