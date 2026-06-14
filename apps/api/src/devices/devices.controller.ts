@@ -33,9 +33,11 @@ import { DevicesService } from './devices.service.js';
 import {
   EnrollmentApproveBodySchema,
   EnrollmentRegisterBodySchema,
+  MigrateDeviceBodySchema,
   WithdrawDeviceBodySchema,
   type EnrollmentApproveBody,
   type EnrollmentRegisterBody,
+  type MigrateDeviceBody,
   type WithdrawDeviceBody,
 } from './devices.schemas.js';
 
@@ -109,6 +111,23 @@ class WithdrawDeviceBodyDto {
   @ApiProperty({
     description:
       "The device's Ed25519 signature public key (base64) — identifies which device to withdraw",
+    maxLength: 512,
+  })
+  signaturePublicKey!: string;
+
+  @ApiProperty({
+    description:
+      'base64url Ed25519 proof-of-possession: sign(argus-withdraw:v1\\n${spk}, signaturePrivateKey)',
+    maxLength: 128,
+    pattern: '^[A-Za-z0-9_-]+$',
+  })
+  proof!: string;
+}
+
+class MigrateDeviceBodyDto {
+  @ApiProperty({
+    description:
+      "The device's Ed25519 signature public key (base64) — the key being migrated to a composite identity",
     maxLength: 512,
   })
   signaturePublicKey!: string;
@@ -237,6 +256,26 @@ export class DevicesController {
     @Body(new ZodValidationPipe(WithdrawDeviceBodySchema)) body: WithdrawDeviceBody,
   ): Promise<void> {
     await this.devices.withdrawDevice(auth, body.signaturePublicKey, body.proof);
+  }
+
+  @Post('devices/me/migrate')
+  @HttpCode(204)
+  @Throttle(perMinute(SENSITIVE_LIMITS.deviceWithdraw))
+  @ApiOperation({
+    summary: 'Atomically migrate device to composite identity (pre-B2 → B2)',
+    operationId: 'migrateDevice',
+    description:
+      "Atomically deletes the caller's existing device row and re-inserts it as isProvisional=false in one transaction. Eliminates the race window that a separate withdrawDevice + publishKeyPackages leaves open (a concurrent key-packages POST with a stolen bearer token could otherwise sneak in as the sole trusted device). Requires an Ed25519 proof-of-possession over the same signing key. Idempotent.",
+  })
+  @ApiBody({ type: MigrateDeviceBodyDto })
+  @ApiNoContentResponse({ description: 'device migrated' })
+  @ApiBadRequestResponse({ description: 'invalid body or proof' })
+  @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
+  async migrate(
+    @CurrentAuth() auth: VerifiedAuth,
+    @Body(new ZodValidationPipe(MigrateDeviceBodySchema)) body: MigrateDeviceBody,
+  ): Promise<void> {
+    await this.devices.migrateDevice(auth, body.signaturePublicKey, body.proof);
   }
 
   @Get('devices/me/conversations')

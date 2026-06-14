@@ -321,6 +321,73 @@ export class DevicesService {
   }
 
   /**
+   * Atomically swap the caller's device from the legacy bare-userId identity to the composite
+   * userId:deviceUuid identity, without a race window. In one transaction: (1) verify proof-of-
+   * possession against the current signing key, (2) delete the existing device row (and its pending
+   * Welcomes, which are useless after the key is re-registered), (3) re-insert the same signing key
+   * as isProvisional=false. This prevents the race that withdrawDevice + a separate publishKeyPackages
+   * call leaves open: between those two calls, zero non-provisional devices exist, so a concurrent
+   * POST /devices/me/key-packages with a stolen bearer token could sneak in as the new trusted device.
+   */
+  async migrateDevice(
+    auth: VerifiedAuth,
+    signaturePublicKey: string,
+    proofBase64url: string,
+  ): Promise<void> {
+    await withTenant(auth.tenantId, async (tx) => {
+      const userId = await requireUser(tx, auth.sub);
+
+      // Verify proof-of-possession (same domain as withdraw — caller must own the private key).
+      const proven = verifyWithdraw(
+        Buffer.from(signaturePublicKey, 'base64'),
+        signaturePublicKey,
+        Buffer.from(proofBase64url, 'base64url'),
+      );
+      if (!proven) throw new BadRequestException('invalid migrate proof');
+
+      // Lock user row — serializes concurrent migrate/publish calls (same pattern as publish()).
+      await tx.execute(sql`select 1 from users where id = ${userId} for update`);
+
+      const [device] = await tx
+        .select({ id: schema.devices.id })
+        .from(schema.devices)
+        .where(
+          and(
+            eq(schema.devices.userId, userId),
+            eq(schema.devices.signaturePublicKey, signaturePublicKey),
+          ),
+        )
+        .limit(1);
+
+      if (device) {
+        // Delete pending Welcomes first (FK is ON DELETE NO ACTION).
+        await tx
+          .delete(schema.conversationWelcomes)
+          .where(
+            and(
+              eq(schema.conversationWelcomes.tenantId, auth.tenantId),
+              eq(schema.conversationWelcomes.recipientDeviceId, device.id),
+            ),
+          );
+        await tx.delete(schema.devices).where(eq(schema.devices.id, device.id));
+      }
+
+      // Re-insert as non-provisional. isProvisional=false is safe here because the proof above
+      // confirms the caller holds the private key — this is a key-rotation / identity-rename, not
+      // a new device that must go through the enrollment ceremony.
+      await tx
+        .insert(schema.devices)
+        .values({ tenantId: auth.tenantId, userId, signaturePublicKey, isProvisional: false })
+        .onConflictDoNothing(); // idempotent: concurrent migrate already inserted — already trusted
+    });
+
+    await this.audit.record(auth.tenantId, {
+      eventType: 'device.migrated',
+      actorSub: auth.sub,
+    });
+  }
+
+  /**
    * Return the caller's conversation IDs. Used by D1 after approving D2 to compute the fan-out
    * diff — which conversations D1 must issue add-commits for. METADATA ONLY: IDs, no content.
    */

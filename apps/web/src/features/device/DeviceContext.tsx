@@ -10,7 +10,7 @@ import {
 
 import { signWithdraw } from '@argus/crypto/device-proof';
 import { restoreAndProvision } from '../../lib/device-restore';
-import { withdrawDevice } from '../../lib/api';
+import { migrateDevice } from '../../lib/api';
 import { DeviceKeystore } from '../../lib/keystore';
 import { provisionDevice } from '../../lib/provisioning';
 import { useAuth } from '../auth/AuthContext';
@@ -155,12 +155,9 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         }
         let dev: DeviceKeys | undefined;
         if (isLegacyMigration) {
-          // Remove the old device row from the server so the new composite-identity device is
-          // published as non-provisional. The MLS credential embeds the identity string, so there
-          // is no safe way to reuse the old key under the new identity — we must regenerate.
-          // Steps: load old device (verify passphrase) → delete server row → clear local keystore
-          // → create fresh device. The old server row's absence means no existing non-provisional
-          // device → provisionDevice publishes the new key with isProvisional = false.
+          // Atomically migrate the old device to composite identity: migrateDevice deletes the old
+          // row and re-inserts it as isProvisional=false in one transaction, eliminating the race
+          // window that separate withdrawDevice + provisionDevice calls leave open.
           const oldDev = await keystore.loadDevice(storedIdent!, passphrase);
           if (!oldDev) throw new Error('legacy device not found in keystore');
           const oldSpk = deviceSignaturePublicKeyB64(oldDev);
@@ -169,7 +166,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
             .replace(/\+/g, '-')
             .replace(/\//g, '_')
             .replace(/=+$/, '');
-          await withdrawDevice(oldSpk, proof);
+          await migrateDevice(oldSpk, proof);
           // Reidentify: preserve the signing key under the new composite identity so existing
           // MLS group states (which embed the private key internally) remain usable. Only the
           // identity string metadata guards change — the ratchet and leaf-node key are the same.
@@ -236,7 +233,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
             .replace(/\+/g, '-')
             .replace(/\//g, '_')
             .replace(/=+$/, '');
-          await withdrawDevice(oldSpk, proof).catch(() => undefined);
+          await migrateDevice(oldSpk, proof).catch(() => undefined);
           const newUuid = crypto.randomUUID();
           const newIdentity = formatDeviceIdentity(userId, newUuid);
           // Reidentify: same signing key (from restoreAndProvision) under the new composite identity.

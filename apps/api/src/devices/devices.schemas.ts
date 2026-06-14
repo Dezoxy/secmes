@@ -33,3 +33,14 @@ export const WithdrawDeviceBodySchema = z
   })
   .strict();
 export type WithdrawDeviceBody = z.infer<typeof WithdrawDeviceBodySchema>;
+
+// Same shape as WithdrawDeviceBodySchema — proof is over the same signing key being migrated.
+// The difference: the server atomically re-inserts the device as isProvisional=false within the
+// same transaction, eliminating the race window that withdrawDevice + provisionDevice leaves open.
+export const MigrateDeviceBodySchema = z
+  .object({
+    signaturePublicKey: z.string().min(1).max(512),
+    proof: base64url.max(128),
+  })
+  .strict();
+export type MigrateDeviceBody = z.infer<typeof MigrateDeviceBodySchema>;

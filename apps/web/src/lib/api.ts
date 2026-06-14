@@ -926,6 +926,23 @@ export async function withdrawDevice(signaturePublicKey: string, proof: string):
   );
 }
 
+/**
+ * Atomically migrate the legacy bare-userId device to a composite-identity device: deletes the
+ * existing device row and re-inserts it as non-provisional in one transaction, closing the race
+ * window that withdrawDevice + publishKeyPackages leaves open. Use instead of withdrawDevice during
+ * the pre-B2 → B2 identity migration.
+ */
+export async function migrateDevice(signaturePublicKey: string, proof: string): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: '/devices/me/migrate',
+      method: 'POST',
+      body: { signaturePublicKey, proof },
+      requestSchema: WithdrawDeviceBodySchema,
+    }),
+  );
+}
+
 /** Return the caller's conversation IDs (for enrollment fan-out diff). */
 export async function listMyConversations(): Promise<string[]> {
   return unwrapApiResult(

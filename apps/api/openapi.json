@@ -2931,6 +2931,127 @@
         ]
       }
     },
+    "/devices/me/migrate": {
+      "post": {
+        "description": "Atomically deletes the caller's existing device row and re-inserts it as isProvisional=false in one transaction. Eliminates the race window that a separate withdrawDevice + publishKeyPackages leaves open (a concurrent key-packages POST with a stolen bearer token could otherwise sneak in as the sole trusted device). Requires an Ed25519 proof-of-possession over the same signing key. Idempotent.",
+        "operationId": "migrateDevice",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MigrateDeviceBodyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "device migrated"
+          },
+          "400": {
+            "description": "invalid body or proof",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Plan upgrade required — current plan does not include this feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted to perform this action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Atomically migrate device to composite identity (pre-B2 → B2)",
+        "tags": [
+          "devices"
+        ]
+      }
+    },
     "/devices/me/conversations": {
       "get": {
         "description": "Returns conversation IDs the caller is a member of. Used by D1 after approving D2 to compute which conversations need an add-commit. Metadata only — no conversation content.",
@@ -7973,6 +8094,28 @@
           "signaturePublicKey": {
             "type": "string",
             "description": "The device's Ed25519 signature public key (base64) — identifies which device to withdraw",
+            "maxLength": 512,
+            "pattern": "^[A-Za-z0-9+/]+={0,2}$"
+          },
+          "proof": {
+            "type": "string",
+            "description": "base64url Ed25519 proof-of-possession: sign(argus-withdraw:v1\\n${spk}, signaturePrivateKey)",
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        },
+        "required": [
+          "signaturePublicKey",
+          "proof"
+        ],
+        "additionalProperties": false
+      },
+      "MigrateDeviceBodyDto": {
+        "type": "object",
+        "properties": {
+          "signaturePublicKey": {
+            "type": "string",
+            "description": "The device's Ed25519 signature public key (base64) — the key being migrated to a composite identity",
             "maxLength": 512,
             "pattern": "^[A-Za-z0-9+/]+={0,2}$"
           },
