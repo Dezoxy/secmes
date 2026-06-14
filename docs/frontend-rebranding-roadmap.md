@@ -6,9 +6,9 @@ Goal: make Argus feel like a distinct, modern, privacy-first product instead of 
 
 ## 1. Decision
 
-Invent a new product UI direction: **Argus Secure Workspace**.
+Invent a new product UI direction: **Argus Minimal Messenger OS**.
 
-Argus should feel like a secure operations tool for teams: calm, precise, premium, and evidence-forward. The UI should make a new user immediately understand that this is not a normal chat app with a lock icon. It is a private workspace where identity, devices, encryption state, and delivery confidence are part of the interface.
+Argus should feel like a sparse, fast, command-driven encrypted messenger: calm, precise, modern, and intentionally quiet. The UI should make a new user immediately understand that this is private team messaging without turning the product into a heavy security dashboard.
 
 The visual direction should move away from:
 
@@ -20,11 +20,11 @@ The visual direction should move away from:
 
 The new direction should move toward:
 
-- a desktop-native secure workspace shell
-- visible but restrained trust signals
-- clear information hierarchy for conversations, devices, storage, and admin
+- a desktop-native messenger shell with very low visual noise
+- command/search as the primary navigation pattern
+- clear information hierarchy for conversations, devices, security, and settings
 - a neutral palette with a single strong accent and clear state colors
-- product imagery that shows the actual app, not abstract atmosphere
+- tiny factual security states instead of large trust panels
 - a design token layer that makes future rebrands cheap
 
 ## 2. Product Feel
@@ -60,16 +60,17 @@ Security should appear as product evidence, not decoration.
 
 ### Signature UI idea
 
-Add a persistent **Trust Strip** to important surfaces.
+Add a persistent **Command Layer** as the signature interaction.
 
 Examples:
 
-- Chat header: `Verified`, `MLS active`, `Device trusted`
-- Settings security section: `Passkey login`, `Recovery configured`, `This browser only`
-- Device section: `Current device`, `Pending approval`, `Last seen`
-- Transparency page: `Build digest`, `EU storage`, `Crypto-blind server`
+- Global command bar: `Search or jump to conversation`
+- Quick actions: `Open devices`, `Verify contact`, `Start conversation`
+- Chat header: tiny factual state, e.g. `Verified` and `MLS`
+- Conversation switcher: collapsible and keyboard-friendly
+- Security/device surfaces: reachable from command, not always visible
 
-This gives Argus a recognizable UI pattern that competitors do not usually have.
+This gives Argus a recognizable power-user pattern without making the UI busy.
 
 ## 4. Visual System
 
@@ -146,14 +147,15 @@ All motion must respect `prefers-reduced-motion`.
 
 ### Desktop shell
 
-Replace the centered `90vh` app frame with a desktop-native shell:
+Replace the centered `90vh` app frame with a desktop-native Minimal Messenger OS shell:
 
-- left rail: workspace, chat, security, devices, storage, settings
-- conversation rail: searchable conversation list
-- main area: selected thread or selected route
-- optional right rail: trust details, members, files, or device state
+- ultra-thin left rail: app mark plus 3-4 primary icons
+- top command bar: `Search or jump to conversation`
+- collapsible conversation switcher: visible when useful, hidden when focused
+- main area: selected thread gets most of the space
+- tiny inline security state: `Verified`, `MLS`
 
-This makes chat, admin, devices, and storage feel like one product instead of separate modals.
+This makes Argus feel simpler and more distinctive than a standard chat app.
 
 ### Mobile shell
 
@@ -162,7 +164,7 @@ Keep the current mobile flow directionally:
 - conversation list first
 - thread opens as a full screen
 - settings opens as a native-feeling sheet
-- avoid crowding the Trust Strip; use compact badges and drill-down panels
+- avoid crowding security state; use compact badges and drill-down panels
 
 Mobile is already stronger than desktop, so the rebrand should refine it rather than rebuild it.
 
@@ -182,7 +184,7 @@ Example first screen:
 ARGUS
 Private team messaging, sealed end to end.
 
-[Product preview: chat + Trust Strip + verified device]
+[Product preview: command bar + focused chat + verified state]
 
 [Continue with passkey]
 
@@ -249,14 +251,16 @@ Done when:
 
 ### Phase 2 - Redesign the app shell
 
-Purpose: make desktop feel like a secure workspace, not a phone mockup.
+Purpose: make desktop feel like a minimal command-driven messenger, not a phone mockup.
 
 Tasks:
 
 - replace the centered desktop chat frame with a full app shell
-- add a global navigation rail for core product areas
+- add an ultra-thin global navigation rail for core product areas
+- add the command/search layer
+- add a collapsible conversation switcher
 - keep chat fast and focused
-- introduce the Trust Strip in chat headers and security/device surfaces
+- introduce tiny factual security badges in chat headers and security/device surfaces
 - make route pages reuse the same shell instead of feeling separate
 
 High-value files:
@@ -272,6 +276,30 @@ Done when:
 - desktop chat uses available width intentionally
 - settings/devices/security/storage feel like product areas
 - mobile remains at least as usable as it is today
+
+### Phase 2a - Create the v2 folder boundary
+
+Keep the redesign isolated under `apps/web/src/v2` until it is intentionally routed.
+
+Recommended structure:
+
+```text
+apps/web/src/v2/
+  README.md
+  design/        # tokens, visual rules, motion rules
+  shell/         # app rail, command bar, conversation switcher
+  chat/          # v2 thread, composer, message row/bubble components
+  routes/        # future route adapters and feature-flagged entry points
+  mocks/         # static prototype data for screenshots and tests
+```
+
+Rules:
+
+- v2 components should stay behind `/v2` sketch routes until a feature flag or promotion PR
+- v2 can reuse stable libraries from `apps/web/src/lib`
+- v2 should avoid importing v1 feature components except through explicit adapters
+- use `/v2` and `/v2/*` as coded sketch routes before replacing `/chat`
+- keep v2 E2E tests separate until the route is promoted
 
 ### Phase 3 - Redesign the landing and trust center
 
@@ -391,4 +419,3 @@ Suggested scope:
 - no layout redesign yet
 
 Reasoning: this pays down the hard-coded purple/dark styling first. After that, the new design can be rolled out screen by screen with smaller, safer diffs.
-
