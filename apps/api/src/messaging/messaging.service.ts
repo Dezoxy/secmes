@@ -824,7 +824,7 @@ export class MessagingService {
         }
       } else {
         const nextEpoch = currentMax + 1;
-        if (body.epoch > nextEpoch) {
+        if (body.epoch !== nextEpoch) {
           throw new ConflictException(
             `non-contiguous epoch: expected ${String(nextEpoch)}, got ${String(body.epoch)}`,
           );
