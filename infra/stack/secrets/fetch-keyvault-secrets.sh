@@ -4,7 +4,7 @@
 # Runs as a boot-time systemd oneshot (argus-secrets.service), BEFORE the Compose stack + the backup/cleanup
 # units. It is the "separate fetch step" the backup/cleanup units already reference: it materialises
 # /run/argus/secrets/* from Key Vault. The stack + workers then read those files (compose Docker secrets /
-# *_FILE env / systemd LoadCredential). See infra/vm/secrets/README.md + docs/threat-models/vm-secrets.md.
+# *_FILE env / systemd LoadCredential). See infra/stack/secrets/README.md + docs/threat-models/vm-secrets.md.
 #
 # Security model:
 #   - NO static credentials. The access token is minted by a platform machine identity scoped to

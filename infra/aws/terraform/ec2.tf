@@ -19,7 +19,7 @@ locals {
 
 # The experiment box. Single instance, single root volume, IMDSv2 enforced. First-boot provisioning (Docker,
 # the Arc agent + `azcmagent connect`, the swapfile, the secret-fetch unit) is in cloud-init.yaml — the AWS
-# port of infra/vm/terraform/cloud-init.yaml.
+# port of infra/azure/terraform/cloud-init.yaml.
 resource "aws_instance" "this" {
   ami                    = local.ami_id
   instance_type          = var.instance_type

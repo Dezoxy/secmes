@@ -9,7 +9,7 @@ terraform {
     }
     # Azure — secrets stay here. This module creates a SEPARATE experiment Key Vault (dummy values) + the Arc
     # onboarding service principal, so the EC2 box reads secrets via an Azure Arc managed identity (no static
-    # cred). The live infra/vm/ stack and its prod Key Vault are NOT touched by this module.
+    # cred). The live infra/azure/ stack and its prod Key Vault are NOT touched by this module.
     azurerm = {
       source  = "hashicorp/azurerm"
       version = "~> 4.0"
@@ -26,7 +26,7 @@ terraform {
     }
   }
 
-  # Local state for the experiment (mirrors infra/vm/terraform/). State holds the Arc onboarding SP id, the KV
+  # Local state for the experiment (mirrors infra/azure/terraform/). State holds the Arc onboarding SP id, the KV
   # id, and the GitHub OIDC role arn — DO NOT commit terraform.tfstate. Before any shared/CI use, migrate to an
   # encrypted remote backend with locking, e.g.:
   # backend "s3" {

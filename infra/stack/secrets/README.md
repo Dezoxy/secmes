@@ -57,7 +57,7 @@ consumers `Requires=` this unit, so they don't start on a missing secret).
 
 ### Deploy-time secrets (fetched by `deploy.sh`, NOT delivered to the running stack)
 
-The CD rollout (`infra/vm/deploy/deploy.sh`, Slice 4) fetches two extra secrets via the Managed Identity,
+The CD rollout (`infra/stack/deploy/deploy.sh`, Slice 4) fetches two extra secrets via the Managed Identity,
 uses them, and drops them — they are **never** written to `/run/argus/secrets` (least privilege: the running
 stack never holds a GitHub token or the DB owner DSN):
 
@@ -68,11 +68,11 @@ stack never holds a GitHub token or the DB owner DSN):
 
 ## Populate the vault (one-time, by you)
 
-The VM's Managed Identity has **Key Vault Secrets User** (read-only) from `infra/vm/terraform`. You set the
+The VM's Managed Identity has **Key Vault Secrets User** (read-only) from `infra/azure/terraform`. You set the
 values out-of-band — they never touch the repo:
 
 ```bash
-KV="$(terraform -chdir=infra/vm/terraform output -raw key_vault_name)"
+KV="$(terraform -chdir=infra/azure/terraform output -raw key_vault_name)"
 az keyvault secret set --vault-name "$KV" --name argus-postgres-owner-password --value '<owner-pw>'
 az keyvault secret set --vault-name "$KV" --name argus-database-url           --value 'postgres://argus_app:<pw>@postgres:5432/argus'
 az keyvault secret set --vault-name "$KV" --name argus-s3-secret-access-key   --value '<b2-attachment-key-secret>'
@@ -99,8 +99,8 @@ Set values **without a trailing newline** (the fetch strips one defensively, but
 
 ```bash
 install -d /opt/argus/secrets
-install -m 0755 infra/vm/secrets/fetch-keyvault-secrets.sh /opt/argus/secrets/
-install -m 0644 infra/vm/secrets/argus-secrets.service /etc/systemd/system/
+install -m 0755 infra/stack/secrets/fetch-keyvault-secrets.sh /opt/argus/secrets/
+install -m 0644 infra/stack/secrets/argus-secrets.service /etc/systemd/system/
 # Template the real vault name into the unit (the deploy reads the TF output):
 sed -i "s/REPLACE_WITH_KEY_VAULT_NAME/$KV/" /etc/systemd/system/argus-secrets.service
 systemctl daemon-reload

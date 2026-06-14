@@ -39,7 +39,7 @@ id_ed25519
 *.gpg
 *.asc
 # Root-only runtime credential dir (compose local-dev secret files). Anchored with a leading slash so it does
-# NOT match the tracked code dir infra/vm/secrets/ (the Key Vault fetch script + systemd unit).
+# NOT match the tracked code dir infra/stack/secrets/ (the Key Vault fetch script + systemd unit).
 /secrets/
 .secrets/
 *.secret

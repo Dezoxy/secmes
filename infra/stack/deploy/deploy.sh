@@ -49,7 +49,7 @@ mi_token() {
       jq -r '.access_token // empty'
     ;;
   arc)
-    # Azure Arc HIMDS challenge-token handshake (see infra/vm/secrets/fetch-keyvault-secrets.sh for the rationale):
+    # Azure Arc HIMDS challenge-token handshake (see infra/stack/secrets/fetch-keyvault-secrets.sh for the rationale):
     # 401 names a root/himds-only .key file; read it, echo back as Basic auth (via --config stdin, never argv).
     local url hdrs realm secret resp
     url="${ARC_IMDS_URL}?api-version=2020-06-01&resource=https%3A%2F%2Fvault.azure.net"
@@ -97,21 +97,21 @@ log "staging config into ${APP_DIR}"
 install -d -m 0750 -o root -g argus "$APP_DIR" "$APP_DIR/secrets"
 install -m 0640 -o root -g argus "$REPO_ROOT/compose.prod.yaml" "$COMPOSE"
 # Observability config tree (Prometheus/Grafana/Alertmanager) — the compose services bind-mount it read-only
-# at ./infra/vm/observability (relative to $COMPOSE in $APP_DIR). World-readable (0755 dirs / 0644 files) so
+# at ./infra/stack/observability (relative to $COMPOSE in $APP_DIR). World-readable (0755 dirs / 0644 files) so
 # the non-root prometheus/grafana container users can read it; it contains NO secrets (Grafana's admin pw is a
 # Key Vault credential file, not in this tree). Refresh from the staged repo each deploy.
-rm -rf "$APP_DIR/infra/vm/observability" "$APP_DIR/infra/vm/glitchtip"
-install -d -m 0755 "$APP_DIR/infra/vm"
-cp -a "$REPO_ROOT/infra/vm/observability" "$APP_DIR/infra/vm/observability"
-chmod -R a+rX "$APP_DIR/infra/vm/observability"
+rm -rf "$APP_DIR/infra/stack/observability" "$APP_DIR/infra/stack/glitchtip"
+install -d -m 0755 "$APP_DIR/infra/stack"
+cp -a "$REPO_ROOT/infra/stack/observability" "$APP_DIR/infra/stack/observability"
+chmod -R a+rX "$APP_DIR/infra/stack/observability"
 # GlitchTip entrypoint wrapper — bind-mounted read-only into the glitchtip + glitchtip-worker containers.
 # Contains NO secrets (reads them from Docker-secret files at runtime); world-executable so the container
 # user can exec it regardless of uid.
-install -d -m 0755 "$APP_DIR/infra/vm/glitchtip"
-install -m 0755 "$REPO_ROOT/infra/vm/glitchtip/docker-entrypoint.sh" "$APP_DIR/infra/vm/glitchtip/docker-entrypoint.sh"
-chmod a+rx "$APP_DIR/infra/vm/glitchtip/docker-entrypoint.sh"
-install -m 0755 "$REPO_ROOT/infra/vm/secrets/fetch-keyvault-secrets.sh" "$APP_DIR/secrets/fetch-keyvault-secrets.sh"
-install -m 0644 "$REPO_ROOT/infra/vm/secrets/argus-secrets.service" /etc/systemd/system/argus-secrets.service
+install -d -m 0755 "$APP_DIR/infra/stack/glitchtip"
+install -m 0755 "$REPO_ROOT/infra/stack/glitchtip/docker-entrypoint.sh" "$APP_DIR/infra/stack/glitchtip/docker-entrypoint.sh"
+chmod a+rx "$APP_DIR/infra/stack/glitchtip/docker-entrypoint.sh"
+install -m 0755 "$REPO_ROOT/infra/stack/secrets/fetch-keyvault-secrets.sh" "$APP_DIR/secrets/fetch-keyvault-secrets.sh"
+install -m 0644 "$REPO_ROOT/infra/stack/secrets/argus-secrets.service" /etc/systemd/system/argus-secrets.service
 # Point the unit at our fetch script + the real vault name (the repo ships a placeholder).
 sed -i "s|/opt/argus/secrets/fetch-keyvault-secrets.sh|$APP_DIR/secrets/fetch-keyvault-secrets.sh|" \
   /etc/systemd/system/argus-secrets.service

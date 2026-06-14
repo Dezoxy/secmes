@@ -10,7 +10,7 @@ experiment Key Vault seeded with DUMMY values** — it does not touch the produc
 
 ## What changes vs the live VM path
 
-| Aspect | Live (`infra/vm/`) | Experiment (`infra/aws/`) |
+| Aspect | Live (`infra/azure/`) | Experiment (`infra/aws/`) |
 | --- | --- | --- |
 | Compute | Azure VM (germanywestcentral) | AWS EC2 (eu-central-1) |
 | Secret token source | VM Managed Identity via Azure IMDS `169.254.169.254` | Azure Arc managed identity via HIMDS `localhost:40342` + challenge-token handshake |

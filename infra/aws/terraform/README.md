@@ -2,7 +2,7 @@
 
 An **experiment** that runs the argus compute on a single **AWS EC2** box (eu-central-1) while secrets stay in
 **Azure Key Vault**, read via an **Azure Arc** managed identity (no static credential). It is parallel to the
-live `infra/vm/` Azure stack and **touches neither** the production VM nor its Key Vault. No real user data.
+live `infra/azure/` Azure stack and **touches neither** the production VM nor its Key Vault. No real user data.
 
 See [`docs/threat-models/cross-cloud-secret-fetch.md`](../../../docs/threat-models/cross-cloud-secret-fetch.md)
 for the security model + residual risks.

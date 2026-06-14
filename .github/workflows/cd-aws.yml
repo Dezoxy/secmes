@@ -42,7 +42,7 @@ jobs:
             dockerfile: apps/api/Dockerfile
           - name: ingress
             context: .
-            dockerfile: infra/vm/caddy/Dockerfile
+            dockerfile: infra/stack/caddy/Dockerfile
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
@@ -140,7 +140,7 @@ jobs:
           # Bundle what deploy.sh reads from the unpacked tree: compose + the secret-fetch unit + deploy.sh, PLUS
           # the observability config tree + the glitchtip entrypoint (deploy.sh step 1 cp's both even when the
           # GlitchTip tier is skipped at runtime).
-          tar czf deploy-bundle.tgz compose.prod.yaml infra/vm/secrets infra/vm/deploy infra/vm/observability infra/vm/glitchtip
+          tar czf deploy-bundle.tgz compose.prod.yaml infra/stack/secrets infra/stack/deploy infra/stack/observability infra/stack/glitchtip
           B64="$(base64 -w0 deploy-bundle.tgz)"
           GHCR_REGISTRY="ghcr.io/$(echo "$GHCR_OWNER" | tr '[:upper:]' '[:lower:]')"
           # single-quoted echos write LITERAL shell to runcmd.sh ($WORK expands on the box, not in the runner).
@@ -158,7 +158,7 @@ jobs:
               "$KEY_VAULT" "$IMAGE_TAG" "$GHCR_REGISTRY" "$GHCR_USER" "$GH_REPO"
             printf 'export S3_ENDPOINT=%q S3_REGION=%q S3_BUCKET=%q S3_ACCESS_KEY_ID=%q OIDC_ISSUER=%q OIDC_AUDIENCE=%q\n' \
               "$S3_ENDPOINT" "$S3_REGION" "$S3_BUCKET" "$S3_ACCESS_KEY_ID" "$OIDC_ISSUER" "$OIDC_AUDIENCE"
-            echo 'bash "$WORK/infra/vm/deploy/deploy.sh"'
+            echo 'bash "$WORK/infra/stack/deploy/deploy.sh"'
             echo 'rm -rf "$WORK"'
           } >runcmd.sh
           # SSM AWS-RunShellScript takes a `commands` array; pass the whole script as one element (jq -Rs reads

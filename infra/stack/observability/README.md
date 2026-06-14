@@ -42,16 +42,16 @@ container stdout (json logs) ──Alloy (ro tail, no socket, scrub)──▶ lo
 ## Validate locally
 
 ```bash
-docker run --rm --entrypoint promtool -v "$PWD/infra/vm/observability/prometheus:/etc/prometheus:ro" \
+docker run --rm --entrypoint promtool -v "$PWD/infra/stack/observability/prometheus:/etc/prometheus:ro" \
   prom/prometheus:v2.55.1 check config /etc/prometheus/prometheus.yml
-docker run --rm --entrypoint amtool -v "$PWD/infra/vm/observability/alertmanager:/etc/alertmanager:ro" \
+docker run --rm --entrypoint amtool -v "$PWD/infra/stack/observability/alertmanager:/etc/alertmanager:ro" \
   prom/alertmanager:v0.28.1 check-config /etc/alertmanager/alertmanager.yml
 # logs (#47b)
-docker run --rm -v "$PWD/infra/vm/observability/loki:/etc/loki:ro" \
+docker run --rm -v "$PWD/infra/stack/observability/loki:/etc/loki:ro" \
   grafana/loki:3.5.0 -config.file=/etc/loki/loki-config.yml -verify-config
-docker run --rm -v "$PWD/infra/vm/observability/alloy:/etc/alloy:ro" \
+docker run --rm -v "$PWD/infra/stack/observability/alloy:/etc/alloy:ro" \
   grafana/alloy:v1.16.3 validate /etc/alloy/config.alloy
 ```
 
-`deploy.sh` stages this tree into `/opt/argus/infra/vm/observability` (the compose services bind-mount it
+`deploy.sh` stages this tree into `/opt/argus/infra/stack/observability` (the compose services bind-mount it
 read-only). Pin/refresh the image tags (Dependabot-tracked) before arming.

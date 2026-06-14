@@ -1,5 +1,5 @@
 #cloud-config
-# First-boot provisioning for the argus EXPERIMENT EC2 box — the AWS port of infra/vm/terraform/cloud-init.yaml.
+# First-boot provisioning for the argus EXPERIMENT EC2 box — the AWS port of infra/azure/terraform/cloud-init.yaml.
 # Installs the host tooling the stack + native workers need (Docker; age/awscli/pg-client for the backup/cleanup
 # units; cosign for image-signature verification) AND onboards the box into Azure Arc so it gets an Entra
 # managed identity that reads Key Vault on-box (no static credential — the Arc analogue of the live VM's

@@ -13,7 +13,7 @@ Principle: **OSS self-hosted by default** (nothing leaves our tenancy); external
 | `dast.yml` (nightly) | OWASP ZAP baseline, **42Crunch Conformance Scan** | against staging |
 | `cd.yml` | **Trivy image scan**, **syft SBOM**, **cosign** keyless sign + attest | HIGH/CRITICAL in the image |
 
-`cd.yml` is **release-on-tag**: pushing a semver tag (`v*.*.*`) builds **both** images (the `api` and the Caddy `ingress` that bakes the PWA) tagged with the version, pushes them to **GHCR**, then scans (Trivy), SBOMs (syft), and keyless-signs/attests (cosign). It then **rolls out** to the single VM via **`az vm run-command`** (Azure OIDC) — the VM pulls the signed images and runs DB **migrations before serving** (`infra/vm/deploy/deploy.sh`). The deploy is double-gated: `vars.ENABLE_DEPLOY` (master kill-switch) **and** the **`prod` GitHub Environment**'s required-reviewer approval (a per-release human gate). The run-command payload is non-secret (exact-SHA config); every secret is fetched on the VM via the Managed Identity. See `docs/threat-models/vm-cd.md`.
+`cd.yml` is **release-on-tag**: pushing a semver tag (`v*.*.*`) builds **both** images (the `api` and the Caddy `ingress` that bakes the PWA) tagged with the version, pushes them to **GHCR**, then scans (Trivy), SBOMs (syft), and keyless-signs/attests (cosign). It then **rolls out** to the single VM via **`az vm run-command`** (Azure OIDC) — the VM pulls the signed images and runs DB **migrations before serving** (`infra/stack/deploy/deploy.sh`). The deploy is double-gated: `vars.ENABLE_DEPLOY` (master kill-switch) **and** the **`prod` GitHub Environment**'s required-reviewer approval (a per-release human gate). The run-command payload is non-secret (exact-SHA config); every secret is fetched on the VM via the Managed Identity. See `docs/threat-models/vm-cd.md`.
 
 **Secrets/vars to set before first run:** `X42C_API_TOKEN` (42Crunch), `vars.STAGING_URL` (DAST), and for CD: `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID` (OIDC secrets) + `vars.AZURE_RESOURCE_GROUP`/`vars.AZURE_VM_NAME`/`vars.KEY_VAULT_NAME` and the build-time `vars.VITE_OIDC_*` (all from the Terraform outputs). GHCR push uses the built-in `GITHUB_TOKEN` (no extra secret). Third-party action versions are pinned but **verify them before the first run**.
 
@@ -47,7 +47,7 @@ Enforce the invariants generic scanners miss: no `Math.random()` for security, n
 
 ## Cloud + runtime (Azure)
 
-- **Defender for Cloud** — **not yet wired** in `infra/vm/` (the AKS-era `enable_defender_cspm` toggle was removed with the legacy Terraform). Enable free CSPM in the Azure portal, or add it to the VM Terraform as a follow-up. (Defender for Containers was AKS-only — N/A for a single VM running Docker Compose.)
+- **Defender for Cloud** — **not yet wired** in `infra/azure/` (the AKS-era `enable_defender_cspm` toggle was removed with the legacy Terraform). Enable free CSPM in the Azure portal, or add it to the VM Terraform as a follow-up. (Defender for Containers was AKS-only — N/A for a single VM running Docker Compose.)
 
 ## External milestones (not tools — schedule before GA)
 

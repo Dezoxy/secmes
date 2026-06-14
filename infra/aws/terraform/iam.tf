@@ -61,7 +61,7 @@ resource "aws_iam_instance_profile" "instance" {
 
 # ============================================================================================================
 # GitHub Actions OIDC deploy role — the AWS analogue of the live least-privilege custom `run-command` role
-# (infra/vm/terraform/github_oidc.tf). GitHub mints a short-lived OIDC token (no stored cloud cred); this role
+# (infra/azure/terraform/github_oidc.tf). GitHub mints a short-lived OIDC token (no stored cloud cred); this role
 # trusts ONLY tokens whose subject is this repo bound to the `aws-experiment` GitHub Environment. The role can
 # do exactly: start the instance (so a deploy can wake a stopped box), describe it, and run AWS-RunShellScript
 # on THAT ONE instance via SSM. It CANNOT stop/terminate/resize it, read Key Vault, or touch any other host.

@@ -1,10 +1,9 @@
-# VM Terraform — Slice 1 of the VM deploy pipeline
+# Azure Terraform — provisions the live single-VM deploy
 
 Provisions the single Azure VM the argus stack runs on, plus the Azure pieces around it. **This module is
-build-only here — nobody applies it from CI.** You review and `terraform apply` it yourself.
-
-> The legacy AKS Terraform in `infra/terraform/` is dormant (K8s dropped); this `infra/vm/` module is the
-> active deploy.
+build-only here — nobody applies it from CI.** You review and `terraform apply` it yourself. The
+cloud-agnostic runtime the VM then runs (deploy script, secret-fetch, Caddy, observability) lives in
+[`infra/stack/`](../../stack/); the AWS experiment equivalent is [`infra/aws/`](../../aws/).
 
 ## What it creates
 
@@ -32,7 +31,7 @@ build-only here — nobody applies it from CI.** You review and `terraform apply
 ## Apply (you, manually)
 
 ```bash
-cd infra/vm/terraform
+cd infra/azure/terraform
 cp terraform.tfvars.example terraform.tfvars   # fill in subscription_id + admin_ssh_public_key (+ optional admin_*)
 terraform init
 terraform plan      # review

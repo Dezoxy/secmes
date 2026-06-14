@@ -54,7 +54,7 @@ resource "aws_ssm_parameter" "arc_onboarding_secret" {
 #   2. Confirm the machine shows "Connected" in Azure Arc (or `az connectedmachine show -n ${prefix}-ec2 -g ${prefix}-rg`).
 #   3. Set arc_machine_connected = true and re-`apply` — the data source below resolves the now-existing machine
 #      and grants its managed identity `Key Vault Secrets User` (read-only) on the experiment vault. Same RBAC
-#      the live VM Managed Identity holds (infra/vm/terraform/keyvault.tf), just a different principal + vault.
+#      the live VM Managed Identity holds (infra/azure/terraform/keyvault.tf), just a different principal + vault.
 # ============================================================================================================
 data "azurerm_arc_machine" "exp" {
   count               = var.arc_machine_connected ? 1 : 0
