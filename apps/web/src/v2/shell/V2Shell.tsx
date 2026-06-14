@@ -275,7 +275,7 @@ export function V2SketchShell({
           </header>
 
           <div className="grid min-h-0 flex-1 grid-cols-1 xl:grid-cols-[minmax(0,1fr)_18rem]">
-            <main className="min-w-0 overflow-hidden">{children}</main>
+            <main className="min-w-0 overflow-x-hidden overflow-y-auto">{children}</main>
             {aside && (
               <aside className="hidden border-l border-white/[0.07] bg-[#0d1014] p-4 xl:block">
                 {aside}
