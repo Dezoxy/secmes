@@ -63,16 +63,35 @@ export class KeyDirectoryService {
         .limit(1);
       if (!user) throw new BadRequestException('user not provisioned; sign in first');
 
+      // Serialize concurrent first-device provisioning: lock the user row so two simultaneous
+      // publish() calls for a new user cannot both read no existing trusted device and both
+      // compute isProvisional = false, producing two "genesis" devices without enrollment.
+      await tx.execute(sql`select 1 from users where id = ${user.id} for update`);
+
+      // Provisional = true when the user already has at least one trusted (non-provisional) device,
+      // meaning this is a new secondary device that must go through the enrollment ceremony before
+      // it may approve further enrollments. First-ever device for a user is non-provisional.
+      const [existingTrusted] = await tx
+        .select({ id: schema.devices.id })
+        .from(schema.devices)
+        .where(and(eq(schema.devices.userId, user.id), eq(schema.devices.isProvisional, false)))
+        .limit(1);
+      const isProvisional = existingTrusted !== undefined;
+
       const [device] = await tx
         .insert(schema.devices)
-        .values({ tenantId: auth.tenantId, userId: user.id, signaturePublicKey })
+        .values({ tenantId: auth.tenantId, userId: user.id, signaturePublicKey, isProvisional })
         .onConflictDoUpdate({
           target: [
             schema.devices.tenantId,
             schema.devices.userId,
             schema.devices.signaturePublicKey,
           ],
-          set: { signaturePublicKey }, // no-op update so the existing row is returned (idempotent re-register)
+          // Never change isProvisional on re-registration. Only the initial INSERT may set it based on
+          // whether a trusted device already exists. Allowing the conflict handler to set isProvisional=false
+          // would let an attacker promote a provisional device by first revoking the only trusted device
+          // (via revokeUnclaimed) and then re-publishing — racing back to a "no trusted devices" state.
+          set: { signaturePublicKey },
         })
         .returning({ id: schema.devices.id });
       if (!device) throw new Error('device upsert returned no row');
@@ -130,7 +149,9 @@ export class KeyDirectoryService {
           select kp.id
           from key_packages kp
           join devices d on d.id = kp.device_id
-          where d.user_id = ${targetUserId} and kp.claimed_at is null
+          where d.user_id = ${targetUserId}
+            and d.is_provisional = false
+            and kp.claimed_at is null
           order by kp.created_at asc
           limit 1
           for update skip locked
@@ -225,13 +246,20 @@ export class KeyDirectoryService {
    * an empty pool are omitted (caller must check coverage and prompt for replenishment if needed).
    * `FOR UPDATE SKIP LOCKED` per device so concurrent claims pick different rows.
    */
-  async claimAll(auth: VerifiedAuth, targetUserId: string): Promise<ClaimedKeyPackage[]> {
+  async claimAll(
+    auth: VerifiedAuth,
+    targetUserId: string,
+    deviceId?: string,
+    excludeDeviceId?: string,
+  ): Promise<ClaimedKeyPackage[]> {
     const claimed = await withTenant(auth.tenantId, async (tx) => {
       // LATERAL JOIN: for each device of the target user, select the oldest unclaimed package with
       // FOR UPDATE SKIP LOCKED, then UPDATE (claim) it in one statement. This avoids DISTINCT ON +
       // FOR UPDATE, which PostgreSQL rejects (DISTINCT ON is not allowed with locking clauses). The
       // LATERAL subquery runs once per device; SKIP LOCKED means concurrent claimAll calls pick
       // different packages rather than blocking. Defense-in-depth: explicit tenant_id filter on top of RLS.
+      // When deviceId is provided, the WHERE clause limits the UPDATE to that specific device so only
+      // its pool is depleted (used during enrollment fan-out to avoid burning other devices' packages).
       const rows = (await tx.execute(sql`
         update key_packages kp set claimed_at = now()
         from devices d
@@ -246,6 +274,9 @@ export class KeyDirectoryService {
         ) chosen on true
         where d.user_id = ${targetUserId}
           and d.tenant_id = ${auth.tenantId}
+          and d.is_provisional = false
+          ${deviceId ? sql`and d.id = ${deviceId}` : sql``}
+          ${excludeDeviceId ? sql`and d.id <> ${excludeDeviceId}` : sql``}
           and kp.id = chosen.id
         returning kp.device_id, kp.key_package, d.signature_public_key
       `)) as unknown as unknown[];

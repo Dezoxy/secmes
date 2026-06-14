@@ -78,6 +78,16 @@ export interface MessageSocketOptions {
    * conversation from the visible list.
    */
   onRemoved?: (conversationId: string) => void;
+  /**
+   * Another device of this user registered a pending enrollment request (B2). D1 should prompt the
+   * user to approve or reject via the enrollment panel.
+   */
+  onEnrollmentPending?: (enrollmentId: string, requestingDeviceId: string) => void;
+  /**
+   * This user's enrollment was approved by an existing device (B2). D2 should drain pending Welcomes
+   * to join the conversations D1 added it to.
+   */
+  onEnrollmentApproved?: (enrollmentId: string) => void;
   /** Injectable WebSocket constructor (tests). Defaults to the global. */
   WebSocketImpl?: typeof WebSocket;
   /** Reconnect backoff knobs (tests tune these down). */
@@ -209,6 +219,20 @@ export function createMessageSocket(opts: MessageSocketOptions): MessageSocket {
       if (!authed) return;
       const id = (frame.data as { conversationId?: unknown } | null)?.conversationId;
       if (typeof id === 'string') opts.onRemoved?.(id);
+      return;
+    }
+    if (frame.event === 'enrollment_pending') {
+      if (!authed) return;
+      const data = frame.data as { enrollmentId?: unknown; requestingDeviceId?: unknown } | null;
+      const id = data?.enrollmentId;
+      const rid = data?.requestingDeviceId;
+      if (typeof id === 'string' && typeof rid === 'string') opts.onEnrollmentPending?.(id, rid);
+      return;
+    }
+    if (frame.event === 'enrollment_approved') {
+      if (!authed) return;
+      const id = (frame.data as { enrollmentId?: unknown } | null)?.enrollmentId;
+      if (typeof id === 'string') opts.onEnrollmentApproved?.(id);
       return;
     }
     // 'error' frames need no client action (membership/authz is server-enforced; the keys gate content).

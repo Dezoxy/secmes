@@ -793,6 +793,10 @@ export class MessagingService {
       // a malicious member inject an arbitrarily large epoch that blocks all future messaging.
       // body.epoch === expectedEpoch → normal new commit; body.epoch < expectedEpoch → handled by
       // the unique constraint below (own idempotent retry or 409).
+      // Empty commit log: accept any epoch as the first entry. 1:1 conversations and legacy
+      // conversations (created before B1 commit-tracking) never wrote an epoch-0 commit row; their
+      // local MLS group may be at epoch N > 0. sendMessage already skips the epoch gate for
+      // empty-log conversations (maxEpoch === -1 path); postCommit mirrors that here.
       const [slotRow] = await tx
         .select({ currentMax: max(schema.conversationCommits.epoch) })
         .from(schema.conversationCommits)
@@ -802,14 +806,29 @@ export class MessagingService {
             eq(schema.conversationCommits.conversationId, conversationId),
           ),
         );
-      const nextEpoch =
+      const currentMax =
         slotRow?.currentMax !== null && slotRow?.currentMax !== undefined
-          ? Number(slotRow.currentMax) + 1
-          : 0;
-      if (body.epoch > nextEpoch) {
-        throw new ConflictException(
-          `non-contiguous epoch: expected ${String(nextEpoch)}, got ${String(body.epoch)}`,
-        );
+          ? Number(slotRow.currentMax)
+          : null;
+
+      if (currentMax === null) {
+        // Empty commit log: first commit may arrive at epoch > 0 for legacy conversations
+        // (pre-B1 tracking; local MLS group advanced beyond epoch 0 without server-side records).
+        // Cap at MAX_FIRST_EPOCH to prevent a malicious member from posting a huge sentinel epoch
+        // that bricks future sendMessage (which uses maxEpoch + 1 as the expected next epoch).
+        const MAX_FIRST_EPOCH = 65_535;
+        if (body.epoch > MAX_FIRST_EPOCH) {
+          throw new ConflictException(
+            `first-commit epoch ${String(body.epoch)} exceeds maximum ${String(MAX_FIRST_EPOCH)}`,
+          );
+        }
+      } else {
+        const nextEpoch = currentMax + 1;
+        if (body.epoch !== nextEpoch) {
+          throw new ConflictException(
+            `non-contiguous epoch: expected ${String(nextEpoch)}, got ${String(body.epoch)}`,
+          );
+        }
       }
 
       // Attempt to insert — the UNIQUE (tenant_id, conversation_id, epoch) constraint is the server-side

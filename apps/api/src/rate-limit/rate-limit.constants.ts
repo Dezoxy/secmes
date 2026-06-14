@@ -66,4 +66,14 @@ export const SENSITIVE_LIMITS = {
   exportMyData: 2,
   /** Account deletion — irreversible cascade; low cap prevents accidental hammering. Per day. */
   deleteAccount: 3,
+  /** Enrollment register — D2 registers a pending link request. Low: infrequent, and DoS T4 mitigation. */
+  enrollmentRegister: 5,
+  /** Enrollment approve/reject — D1 approves or rejects. Low: rare human action. */
+  enrollmentApprove: 10,
+  /** Enrollment list — D1 polls pending requests. Moderate: UI may poll while waiting. */
+  enrollmentList: 30,
+  /** Conversation list for fan-out diff — D1 fetches its conversation IDs after approval. */
+  enrollmentConversationList: 30,
+  /** Self device withdrawal — legacy migration or explicit device removal. Very rare; tight cap. */
+  deviceWithdraw: 5,
 } as const;

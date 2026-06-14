@@ -109,5 +109,11 @@ opaque base64 to the crypto-blind server). Private keys never leave; the passphr
   (`resetForNewAccount`) still does NOT revoke (the device is a different user's — no authority). The **account-switch** case is intentionally *not* client-revocable: the abandoned
   device belongs to a different user and the current session has no authority over it (correct authz);
   those packages are cleaned when that user next re-provisions. (Codex P2, PR #66 — accepted residual.)
-- **Single device per user** (v1, B2) — multi-device key management is deferred; ties into the
-  device-bound-session hardening noted in `welcome-delivery.md` §6.
+- **Multi-device (B2, shipped PR #191)** — a user may have N devices, each with its own composite
+  `userId:deviceUuid` MLS identity and independent KeyPackage pool. A second device (D2) registers a
+  pending enrollment; an existing trusted device (D1) verifies D2's fingerprint out-of-band and approves
+  with an Ed25519 `argus-enroll:v1` proof-of-possession. On approval, D1 fans out add-commits to every
+  conversation D2 is not yet in (`lib/enroll.ts`). D2 joins via normal Welcome drain. New devices receive
+  no history (forward secrecy). Legacy bare-userId keystores migrate atomically via `POST /devices/me/migrate`
+  (delete + re-insert as non-provisional in one transaction under `FOR UPDATE`, eliminating the race window
+  that separate withdraw + publish leaves open). Threat model `multi-device-enrollment.md`.
