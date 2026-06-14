@@ -1,12 +1,13 @@
 name: cd-aws
 
-# EXPERIMENT deploy to the parallel AWS EC2 box (Azure Arc for secrets). Mirrors cd.yml's release-on-tag UX —
-# push a semver tag, approve on GitHub, the instance auto-updates — but is fully independent of the live Azure
-# deploy: its own `aws-experiment` Environment gate and its own ENABLE_DEPLOY_AWS kill-switch. The live cd.yml
-# is untouched. See infra/aws/terraform/README.md + docs/threat-models/cross-cloud-secret-fetch.md.
+# EXPERIMENT deploy to the parallel AWS EC2 box (Azure Arc for secrets). Tag-triggered like cd.yml — push a
+# tag, approve on GitHub, the instance auto-updates — but on its OWN tag namespace (`aws-v*`), NOT the prod
+# `v*` tags. So a production release never triggers the experiment and never collides on the GHCR image tag
+# (experiment images are `…:aws-vX.Y.Z`). Fully independent of the live Azure deploy: its own `aws-experiment`
+# Environment gate + ENABLE_DEPLOY_AWS kill-switch. The live cd.yml is untouched. See the README + threat model.
 on:
   push:
-    tags: ['v*.*.*']
+    tags: ['aws-v*.*.*']
 
 # Least privilege. id-token: GitHub OIDC -> AWS IAM role (no stored cloud creds) + cosign keyless signing.
 # packages: write to push images to GHCR. No contents:write.
@@ -28,7 +29,7 @@ jobs:
   # images job): signed with THIS workflow's OIDC identity (.../cd-aws.yml@refs/tags/<tag>), which is what the
   # deploy verifies via ARGUS_COSIGN_WORKFLOW. Gated by ENABLE_DEPLOY_AWS so it never fires until you opt in.
   # NOTE: only the `deploy` job is behind the `aws-experiment` Environment approval — build+push+sign here run
-  # PRE-approval on any v*.*.* tag push (once the kill-switch is on). Acceptable for a no-real-data experiment;
+  # PRE-approval on any aws-v*.*.* tag push (once the kill-switch is on). Acceptable for a no-real-data experiment;
   # gate this job behind the environment too if these signed images ever need to be trusted elsewhere.
   images:
     if: ${{ vars.ENABLE_DEPLOY_AWS == 'true' }}

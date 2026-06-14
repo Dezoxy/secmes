@@ -55,7 +55,7 @@ Terraform outputs:
 | `AWS_KEY_VAULT_NAME` | `terraform output key_vault_name` |
 | `S3_*`, `OIDC_*`, `VITE_OIDC_*`, `GHCR_USER` | same non-secret config the live deploy uses |
 
-Then push a `vX.Y.Z` tag → `cd-aws.yml` builds/signs the images, pauses on the `aws-experiment` approval, then
+Then push an **`aws-vX.Y.Z`** tag (the experiment's own tag namespace — distinct from the prod `vX.Y.Z` tags so a production release never triggers it) → `cd-aws.yml` builds/signs the images, pauses on the `aws-experiment` approval, then
 **starts the instance** (if stopped), waits for SSM, and runs `deploy.sh` with `ARGUS_TOKEN_SOURCE=arc` +
 `ARGUS_SKIP_GLITCHTIP=1`. CD never stops the box — **stop it by hand** to save cost
 (`aws ec2 stop-instances --instance-ids <id>`); a stopped box is ~$0 compute.
