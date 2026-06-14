@@ -17,7 +17,7 @@
     "@argus/contracts": "workspace:^",
     "@argus/crypto": "workspace:^",
     "@dicebear/core": "^10.3.0",
-    "@dicebear/lorelei": "^9.4.2",
+    "@dicebear/styles": "^10.2.0",
     "idb": "^8.0.3",
     "lucide-react": "^1.18.0",
     "oidc-client-ts": "^3.5.0",

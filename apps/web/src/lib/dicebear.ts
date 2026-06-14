@@ -1,9 +1,9 @@
-import { createAvatar } from '@dicebear/core';
-import * as lorelei from '@dicebear/lorelei';
+import { Avatar, Style } from '@dicebear/core';
+import lorelei from '@dicebear/styles/lorelei.json';
 
 /** Deterministic lorelei portrait seeded by a stable user ID — always a local data URI, no network. */
 export function dicebearAvatar(userId: string): string {
-  const svg = createAvatar(lorelei, { seed: userId }).toString();
+  const svg = new Avatar(new Style(lorelei), { seed: userId }).toString();
   return `data:image/svg+xml,${encodeURIComponent(svg)}`;
 }
 
