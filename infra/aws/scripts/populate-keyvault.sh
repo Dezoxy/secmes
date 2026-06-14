@@ -4,7 +4,11 @@
 # derives the two DSNs, and takes the four EXTERNAL credentials from the environment.
 #
 # Idempotent + safe to re-run: by default it SKIPS any secret that already exists (never clobbers a live
-# value). Pass --rotate to overwrite existing values (rotation — expect a redeploy to pick them up).
+# value). Pass --rotate to overwrite existing values (rotation — expect a redeploy to pick them up). Two
+# secrets are EXEMPT from --rotate (set-once): argus-zitadel-masterkey (re-encrypts Zitadel's DB-stored keys —
+# a new value bricks decryption of existing data) and argus-postgres-owner-password (consumed only at first
+# init; a new KV value the running DB never adopts breaks migration auth). Rotating either is a deliberate DR
+# procedure, not this helper's job.
 #
 # NOT set here (provision during "arming" after the first deploy — fetch-keyvault-secrets.sh seeds them empty
 # until then): stripe-secret-key, stripe-webhook-secret, operator-api-key, sentry-dsn,
@@ -90,19 +94,29 @@ put() { # $1 = name ; $2 = value
   set_secret "$1" "$2"
 }
 
+# Set-once wrapper: NEVER overwritten, even with --rotate. For values whose blind rotation is destructive (see
+# the header note — Zitadel masterkey, Postgres owner password). Rotating them is a separate DR flow.
+put_once() { # $1 = name ; $2 = value
+  if secret_exists "$1"; then
+    log "exists, NOT rotating $1 (set-once — rotating it is a separate DR procedure)"
+    return 0
+  fi
+  set_secret "$1" "$2"
+}
+
 # Read a secret's current value (used to derive the migration DSN from the owner password).
 get_secret() { az keyvault secret show --vault-name "$KV" --name "$1" --query value -o tsv --only-show-errors; }
 
 log "target vault: $KV  (rotate=$ROTATE)"
 if [ "$ROTATE" -eq 1 ]; then
-  log "WARNING: --rotate overwrites Key Vault values but does NOT change them on the RUNNING database."
+  log "WARNING: --rotate overwrites Key Vault values but does NOT change them on the RUNNING stack."
   log "  Redeploy after this so deploy.sh re-applies the argus_app/argus_cleanup/argus_backup role logins."
-  log "  The Postgres OWNER role password is consumed only at first init — rotate it on the live DB by hand"
-  log "  (ALTER ROLE argus ...) to match argus-postgres-owner-password, or migrations will fail to auth."
+  log "  NEVER auto-rotated (set-once): argus-zitadel-masterkey and argus-postgres-owner-password — rotating"
+  log "  either is a destructive DR step (re-encrypt Zitadel's stored data / ALTER ROLE on the live DB)."
 fi
 
 # --- Generated runtime secrets (lengths mirror infra/aws/terraform/keyvault.tf's generated_secret_lengths) ---
-put argus-postgres-owner-password "$(gen_alnum 32)"
+put_once argus-postgres-owner-password "$(gen_alnum 32)" # set-once: consumed at first init; rotating breaks auth
 put argus-redis-password "$(gen_alnum 32)"
 put argus-zitadel-db-password "$(gen_alnum 32)"
 put argus-grafana-admin-password "$(gen_alnum 24)"
@@ -110,7 +124,7 @@ put argus-backup-db-password "$(gen_alnum 32)"
 put argus-cleanup-db-password "$(gen_alnum 32)"
 put argus-glitchtip-db-password "$(gen_alnum 32)"
 put argus-glitchtip-secret-key "$(gen_alnum 50)"
-put argus-zitadel-masterkey "$(gen_alnum 32)" # Zitadel requires EXACTLY 32 bytes; 32 ASCII chars = 32 bytes
+put_once argus-zitadel-masterkey "$(gen_alnum 32)" # EXACTLY 32 bytes; set-once — a new value bricks Zitadel decryption
 # Zitadel bootstrap admin (first-init only; change + enable MFA after first login). Guarantee the default
 # complexity policy (upper+lower+digit+symbol) by appending fixed-class chars to an alphanumeric base.
 put argus-zitadel-admin-password "$(gen_alnum 20)Aa9."
@@ -122,12 +136,13 @@ if [ "$ROTATE" -eq 1 ] || ! secret_exists argus-database-url; then
 else
   log "exists, skipping argus-database-url"
 fi
-if [ "$ROTATE" -eq 1 ] || ! secret_exists argus-migration-database-url; then
+# Derived from the set-once owner password, so it never needs a rotate-rebuild (the owner never changes here).
+if ! secret_exists argus-migration-database-url; then
   _owner="$(get_secret argus-postgres-owner-password)"
   put argus-migration-database-url "postgres://argus:${_owner}@postgres:5432/argus"
   _owner=""
 else
-  log "exists, skipping argus-migration-database-url"
+  log "exists, skipping argus-migration-database-url (derived from the set-once owner password)"
 fi
 
 # --- External credentials (operator-supplied via env; fail closed if a NEW secret is needed but unset) ---

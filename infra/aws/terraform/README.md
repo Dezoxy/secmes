@@ -16,6 +16,15 @@ but the **Arc onboarding SP client secret** + resource ids still live in state �
 encrypted/locked remote backend matters.) **Run every command below from the repo root** (paths are
 repo-root-relative — matching the `terraform -chdir=infra/aws/terraform` form the helpers print).
 
+> **Start fresh — don't promote a dummy-seeded vault in place.** A real deploy applies with
+> `seed_dummy_secrets = false` from the **first** apply, into freshly-bootstrapped remote state — so no
+> `azurerm_key_vault_secret.seed` resources ever exist and `populate-keyvault.sh` writes clean names. If you
+> instead `-migrate-state` a local state that already seeded the dummy experiment, phase-1 apply **destroys**
+> those seeds and the vault (purge-protection is on) **soft-deletes** the names; Azure then refuses to
+> recreate a soft-deleted name (409 Conflict), so the populate step fails. To promote anyway: bump
+> `var.prefix` for a brand-new vault, **or** `az keyvault secret recover --vault-name <kv> --name <name>` each
+> soft-deleted name and then run `infra/aws/scripts/populate-keyvault.sh --rotate`.
+
 1. **Remote state (once):** `infra/aws/scripts/bootstrap-tfstate.sh` → creates the encrypted/locked/versioned
    S3 backend and writes `infra/aws/terraform/backend.hcl`. Uncomment `backend "s3" {}` in `versions.tf`, then
    `terraform -chdir=infra/aws/terraform init -backend-config=backend.hcl -migrate-state`.
