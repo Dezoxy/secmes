@@ -7,8 +7,13 @@
 # *_FILE env / systemd LoadCredential). See infra/vm/secrets/README.md + docs/threat-models/vm-secrets.md.
 #
 # Security model:
-#   - NO static credentials. The access token is minted by the VM's Managed Identity via IMDS
-#     (169.254.169.254) — link-local, on-box only — and is scoped to vault.azure.net (read).
+#   - NO static credentials. The access token is minted by a platform machine identity scoped to
+#     vault.azure.net (read). Two sources, selected by ARGUS_TOKEN_SOURCE (default imds):
+#       imds — the Azure VM's Managed Identity via IMDS (169.254.169.254), link-local, on-box only.
+#       arc  — the box is a NON-Azure host (AWS EC2) onboarded to Azure Arc; the Arc managed identity mints
+#              the token via the local HIMDS endpoint (localhost:40342) using the challenge-token handshake
+#              (a 401 names a root/himds-group-only .key file we read + echo back as Basic auth). Still no
+#              static credential — and the challenge file gates token minting to root/himds, stricter than IMDS.
 #   - Secret VALUES are written to tmpfs (/run, never disk-backed) at mode 0444 owned by root. The files MUST
 #     be mode 0444, not 0400: file-based Compose secrets are bind-mounted into the container with the host
 #     owner/mode UNCHANGED on Linux (no uid/gid remapping — that only happens on macOS Docker Desktop's
@@ -29,7 +34,9 @@ set -euo pipefail
 SECRETS_DIR="${ARGUS_SECRETS_DIR:-/run/argus/secrets}"
 : "${ARGUS_KEY_VAULT:?ARGUS_KEY_VAULT required (the Key Vault name)}"
 KV_API_VERSION="${KV_API_VERSION:-7.4}"
+TOKEN_SOURCE="${ARGUS_TOKEN_SOURCE:-imds}" # imds (Azure VM Managed Identity) | arc (Azure Arc HIMDS on EC2)
 IMDS_URL="http://169.254.169.254/metadata/identity/oauth2/token"
+ARC_IMDS_URL="http://localhost:40342/metadata/identity/oauth2/token"
 VAULT_URL="https://${ARGUS_KEY_VAULT}.vault.azure.net"
 
 # Key Vault secret name -> local credential filename (in $SECRETS_DIR). KV names are kebab-case (Key Vault
@@ -85,6 +92,41 @@ log() { printf 'argus-secrets: %s\n' "$*" >&2; } # names/status only — NEVER a
 cleanup() { rm -f "${SECRETS_DIR}"/.tmp.* 2>/dev/null || true; }
 trap cleanup EXIT
 
+# Azure Arc managed-identity token via HIMDS (localhost:40342), with the challenge-token handshake:
+#   1. unauthenticated GET → 401 + `Www-Authenticate: Basic realm=<challenge-file path>`
+#   2. read that file (mode 0440, himds group / root only — we run as root) → its contents are the Basic secret
+#   3. retry with `Authorization: Basic <contents>` (passed via curl --config stdin, never argv) → token JSON
+# Prints the access_token on stdout; logs FATAL + returns non-zero on any failure (caller fails closed).
+arc_access_token() {
+  local url hdrs realm secret resp
+  url="${ARC_IMDS_URL}?api-version=2020-06-01&resource=https%3A%2F%2Fvault.azure.net"
+  hdrs="$(curl -sS --max-time 15 --retry 3 --retry-connrefused --retry-delay 2 \
+    -D - -o /dev/null -H 'Metadata: true' "$url" | tr -d '\r')" || {
+    log "FATAL: Arc HIMDS unreachable at ${ARC_IMDS_URL} (is the Arc agent Connected?)"
+    return 1
+  }
+  realm="$(printf '%s\n' "$hdrs" | grep -i '^Www-Authenticate:' | sed -n 's/.*realm=\([^ ]*\).*/\1/p')"
+  [ -n "$realm" ] || {
+    log "FATAL: Arc HIMDS returned no challenge realm"
+    return 1
+  }
+  [ -r "$realm" ] || {
+    log "FATAL: cannot read Arc challenge file ${realm} (need root or the himds group)"
+    return 1
+  }
+  secret="$(cat "$realm")"
+  resp="$(curl -fsS --max-time 15 --retry 3 --retry-connrefused --retry-delay 2 \
+    -H 'Metadata: true' --config - "$url" <<EOF
+header = "Authorization: Basic ${secret}"
+EOF
+  )" || {
+    log "FATAL: Arc HIMDS token request failed"
+    return 1
+  }
+  secret=""
+  printf '%s' "$resp" | jq -r '.access_token // empty'
+}
+
 # Under the systemd unit, `RuntimeDirectory=argus/secrets` already created this dir (root:root 0700) before
 # ExecStart — surviving a reboot that wipes /run. This install -d is just a fallback for a MANUAL run outside
 # systemd; root:root 0700 with NO chgrp (the unit's empty CapabilityBoundingSet drops CAP_CHOWN). The 0700
@@ -93,16 +135,27 @@ trap cleanup EXIT
 install -d -m 0700 "$SECRETS_DIR"
 umask 0077
 
-# --- 1. Managed-Identity access token for Key Vault (no static creds). ---
-token_json="$(curl -fsS --max-time 15 --retry 3 --retry-connrefused --retry-delay 2 -H 'Metadata: true' \
-  "${IMDS_URL}?api-version=2018-02-01&resource=https%3A%2F%2Fvault.azure.net")" || {
-  log "FATAL: could not obtain a Managed Identity token from IMDS"
+# --- 1. Machine-identity access token for Key Vault (no static creds). Source per ARGUS_TOKEN_SOURCE. ---
+case "$TOKEN_SOURCE" in
+imds)
+  token_json="$(curl -fsS --max-time 15 --retry 3 --retry-connrefused --retry-delay 2 -H 'Metadata: true' \
+    "${IMDS_URL}?api-version=2018-02-01&resource=https%3A%2F%2Fvault.azure.net")" || {
+    log "FATAL: could not obtain a Managed Identity token from IMDS"
+    exit 1
+  }
+  access_token="$(printf '%s' "$token_json" | jq -r '.access_token // empty')"
+  token_json=""
+  ;;
+arc)
+  access_token="$(arc_access_token)" || exit 1
+  ;;
+*)
+  log "FATAL: unknown ARGUS_TOKEN_SOURCE='${TOKEN_SOURCE}' (expected imds|arc)"
   exit 1
-}
-access_token="$(printf '%s' "$token_json" | jq -r '.access_token // empty')"
-token_json=""
+  ;;
+esac
 [ -n "$access_token" ] || {
-  log "FATAL: IMDS returned no access_token"
+  log "FATAL: no access_token from token source '${TOKEN_SOURCE}'"
   exit 1
 }
 
