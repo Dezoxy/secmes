@@ -10,6 +10,11 @@
 # until then): stripe-secret-key, stripe-webhook-secret, operator-api-key, sentry-dsn,
 # zitadel-management-pat, zitadel-login-pat.
 #
+# This script only POPULATES the vault. The generated passwords are APPLIED to the Postgres roles by deploy.sh
+# ON THE BOX (the only host with DB access): the argus_app/argus_cleanup/argus_backup role logins (see #203 /
+# infra/stack/deploy/deploy.sh) and the owner password at Postgres first-init. The operator's machine cannot
+# reach the DB (no inbound; SSM-only), so applying role passwords is necessarily deploy.sh's job, not this.
+#
 # Auth: `az login` first, as a principal with **Key Vault Secrets Officer** on the vault (Terraform grants this
 # via var.azure_admin_object_id). Secret VALUES are written via `--file` from a 0600 temp file — NEVER on argv
 # (so not in `ps`/`/proc/<pid>/cmdline`) — and are never logged (names + status only).
