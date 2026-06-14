@@ -18,4 +18,7 @@ create table stripe_events (
   received_at timestamptz not null default now()
 );
 
-grant select, insert on stripe_events to argus_app;
+-- INSERT (claim) + SELECT, and DELETE: the webhook RELEASES a claim (deletes the row) when dispatch throws
+-- after claiming, so Stripe's at-least-once retry can re-process — without DELETE that release fails and the
+-- retry would be silently deduped, losing the plan write.
+grant select, insert, delete on stripe_events to argus_app;
