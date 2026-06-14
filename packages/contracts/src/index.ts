@@ -321,6 +321,11 @@ export type Enrollment = z.infer<typeof EnrollmentSchema>;
 export const ConversationListSchema = z.object({ conversationIds: z.array(z.string().uuid()) });
 export type ConversationList = z.infer<typeof ConversationListSchema>;
 
+export const WithdrawDeviceBodySchema = z
+  .object({ signaturePublicKey: z.string().min(1).max(512) })
+  .strict();
+export type WithdrawDeviceBody = z.infer<typeof WithdrawDeviceBodySchema>;
+
 export const SubscribePushRequestSchema = z
   .object({
     deviceId: z.string().uuid(),

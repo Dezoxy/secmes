@@ -81,6 +81,7 @@ import {
   EnrollmentApproveBodySchema,
   EnrollmentSchema,
   ConversationListSchema,
+  WithdrawDeviceBodySchema,
   type Enrollment as ContractEnrollment,
   type ConversationList as ContractConversationList,
 } from '@argus/contracts';
@@ -905,6 +906,22 @@ export async function rejectEnrollment(enrollmentId: string): Promise<void> {
     await requestStatus({
       path: `/devices/enrollments/${encodeURIComponent(enrollmentId)}/reject`,
       method: 'POST',
+    }),
+  );
+}
+
+/**
+ * Permanently delete this device's server row (cascades to key packages). Used by the legacy
+ * pre-B2 migration to remove the old bare-userId device row so the new composite-identity device
+ * is published as non-provisional. Idempotent — no-ops if the device is already gone.
+ */
+export async function withdrawDevice(signaturePublicKey: string): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: '/devices/me/withdraw',
+      method: 'POST',
+      body: { signaturePublicKey },
+      requestSchema: WithdrawDeviceBodySchema,
     }),
   );
 }

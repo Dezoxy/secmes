@@ -245,6 +245,34 @@ export class DevicesService {
   }
 
   /**
+   * Permanently delete the caller's own device row (and its key packages via cascade). Used by the
+   * legacy pre-B2 migration path: removes the old bare-userId device so the new composite-identity
+   * device is published as non-provisional. Idempotent if the row is already gone.
+   */
+  async withdrawDevice(auth: VerifiedAuth, signaturePublicKey: string): Promise<void> {
+    await withTenant(auth.tenantId, async (tx) => {
+      const userId = await requireUser(tx, auth.sub);
+      const [device] = await tx
+        .select({ id: schema.devices.id })
+        .from(schema.devices)
+        .where(
+          and(
+            eq(schema.devices.userId, userId),
+            eq(schema.devices.signaturePublicKey, signaturePublicKey),
+          ),
+        )
+        .limit(1);
+      if (!device) return; // idempotent — already gone
+      await tx.delete(schema.devices).where(eq(schema.devices.id, device.id));
+    });
+
+    await this.audit.record(auth.tenantId, {
+      eventType: 'device.withdrawn',
+      actorSub: auth.sub,
+    });
+  }
+
+  /**
    * Return the caller's conversation IDs. Used by D1 after approving D2 to compute the fan-out
    * diff — which conversations D1 must issue add-commits for. METADATA ONLY: IDs, no content.
    */

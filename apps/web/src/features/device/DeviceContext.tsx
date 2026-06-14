@@ -1,9 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 
 import type { DeviceKeys } from '@argus/crypto';
-import { formatDeviceIdentity, parseDeviceIdentity } from '@argus/crypto';
+import {
+  deviceSignaturePublicKeyB64,
+  formatDeviceIdentity,
+  parseDeviceIdentity,
+} from '@argus/crypto';
 
 import { restoreAndProvision } from '../../lib/device-restore';
+import { withdrawDevice } from '../../lib/api';
 import { DeviceKeystore } from '../../lib/keystore';
 import { provisionDevice } from '../../lib/provisioning';
 import { useAuth } from '../auth/AuthContext';
@@ -148,11 +153,18 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         }
         let dev: DeviceKeys | undefined;
         if (isLegacyMigration) {
-          // Re-seal the SAME keys under the new composite identity without changing the underlying
-          // key material. This keeps the server device row unchanged (isProvisional = false) —
-          // provisionDevice below will hit onConflictDoUpdate and leave the flag alone. Creating a
-          // new key would publish a new device row as provisional (old row still exists as trusted).
-          dev = await keystore.reidentifyDevice(storedIdent!, identity, passphrase);
+          // Remove the old device row from the server so the new composite-identity device is
+          // published as non-provisional. The MLS credential embeds the identity string, so there
+          // is no safe way to reuse the old key under the new identity — we must regenerate.
+          // Steps: load old device (verify passphrase) → delete server row → clear local keystore
+          // → create fresh device. The old server row's absence means no existing non-provisional
+          // device → provisionDevice publishes the new key with isProvisional = false.
+          const oldDev = await keystore.loadDevice(storedIdent!, passphrase);
+          if (!oldDev) throw new Error('legacy device not found in keystore');
+          const oldSpk = deviceSignaturePublicKeyB64(oldDev);
+          await withdrawDevice(oldSpk);
+          await keystore.clearDevice();
+          dev = await keystore.getOrCreateDevice(identity, passphrase);
         } else if (creating) {
           dev = await keystore.getOrCreateDevice(identity, passphrase);
         } else {

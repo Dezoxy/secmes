@@ -2810,6 +2810,127 @@
         ]
       }
     },
+    "/devices/me/withdraw": {
+      "post": {
+        "description": "Deletes the caller's own device row identified by signaturePublicKey (cascades to key packages). Used during the pre-B2 → B2 identity migration to remove the old device row so the new composite-identity device is not published as provisional. Idempotent if the device is already gone.",
+        "operationId": "withdrawDevice",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WithdrawDeviceBodyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "device withdrawn (or was already absent)"
+          },
+          "400": {
+            "description": "invalid body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Plan upgrade required — current plan does not include this feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted to perform this action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Permanently remove this device (legacy migration or explicit device removal)",
+        "tags": [
+          "devices"
+        ]
+      }
+    },
     "/devices/me/conversations": {
       "get": {
         "description": "Returns conversation IDs the caller is a member of. Used by D1 after approving D2 to compute which conversations need an add-commit. Metadata only — no conversation content.",
@@ -7835,6 +7956,21 @@
         "required": [
           "approvingDeviceId",
           "proof"
+        ],
+        "additionalProperties": false
+      },
+      "WithdrawDeviceBodyDto": {
+        "type": "object",
+        "properties": {
+          "signaturePublicKey": {
+            "type": "string",
+            "description": "The device's Ed25519 signature public key (base64) — identifies which device to withdraw",
+            "maxLength": 512,
+            "pattern": "^[A-Za-z0-9+/]+={0,2}$"
+          }
+        },
+        "required": [
+          "signaturePublicKey"
         ],
         "additionalProperties": false
       },

@@ -33,8 +33,10 @@ import { DevicesService } from './devices.service.js';
 import {
   EnrollmentApproveBodySchema,
   EnrollmentRegisterBodySchema,
+  WithdrawDeviceBodySchema,
   type EnrollmentApproveBody,
   type EnrollmentRegisterBody,
+  type WithdrawDeviceBody,
 } from './devices.schemas.js';
 
 // OpenAPI DTO classes — bounds mirror the Zod schemas so 42Crunch sees tight contracts.
@@ -93,6 +95,15 @@ class EnrollmentDto {
 class ConversationListDto {
   @ApiProperty({ type: [String], description: 'Conversation IDs the caller is a member of' })
   conversationIds!: string[];
+}
+
+class WithdrawDeviceBodyDto {
+  @ApiProperty({
+    description:
+      "The device's Ed25519 signature public key (base64) — identifies which device to withdraw",
+    maxLength: 512,
+  })
+  signaturePublicKey!: string;
 }
 
 @ApiTags('devices')
@@ -190,6 +201,26 @@ export class DevicesController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<void> {
     await this.devices.rejectEnrollment(auth, id);
+  }
+
+  @Post('devices/me/withdraw')
+  @HttpCode(204)
+  @Throttle(perMinute(SENSITIVE_LIMITS.deviceWithdraw))
+  @ApiOperation({
+    summary: 'Permanently remove this device (legacy migration or explicit device removal)',
+    operationId: 'withdrawDevice',
+    description:
+      "Deletes the caller's own device row identified by signaturePublicKey (cascades to key packages). Used during the pre-B2 → B2 identity migration to remove the old device row so the new composite-identity device is not published as provisional. Idempotent if the device is already gone.",
+  })
+  @ApiBody({ type: WithdrawDeviceBodyDto })
+  @ApiNoContentResponse({ description: 'device withdrawn (or was already absent)' })
+  @ApiBadRequestResponse({ description: 'invalid body' })
+  @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
+  async withdraw(
+    @CurrentAuth() auth: VerifiedAuth,
+    @Body(new ZodValidationPipe(WithdrawDeviceBodySchema)) body: WithdrawDeviceBody,
+  ): Promise<void> {
+    await this.devices.withdrawDevice(auth, body.signaturePublicKey);
   }
 
   @Get('devices/me/conversations')

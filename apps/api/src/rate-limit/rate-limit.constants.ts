@@ -74,4 +74,6 @@ export const SENSITIVE_LIMITS = {
   enrollmentList: 30,
   /** Conversation list for fan-out diff — D1 fetches its conversation IDs after approval. */
   enrollmentConversationList: 30,
+  /** Self device withdrawal — legacy migration or explicit device removal. Very rare; tight cap. */
+  deviceWithdraw: 5,
 } as const;
