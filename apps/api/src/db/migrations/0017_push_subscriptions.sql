@@ -15,6 +15,14 @@ create table if not exists push_subscriptions (
   unique (tenant_id, device_id)       -- one subscription per device; upsert target
 );
 
+-- The composite FK below references devices (tenant_id, id), which needs a matching unique constraint on
+-- those columns. devices (migration 0004) has only PK(id) + unique(tenant_id, user_id, signature_public_key),
+-- so the (tenant_id, id) unique index must be created here, in migration order, for a fresh-from-empty deploy
+-- (the first prod deploy and any DR restore) to succeed. 0024_device_enrollments also creates this index with
+-- `if not exists` for its own FKs — that becomes a harmless no-op once this runs. Without this line, migrating
+-- a clean DB fails at 0017: "no unique constraint matching given keys for referenced table devices".
+create unique index if not exists devices_tenant_id_uidx on devices (tenant_id, id);
+
 -- Composite FK: device must exist in the same tenant; cascade on device delete (clean removal on revoke).
 alter table push_subscriptions
   add constraint push_subscriptions_device_fk
