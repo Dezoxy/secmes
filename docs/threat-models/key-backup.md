@@ -30,7 +30,7 @@ The server stores **only ciphertext it cannot open** (no passphrase). This exist
 - **Argon2id parameters (starting point):** `m = 64 MiB, t = 3, p = 1`; **tune to ~1–2 s on a budget phone** before GA. Store per-backup: `kdf_params = { algo: "argon2id", m, t, p, salt(base64), v }`. Unique 16-byte CSPRNG salt per user. Version the params so we can raise cost later without breaking old backups.
 - **Scope = identity, not history (v1).** Back up the **device signature/identity private key** only → recovery restores the ability to **receive new messages** (re-publish a KeyPackage, re-join groups from server-held Welcomes/state). **Old messages are NOT recoverable** — their per-epoch keys were deleted by forward secrecy. State this plainly in the UI ("messages from before this device are not restored"). *This preserves FS.*
 - **Optional, opt-in "history backup" (post-v1):** a user who explicitly accepts the tradeoff can additionally back up group secrets → recoverable history, **at the cost of FS for that data.** Off by default; clearly labeled.
-- **Rotation:** after recovery on a new device, or on suspected compromise, **rotate**: generate a new device key, publish a new KeyPackage, mark the old device revoked (ties to `device-lifecycle.md`).
+- **Rotation:** after recovery on a new device, or on suspected compromise, **rotate**: generate a new device key, publish a new KeyPackage, mark the old device revoked (ties to `multi-device-enrollment.md`).
 - **AEAD:** encrypt the key material with the ciphersuite AEAD (e.g. AES-256-GCM / XChaCha20-Poly1305) under `backupKey`, random nonce, stored with the ciphertext.
 
 ## Implementation — sealing primitive (checkpoint 21)
