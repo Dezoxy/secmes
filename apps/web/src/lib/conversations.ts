@@ -135,9 +135,8 @@ export class ConversationManager {
 
   /** Phase 1: claim the peer's one-time KeyPackage and derive the safety number. Trusts nothing yet.
    *  Only the PRIMARY peer device is claimed here — its key is the one the user verifies OOB.
-   *  Peer secondary devices are claimed in confirm() alongside own secondary devices so all devices
-   *  of both parties join from the same epoch-0 commit; they are trusted through the peer's own
-   *  enrollment trust chain (D1 approved them) and do not require a separate OOB safety check. */
+   *  Peer secondary devices join via the enrollment fan-out when the peer links them; adding them
+   *  here without per-device safety-number confirmation would bypass the #20 MITM defense. */
   async prepare(peerUserId: string): Promise<PendingConversation> {
     const claimed = await claimKeyPackage(peerUserId);
     const peerKeyPackage = deserializeKeyPackage(claimed.keyPackage);
@@ -172,21 +171,10 @@ export class ConversationManager {
       ? await claimEnrolledOwnDevices(this.selfUserId, this.selfDeviceId)
       : [];
 
-    // Claim peer's other devices (B2, only when running in B2 mode with a known selfDeviceId):
-    // already enrolled via the peer's own D1 approval flow, so they are trusted through the
-    // peer's enrollment chain without a separate OOB safety check. The enrollment fan-out only
-    // covers conversations existing at link time; new conversations must include peer secondary
-    // devices here so they receive a Welcome from epoch 0.
-    const peerOtherClaimed = this.selfDeviceId
-      ? await claimAllKeyPackages(pending.peer.userId, undefined, pending.peer.deviceId)
-      : [];
-
     // Create a SOLO conversation (just me — my own id dedups to the creator server-side).
     const { conversationId } = await createConversation([this.selfUserId]);
 
-    const hasExtra = ownOtherClaimed.length > 0 || peerOtherClaimed.length > 0;
-
-    if (!hasExtra) {
+    if (ownOtherClaimed.length === 0) {
       // Single-device path: add peer + deliver Welcome directly. The peer is added as a member of
       // the server conversation in the same deliverWelcome transaction, so a delivery failure leaves
       // only a benign self-only conversation, not a peer-visible orphan.
@@ -197,12 +185,11 @@ export class ConversationManager {
         ...serializeInvite(invite),
       });
     } else {
-      // Multi-device path (B2): batch-add peer + peer secondary + own secondary in one epoch-0
-      // commit so all devices of both parties join from the same epoch.
+      // Multi-device path (B2): batch-add peer + own other devices in one epoch-0 commit so they
+      // all join from the same epoch and forward secrecy is not split across commits.
       const ownOtherPackages = ownOtherClaimed.map((p) => deserializeKeyPackage(p.keyPackage));
-      const peerOtherPackages = peerOtherClaimed.map((p) => deserializeKeyPackage(p.keyPackage));
       const staged = await conversation.stageMembershipCommit({
-        add: [pending.peerKeyPackage, ...peerOtherPackages, ...ownOtherPackages],
+        add: [pending.peerKeyPackage, ...ownOtherPackages],
       });
       if (!staged.invite) throw new Error('epoch-0 commit produced no Welcome');
       const inv = serializeInvite(staged.invite);
@@ -235,12 +222,6 @@ export class ConversationManager {
               welcome: inv.welcome,
               ratchetTree: inv.ratchetTree,
             },
-            ...peerOtherClaimed.map((p) => ({
-              recipientUserId: pending.peer.userId,
-              recipientDeviceId: p.deviceId,
-              welcome: inv.welcome,
-              ratchetTree: inv.ratchetTree,
-            })),
             ...ownOtherClaimed.map((p) => ({
               recipientUserId: this.selfUserId,
               recipientDeviceId: p.deviceId,
@@ -271,7 +252,7 @@ export class ConversationManager {
       this.sessionKey,
     );
     // Multi-device path: staged commit has been applied and persisted — remove the pending slot.
-    if (hasExtra) {
+    if (ownOtherClaimed.length > 0) {
       await this.keystore.clearStagedCommit(conversationId);
     }
     const session: ConversationSession = {

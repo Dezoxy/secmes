@@ -178,21 +178,14 @@ describe('ConversationManager', () => {
 
     beforeEach(async () => {
       d2 = await engine.generateDeviceKeys('me:d2-uuid');
-      // Return own D2's package only when claiming self-user packages; peer has no secondary
-      // devices in this test scenario (returning different values prevents the ts-mls duplicate-
-      // client error that fires when the same KeyPackage is added twice in one commit).
-      claimAll.mockImplementation(async (userId: string) => {
-        if (userId === 'me-user') {
-          return [
-            {
-              deviceId: 'd2-server-id',
-              signaturePublicKey: deviceSignaturePublicKeyB64(d2),
-              keyPackage: serializeKeyPackage(d2.publicPackage),
-            },
-          ];
-        }
-        return []; // peer has no secondary devices in this scenario
-      });
+      // Simulate own D2 being in the key directory (server device id = 'd2-server-id').
+      claimAll.mockResolvedValue([
+        {
+          deviceId: 'd2-server-id',
+          signaturePublicKey: deviceSignaturePublicKeyB64(d2),
+          keyPackage: serializeKeyPackage(d2.publicPackage),
+        },
+      ]);
       // D2 has completed the enrollment trust flow — must be in the approved list for self-add.
       // fingerprint must match deviceSignaturePublicKeyB64(d2) so the leaf-key MITM check passes.
       vi.mocked(listEnrollments).mockResolvedValue([
@@ -210,10 +203,8 @@ describe('ConversationManager', () => {
       );
       const session = await mgr.confirm(await mgr.prepare('peer-user'));
 
-      // claimAllKeyPackages called for self-user AND for peer secondary devices.
+      // claimAllKeyPackages called for self-user, deliverWelcome NOT used (multi-device path uses postCommit).
       expect(claimAll).toHaveBeenCalledWith('me-user', undefined, 'my-server-id');
-      expect(claimAll).toHaveBeenCalledWith('peer-user', undefined, 'peer-device');
-      // deliverWelcome NOT used — multi-device path uses postCommit.
       expect(deliver).not.toHaveBeenCalled();
       expect(post).toHaveBeenCalledTimes(1);
 
