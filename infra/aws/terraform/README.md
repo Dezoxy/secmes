@@ -9,14 +9,17 @@ for the security model + residual risks.
 
 ## Real deploy (promoting off the experiment)
 
-The defaults run a **dummy-secret experiment**. For a REAL deploy (real secrets, remote state, **no secrets in
-Terraform state**), the helpers in `infra/aws/scripts/` + `real.tfvars.example` automate it:
+The defaults run a **dummy-secret experiment**. For a REAL deploy (real secrets in Key Vault, encrypted remote
+state, **no app/runtime secrets in Terraform state**), the helpers in `infra/aws/scripts/` +
+`real.tfvars.example` automate it. (Note: `seed_dummy_secrets=false` keeps the Key Vault values out of state,
+but the **Arc onboarding SP client secret** + resource ids still live in state — which is exactly why step 1's
+encrypted/locked remote backend matters.)
 
 1. **Remote state (once):** `scripts/bootstrap-tfstate.sh` → creates the encrypted/locked/versioned S3 backend
    and writes `backend.hcl`. Uncomment `backend "s3" {}` in `versions.tf`, then
    `terraform -chdir=infra/aws/terraform init -backend-config=backend.hcl -migrate-state`.
-2. **Apply (phase 1):** `cp real.tfvars.example real.tfvars` and fill it (note `seed_dummy_secrets = false` —
-   TF seeds NO secrets), then `terraform apply -var-file=real.tfvars`. The box boots + onboards into Arc.
+2. **Apply (phase 1):** `cp real.tfvars.example real.tfvars` and fill it (`seed_dummy_secrets = false` — TF
+   seeds no app/runtime secrets), then `terraform apply -var-file=real.tfvars`. The box boots + onboards into Arc.
 3. **Wait:** `az connectedmachine show -n argus-exp-ec2 -g argus-exp-rg --query status` → `Connected`.
 4. **Apply (phase 2):** `terraform apply -var-file=real.tfvars -var arc_machine_connected=true` (grants the Arc
    identity Key Vault read).

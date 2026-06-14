@@ -1,7 +1,8 @@
 # Real (non-experiment) AWS deploy var values. Copy to real.tfvars (gitignored) and
 #   terraform apply -var-file=real.tfvars
-# The key flip from the experiment is `seed_dummy_secrets = false`: Terraform seeds NO secrets (none in
-# state) — you set the real values out-of-band with scripts/populate-keyvault.sh.
+# The key flip from the experiment is `seed_dummy_secrets = false`: Terraform seeds no app/runtime secrets —
+# you set the real values out-of-band with scripts/populate-keyvault.sh. (The Arc onboarding SP secret + ids
+# still live in state regardless, so use the encrypted remote backend — see scripts/bootstrap-tfstate.sh.)
 
 seed_dummy_secrets = false
 

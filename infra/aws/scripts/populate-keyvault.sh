@@ -55,20 +55,24 @@ command -v az >/dev/null || {
   exit 1
 }
 
+# Secret values are staged in a private temp dir (0700) and removed on ANY exit — including a failed `az`
+# under `set -e` — so a plaintext value never lingers on disk. Mirrors infra/backup/backup-db.sh.
+umask 077
+WORKDIR="$(mktemp -d)"
+trap 'rm -rf -- "$WORKDIR"' EXIT
+
 # URL-unreserved (alphanumeric subset) of length $1 — matches the charset deploy.sh enforces for role logins.
 gen_alnum() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$1"; }
 
 secret_exists() { az keyvault secret show --vault-name "$KV" --name "$1" --only-show-errors >/dev/null 2>&1; }
 
-# Set a secret VALUE without ever putting it on argv: write to a 0600 temp file + `--file --encoding utf-8`.
+# Set a secret VALUE without ever putting it on argv: write to the 0700-dir temp file + `--file`. The file is
+# overwritten each call and removed by the EXIT trap (so a value never survives a failure mid-run).
 set_secret() { # $1 = name ; $2 = value
-  local f
-  f="$(mktemp)"
-  chmod 600 "$f"
+  local f="$WORKDIR/val"
   printf '%s' "$2" >"$f"
   az keyvault secret set --vault-name "$KV" --name "$1" --file "$f" --encoding utf-8 \
     --only-show-errors >/dev/null
-  rm -f "$f"
   log "set $1"
 }
 
@@ -85,6 +89,12 @@ put() { # $1 = name ; $2 = value
 get_secret() { az keyvault secret show --vault-name "$KV" --name "$1" --query value -o tsv --only-show-errors; }
 
 log "target vault: $KV  (rotate=$ROTATE)"
+if [ "$ROTATE" -eq 1 ]; then
+  log "WARNING: --rotate overwrites Key Vault values but does NOT change them on the RUNNING database."
+  log "  Redeploy after this so deploy.sh re-applies the argus_app/argus_cleanup/argus_backup role logins."
+  log "  The Postgres OWNER role password is consumed only at first init — rotate it on the live DB by hand"
+  log "  (ALTER ROLE argus ...) to match argus-postgres-owner-password, or migrations will fail to auth."
+fi
 
 # --- Generated runtime secrets (lengths mirror infra/aws/terraform/keyvault.tf's generated_secret_lengths) ---
 put argus-postgres-owner-password "$(gen_alnum 32)"
