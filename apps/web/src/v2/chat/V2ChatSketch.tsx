@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { CheckCheck, Paperclip, Send } from 'lucide-react';
-import { v2ClassNames } from '../design/tokens';
+import { joinClasses, v2ClassNames } from '../design/tokens';
 import {
   v2Conversations,
   v2MessagesByConversation,
@@ -8,10 +8,6 @@ import {
   type V2Message,
 } from '../mocks/sketch-data';
 import { V2AsidePanel, V2Badge, V2FactRow, V2SketchShell } from '../shell/V2Shell';
-
-function joinClasses(...classes: Array<string | false | undefined>): string {
-  return classes.filter(Boolean).join(' ');
-}
 
 function getTrustLabel(status: V2Conversation['status']) {
   if (status === 'pending') return 'Pending verification';
@@ -23,6 +19,35 @@ function getTrustTone(status: V2Conversation['status']) {
   if (status === 'pending') return 'warning';
   if (status === 'verified') return 'verified';
   return 'neutral';
+}
+
+function TrustStatusDot({ status }: { status: V2Conversation['status'] }) {
+  const colorClass =
+    status === 'verified'
+      ? 'bg-emerald-300'
+      : status === 'pending'
+        ? 'bg-amber-300'
+        : 'bg-white/24';
+
+  return (
+    <span
+      role="img"
+      aria-label={getTrustLabel(status)}
+      title={getTrustLabel(status)}
+      className={joinClasses('h-1.5 w-1.5 rounded-full', colorClass)}
+    />
+  );
+}
+
+function UnreadBadge({ count }: { count: number }) {
+  return (
+    <span
+      aria-label={`${count} unread messages`}
+      className="inline-flex min-w-5 items-center justify-center rounded-full bg-teal-300 px-1.5 text-[11px] font-semibold text-[#07100f]"
+    >
+      {count}
+    </span>
+  );
 }
 
 function ConversationSwitcher({
@@ -60,21 +85,16 @@ function ConversationSwitcher({
                 <span className="truncate text-sm font-medium text-white/86">
                   {conversation.name}
                 </span>
-                {conversation.status === 'verified' && (
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
-                )}
-                {conversation.status === 'pending' && (
-                  <span className="h-1.5 w-1.5 rounded-full bg-amber-300" />
-                )}
-                {conversation.status === 'quiet' && (
-                  <span className="h-1.5 w-1.5 rounded-full bg-white/24" />
-                )}
+                <TrustStatusDot status={conversation.status} />
               </span>
               <span className="mt-0.5 block truncate text-xs text-white/42">
                 {conversation.preview}
               </span>
             </span>
-            <span className="text-xs text-white/32">{conversation.time}</span>
+            <span className="flex items-center gap-2 text-xs text-white/32">
+              {conversation.unread && <UnreadBadge count={conversation.unread} />}
+              {conversation.time}
+            </span>
           </button>
         ))}
       </div>
@@ -109,6 +129,8 @@ function MobileConversationTabs({
         >
           <span className="font-semibold">{conversation.initials}</span>
           <span>{conversation.name}</span>
+          <TrustStatusDot status={conversation.status} />
+          {conversation.unread && <UnreadBadge count={conversation.unread} />}
         </button>
       ))}
     </div>

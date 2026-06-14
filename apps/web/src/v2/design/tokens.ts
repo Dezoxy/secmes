@@ -31,3 +31,7 @@ export const v2ClassNames = {
   focus:
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0b0d10]',
 } as const;
+
+export function joinClasses(...classes: Array<string | false | undefined>): string {
+  return classes.filter(Boolean).join(' ');
+}

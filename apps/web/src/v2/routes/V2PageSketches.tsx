@@ -15,14 +15,10 @@ import {
   Shield,
   type LucideIcon,
 } from 'lucide-react';
-import { v2ClassNames } from '../design/tokens';
+import { joinClasses, v2ClassNames } from '../design/tokens';
 import { v2RouteSketches, v2SettingsRows, v2TrustFacts } from '../mocks/sketch-data';
 import { V2AsidePanel, V2Badge, V2CommandBar, V2FactRow, V2SketchShell } from '../shell/V2Shell';
 import { V2ChatSketch } from '../chat/V2ChatSketch';
-
-function joinClasses(...classes: Array<string | false | undefined>): string {
-  return classes.filter(Boolean).join(' ');
-}
 
 const storageCards: Array<{
   id: string;
@@ -664,7 +660,7 @@ export function V2TransparencySketch() {
 export function V2Sketchbook() {
   return (
     <V2SketchShell
-      active="chat"
+      active="sketchbook"
       title="V2 Sketchbook"
       subtitle="Static page sketches matching the current v1 route inventory."
       aside={

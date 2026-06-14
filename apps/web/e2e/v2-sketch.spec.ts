@@ -33,6 +33,10 @@ for (const route of v2Routes) {
 test('v2 sketchbook cards and command palette navigate between sketches', async ({ page }) => {
   await page.goto('/v2');
 
+  await expect(page.getByRole('button', { name: 'Chat' })).not.toHaveAttribute(
+    'aria-current',
+    'page',
+  );
   await page.locator('main a[href="/v2/security"]').first().click();
   await expect(page).toHaveURL('/v2/security');
   await expect(page.getByRole('heading', { name: 'Security', exact: true })).toBeVisible();
@@ -46,6 +50,25 @@ test('v2 sketchbook cards and command palette navigate between sketches', async 
   await expect(page.getByRole('heading', { name: 'Storage', exact: true })).toBeVisible();
 });
 
+test('v2 command palette supports keyboard open, focus trap, and Escape close', async ({
+  page,
+}) => {
+  await page.goto('/v2/chat');
+
+  await page.getByRole('button', { name: 'Open v2 command palette' }).press('ControlOrMeta+K');
+  const dialog = page.getByRole('dialog', { name: 'V2 command palette' });
+  await expect(dialog).toBeVisible();
+
+  await page.getByLabel('Search command palette').fill('storage');
+  await page.keyboard.press('Shift+Tab');
+  await expect(page.getByRole('button', { name: 'Open storage controls Storage' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(page.getByLabel('Search command palette')).toBeFocused();
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});
+
 test('v2 chat keeps messages and verification state scoped to the selected conversation', async ({
   page,
 }) => {
@@ -56,6 +79,7 @@ test('v2 chat keeps messages and verification state scoped to the selected conve
   await page.getByRole('button', { name: /Legal review/i }).click();
   await expect(page.getByText('I opened the invite from a new browser.')).toBeVisible();
   await expect(page.getByText('Pending verification')).toBeVisible();
+  await expect(page.getByRole('img', { name: 'Pending verification' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Verify now' }).click();
   await expect(page.getByText('Safety number accepted on this browser.')).toBeVisible();

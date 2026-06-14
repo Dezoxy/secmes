@@ -1,7 +1,14 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, Command, Search, X } from 'lucide-react';
-import { v2ClassNames } from '../design/tokens';
+import { joinClasses, v2ClassNames } from '../design/tokens';
 import {
   v2CommandActions,
   v2CommandHint,
@@ -17,10 +24,6 @@ interface V2ShellProps {
   children: ReactNode;
   aside?: ReactNode;
   commandPreview?: boolean;
-}
-
-function joinClasses(...classes: Array<string | false | undefined>): string {
-  return classes.filter(Boolean).join(' ');
 }
 
 export function V2Badge({
@@ -125,6 +128,32 @@ function V2CommandPalette({ open, onClose }: { open: boolean; onClose: () => voi
     onClose();
   };
 
+  const trapFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Tab') return;
+
+    const focusable = Array.from(
+      event.currentTarget.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((element) => element.getClientRects().length > 0);
+
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (!first || !last) return;
+
+    const active = document.activeElement;
+    if (event.shiftKey && (!active || active === first || !event.currentTarget.contains(active))) {
+      event.preventDefault();
+      last.focus();
+      return;
+    }
+
+    if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-[70] bg-black/45 px-4 py-20 backdrop-blur-sm"
@@ -132,6 +161,7 @@ function V2CommandPalette({ open, onClose }: { open: boolean; onClose: () => voi
       aria-modal="true"
       aria-label="V2 command palette"
       onClick={onClose}
+      onKeyDown={trapFocus}
     >
       <div
         className="mx-auto w-full max-w-xl overflow-hidden rounded-2xl border border-white/[0.09] bg-[#151a20] shadow-2xl shadow-black/40"
@@ -143,6 +173,7 @@ function V2CommandPalette({ open, onClose }: { open: boolean; onClose: () => voi
             ref={inputRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
+            aria-label="Search command palette"
             placeholder="Search pages, conversations, and actions"
             className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-white/36"
           />
