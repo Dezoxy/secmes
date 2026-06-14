@@ -123,6 +123,14 @@ aws s3 cp "s3://$BUCKET/$GLOBALS_KEY" ./globals.sql.age --endpoint-url "$EP"
 aws s3 cp "s3://$BUCKET/$DB_KEY"      ./backup.dump.age --endpoint-url "$EP"
 
 # 2. Roles FIRST (no passwords — re-applied from Key Vault in step 4). Connect to the maintenance DB.
+#    NOTE (found by the restore drill): no `-v ON_ERROR_STOP=1` here, on purpose — two globals lines can
+#    error without aborting the restore:
+#      - `CREATE ROLE <bootstrap-superuser>` → "role already exists" if the fresh cluster reuses the source
+#        superuser name (e.g. argus). Harmless.
+#      - `GRANT pg_read_all_data TO argus_backup ... GRANTED BY <src-superuser>` → FAILS on PG16 when the
+#        fresh cluster's superuser differs from the original (the grantor needs ADMIN option on the predefined
+#        role). When it fails, argus_backup keeps BYPASSRLS but LOSES pg_read_all_data, so the NEXT backup
+#        can't read the tables. Step 4 re-grants it explicitly, recovering this regardless of superuser name.
 age -d -i age.key globals.sql.age | psql -d postgres
 
 # 3. Restore the DB into a FRESH database — faithfully (keep owners/grants/policies; the roles now exist).
@@ -130,10 +138,14 @@ age -d -i age.key backup.dump.age > backup.dump
 createdb argus_restore
 pg_restore --dbname argus_restore backup.dump   # NOT --no-owner/--no-privileges — roles exist, so keep them
 
-# 4. Re-apply role login passwords from Key Vault (the backup deliberately omits them), e.g.:
-#    ALTER ROLE argus_app   LOGIN PASSWORD '<from-key-vault>';
+# 4. Re-apply role login passwords from Key Vault (the backup deliberately omits them), AND re-grant
+#    argus_backup's full-read membership (the globals GRANT can fail across superusers — see step 2). Run as
+#    the restore superuser; `grant` is idempotent if already a member:
+#    ALTER ROLE argus_app     LOGIN PASSWORD '<from-key-vault>';
 #    ALTER ROLE argus_cleanup LOGIN PASSWORD '<from-key-vault>';
 #    ALTER ROLE argus_backup  LOGIN PASSWORD '<from-key-vault>';
+#    GRANT pg_read_all_data TO argus_backup;   -- restores full-DB read for the next backup (BYPASSRLS survives)
+#    -- verify: `\du argus_backup` must show BOTH "Bypass RLS" and membership of pg_read_all_data
 
 # 5. Sanity-check, then cut over. Securely remove the key + plaintext dump.
 shred -u age.key backup.dump
@@ -152,7 +164,10 @@ shred -u age.key backup.dump
   segfaults, drop `MemoryDenyWriteExecute=true` from the unit (the one knob known to bite the CLI). Confirm
   the dry-run completes a **real** multipart upload (a full dump), not just a connection.
 - **Do a real restore drill** (above) on day one and on a schedule — checkpoint 49 is "backups **+ a tested
-  restore**", not just backups.
+  restore**", not just backups. _Drilled 2026-06-14 against PG16 (dump → fresh-cluster restore): data, schema,
+  all RLS policies and per-role grants restore correctly and RLS enforces under a real `argus_app` login. The
+  drill surfaced the `pg_read_all_data` / `GRANTED BY` gap now handled in steps 2 and 4 — re-run the drill
+  against the actual prod backup objects before GA._
 - **Remote Postgres:** loopback uses `PGSSLMODE=prefer`. If `PGHOST` ever points off-box, set
   `PGSSLMODE=verify-full` + a CA bundle so the connection can't silently fall back to plaintext.
 - **Alerting:** `OnFailure=argus-notify-failure@%p.service` is wired in the unit. When the backup fails,

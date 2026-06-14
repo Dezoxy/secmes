@@ -139,4 +139,40 @@ Everything else rides the 120/min baseline. Two row-creation paths are **conscio
   limits, and `isMember` is an indexed lookup — so the unbounded single-socket amplification is closed.
   Per-user-aggregate + max-connections-per-user caps ride the realtime hardening / edge follow-up.
 - **DDoS / L7 volumetric** (many IPs, pre-auth) is **out of scope** for app-layer throttling — that belongs at
-  the edge (Caddy/WAF/CDN), part of the VM deploy track.
+  the edge (Cloudflare), see §7.
+
+## 7. Edge rate-limiting (Cloudflare) — the unauthenticated surface (COMP-2)
+
+The app throttler (§1–§6) only bounds **authenticated** abuse. The **unauthenticated surface** — the pre-auth
+WebSocket handshake, `POST /webhooks/stripe`, the OIDC login/token round-trip, and tenant **invite-accept**
+before the caller is tenant-bound — is bounded at the **edge**. Ingress is **Cloudflare Tunnel**, so the edge
+is **Cloudflare, not Caddy** (the in-repo Caddyfile has no `rate_limit` — that Caddy module isn't in our
+build; earlier "Caddy `rate_limit`" mentions above are superseded by this section).
+
+- **Closed internal beta:** Cloudflare's **always-on L3/4 DDoS protection** (automatic) is sufficient — no
+  manual rules required to start.
+- **Before PUBLIC exposure:** apply the L7 **Rate limiting rules** below in the Cloudflare dashboard
+  (Security → WAF → Rate limiting rules). They are **dashboard-managed** (like the Tunnel ingress), so this
+  table is their authoritative spec — there is no repo IaC for them.
+
+Apply per **client IP**, each rule scoped to the **zone** shown. **Important:** `/api/*` exists on *both*
+zones but means different things — on the **app** zone it is our API (rule #3); on the **auth** zone it is the
+Zitadel console / Login-V2 alias (Caddyfile routes `auth.4rgus.com` `/api/*` → Zitadel). Do **not** apply
+rule #3 to the auth zone or it throttles Zitadel's own console; rule #5 governs the auth zone.
+
+| # | Zone | Match | Limit / IP | Action | Closes |
+|---|---|---|---|---|---|
+| 1 | `4rgus.com` | `uri.path starts_with "/ws"` | 30 / min | Managed Challenge | pre-auth WebSocket connect flood — each socket holds a `ConnState` + 10s auth timer in the gateway |
+| 2 | `4rgus.com` | `uri.path eq "/webhooks/stripe"` | 60 / min | Block (1 min) | webhook flood (legit Stripe volume is low; still signature-gated + now idempotent) |
+| 3 | `4rgus.com` | `uri.path starts_with "/api/"` | 600 / min | Managed Challenge | generic API flood on the cheap token-rejection path (well above any legitimate per-user burst) |
+| 4 | `4rgus.com` | `POST /tenants/invites/accept` | 10 / min | Block (5 min) | invite-token guessing before the caller is tenant-bound — complements the in-app per-user cap |
+| 5 | `auth.4rgus.com` | the login + `/oauth/v2/token` endpoints (incl. the `/api/*` Zitadel alias) | 30 / min | Managed Challenge | credential-stuffing / flood against Zitadel |
+
+Also enable Cloudflare **Bot Fight Mode** (Super Bot Fight Mode on Pro+) and keep **"Under Attack" mode** as
+break-glass.
+
+**In-repo follow-up (before public, code):** add a **pre-auth connection cap** to the realtime gateway —
+bound the number of concurrent *un-authenticated* sockets (and/or shorten the first-frame auth timeout) so a
+connect flood that slips the edge can't exhaust server sockets/memory. The gateway currently allocates per
+pre-auth socket with no global pre-auth ceiling. Tracked as a realtime-hardening item, not required for a
+closed beta (rule #1 above is the edge mitigation).
