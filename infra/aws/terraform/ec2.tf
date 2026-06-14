@@ -21,11 +21,13 @@ locals {
 # the Arc agent + `azcmagent connect`, the swapfile, the secret-fetch unit) is in cloud-init.yaml — the AWS
 # port of infra/azure/terraform/cloud-init.yaml.
 resource "aws_instance" "this" {
+  # checkov:skip=CKV_AWS_126: detailed (1-min) CloudWatch monitoring is a paid add; basic 5-min monitoring is enough for one experiment box.
   ami                    = local.ami_id
   instance_type          = var.instance_type
   subnet_id              = aws_subnet.public.id
   vpc_security_group_ids = [aws_security_group.instance.id]
   iam_instance_profile   = aws_iam_instance_profile.instance.name
+  ebs_optimized          = true # t3 is EBS-optimized by default; set explicit for CKV_AWS_135
 
   # IMDSv2 REQUIRED: token-gated metadata, hop-limit 1 so a container/SSRF can't reach the instance role's
   # credentials. The AWS equivalent of "IMDS is link-local, on-box only".

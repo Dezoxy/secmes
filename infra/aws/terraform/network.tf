@@ -5,10 +5,18 @@
 #     allow-list); a NAT Gateway (no public IP on the instance) is the pricier hardening upgrade. ---
 
 resource "aws_vpc" "this" {
+  # checkov:skip=CKV2_AWS_11: VPC flow logging is an enterprise observability add (needs a log destination + IAM); not warranted for a single-box experiment where all inbound is denied.
   cidr_block           = "10.40.0.0/16"
   enable_dns_support   = true
   enable_dns_hostnames = true
   tags                 = { Name = "${var.prefix}-vpc" }
+}
+
+# Lock the VPC's DEFAULT security group: adopt it with NO rules so it denies all traffic (CKV2_AWS_12). The
+# instance always uses aws_security_group.instance; this just ensures the unused default SG is inert.
+resource "aws_default_security_group" "this" {
+  vpc_id = aws_vpc.this.id
+  # no ingress/egress blocks → all rules removed → restricts all traffic
 }
 
 resource "aws_internet_gateway" "this" {

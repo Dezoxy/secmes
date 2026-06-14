@@ -38,6 +38,7 @@ resource "azurerm_role_assignment" "arc_onboarding" {
 # fetched copy. SecureString uses the AWS-managed aws/ssm KMS key (the instance role's kms:Decrypt is scoped to
 # ViaService=ssm).
 resource "aws_ssm_parameter" "arc_onboarding_secret" {
+  # checkov:skip=CKV_AWS_337: the AWS-managed aws/ssm key is sufficient for a single use-once onboarding secret; a customer-managed CMK is a cost/ops add not warranted for the experiment.
   name        = "/${var.prefix}/arc-onboarding-secret"
   description = "Azure Arc onboarding SP client secret (used once by azcmagent connect at first boot)."
   type        = "SecureString"

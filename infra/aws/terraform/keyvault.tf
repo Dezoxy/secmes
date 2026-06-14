@@ -112,10 +112,12 @@ locals {
 }
 
 resource "azurerm_key_vault_secret" "seed" {
-  for_each     = var.seed_dummy_secrets ? local.seeded_secrets : {}
-  name         = each.key
-  value        = each.value
-  key_vault_id = azurerm_key_vault.exp.id
+  for_each        = var.seed_dummy_secrets ? local.seeded_secrets : {}
+  name            = each.key
+  value           = each.value
+  key_vault_id    = azurerm_key_vault.exp.id
+  content_type    = "text/plain"           # CKV_AZURE_114 / semgrep keyvault-content-type
+  expiration_date = "2027-06-14T00:00:00Z" # CKV_AZURE_41 / semgrep keyvault-ensure-secret-expires — dummy secrets expire
 
   # The apply principal needs Secrets Officer first (you, via azure_admin_object_id, or another grant).
   depends_on = [azurerm_role_assignment.admin_kv_secrets_officer]
