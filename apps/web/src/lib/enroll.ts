@@ -144,6 +144,16 @@ export async function enrollDevice(
           // conversation_commits is empty. Skip without retrying; D2 has no history for it anyway.
           break;
         }
+        // The winning commit may have already added D2 (two D1 tabs racing fan-out). Retrying
+        // would stage a duplicate add and burn a key package. Re-check membership and skip if D2
+        // is now a leaf — reuses d2SigKeyBytes from the top of the conversation loop.
+        const d2NowPresent = conversation.members().some((m) => {
+          const mKey = m.signaturePublicKey;
+          if (mKey.length !== d2SigKeyBytes.length) return false;
+          for (let i = 0; i < mKey.length; i++) if (mKey[i] !== d2SigKeyBytes[i]) return false;
+          return true;
+        });
+        if (d2NowPresent) break;
         continue;
       }
       break;

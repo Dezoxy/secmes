@@ -278,6 +278,18 @@ export class DevicesService {
       );
       if (!proven) throw new BadRequestException('invalid withdraw proof');
 
+      // Clear pending Welcomes for this device before deleting it. The conversation_welcomes →
+      // devices FK is ON DELETE NO ACTION, so deleting the device row first would fail with a
+      // FK violation if any Welcomes remain. The Welcomes are HPKE-sealed to the device's
+      // private key (which we're about to destroy), so they are useless after withdrawal anyway.
+      await tx
+        .delete(schema.conversationWelcomes)
+        .where(
+          and(
+            eq(schema.conversationWelcomes.tenantId, auth.tenantId),
+            eq(schema.conversationWelcomes.recipientDeviceId, device.id),
+          ),
+        );
       await tx.delete(schema.devices).where(eq(schema.devices.id, device.id));
     });
 
