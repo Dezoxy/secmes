@@ -170,7 +170,10 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
             .replace(/\//g, '_')
             .replace(/=+$/, '');
           await withdrawDevice(oldSpk, proof);
-          await keystore.clearDevice();
+          // Keep group states and META salt intact so the new composite-identity device can still
+          // decrypt existing conversation history with the same passphrase (clearDeviceOnly vs
+          // clearDevice — see DeviceKeystore for the distinction).
+          await keystore.clearDeviceOnly();
           dev = await keystore.getOrCreateDevice(identity, passphrase);
         } else if (creating) {
           dev = await keystore.getOrCreateDevice(identity, passphrase);

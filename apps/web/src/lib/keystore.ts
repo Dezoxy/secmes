@@ -925,6 +925,20 @@ export class DeviceKeystore {
     this.appendChains.clear();
   }
 
+  /**
+   * Clear only the device credential and key-package pool, keeping group states, message history,
+   * and the META salt intact. Used for the pre-B2 → composite-identity migration: the old device
+   * row is removed from the server but the local MLS group states (sealed with the passphrase-
+   * derived session key) must survive so the migrated device can still decrypt conversation history.
+   * The same passphrase + unchanged META salt → same session key → same access to old group states.
+   */
+  async clearDeviceOnly(): Promise<void> {
+    await this.db.delete(STORE, SELF);
+    await this.db.delete(POOL_STORE, SELF);
+    await this.db.clear(PENDING_STORE);
+    // GROUP_STORE, MSGLOG_STORE, and META_STORE are intentionally preserved.
+  }
+
   /** Whether a sealed device is stored for this profile. Metadata only — no passphrase, no unseal. */
   async hasDevice(): Promise<boolean> {
     return (await this.db.get(STORE, SELF)) !== undefined;
