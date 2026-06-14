@@ -331,6 +331,7 @@ The `packages/contracts` shared types are the concrete payoff of going TypeScrip
 | Compromised admin | MFA via IdP, least privilege, full audit trail, no content access |
 | Lost device | Key recovery from encrypted backup; device revocation |
 | Malicious insider (you) | E2EE means you *cannot* read content — provable, sellable |
+| Metadata exposure (who talks to whom, when, message sizes) | Inherent to a hosted delivery layer; minimized (opaque conversation IDs, no titles, pseudonymous identity, IDs-only logs, RLS) and stated as an accepted residual — see `threat-models/metadata-exposure.md` |
 | Malicious JS injection | CSP + SRI + service-worker pinning + hardened pipeline (§3.2) |
 | Compromised user account | IdP MFA + session controls + device revocation |
 

@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, Patch, Post, UseGuards } from 
 import { Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
@@ -15,10 +16,21 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 
-import type { SsoConfig } from '@argus/contracts';
+import {
+  CreateSsoConfigBodySchema,
+  RotateSsoSecretBodySchema,
+  UpdateSsoConfigBodySchema,
+} from '@argus/contracts';
+import type {
+  CreateSsoConfigBody,
+  RotateSsoSecretBody,
+  SsoConfig,
+  UpdateSsoConfigBody,
+} from '@argus/contracts';
 import { AdminGuard } from '../auth/admin.guard.js';
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { CurrentAuth } from '../auth/current-auth.decorator.js';
+import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { perMinute, SENSITIVE_LIMITS } from '../rate-limit/rate-limit.constants.js';
 import { SsoService } from './sso.service.js';
 
@@ -111,6 +123,7 @@ export class SsoController {
     summary: 'Configure SSO for this tenant (admin only). Provisions a Zitadel org + IdP.',
     operationId: 'createSsoConfig',
   })
+  @ApiBody({ type: CreateSsoConfigBodyDto })
   @ApiCreatedResponse({ description: 'SSO configured', type: SsoConfigDto })
   @ApiConflictResponse({ description: 'SSO already configured' })
   @ApiServiceUnavailableResponse({
@@ -120,12 +133,9 @@ export class SsoController {
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async createConfig(
     @CurrentAuth() auth: VerifiedAuth,
-    @Body() body: CreateSsoConfigBodyDto,
+    @Body(new ZodValidationPipe(CreateSsoConfigBodySchema)) body: CreateSsoConfigBody,
   ): Promise<SsoConfig> {
-    return this.ssoService.createSsoConfig(
-      auth,
-      body as unknown as import('@argus/contracts').CreateSsoConfigBody,
-    );
+    return this.ssoService.createSsoConfig(auth, body);
   }
 
   @Patch()
@@ -134,6 +144,7 @@ export class SsoController {
     summary: 'Update tenant SSO config (admin only). Does not touch the client secret.',
     operationId: 'updateSsoConfig',
   })
+  @ApiBody({ type: UpdateSsoConfigBodyDto })
   @ApiOkResponse({ description: 'SSO config updated', type: SsoConfigDto })
   @ApiNotFoundResponse({ description: 'SSO not configured' })
   @ApiServiceUnavailableResponse({
@@ -143,12 +154,9 @@ export class SsoController {
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async updateConfig(
     @CurrentAuth() auth: VerifiedAuth,
-    @Body() body: UpdateSsoConfigBodyDto,
+    @Body(new ZodValidationPipe(UpdateSsoConfigBodySchema)) body: UpdateSsoConfigBody,
   ): Promise<SsoConfig> {
-    return this.ssoService.updateSsoConfig(
-      auth,
-      body as unknown as import('@argus/contracts').UpdateSsoConfigBody,
-    );
+    return this.ssoService.updateSsoConfig(auth, body);
   }
 
   @Patch('secret')
@@ -158,6 +166,7 @@ export class SsoController {
     summary: 'Rotate the SSO client secret (admin only). New secret forwarded to Zitadel.',
     operationId: 'rotateSsoSecret',
   })
+  @ApiBody({ type: RotateSsoSecretBodyDto })
   @ApiNoContentResponse({ description: 'secret rotated' })
   @ApiNotFoundResponse({ description: 'SSO not configured' })
   @ApiServiceUnavailableResponse({
@@ -167,12 +176,9 @@ export class SsoController {
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async rotateSecret(
     @CurrentAuth() auth: VerifiedAuth,
-    @Body() body: RotateSsoSecretBodyDto,
+    @Body(new ZodValidationPipe(RotateSsoSecretBodySchema)) body: RotateSsoSecretBody,
   ): Promise<void> {
-    return this.ssoService.rotateSsoSecret(
-      auth,
-      body as unknown as import('@argus/contracts').RotateSsoSecretBody,
-    );
+    return this.ssoService.rotateSsoSecret(auth, body);
   }
 
   @Delete()

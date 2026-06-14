@@ -195,10 +195,13 @@ export class TenantsService {
     const tokenHash = sha256hex(token);
     const INVALID = 'invalid or expired invite';
 
-    // Cross-tenant lookup: withRouting sets role=argus_app without app.tenant_id. The
-    // tenant_invites_accept_flow policy allows this SELECT; column grant limits fields.
-    const invite = await withRouting((tx) =>
-      tx
+    // Cross-tenant lookup: withRouting sets role=argus_app without app.tenant_id. We additionally set a
+    // transaction-local app.invite_token_hash; the tenant_invites_accept_flow RLS policy (migration 0028)
+    // exposes ONLY the row whose token_hash matches it, so even this query cannot read another tenant's
+    // invites. The explicit token_hash filter below is retained for the unique-index lookup + defense-in-depth.
+    const invite = await withRouting(async (tx) => {
+      await tx.execute(sql`select set_config('app.invite_token_hash', ${tokenHash}, true)`);
+      return tx
         .select({
           id: schema.tenantInvites.id,
           tenantId: schema.tenantInvites.tenantId,
@@ -210,8 +213,8 @@ export class TenantsService {
         .from(schema.tenantInvites)
         .where(eq(schema.tenantInvites.tokenHash, tokenHash))
         .limit(1)
-        .then((r) => r[0]),
-    );
+        .then((r) => r[0]);
+    });
 
     if (!invite) throw new ForbiddenException(INVALID);
     if (invite.acceptedAt !== null) throw new ForbiddenException(INVALID);
