@@ -7,6 +7,36 @@ live `infra/azure/` Azure stack and **touches neither** the production VM nor it
 See [`docs/threat-models/cross-cloud-secret-fetch.md`](../../../docs/threat-models/cross-cloud-secret-fetch.md)
 for the security model + residual risks.
 
+## Real deploy (promoting off the experiment)
+
+The defaults run a **dummy-secret experiment**. For a REAL deploy (real secrets, remote state, **no secrets in
+Terraform state**), the helpers in `infra/aws/scripts/` + `real.tfvars.example` automate it:
+
+1. **Remote state (once):** `scripts/bootstrap-tfstate.sh` → creates the encrypted/locked/versioned S3 backend
+   and writes `backend.hcl`. Uncomment `backend "s3" {}` in `versions.tf`, then
+   `terraform -chdir=infra/aws/terraform init -backend-config=backend.hcl -migrate-state`.
+2. **Apply (phase 1):** `cp real.tfvars.example real.tfvars` and fill it (note `seed_dummy_secrets = false` —
+   TF seeds NO secrets), then `terraform apply -var-file=real.tfvars`. The box boots + onboards into Arc.
+3. **Wait:** `az connectedmachine show -n argus-exp-ec2 -g argus-exp-rg --query status` → `Connected`.
+4. **Apply (phase 2):** `terraform apply -var-file=real.tfvars -var arc_machine_connected=true` (grants the Arc
+   identity Key Vault read).
+5. **Populate the vault** with REAL secrets:
+   `export ARGUS_S3_SECRET_ACCESS_KEY=… ARGUS_B2_APP_KEY=… ARGUS_TUNNEL_TOKEN=… ARGUS_GHCR_TOKEN=…` then
+   `scripts/populate-keyvault.sh` (generates passwords + masterkey, derives the DSNs; idempotent — re-run safe).
+   Your machine must reach the KV through its **default-deny firewall** — set `seed_admin_ip` in `real.tfvars`
+   (your /32) or run the helper from a host that egresses via the EC2 EIP, else the writes get a 403.
+6. **Wire GitHub:** `export S3_BUCKET=… S3_ACCESS_KEY_ID=… OIDC_ISSUER=… OIDC_AUDIENCE=… VITE_OIDC_ISSUER=…
+   VITE_OIDC_CLIENT_ID=… VITE_OIDC_REDIRECT_URI=… [X42C_API_TOKEN=…]` then `scripts/setup-github-cicd.sh` (sets
+   the cd-aws.yml vars from TF outputs + creates the gated Environment; leaves `ENABLE_DEPLOY_AWS=false`).
+7. **Deploy:** `gh variable set ENABLE_DEPLOY_AWS true`, then `git tag aws-v0.1.0 && git push origin aws-v0.1.0`
+   → approve in the `aws-experiment` Environment → SSM rolls out `deploy.sh` (migrate → provision runtime role
+   logins → bring the stack up).
+8. **Arm** the optional secrets after first boot (Stripe, operator key, Sentry DSN, Zitadel mgmt/login PATs)
+   via `az keyvault secret set …` — see `infra/stack/secrets/README.md`.
+
+> The `argus_app`/`argus_cleanup`/`argus_backup` DB roles get their LOGIN passwords set **automatically** by
+> `deploy.sh` from the Key Vault values — no manual `ALTER ROLE`.
+
 ## What it creates
 
 - **AWS:** VPC + public subnet, a no-inbound security group, one EC2 instance (`t3.medium`, IMDSv2-required,

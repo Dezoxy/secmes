@@ -26,16 +26,12 @@ terraform {
     }
   }
 
-  # Local state for the experiment (mirrors infra/azure/terraform/). State holds the Arc onboarding SP id, the KV
-  # id, and the GitHub OIDC role arn — DO NOT commit terraform.tfstate. Before any shared/CI use, migrate to an
-  # encrypted remote backend with locking, e.g.:
-  # backend "s3" {
-  #   bucket         = "argus-exp-tfstate"
-  #   key            = "aws-experiment.tfstate"
-  #   region         = "eu-central-1"
-  #   dynamodb_table = "argus-exp-tflock"
-  #   encrypt        = true
-  # }
+  # Local state by default (the experiment). State holds the Arc onboarding SP id, the KV id, and the GitHub
+  # OIDC role arn — DO NOT commit terraform.tfstate. For a REAL deploy use the remote S3 backend (encrypted +
+  # locked + versioned, survives laptop loss): run `scripts/bootstrap-tfstate.sh` (creates the bucket + lock
+  # table + writes backend.hcl from backend.hcl.example), UNCOMMENT the partial block below, then
+  #   terraform init -backend-config=backend.hcl -migrate-state
+  # backend "s3" {}
 }
 
 # AWS compute lives in eu-central-1 (Frankfurt) for EU/GDPR residency parity with the live germanywestcentral

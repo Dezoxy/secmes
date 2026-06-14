@@ -1,0 +1,26 @@
+# Real (non-experiment) AWS deploy var values. Copy to real.tfvars (gitignored) and
+#   terraform apply -var-file=real.tfvars
+# The key flip from the experiment is `seed_dummy_secrets = false`: Terraform seeds NO secrets (none in
+# state) — you set the real values out-of-band with scripts/populate-keyvault.sh.
+
+seed_dummy_secrets = false
+
+# Azure (Key Vault holds the secrets; the EC2 reads them via Arc).
+azure_subscription_id = "<your-azure-subscription-id>"
+azure_admin_object_id = "<your-entra-object-id>" # grants you Key Vault Secrets Officer (to set the secrets)
+# Your machine's public IP/CIDR, allowed through the KV default-deny firewall so populate-keyvault.sh can set
+# secrets from off-box. Leave null only if you run the helper from a host that egresses via the EC2 EIP.
+seed_admin_ip = "<your.public.ip>/32"
+
+# GitHub OIDC (the IAM deploy role's trust subject binds to this exact environment).
+github_owner = "Dezoxy"
+github_repo  = "secmes"
+# The GitHub Environment the deploy job + IAM OIDC trust use. If you change it, ALSO edit `environment:` in
+# .github/workflows/cd-aws.yml — the trust subject (repo:OWNER/REPO:environment:<this>) must match the
+# environment the deploy job actually runs in, or AssumeRoleWithWebIdentity is rejected.
+github_deploy_environment = "aws-experiment"
+
+# Defaults worth knowing (override only if needed):
+# aws_region    = "eu-central-1"   # EU residency
+# instance_type = "t3.medium"      # bump to t3.large if memory-tight
+# admin_cidr    = null             # no inbound SSH; deploys ride SSM, ingress rides the Cloudflare Tunnel

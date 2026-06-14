@@ -1,0 +1,8 @@
+# Partial S3 backend config for the REAL AWS deploy. `scripts/bootstrap-tfstate.sh` writes a real `backend.hcl`
+# (gitignored) with your resolved names; this is the committed template. Then uncomment `backend "s3" {}` in
+# versions.tf and run:  terraform init -backend-config=backend.hcl -migrate-state
+bucket         = "argus-tfstate-<your-aws-account-id>"
+key            = "aws-real.tfstate"
+region         = "eu-central-1"
+dynamodb_table = "argus-tflock"
+encrypt        = true
