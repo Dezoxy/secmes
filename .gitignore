@@ -43,6 +43,9 @@ id_ed25519
 /secrets/
 .secrets/
 *.secret
+# operator AWS-deploy prep sheet — the filled copy holds live secrets; the blanks-only template is tracked
+prep.env
+!prep.env.example
 
 # terraform
 **/.terraform/*
