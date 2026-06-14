@@ -10,19 +10,23 @@ Run the whole stack on your machine with Docker Compose — the **same** Compose
 ## Start / stop
 
 ```bash
-make up      # build + start postgres, redis, minio, api
-make ps      # status
-make logs    # tail logs
-make down    # stop (keeps data)
-make reset   # stop + wipe data volumes
+make up                    # build + start postgres, redis, minio, zitadel (+ provision OIDC)
+make migrate && make seed  # apply the schema + seed the dev tenant
+make api-dev               # run the API on the host (:3000)
+make ps                    # status
+make logs                  # tail logs
+make down                  # stop (keeps data)
+make reset                 # stop + wipe data volumes
 ```
+
+The API runs on the host via `make api-dev` — the Compose `api` service is `app`-profile-gated, so `make up` does **not** start it. One-time: add `127.0.0.1 zitadel` to `/etc/hosts` (see [`local-auth.md`](local-auth.md)).
 
 ## What you get
 
 | URL | Service |
 |---|---|
-| http://localhost:3000/healthz | api health probe |
-| http://localhost:3000/docs | Swagger UI (dev only) |
+| http://localhost:3000/healthz | api health probe (after `make api-dev`) |
+| http://localhost:3000/docs | Swagger UI (dev only; after `make api-dev`) |
 | http://localhost:9001 | MinIO web console (user/pass: `argus` / `argus_local_dev`) |
 | localhost:5432 | Postgres (`argus` / `argus_local_dev`, db `argus`) |
 | localhost:6379 | Redis |
@@ -42,15 +46,14 @@ Production runs from a separate **`compose.prod.yaml`** (standalone — not laye
 
 ## Develop against it from the host (hot reload)
 
-Prefer editing with live reload? Run the backing services in Docker and the app on the host:
+`make api-dev` runs the API on the host in watch mode (Nest `--watch`) against the Docker backing services. For the PWA with hot reload:
 
 ```bash
-make up                       # postgres/redis/minio (api also starts; ignore or `docker compose stop api`)
-pnpm --filter @argus/api dev # nest watch on the host, pointing at localhost services
+pnpm --filter @argus/web dev   # Vite dev server on http://localhost:5173
 ```
 
 ## Notes
 
 - All credentials here are **local-only throwaway values**, never real secrets.
-- **Zitadel (identity)** is added under a `--profile auth` at Phase 1 (checkpoint 9). Until then, auth is stubbed locally.
+- **Zitadel (identity)** runs as part of `make up` (its own DB + Login V2, provisioned by `make auth-provision`), so local login uses the real OIDC flow — see [`local-auth.md`](local-auth.md). Demo mode (auth stubbed) only applies when OIDC is left unconfigured.
 - Data persists in named volumes (`pgdata`, `miniodata`) across `make down`; use `make reset` to start clean.
