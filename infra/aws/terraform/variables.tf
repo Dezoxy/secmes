@@ -34,6 +34,11 @@ variable "admin_cidr" {
   type        = string
   default     = null
   description = "Optional CIDR for a break-glass inbound SSH rule (port 22). Leave null (default) for NO inbound at all — deploys ride SSM, ingress rides the Cloudflare Tunnel. Set to your /32 only if you must SSH in for debugging."
+
+  validation {
+    condition     = var.admin_cidr == null || !contains(["0.0.0.0/0", "::/0"], var.admin_cidr)
+    error_message = "admin_cidr must not be world-open (0.0.0.0/0 or ::/0) — that exposes break-glass SSH to the entire internet. Use a specific /32."
+  }
 }
 
 # --- GitHub OIDC (CD via SSM) ---
