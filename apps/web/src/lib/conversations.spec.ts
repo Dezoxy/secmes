@@ -275,5 +275,67 @@ describe('ConversationManager', () => {
       expect(claimAll).toHaveBeenCalledWith('peer-user', undefined, 'peer-device');
       expect(claimAll).not.toHaveBeenCalledWith('me-user', expect.anything(), expect.anything());
     });
+
+    it('prepare() returns per-device safety numbers; confirm() delivers Welcome to peer secondary device', async () => {
+      const peerD2 = await engine.generateDeviceKeys('peer:d2-uuid');
+      // Override B2 mock: return peerD2 for peer secondary claim; d2 for own secondary claim.
+      claimAll.mockImplementation(async (userId: string, _?: unknown, excludeDeviceId?: string) => {
+        if (userId === 'peer-user' && excludeDeviceId === 'peer-device') {
+          return [
+            {
+              deviceId: 'peer-d2-id',
+              signaturePublicKey: deviceSignaturePublicKeyB64(peerD2),
+              keyPackage: serializeKeyPackage(peerD2.publicPackage),
+            },
+          ];
+        }
+        if (userId === 'me-user') {
+          return [
+            {
+              deviceId: 'd2-server-id',
+              signaturePublicKey: deviceSignaturePublicKeyB64(d2),
+              keyPackage: serializeKeyPackage(d2.publicPackage),
+            },
+          ];
+        }
+        return [];
+      });
+
+      const mgr = new ConversationManager(
+        me,
+        'me-user',
+        keystore,
+        await keystore.deriveSessionKey('pw'),
+        'my-server-id',
+      );
+      const pending = await mgr.prepare('peer-user');
+
+      // prepare() must compute per-device safety numbers for peer secondary devices.
+      expect(pending.peerSecondaryDevices).toHaveLength(1);
+      expect(pending.peerSecondaryDevices[0]!.deviceId).toBe('peer-d2-id');
+      expect(pending.peerSecondaryDevices[0]!.safetyNumber).toMatch(/\d/);
+
+      const session = await mgr.confirm(pending);
+
+      // confirm() must include a Welcome for the peer secondary device in the commit.
+      const body = post.mock.calls[0]![1];
+      const peerD2Welcome = body.welcomes.find(
+        (w: { recipientDeviceId: string }) => w.recipientDeviceId === 'peer-d2-id',
+      );
+      expect(peerD2Welcome).toBeDefined();
+      expect(peerD2Welcome!.recipientUserId).toBe('peer-user');
+
+      // The peer's secondary device can actually join from the delivered Welcome and decrypt.
+      const joinedConv = await engine.joinConversation(
+        peerD2,
+        deserializeInvite({
+          welcome: peerD2Welcome!.welcome,
+          ratchetTree: peerD2Welcome!.ratchetTree,
+        }),
+      );
+      expect(await joinedConv.decrypt(await session.conversation.encrypt('hi from d1'))).toBe(
+        'hi from d1',
+      );
+    });
   });
 });
