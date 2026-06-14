@@ -170,11 +170,11 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
             .replace(/\//g, '_')
             .replace(/=+$/, '');
           await withdrawDevice(oldSpk, proof);
-          // Keep group states and META salt intact so the new composite-identity device can still
-          // decrypt existing conversation history with the same passphrase (clearDeviceOnly vs
-          // clearDevice — see DeviceKeystore for the distinction).
+          // Clear the old device credential and MLS group states; rebind MSGLOG records to the
+          // new identity so historical messages remain accessible after migration.
           await keystore.clearDeviceOnly();
           dev = await keystore.getOrCreateDevice(identity, passphrase);
+          await keystore.rebindMessageLogs(dev);
         } else if (creating) {
           dev = await keystore.getOrCreateDevice(identity, passphrase);
         } else {
@@ -217,7 +217,40 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         const { userId: artifactUserId, deviceUuid: uuid } = parseDeviceIdentity(identity);
         if (artifactUserId !== userId)
           throw new Error('recovery artifact belongs to a different account');
-        if (!uuid) throw new Error('invalid identity in recovery artifact');
+        if (!uuid) {
+          // Legacy pre-B2 artifact (bare userId identity). Restore the old device onto the server
+          // so it can be cleanly withdrawn, then migrate to composite identity — same path as
+          // unlock()'s isLegacyMigration branch. Tolerates 404 from withdrawDevice if the old
+          // device was already withdrawn during migration on another browser.
+          const { device: oldDev } = await restoreAndProvision(
+            keystore,
+            identity,
+            artifactJson,
+            passphrase,
+          );
+          const oldSpk = deviceSignaturePublicKeyB64(oldDev);
+          const proofBytes = signWithdraw(deviceSignatureSeed(oldDev), oldSpk);
+          const proof = btoa(String.fromCharCode(...proofBytes))
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=+$/, '');
+          await withdrawDevice(oldSpk, proof).catch(() => undefined);
+          await keystore.clearDeviceOnly();
+          const newUuid = crypto.randomUUID();
+          const newIdentity = formatDeviceIdentity(userId, newUuid);
+          const dev = await keystore.getOrCreateDevice(newIdentity, passphrase);
+          if (!dev) throw new Error('could not create migrated device');
+          await keystore.rebindMessageLogs(dev);
+          const { pool: provisioned, result } = await provisionDevice(keystore, dev, passphrase);
+          setDevice(dev);
+          setPool(provisioned);
+          setDeviceId(result.deviceId);
+          setDeviceUuid(newUuid);
+          setPassphrase(passphrase);
+          setSessionKey(await keystore.deriveSessionKey(passphrase));
+          setStatus('ready');
+          return;
+        }
         // Shared with the Settings recovery panel: restore → revoke now-stale packages → publish fresh (#20).
         const {
           device: dev,

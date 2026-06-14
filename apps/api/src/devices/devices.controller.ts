@@ -90,6 +90,14 @@ class EnrollmentDto {
 
   @ApiProperty({ type: 'string', format: 'date-time', nullable: true })
   resolvedAt!: string | null;
+
+  @ApiProperty({
+    type: 'string',
+    nullable: true,
+    description:
+      "D1's registered signature public key (base64) — used by D2 to verify D1's key package",
+  })
+  approverSignaturePublicKey!: string | null;
 }
 
 class ConversationListDto {
@@ -256,6 +264,7 @@ function toDto(row: {
   createdAt: Date;
   expiresAt: Date;
   resolvedAt: Date | null;
+  approverSignaturePublicKey?: string | null;
 }): EnrollmentDto {
   return {
     id: row.id,
@@ -266,5 +275,6 @@ function toDto(row: {
     createdAt: row.createdAt.toISOString(),
     expiresAt: row.expiresAt.toISOString(),
     resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
+    approverSignaturePublicKey: row.approverSignaturePublicKey ?? null,
   };
 }

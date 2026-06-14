@@ -314,6 +314,8 @@ export const EnrollmentSchema = z
     createdAt: z.string().datetime(),
     expiresAt: z.string().datetime(),
     resolvedAt: z.string().datetime().nullable(),
+    /** D1's registered signature public key (base64) — used by D2 to verify D1's claimed key package. */
+    approverSignaturePublicKey: z.string().nullable().optional(),
   })
   .strip();
 export type Enrollment = z.infer<typeof EnrollmentSchema>;

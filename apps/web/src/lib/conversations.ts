@@ -47,14 +47,26 @@ async function claimEnrolledOwnDevices(
   const enrollmentByDeviceId = new Map(
     enrollments.map((e) => [e.requestingDeviceId, e.fingerprint]),
   );
-  // approvedByDeviceId (D1) is a trusted already-provisioned device — no fingerprint stored for it.
-  // Include it so D2 can self-add D1 when D2 creates a new conversation.
-  const approverDeviceIds = new Set(
-    enrollments.map((e) => e.approvedByDeviceId).filter((id): id is string => id !== null),
+  // Map approvedByDeviceId (D1) → D1's registered SPK for the leaf-key MITM check on D1.
+  // A compromised server could swap D1's key package; checking against D1's registered SPK
+  // (returned alongside the enrollment row) prevents a server-injected key from being self-added.
+  const approverSpkByDeviceId = new Map(
+    enrollments
+      .filter((e) => e.approvedByDeviceId !== null && e.approverSignaturePublicKey != null)
+      .map((e) => [e.approvedByDeviceId as string, e.approverSignaturePublicKey as string]),
   );
   return packages.filter((p) => {
     if (p.deviceId === selfDeviceId) return false;
-    if (approverDeviceIds.has(p.deviceId)) return true; // D1: trusted approver, skip fingerprint check
+    const approverSpk = approverSpkByDeviceId.get(p.deviceId);
+    if (approverSpk !== undefined) {
+      // D1: verify claimed package leaf key matches D1's registered SPK.
+      const expectedBytes = fromBase64(approverSpk);
+      const claimedKey = deserializeKeyPackage(p.keyPackage).leafNode.signaturePublicKey;
+      return (
+        claimedKey.length === expectedBytes.length &&
+        claimedKey.every((b, i) => b === expectedBytes[i])
+      );
+    }
     const fingerprint = enrollmentByDeviceId.get(p.deviceId);
     if (!fingerprint) return false;
     const expectedBytes = fromBase64(fingerprint);

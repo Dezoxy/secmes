@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { and, eq, gt, sql } from 'drizzle-orm';
+import { aliasedTable, and, eq, gt, sql } from 'drizzle-orm';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
@@ -17,6 +17,8 @@ export interface EnrollmentRow {
   createdAt: Date;
   expiresAt: Date;
   resolvedAt: Date | null;
+  /** D1's registered signature public key — used by D2 to verify D1's claimed key package. Present only on listEnrollments rows (JOINed); absent on register/approve/reject rows. */
+  approverSignaturePublicKey?: string | null;
 }
 
 @Injectable()
@@ -94,9 +96,28 @@ export class DevicesService {
     return withTenant(auth.tenantId, async (tx) => {
       const userId = await requireUser(tx, auth.sub);
       const effectiveStatus = status ?? 'pending';
+      // Join the approver's devices row so D2 can verify D1's claimed key package SPK (P1-3).
+      const approverDevice = aliasedTable(schema.devices, 'approver_device');
       return tx
-        .select()
+        .select({
+          id: schema.deviceEnrollments.id,
+          requestingDeviceId: schema.deviceEnrollments.requestingDeviceId,
+          approvedByDeviceId: schema.deviceEnrollments.approvedByDeviceId,
+          fingerprint: schema.deviceEnrollments.fingerprint,
+          status: schema.deviceEnrollments.status,
+          createdAt: schema.deviceEnrollments.createdAt,
+          expiresAt: schema.deviceEnrollments.expiresAt,
+          resolvedAt: schema.deviceEnrollments.resolvedAt,
+          approverSignaturePublicKey: approverDevice.signaturePublicKey,
+        })
         .from(schema.deviceEnrollments)
+        .leftJoin(
+          approverDevice,
+          and(
+            eq(approverDevice.id, schema.deviceEnrollments.approvedByDeviceId),
+            eq(approverDevice.tenantId, schema.deviceEnrollments.tenantId),
+          ),
+        )
         .where(
           and(
             eq(schema.deviceEnrollments.userId, userId),
