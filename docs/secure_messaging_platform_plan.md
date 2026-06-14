@@ -177,7 +177,7 @@ short-lived OIDC tokens for CD; no long-lived cloud keys on the VM
 ```
 
 ### 6.5 IaC
-- Terraform (`infra/vm/`) provisions the RG, VNet, NSG (deny inbound), the VM, Key Vault, and the Managed Identity.
+- Terraform (`infra/azure/`) provisions the RG, VNet, NSG (deny inbound), the VM, Key Vault, and the Managed Identity.
 
 ---
 
@@ -366,7 +366,7 @@ Self-hosting the data services on one VM is far cheaper than managed Azure data 
 > This is an earlier, looser cut. `docs/roadmap.md` is **canonical** for phasing — defer to it when they disagree.
 
 **Phase 0 — VM & pipeline**
-The Azure VM via Terraform (`infra/vm/`), Managed Identity → Key Vault, NSG deny-inbound, Cloudflare Tunnel ingress + Caddy reverse proxy, CD via `az vm run-command`, migrate-on-deploy, a "hello world" `api` live end-to-end. *Prove the pipeline before the bulk of the app logic.*
+The Azure VM via Terraform (`infra/azure/`), Managed Identity → Key Vault, NSG deny-inbound, Cloudflare Tunnel ingress + Caddy reverse proxy, CD via `az vm run-command`, migrate-on-deploy, a "hello world" `api` live end-to-end. *Prove the pipeline before the bulk of the app logic.*
 
 **Phase 1 — Identity & tenancy**
 Zitadel deployed (Docker Compose on the VM); tenant + user model with RLS; OIDC login; admin role; audit events for login/logout.

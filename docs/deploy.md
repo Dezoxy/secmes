@@ -3,13 +3,13 @@
 How the production stack runs on the single Azure VM (`germanywestcentral`). **Status: built, not yet
 deployed.** The infrastructure exists as code across slices; CD (`vars.ENABLE_DEPLOY`) is still off.
 
-- **Slice 1** — VM + network + Key Vault + Managed Identity + GitHub-OIDC deploy role (`infra/vm/terraform/`).
+- **Slice 1** — VM + network + Key Vault + Managed Identity + GitHub-OIDC deploy role (`infra/azure/terraform/`).
 - **Slice 2** — the prod runtime topology: `compose.prod.yaml`, the Caddy single-origin router
-  (`infra/vm/caddy/`), and the cloudflared tunnel.
+  (`infra/stack/caddy/`), and the cloudflared tunnel.
 - **Slice 3** — Key Vault → credential files: `argus-secrets.service` fetches secrets via the Managed
-  Identity into `/run/argus/secrets/` (tmpfs) — `infra/vm/secrets/`.
+  Identity into `/run/argus/secrets/` (tmpfs) — `infra/stack/secrets/`.
 - **Slice 4 (this)** — CD: `cd.yml` builds/scans/signs both images → GHCR, then `az vm run-command` rolls out
-  (`infra/vm/deploy/deploy.sh`) with **migrate-before-serve**. Gated behind `vars.ENABLE_DEPLOY`.
+  (`infra/stack/deploy/deploy.sh`) with **migrate-before-serve**. Gated behind `vars.ENABLE_DEPLOY`.
 
 ## Topology
 
@@ -23,7 +23,7 @@ users ─HTTPS─▶ Cloudflare edge (TLS · WAF · rate-limit) ─tunnel─▶ 
                zitadel ─▶ zitadel-db (own Postgres, internal network, NO published port)
 ```
 
-The VM opens **no inbound port** (NSG denies all inbound; `infra/vm/terraform/`). The only way in is the
+The VM opens **no inbound port** (NSG denies all inbound; `infra/azure/terraform/`). The only way in is the
 **outbound** Cloudflare tunnel. TLS, WAF, and the edge rate-limit live at Cloudflare; Caddy speaks plain HTTP
 on a non-privileged port over the internal Docker network only. Threat model:
 `docs/threat-models/vm-ingress.md`.
@@ -51,7 +51,7 @@ limits).
 the ingress image locally for verification:
 
 ```bash
-docker build -f infra/vm/caddy/Dockerfile -t argus-ingress:local .   # context = repo root
+docker build -f infra/stack/caddy/Dockerfile -t argus-ingress:local .   # context = repo root
 docker compose -f compose.prod.yaml config -q                         # validate the stack
 ```
 
@@ -78,7 +78,7 @@ secrets exist). The deploy job runs in the **`prod` GitHub Environment** — con
 reviewers (you)**, so every tagged release **pauses for your manual approval** before the root run-command
 runs. The OIDC federated subject is bound to that environment (`var.github_deploy_subject`), not a branch.
 
-`infra/vm/deploy/deploy.sh` on the VM: installs/refreshes `argus-secrets.service` → fetches the runtime
+`infra/stack/deploy/deploy.sh` on the VM: installs/refreshes `argus-secrets.service` → fetches the runtime
 secret set (Managed Identity → `/run/argus/secrets`) → `docker login ghcr.io` (token from Key Vault) + pulls
 the images → **`cosign verify`s** each (against this repo's `cd.yml` OIDC identity) and rolls out **by
 digest** → brings up Postgres/Redis → runs **DB migrations as the owner** (file-mounted DSN, then `shred`-ed)
@@ -111,7 +111,7 @@ No secret values live in the repo. `argus-secrets.service` fetches them from Azu
 Managed Identity into `/run/argus/secrets/` (tmpfs, `0444` root files inside a `0700` root dir — `0444` so the
 non-root container users can read the bind-mounted Compose secrets, since Docker does not remap the file owner
 on Linux; the `0700` dir is the confinement boundary) at boot — see
-[`infra/vm/secrets/`](../infra/vm/secrets/README.md). The stack consumes them as **mounted credential files**
+[`infra/stack/secrets/`](../infra/stack/secrets/README.md). The stack consumes them as **mounted credential files**
 (Docker secrets at `/run/secrets/*`), which the app reads via `*_FILE` env vars (invariant #5 — never the
 value in env). Compose's secret sources point at `${ARGUS_SECRETS_DIR}` (`/run/argus/secrets` in prod,
 `./secrets` in local dev):
@@ -139,7 +139,7 @@ injected from the delivered Key Vault files by `deploy.sh` on `up` (`environment
 on-disk env file. Invariant #5 permits a runtime-fetched value alongside a mounted file.
 
 Set the actual values in Key Vault once (the `az keyvault secret set` commands + the full name→file→consumer
-table are in [`infra/vm/secrets/README.md`](../infra/vm/secrets/README.md)). Non-secret config (B2
+table are in [`infra/stack/secrets/README.md`](../infra/stack/secrets/README.md)). Non-secret config (B2
 endpoint/region/bucket + access-key-**id**, the API's OIDC issuer/audience, the PWA's build-time
 `VITE_OIDC_*`, image tags) is in `.env.prod.example` — copy it into the deploy environment. The `secrets/`
 directory (local dev) is gitignored; nothing is committed or baked into an image.
@@ -211,7 +211,7 @@ re-cut the release so the PWA build embeds them.
 
 The API exposes content-blind Prometheus metrics on an internal `:9090` (Slice A, merged). Slice B adds the
 stack: **Prometheus** scrapes `api:9090` over the internal network, **Grafana** visualises it, **Alertmanager**
-routes alerts. Config lives in `infra/vm/observability/` (`deploy.sh` stages it to `/opt/argus`; the services
+routes alerts. Config lives in `infra/stack/observability/` (`deploy.sh` stages it to `/opt/argus`; the services
 bind-mount it read-only). Threat model: `docs/threat-models/observability.md`. **Built as code; armed with the
 rest of the deploy.**
 

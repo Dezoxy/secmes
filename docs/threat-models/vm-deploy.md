@@ -62,7 +62,7 @@ No message content is involved here; this is pure infrastructure (identity, netw
 
 ## 5. Decision & mitigations
 
-- `infra/vm/terraform/`: VM (Ubuntu 24.04, system MI, `encryption_at_host`), NSG deny-inbound, egress-only
+- `infra/azure/terraform/`: VM (Ubuntu 24.04, system MI, `encryption_at_host`), NSG deny-inbound, egress-only
   public IP, Key Vault (RBAC + default-deny firewall via the subnet's KeyVault service endpoint), data disk
   (`caching=None`), GitHub-OIDC app + federated credential + a least-privilege custom `run-command` role,
   cloud-init (base tooling only — pulls no secrets).

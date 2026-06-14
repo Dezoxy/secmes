@@ -75,7 +75,7 @@ the VM/static edge layer. It does not add a telemetry transport and does not cha
 - Add a dependency-free Vite build plugin that reports the largest generated JS/CSS assets by byte size.
 - Keep route imports unchanged in this slice; chat startup stays eager until bundle visibility justifies a
   concrete lazy split.
-- Hosting headers — **now served by Caddy** at the app origin (#43; `infra/vm/caddy/Caddyfile`), `caddy validate`
+- Hosting headers — **now served by Caddy** at the app origin (#43; `infra/stack/caddy/Caddyfile`), `caddy validate`
   clean, smoke-test the CSP against the live app at arming:
   - `Content-Security-Policy` with restrictive defaults — `script-src 'self'` (no inline scripts; ts-mls is
     pure JS so no `wasm-eval`), `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`, and
@@ -95,7 +95,7 @@ the VM/static edge layer. It does not add a telemetry transport and does not cha
 ## 6. Residual risk
 
 - **Headers are wired (#43) but the CSP isn't runtime-verified yet.** They are served by Caddy
-  (`infra/vm/caddy/Caddyfile`, `caddy validate` clean), but nothing has loaded the app *through* Caddy with the
+  (`infra/stack/caddy/Caddyfile`, `caddy validate` clean), but nothing has loaded the app *through* Caddy with the
   CSP enforced — smoke-test against the live app at arming and watch the browser console for violations
   (eyeball the B2 presigned upload/download + the silent-renew XHR specifically). The other #43 frontend-build
   items (SRI, service-worker pinning, published bundle hash) have since shipped — see `code-delivery-integrity.md`.

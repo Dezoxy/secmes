@@ -29,15 +29,61 @@ API_IMAGE="$GHCR_REGISTRY/argus-api:$IMAGE_TAG"
 INGRESS_IMAGE="$GHCR_REGISTRY/argus-ingress:$IMAGE_TAG"
 KV_API_VERSION="7.4"
 
+# --- Cross-environment knobs (ALL default to the live Azure-VM behavior; the AWS experiment sets them via the
+#     cd-aws.yml run-command wrapper, the live cd.yml leaves them unset). ---
+TOKEN_SOURCE="${ARGUS_TOKEN_SOURCE:-imds}"                           # imds (Azure VM MI) | arc (Arc HIMDS on EC2)
+SKIP_GLITCHTIP="${ARGUS_SKIP_GLITCHTIP:-}"                           # 1 = don't run/gate the GlitchTip tier (lean box)
+COSIGN_WORKFLOW="${ARGUS_COSIGN_WORKFLOW:-.github/workflows/cd.yml}" # the workflow whose run built+signed the images
+ARC_IMDS_URL="http://localhost:40342/metadata/identity/oauth2/token"
+
 log() { printf 'argus-deploy: %s\n' "$*"; } # names/status only — never a secret value
 
 # --- Managed-Identity helpers: fetch the two deploy-TRANSIENT secrets (GHCR pull token + owner migration DSN)
 #     straight from Key Vault. They are NOT part of the persistent /run/argus/secrets set the running stack
 #     uses (least privilege: the stack never holds the owner DSN or a GitHub token). ---
 mi_token() {
-  curl -fsS --max-time 15 --retry 3 --retry-connrefused --retry-delay 2 -H 'Metadata: true' \
-    "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fvault.azure.net" |
-    jq -r '.access_token // empty'
+  case "$TOKEN_SOURCE" in
+  imds)
+    curl -fsS --max-time 15 --retry 3 --retry-connrefused --retry-delay 2 -H 'Metadata: true' \
+      "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fvault.azure.net" |
+      jq -r '.access_token // empty'
+    ;;
+  arc)
+    # Azure Arc HIMDS challenge-token handshake (see infra/stack/secrets/fetch-keyvault-secrets.sh for the rationale):
+    # 401 names a root/himds-only .key file; read it, echo back as Basic auth (via --config stdin, never argv).
+    local url hdrs realm secret resp
+    url="${ARC_IMDS_URL}?api-version=2020-06-01&resource=https%3A%2F%2Fvault.azure.net"
+    hdrs="$(curl -sS --max-time 15 --retry 3 --retry-connrefused --retry-delay 2 -D - -o /dev/null \
+      -H 'Metadata: true' "$url" | tr -d '\r')" || {
+      log "FATAL: Arc HIMDS unreachable at ${ARC_IMDS_URL} (is the Arc agent Connected?)"
+      return 1
+    }
+    realm="$(printf '%s\n' "$hdrs" | grep -i '^Www-Authenticate:' | sed -n 's/.*realm=\([^ ]*\).*/\1/p')"
+    [ -n "$realm" ] || {
+      log "FATAL: Arc HIMDS returned no challenge realm"
+      return 1
+    }
+    [ -r "$realm" ] || {
+      log "FATAL: cannot read Arc challenge file '${realm}' (need root or the himds group)"
+      return 1
+    }
+    secret="$(cat "$realm")"
+    resp="$(curl -fsS --max-time 15 --retry 3 --retry-connrefused --retry-delay 2 -H 'Metadata: true' --config - "$url" <<EOF
+header = "Authorization: Basic ${secret}"
+EOF
+    )" || {
+      secret=""
+      log "FATAL: Arc HIMDS token request failed"
+      return 1
+    }
+    secret=""
+    printf '%s' "$resp" | jq -r '.access_token // empty'
+    ;;
+  *)
+    log "FATAL: unknown ARGUS_TOKEN_SOURCE='${TOKEN_SOURCE}'"
+    return 1
+    ;;
+  esac
 }
 kv_get() { # $1 = secret name ; $2 = MI bearer token (passed via curl --config stdin, never argv/cmdline)
   curl -fsS --max-time 15 --retry 3 --retry-connrefused --retry-delay 2 --config - \
@@ -51,25 +97,35 @@ log "staging config into ${APP_DIR}"
 install -d -m 0750 -o root -g argus "$APP_DIR" "$APP_DIR/secrets"
 install -m 0640 -o root -g argus "$REPO_ROOT/compose.prod.yaml" "$COMPOSE"
 # Observability config tree (Prometheus/Grafana/Alertmanager) — the compose services bind-mount it read-only
-# at ./infra/vm/observability (relative to $COMPOSE in $APP_DIR). World-readable (0755 dirs / 0644 files) so
+# at ./infra/stack/observability (relative to $COMPOSE in $APP_DIR). World-readable (0755 dirs / 0644 files) so
 # the non-root prometheus/grafana container users can read it; it contains NO secrets (Grafana's admin pw is a
 # Key Vault credential file, not in this tree). Refresh from the staged repo each deploy.
-rm -rf "$APP_DIR/infra/vm/observability" "$APP_DIR/infra/vm/glitchtip"
-install -d -m 0755 "$APP_DIR/infra/vm"
-cp -a "$REPO_ROOT/infra/vm/observability" "$APP_DIR/infra/vm/observability"
-chmod -R a+rX "$APP_DIR/infra/vm/observability"
+rm -rf "$APP_DIR/infra/stack/observability" "$APP_DIR/infra/stack/glitchtip"
+install -d -m 0755 "$APP_DIR/infra/stack"
+cp -a "$REPO_ROOT/infra/stack/observability" "$APP_DIR/infra/stack/observability"
+chmod -R a+rX "$APP_DIR/infra/stack/observability"
 # GlitchTip entrypoint wrapper — bind-mounted read-only into the glitchtip + glitchtip-worker containers.
 # Contains NO secrets (reads them from Docker-secret files at runtime); world-executable so the container
 # user can exec it regardless of uid.
-install -d -m 0755 "$APP_DIR/infra/vm/glitchtip"
-install -m 0755 "$REPO_ROOT/infra/vm/glitchtip/docker-entrypoint.sh" "$APP_DIR/infra/vm/glitchtip/docker-entrypoint.sh"
-chmod a+rx "$APP_DIR/infra/vm/glitchtip/docker-entrypoint.sh"
-install -m 0755 "$REPO_ROOT/infra/vm/secrets/fetch-keyvault-secrets.sh" "$APP_DIR/secrets/fetch-keyvault-secrets.sh"
-install -m 0644 "$REPO_ROOT/infra/vm/secrets/argus-secrets.service" /etc/systemd/system/argus-secrets.service
+install -d -m 0755 "$APP_DIR/infra/stack/glitchtip"
+install -m 0755 "$REPO_ROOT/infra/stack/glitchtip/docker-entrypoint.sh" "$APP_DIR/infra/stack/glitchtip/docker-entrypoint.sh"
+chmod a+rx "$APP_DIR/infra/stack/glitchtip/docker-entrypoint.sh"
+install -m 0755 "$REPO_ROOT/infra/stack/secrets/fetch-keyvault-secrets.sh" "$APP_DIR/secrets/fetch-keyvault-secrets.sh"
+install -m 0644 "$REPO_ROOT/infra/stack/secrets/argus-secrets.service" /etc/systemd/system/argus-secrets.service
 # Point the unit at our fetch script + the real vault name (the repo ships a placeholder).
 sed -i "s|/opt/argus/secrets/fetch-keyvault-secrets.sh|$APP_DIR/secrets/fetch-keyvault-secrets.sh|" \
   /etc/systemd/system/argus-secrets.service
 sed -i "s/REPLACE_WITH_KEY_VAULT_NAME/${ARGUS_KEY_VAULT}/" /etc/systemd/system/argus-secrets.service
+# The secret-fetch oneshot runs in its OWN process and does NOT inherit deploy.sh's environment, so the token
+# source must be delivered to the UNIT. Default (imds) needs nothing — the script defaults to imds. For the Arc
+# experiment, write a drop-in so argus-secrets.service fetches via HIMDS; clean it up if we ever revert to imds.
+if [ "$TOKEN_SOURCE" != imds ]; then
+  install -d -m 0755 /etc/systemd/system/argus-secrets.service.d
+  printf '[Service]\nEnvironment=ARGUS_TOKEN_SOURCE=%s\n' "$TOKEN_SOURCE" \
+    >/etc/systemd/system/argus-secrets.service.d/10-token-source.conf
+else
+  rm -f /etc/systemd/system/argus-secrets.service.d/10-token-source.conf 2>/dev/null || true
+fi
 systemctl daemon-reload
 
 # --- 2. Fetch the persistent runtime secret set (fail closed: a failure here aborts the deploy). ---
@@ -99,7 +155,7 @@ docker pull "$INGRESS_IMAGE" >/dev/null
 log "verifying image signatures (cosign)"
 api_digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$API_IMAGE")"
 ingress_digest="$(docker inspect --format '{{index .RepoDigests 0}}' "$INGRESS_IMAGE")"
-cosign_id="https://github.com/${GH_REPO}/.github/workflows/cd.yml@refs/tags/${IMAGE_TAG}"
+cosign_id="https://github.com/${GH_REPO}/${COSIGN_WORKFLOW}@refs/tags/${IMAGE_TAG}"
 cosign verify --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   --certificate-identity "$cosign_id" "$api_digest" >/dev/null
 cosign verify --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
@@ -156,24 +212,33 @@ _redis_conf=""
 
 # --- 3c. GlitchTip DATABASE_URL — derived from glitchtip_db_password (same pattern as redis_url above).
 #         The URL is NEVER stored in Key Vault directly; only the password is. This keeps the single source
-#         of truth in Key Vault and lets us change the service hostname without a KV rotation. ---
-[ -s "$SECRETS_DIR/glitchtip_db_password" ] || {
-  log "FATAL: missing/empty runtime secret file: glitchtip_db_password"
-  exit 1
-}
-_gtpw="$(cat "$SECRETS_DIR/glitchtip_db_password")"
-# Enforce URL-safe characters: the password is embedded raw into the postgresql:// DSN. Special chars
-# (@, :, /, #, ?, etc.) split the userinfo / host / path segments and produce a silently wrong DSN that
-# dj-database-url misparses. Reject anything outside the URL-unreserved set — same rule as redis_password.
-case "$_gtpw" in
-*[!A-Za-z0-9._~-]*)
-  log "FATAL: argus-glitchtip-db-password must be URL-safe (A-Za-z0-9._~- only — e.g. openssl rand -hex 32)"
-  exit 1
-  ;;
-esac
-printf 'postgresql://glitchtip:%s@glitchtip-db:5432/glitchtip' "$_gtpw" >"$SECRETS_DIR/glitchtip_database_url"
-chmod 0444 "$SECRETS_DIR/glitchtip_database_url"
-_gtpw=""
+#         of truth in Key Vault and lets us change the service hostname without a KV rotation.
+#         Skipped entirely on the lean experiment box (SKIP_GLITCHTIP=1) — the GlitchTip tier isn't run there. ---
+if [ "$SKIP_GLITCHTIP" != 1 ]; then
+  [ -s "$SECRETS_DIR/glitchtip_db_password" ] || {
+    log "FATAL: missing/empty runtime secret file: glitchtip_db_password"
+    exit 1
+  }
+  _gtpw="$(cat "$SECRETS_DIR/glitchtip_db_password")"
+  # Enforce URL-safe characters: the password is embedded raw into the postgresql:// DSN. Special chars
+  # (@, :, /, #, ?, etc.) split the userinfo / host / path segments and produce a silently wrong DSN that
+  # dj-database-url misparses. Reject anything outside the URL-unreserved set — same rule as redis_password.
+  case "$_gtpw" in
+  *[!A-Za-z0-9._~-]*)
+    log "FATAL: argus-glitchtip-db-password must be URL-safe (A-Za-z0-9._~- only — e.g. openssl rand -hex 32)"
+    exit 1
+    ;;
+  esac
+  printf 'postgresql://glitchtip:%s@glitchtip-db:5432/glitchtip' "$_gtpw" >"$SECRETS_DIR/glitchtip_database_url"
+  chmod 0444 "$SECRETS_DIR/glitchtip_database_url"
+  _gtpw=""
+else
+  # GlitchTip tier isn't running on the lean box, but compose.prod.yaml still declares the glitchtip_database_url
+  # secret SOURCE — seed an empty 0444 file (mirrors the optional-secret empty-seed pattern) so a `docker compose`
+  # config/secret resolution can't fail on a missing source file.
+  : >"$SECRETS_DIR/glitchtip_database_url"
+  chmod 0444 "$SECRETS_DIR/glitchtip_database_url"
+fi
 
 # --- 4. Bring up data services first; wait for Postgres to be healthy before migrating. (redis comes up
 #        authenticated — its redis.conf + redis_url credential files were generated in step 3b above; the
@@ -194,7 +259,10 @@ else
 fi
 # GlitchTip gets its own dedicated Postgres cluster — start it alongside the app DB (both are cold-start
 # idempotent). glitchtip-db is smaller (512m) and independent of the app schema / migrations.
-docker compose -f "$COMPOSE" up -d --no-deps glitchtip-db
+# Skipped on the lean experiment box (SKIP_GLITCHTIP=1).
+if [ "$SKIP_GLITCHTIP" != 1 ]; then
+  docker compose -f "$COMPOSE" up -d --no-deps glitchtip-db
+fi
 pg_cid="$(docker compose -f "$COMPOSE" ps -q postgres)"
 for _ in $(seq 1 60); do
   [ "$(docker inspect -f '{{.State.Health.Status}}' "$pg_cid" 2>/dev/null)" = "healthy" ] && break
@@ -204,16 +272,19 @@ done
   log "FATAL: Postgres did not become healthy"
   exit 1
 }
-# Wait for glitchtip-db separately (independent health; don't block the app-DB wait path).
-gt_cid="$(docker compose -f "$COMPOSE" ps -q glitchtip-db)"
-for _ in $(seq 1 60); do
-  [ "$(docker inspect -f '{{.State.Health.Status}}' "$gt_cid" 2>/dev/null)" = "healthy" ] && break
-  sleep 2
-done
-[ "$(docker inspect -f '{{.State.Health.Status}}' "$gt_cid" 2>/dev/null)" = "healthy" ] || {
-  log "FATAL: glitchtip-db did not become healthy"
-  exit 1
-}
+# Wait for glitchtip-db separately (independent health; don't block the app-DB wait path). Skipped on the lean
+# experiment box (SKIP_GLITCHTIP=1).
+if [ "$SKIP_GLITCHTIP" != 1 ]; then
+  gt_cid="$(docker compose -f "$COMPOSE" ps -q glitchtip-db)"
+  for _ in $(seq 1 60); do
+    [ "$(docker inspect -f '{{.State.Health.Status}}' "$gt_cid" 2>/dev/null)" = "healthy" ] && break
+    sleep 2
+  done
+  [ "$(docker inspect -f '{{.State.Health.Status}}' "$gt_cid" 2>/dev/null)" = "healthy" ] || {
+    log "FATAL: glitchtip-db did not become healthy"
+    exit 1
+  }
+fi
 
 # --- 4b. Stop the OLD api before migrating. On a redeploy the previous api container keeps running while the
 #         owner migration mutates the schema below — a non-backward-compatible migration would have old code
@@ -265,10 +336,19 @@ for _f in tunnel_token zitadel_db_password zitadel_admin_password; do
 done
 # Redis AUTH credential files (redis.conf + redis_url) were generated in step 3b and redis is already up and
 # authenticated; this `up -d` only adds the remaining services. No Redis credential rides env — it's all files.
+# The lean experiment box (SKIP_GLITCHTIP=1) brings up an EXPLICIT service set that excludes the GlitchTip tier
+# (glitchtip + glitchtip-worker + glitchtip-db); the live default (empty list) brings up the whole stack. The
+# explicit list is experiment-only + must be kept in sync if the core/observability service set changes.
+if [ "$SKIP_GLITCHTIP" = 1 ]; then
+  STACK_SERVICES="postgres redis api caddy cloudflared zitadel-db zitadel zitadel-login prometheus alertmanager grafana loki alloy"
+else
+  STACK_SERVICES=""
+fi
+# shellcheck disable=SC2086 # intentional word-splitting: empty STACK_SERVICES = all services; else the explicit set
 TUNNEL_TOKEN="$(cat "$SECRETS_DIR/tunnel_token")" \
   ZITADEL_DB_PASSWORD="$(cat "$SECRETS_DIR/zitadel_db_password")" \
   ZITADEL_ADMIN_PASSWORD="$(cat "$SECRETS_DIR/zitadel_admin_password")" \
-  docker compose -f "$COMPOSE" up -d
+  docker compose -f "$COMPOSE" up -d $STACK_SERVICES
 # The api reads REDIS_URL_FILE ONCE at module construction and holds a persistent ioredis connection. On a
 # redis password ROTATION the `up -d` above won't recreate the api when the image/config is unchanged (a
 # same-IMAGE_TAG/secret-only redeploy) — it would keep authenticating with the OLD password against the
@@ -358,8 +438,11 @@ wait_running alloy
 # only passes after migrations complete + gunicorn is serving — gate on HEALTHY to catch a
 # bad SECRET_KEY, migration failure, or DB connection error at deploy time.
 # glitchtip-worker has no healthcheck; gate on running + not-crash-looping.
-wait_healthy glitchtip 90
-wait_running glitchtip-worker
+# Skipped on the lean experiment box (SKIP_GLITCHTIP=1) — the tier isn't running there.
+if [ "$SKIP_GLITCHTIP" != 1 ]; then
+  wait_healthy glitchtip 90
+  wait_running glitchtip-worker
+fi
 
 # --- 7. Tidy up: drop dangling images (the GHCR login is cleared by the EXIT trap). ---
 docker image prune -f >/dev/null 2>&1 || true

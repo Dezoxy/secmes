@@ -1,8 +1,8 @@
-# Build context for infra/vm/caddy/Dockerfile (BuildKit uses a <dockerfile>.dockerignore INSTEAD OF the root
+# Build context for infra/stack/caddy/Dockerfile (BuildKit uses a <dockerfile>.dockerignore INSTEAD OF the root
 # .dockerignore, so this must be self-complete). The ingress image builds the PWA from the repo root (it needs
 # the pnpm workspace + packages/* + this dir's Caddyfile), but it does NOT need the API source. Excluding
 # apps/api SOURCE keeps the ingress image's layers cache-stable across backend changes → no needless VM re-pull
-# on an api-only release. Note: from infra/ ONLY infra/vm/caddy/Caddyfile is kept (the runtime stage COPYs it);
+# on an api-only release. Note: from infra/ ONLY infra/stack/caddy/Caddyfile is kept (the runtime stage COPYs it);
 # everything else under infra/ is excluded so no stray terraform state/tfvars/.terraform can enter the context.
 
 # Dependencies & build outputs.
@@ -48,14 +48,14 @@ secrets/
 docs
 
 # Infra is NOT part of the PWA build. The runtime stage COPYs exactly ONE infra file
-# (infra/vm/caddy/Caddyfile — see infra/vm/caddy/Dockerfile line 36), so exclude ALL of infra/ and re-include
+# (infra/stack/caddy/Caddyfile — see infra/stack/caddy/Dockerfile line 36), so exclude ALL of infra/ and re-include
 # only the directory chain down to that file. This pins the infra surface to the Caddyfile alone instead of
-# relying on the secret-patterns above to keep infra/vm/terraform state/tfvars/.terraform out — a future stray
+# relying on the secret-patterns above to keep infra/azure/terraform state/tfvars/.terraform out — a future stray
 # file anywhere under infra/ then cannot silently enter the ingress build context or its image layers.
 infra/**
-!infra/vm
-!infra/vm/caddy
-!infra/vm/caddy/Caddyfile
+!infra/stack
+!infra/stack/caddy
+!infra/stack/caddy/Caddyfile
 
 # The API is NOT a dependency of the PWA — exclude its source so a backend change doesn't invalidate the
 # ingress image. Keep apps/api/package.json so `pnpm install --frozen-lockfile` still sees the full workspace.

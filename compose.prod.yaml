@@ -197,7 +197,7 @@ services:
     image: ${ARGUS_INGRESS_IMAGE:-argus-ingress:local}
     build:
       context: .
-      dockerfile: infra/vm/caddy/Dockerfile
+      dockerfile: infra/stack/caddy/Dockerfile
       # OIDC is baked into the PWA at build time (Vite VITE_*). Empty until Zitadel-on-VM (roadmap #9);
       # CD passes the real values so the shipped client does real auth, not demo mode.
       args:
@@ -455,7 +455,7 @@ services:
       - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.retention.time=15d'
     volumes:
-      - ./infra/vm/observability/prometheus:/etc/prometheus:ro
+      - ./infra/stack/observability/prometheus:/etc/prometheus:ro
       - prometheus-data:/prometheus # named volume inherits the image's nobody:nobody ownership on first init
     read_only: true
     tmpfs:
@@ -477,7 +477,7 @@ services:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
       - '--storage.path=/alertmanager'
     volumes:
-      - ./infra/vm/observability/alertmanager:/etc/alertmanager:ro
+      - ./infra/stack/observability/alertmanager:/etc/alertmanager:ro
       - alertmanager-data:/alertmanager
     read_only: true
     tmpfs:
@@ -508,8 +508,8 @@ services:
     secrets:
       - grafana_admin_password
     volumes:
-      - ./infra/vm/observability/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./infra/vm/observability/grafana/dashboards:/etc/grafana/dashboards:ro
+      - ./infra/stack/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/stack/observability/grafana/dashboards:/etc/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana # inherits the image's grafana-user ownership on first init
     depends_on:
       prometheus:
@@ -536,7 +536,7 @@ services:
     restart: unless-stopped
     command: ['-config.file=/etc/loki/loki-config.yml']
     volumes:
-      - ./infra/vm/observability/loki:/etc/loki:ro
+      - ./infra/stack/observability/loki:/etc/loki:ro
       - loki-data:/loki # named volume inherits the image's loki-user (10001) ownership on first init
     read_only: true
     tmpfs:
@@ -565,7 +565,7 @@ services:
       - '/etc/alloy/config.alloy'
     user: '0:0' # required to read root-owned /var/lib/docker/containers/*-json.log (read-only mount; no socket)
     volumes:
-      - ./infra/vm/observability/alloy:/etc/alloy:ro
+      - ./infra/stack/observability/alloy:/etc/alloy:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro # host container logs, READ-ONLY; never the socket
       - alloy-data:/var/lib/alloy/data # read offsets/WAL — avoids re-ingesting on restart
     depends_on:
@@ -661,7 +661,7 @@ services:
       - glitchtip_secret_key
       - redis_url
     volumes:
-      - ./infra/vm/glitchtip/docker-entrypoint.sh:/entrypoint.sh:ro
+      - ./infra/stack/glitchtip/docker-entrypoint.sh:/entrypoint.sh:ro
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -703,7 +703,7 @@ services:
       - glitchtip_secret_key
       - redis_url
     volumes:
-      - ./infra/vm/glitchtip/docker-entrypoint.sh:/entrypoint.sh:ro
+      - ./infra/stack/glitchtip/docker-entrypoint.sh:/entrypoint.sh:ro
     security_opt:
       - no-new-privileges:true
     cap_drop:

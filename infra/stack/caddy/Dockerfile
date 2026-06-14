@@ -3,8 +3,8 @@
 # argus production ingress image: builds the PWA (pnpm workspace) and serves it from Caddy, which also
 # reverse-proxies /api + /ws to the API container. Build context is the REPO ROOT — the web build needs the
 # pnpm workspace and @argus/crypto. Build from the repo root:
-#   docker build -f infra/vm/caddy/Dockerfile -t argus-ingress .
-# See infra/vm/caddy/Caddyfile and docs/threat-models/vm-ingress.md.
+#   docker build -f infra/stack/caddy/Dockerfile -t argus-ingress .
+# See infra/stack/caddy/Caddyfile and docs/threat-models/vm-ingress.md.
 
 # ---- web build (pnpm workspace) ----
 FROM node:24-alpine AS web-build
@@ -33,7 +33,7 @@ RUN pnpm --filter @argus/web build
 
 # ---- runtime: Caddy serving the built PWA + proxying the API ----
 FROM caddy:2-alpine AS runtime
-COPY infra/vm/caddy/Caddyfile /etc/caddy/Caddyfile
+COPY infra/stack/caddy/Caddyfile /etc/caddy/Caddyfile
 COPY --from=web-build /repo/apps/web/dist /srv
 # Validate the config at build time (fail fast on a bad Caddyfile); create a non-root user; and STRIP the
 # `cap_net_bind_service` file capability from the caddy binary. Without stripping it, a container started with

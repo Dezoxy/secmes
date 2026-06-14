@@ -1,0 +1,125 @@
+#cloud-config
+# First-boot provisioning for the argus EXPERIMENT EC2 box — the AWS port of infra/azure/terraform/cloud-init.yaml.
+# Installs the host tooling the stack + native workers need (Docker; age/awscli/pg-client for the backup/cleanup
+# units; cosign for image-signature verification) AND onboards the box into Azure Arc so it gets an Entra
+# managed identity that reads Key Vault on-box (no static credential — the Arc analogue of the live VM's
+# Managed Identity). The app itself is brought up by the CD deploy (SSM send-command) — this lays the
+# foundation only.
+#
+# NOTE: rendered by Terraform's templatefile() — the dollar-brace tokens below are Terraform vars (Arc
+# onboarding config), resolved to literals at apply time. Shell uses $VAR and $(...) only (no literal
+# dollar-brace) so nothing collides with the template engine. Dropped vs the live cloud-init: the Azure
+# data-disk mount (single root volume now) and the Azure CLI (azcmagent handles Arc; the fetch/deploy talk to
+# Key Vault via curl + the Arc token).
+package_update: true
+package_upgrade: true
+
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - git
+  - jq
+  - unzip
+  - age
+  - postgresql-client-16
+
+groups:
+  - argus
+
+users:
+  - default
+  - name: argus
+    system: true
+    primary_group: argus
+    shell: /usr/sbin/nologin
+
+# 2 GiB swapfile — headroom for the core+observability stack on t3.medium's 4 GiB (a memory spike from
+# Loki/Prometheus swaps instead of OOM-killing a container). cloud-init's native swap module creates +
+# enables + fstab-persists it.
+swap:
+  filename: /swapfile
+  size: 2147483648 # 2 GiB in bytes
+  maxsize: 2147483648
+
+write_files:
+  # Keep swap as a last resort, not eager — DB/cache pages should stay resident.
+  - path: /etc/sysctl.d/99-argus-swap.conf
+    permissions: "0644"
+    owner: root:root
+    content: |
+      vm.swappiness=10
+
+  # One-time Azure Arc onboarding. Idempotent: if the agent is already Connected, do nothing. The onboarding SP
+  # secret is fetched from AWS SSM Parameter Store via the instance role (IMDSv2 — no static AWS cred), used for
+  # the single `azcmagent connect`, and never written to disk. After connect, the agent holds its OWN
+  # auto-rotating certificate identity; this onboarding secret is no longer needed on-box.
+  - path: /usr/local/sbin/argus-arc-connect.sh
+    permissions: "0750"
+    owner: root:root
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      log() { printf 'argus-arc-connect: %s\n' "$*" >&2; }
+
+      # Already onboarded? azcmagent show prints the connection status; bail if Connected (idempotent re-runs).
+      if command -v azcmagent >/dev/null 2>&1 && azcmagent show 2>/dev/null | grep -qi 'Agent Status.*: *Connected'; then
+        log "already Connected — skipping onboarding"
+        exit 0
+      fi
+
+      # Fetch the onboarding SP secret from SSM (instance role + IMDSv2; the secret is a SecureString). Held in
+      # a shell var only — never on disk. NOTE: azcmagent takes the secret as an argv flag, so it is briefly
+      # visible in /proc on this single-tenant root box during onboarding (one-time, transient cred that cannot
+      # read Key Vault). Recorded in docs/threat-models/cross-cloud-secret-fetch.md.
+      ARC_SECRET="$(aws ssm get-parameter \
+        --name '${arc_onboarding_param}' --with-decryption \
+        --region '${aws_region}' --query 'Parameter.Value' --output text)"
+      [ -n "$ARC_SECRET" ] || { log "FATAL: empty Arc onboarding secret from SSM"; exit 1; }
+
+      log "running azcmagent connect (resource ${arc_machine_name} in ${arc_resource_group})"
+      azcmagent connect \
+        --service-principal-id "${arc_sp_app_id}" \
+        --service-principal-secret "$ARC_SECRET" \
+        --tenant-id "${arc_tenant_id}" \
+        --subscription-id "${arc_subscription_id}" \
+        --resource-group "${arc_resource_group}" \
+        --location "${arc_location}" \
+        --resource-name "${arc_machine_name}" \
+        --cloud AzureCloud
+      ARC_SECRET=""
+      log "Arc onboarding complete"
+
+runcmd:
+  # Docker CE + Compose plugin (official repo — apt's docker.io lacks the v2 compose plugin).
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" >/etc/apt/sources.list.d/docker.list
+  - apt-get update
+  - DEBIAN_FRONTEND=noninteractive apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  - usermod -aG docker argus
+  # AWS CLI v2 (apt's awscli is v1; the backup/cleanup workers + the Arc-onboarding SSM fetch need v2).
+  # FOLLOW-UP (P2): pin the version + verify the signature against AWS's signing key.
+  - curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m).zip" -o /tmp/awscliv2.zip
+  - unzip -q /tmp/awscliv2.zip -d /tmp
+  - /tmp/aws/install
+  - rm -rf /tmp/aws /tmp/awscliv2.zip
+  # Azure Arc connected-machine agent. FOLLOW-UP (P2): pin the version + checksum-verify (the live cloud-init
+  # carries the same pin-the-installer follow-up for cosign/awscli).
+  - curl -fsSL https://aka.ms/azcmagent -o /tmp/install_linux_azcmagent.sh
+  - bash /tmp/install_linux_azcmagent.sh
+  - rm -f /tmp/install_linux_azcmagent.sh
+  # cosign — the deploy verifies keyless image signatures before rollout. Pinned; FOLLOW-UP (P2): checksum-verify.
+  - curl -fsSLo /usr/local/bin/cosign https://github.com/sigstore/cosign/releases/download/v2.4.1/cosign-linux-amd64
+  - chmod 0755 /usr/local/bin/cosign
+  # Onboard into Azure Arc (gives the box its Key-Vault-reading managed identity).
+  - /usr/local/sbin/argus-arc-connect.sh
+  # Layout. /run/argus/secrets is recreated by argus-secrets.service at deploy time; create it now too so a
+  # manual run before the first deploy still has the dir.
+  - install -d -o argus -g argus -m 0750 /opt/argus
+  - install -d -o root -g argus -m 0750 /run/argus/secrets
+
+# The CD pipeline (SSM send-command → deploy.sh with ARGUS_TOKEN_SOURCE=arc + ARGUS_SKIP_GLITCHTIP=1) takes it
+# from here: deliver the compose config, fetch secrets from the experiment Key Vault via the Arc identity, run
+# migrations, and `docker compose up -d` the core + observability profile.

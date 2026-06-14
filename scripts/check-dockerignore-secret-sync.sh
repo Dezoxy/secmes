@@ -10,7 +10,7 @@ set -euo pipefail
 files=(
   ".dockerignore"
   "apps/api/Dockerfile.dockerignore"
-  "infra/vm/caddy/Dockerfile.dockerignore"
+  "infra/stack/caddy/Dockerfile.dockerignore"
 )
 
 extract() {
