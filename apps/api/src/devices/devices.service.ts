@@ -337,19 +337,12 @@ export class DevicesService {
     await withTenant(auth.tenantId, async (tx) => {
       const userId = await requireUser(tx, auth.sub);
 
-      // Verify proof-of-possession (same domain as withdraw — caller must own the private key).
-      const proven = verifyWithdraw(
-        Buffer.from(signaturePublicKey, 'base64'),
-        signaturePublicKey,
-        Buffer.from(proofBase64url, 'base64url'),
-      );
-      if (!proven) throw new BadRequestException('invalid migrate proof');
-
-      // Lock user row — serializes concurrent migrate/publish calls (same pattern as publish()).
-      await tx.execute(sql`select 1 from users where id = ${userId} for update`);
-
+      // Look up the device FIRST — the proof must be verified against the DB-stored key, never the
+      // request body. Verifying a self-attested key (from the request) before confirming the DB row
+      // exists would let an attacker generate a fresh keypair, produce a valid proof for it, and
+      // insert it as isProvisional=false without any existing trusted device.
       const [device] = await tx
-        .select({ id: schema.devices.id })
+        .select({ id: schema.devices.id, signaturePublicKey: schema.devices.signaturePublicKey })
         .from(schema.devices)
         .where(
           and(
@@ -358,27 +351,37 @@ export class DevicesService {
           ),
         )
         .limit(1);
+      if (!device) return; // idempotent — already migrated or device never provisioned under this key
 
-      if (device) {
-        // Delete pending Welcomes first (FK is ON DELETE NO ACTION).
-        await tx
-          .delete(schema.conversationWelcomes)
-          .where(
-            and(
-              eq(schema.conversationWelcomes.tenantId, auth.tenantId),
-              eq(schema.conversationWelcomes.recipientDeviceId, device.id),
-            ),
-          );
-        await tx.delete(schema.devices).where(eq(schema.devices.id, device.id));
-      }
+      // Verify proof against the DB-stored key (mirrors withdrawDevice — the server is the oracle
+      // for "this key belongs to this user", not the request body).
+      const proven = verifyWithdraw(
+        Buffer.from(device.signaturePublicKey, 'base64'),
+        device.signaturePublicKey,
+        Buffer.from(proofBase64url, 'base64url'),
+      );
+      if (!proven) throw new BadRequestException('invalid migrate proof');
 
-      // Re-insert as non-provisional. isProvisional=false is safe here because the proof above
-      // confirms the caller holds the private key — this is a key-rotation / identity-rename, not
-      // a new device that must go through the enrollment ceremony.
+      // Lock user row to serialize concurrent migrate/publish calls (same pattern as publish()).
+      await tx.execute(sql`select 1 from users where id = ${userId} for update`);
+
+      // Delete pending Welcomes first (FK is ON DELETE NO ACTION).
+      await tx
+        .delete(schema.conversationWelcomes)
+        .where(
+          and(
+            eq(schema.conversationWelcomes.tenantId, auth.tenantId),
+            eq(schema.conversationWelcomes.recipientDeviceId, device.id),
+          ),
+        );
+      await tx.delete(schema.devices).where(eq(schema.devices.id, device.id));
+
+      // Re-insert as non-provisional. Proof-of-possession of the DB-confirmed key is the authority
+      // that this is a key-rotation / identity-rename, not a new device requiring enrollment.
       await tx
         .insert(schema.devices)
         .values({ tenantId: auth.tenantId, userId, signaturePublicKey, isProvisional: false })
-        .onConflictDoNothing(); // idempotent: concurrent migrate already inserted — already trusted
+        .onConflictDoNothing(); // idempotent: concurrent migrate already completed
     });
 
     await this.audit.record(auth.tenantId, {
