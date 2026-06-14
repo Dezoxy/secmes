@@ -152,15 +152,30 @@ fi
 [ -n "$CLIENT_ID" ] && [ "$CLIENT_ID" != "null" ] || { log "FATAL: no client id"; exit 1; }
 
 # --- Access-token lifetime (COMP-6 — see docs/threat-models/auth-tenant-context.md §6) ----------------
-# The access-token TTL is an INSTANCE-level OIDC setting, NOT part of the per-app config above. Zitadel's
-# default is 12h — too long for the "short TTL mitigates in-window token replay" mitigation the threat model
-# relies on. Pin it to ~10-15 min via the Admin API, e.g.:
-#   zcurl PUT /admin/v1/oidc/settings '{"accessTokenLifetime":"900s","idTokenLifetime":"43200s",
-#     "refreshTokenIdleExpiration":"2592000s","refreshTokenExpiration":"7776000s"}'
-# UpdateOIDCSettings is a FULL update — send all four fields (values above illustrative). Left as a
-# documented step rather than an unverified live call here, because a wrong body would reset the other
-# lifetimes. PRODUCTION REQUIREMENT: the prod Zitadel instance MUST pin a short access-token TTL — that
-# setting (not anything in this repo) is what bounds the in-window-replay residual.
+# Pin a SHORT access-token TTL so the threat model's "short TTL bounds in-window token replay" mitigation is
+# real (Zitadel's default is 12h = 43200s). This is an INSTANCE-level OIDC setting on the Admin API
+# (PUT /admin/v1/settings/oidc — endpoint + behaviour verified against v4.15.0), NOT part of the per-app
+# config above. UpdateOIDCSettings is a FULL update, so GET the current settings and override ONLY
+# accessTokenLifetime (preserving the id/refresh lifetimes) before PUTting it back.
+ACCESS_TOKEN_TTL="${ACCESS_TOKEN_TTL:-900s}" # 15 min
+OIDC_CUR="$(zcurl GET /admin/v1/settings/oidc | jq -c '.settings // {}')"
+OIDC_BODY="$(echo "$OIDC_CUR" | jq -c --arg ttl "$ACCESS_TOKEN_TTL" \
+  '{accessTokenLifetime: $ttl,
+    idTokenLifetime:            (.idTokenLifetime            // "43200s"),
+    refreshTokenIdleExpiration: (.refreshTokenIdleExpiration // "2592000s"),
+    refreshTokenExpiration:     (.refreshTokenExpiration     // "7776000s")}')"
+OIDC_RESP="$(zcurl PUT /admin/v1/settings/oidc "$OIDC_BODY")"
+# curl exits 0 even on an HTTP error, so verify by reading the value back — never claim success on a
+# silently-rejected PUT (that would leave the insecure 12h default in place). Fail closed if it didn't take.
+OIDC_NOW="$(zcurl GET /admin/v1/settings/oidc | jq -r '.settings.accessTokenLifetime // empty')"
+[ "$OIDC_NOW" = "$ACCESS_TOKEN_TTL" ] || {
+  log "FATAL: access-token lifetime not pinned (wanted $ACCESS_TOKEN_TTL, got '${OIDC_NOW:-none}'); resp: $OIDC_RESP"
+  exit 1
+}
+log "pinned access-token lifetime = $ACCESS_TOKEN_TTL (Zitadel default is 12h)"
+# PRODUCTION REQUIREMENT: this script runs LOCAL only. The prod Zitadel instance MUST get the same setting —
+# the identical PUT /admin/v1/settings/oidc against prod (with a prod admin token) is the binding control for
+# the in-window-replay residual. Nothing else in this repo can set it.
 
 # 6) Token Action: assert email/name claims from the user onto the access token.
 #    The function name MUST equal the action name. setClaim only sets if the key is absent.
