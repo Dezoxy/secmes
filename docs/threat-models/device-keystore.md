@@ -1,6 +1,6 @@
 # Threat model: client device keystore (IndexedDB)
 
-> Status: **DRAFT for ratification.** Covers roadmap checkpoint 18 — device MLS keys generated client-side and persisted in the browser. Pairs with `mls-integration.md` (key generation) and `key-backup.md` (the at-rest sealing this note defers to).
+> Status: **IMPLEMENTED** (shipped; reviewer-passed — see roadmap). Covers roadmap checkpoint 18 — device MLS keys generated client-side and persisted in the browser. Pairs with `mls-integration.md` (key generation) and `key-backup.md` (the at-rest sealing this note defers to).
 
 ## 1. Feature & data flow
 

@@ -1,6 +1,6 @@
 # Threat model: multi-device enrollment (B2)
 
-> Status: **DRAFT — written before code (DoD gate).** Roadmap **B2 (multi-device sync)**.
+> Status: **IMPLEMENTED** (shipped; reviewer-passed — see roadmap). Roadmap **B2 (multi-device sync)**.
 > Covers the enrollment trust boundary: how a second device (D2) is linked to a user account
 > that already has an active device (D1), and how D2 joins existing MLS conversations.
 

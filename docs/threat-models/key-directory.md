@@ -1,6 +1,6 @@
 # Threat model: key directory & server key-substitution (MITM)
 
-> Status: **DRAFT for ratification.** Blocks Phase 2 (device keys) / Phase 3 (1:1 text). This is the **#1 crypto gap** both external reviews flagged: nothing currently stops a compromised server from handing out a key it controls. Written against the verified `ts-mls` model (KeyPackages + Welcome).
+> Status: **IMPLEMENTED** (shipped; reviewer-passed — see roadmap). Blocks Phase 2 (device keys) / Phase 3 (1:1 text). This is the **#1 crypto gap** both external reviews flagged: nothing currently stops a compromised server from handing out a key it controls. Written against the verified `ts-mls` model (KeyPackages + Welcome).
 
 ## 1. Feature & data flow
 

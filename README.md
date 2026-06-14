@@ -62,12 +62,14 @@ The application is built end-to-end (Phases 0–7 plus group chat and multi-devi
 ```bash
 corepack enable
 pnpm install
-make up                          # Docker stack: Postgres, Redis, MinIO, Zitadel, api — see docs/local-dev.md
+make up                          # backing services: Postgres, Redis, MinIO, Zitadel (+ OIDC provisioning)
+make migrate && make seed        # apply the schema + seed the dev tenant
+make api-dev                     # API on http://localhost:3000 (host)
 pnpm --filter @argus/web dev     # the PWA on http://localhost:5173
 pnpm test
 ```
 
-Full local OIDC login flow: [`docs/local-auth.md`](docs/local-auth.md).
+One-time `/etc/hosts` setup and the full local OIDC login flow: [`docs/local-auth.md`](docs/local-auth.md) · [`docs/local-dev.md`](docs/local-dev.md).
 
 ### Provision (when you have an Azure subscription)
 
