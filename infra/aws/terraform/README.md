@@ -21,9 +21,11 @@ repo-root-relative — matching the `terraform -chdir=infra/aws/terraform` form 
 > `azurerm_key_vault_secret.seed` resources ever exist and `populate-keyvault.sh` writes clean names. If you
 > instead `-migrate-state` a local state that already seeded the dummy experiment, phase-1 apply **destroys**
 > those seeds and the vault (purge-protection is on) **soft-deletes** the names; Azure then refuses to
-> recreate a soft-deleted name (409 Conflict), so the populate step fails. To promote anyway: bump
-> `var.prefix` for a brand-new vault, **or** `az keyvault secret recover --vault-name <kv> --name <name>` each
-> soft-deleted name and then run `infra/aws/scripts/populate-keyvault.sh --rotate`.
+> recreate a soft-deleted name (409 Conflict), so the populate step fails. To promote anyway, bump
+> `var.prefix` for a brand-new vault — that's the only clean path. (Recovering the soft-deleted names does
+> **not** help: they return as the dummy seed values, and `populate-keyvault.sh` won't replace them — `put`
+> skips existing names without `--rotate`, and the six **set-once** secrets are skipped by `put_once` *even
+> with* `--rotate` — so they'd stay dummy. A fresh vault sidesteps all of it.)
 
 1. **Remote state (once):** `infra/aws/scripts/bootstrap-tfstate.sh` → creates the encrypted/locked/versioned
    S3 backend and writes `infra/aws/terraform/backend.hcl`. Uncomment `backend "s3" {}` in `versions.tf`, then
