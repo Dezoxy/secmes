@@ -151,6 +151,17 @@ else
 fi
 [ -n "$CLIENT_ID" ] && [ "$CLIENT_ID" != "null" ] || { log "FATAL: no client id"; exit 1; }
 
+# --- Access-token lifetime (COMP-6 — see docs/threat-models/auth-tenant-context.md §6) ----------------
+# The access-token TTL is an INSTANCE-level OIDC setting, NOT part of the per-app config above. Zitadel's
+# default is 12h — too long for the "short TTL mitigates in-window token replay" mitigation the threat model
+# relies on. Pin it to ~10-15 min via the Admin API, e.g.:
+#   zcurl PUT /admin/v1/oidc/settings '{"accessTokenLifetime":"900s","idTokenLifetime":"43200s",
+#     "refreshTokenIdleExpiration":"2592000s","refreshTokenExpiration":"7776000s"}'
+# UpdateOIDCSettings is a FULL update — send all four fields (values above illustrative). Left as a
+# documented step rather than an unverified live call here, because a wrong body would reset the other
+# lifetimes. PRODUCTION REQUIREMENT: the prod Zitadel instance MUST pin a short access-token TTL — that
+# setting (not anything in this repo) is what bounds the in-window-replay residual.
+
 # 6) Token Action: assert email/name claims from the user onto the access token.
 #    The function name MUST equal the action name. setClaim only sets if the key is absent.
 #    tenant_id claim removed in G1 — tenant lookup is now via user_tenant_index DB table.

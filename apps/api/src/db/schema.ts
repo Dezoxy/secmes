@@ -175,6 +175,14 @@ export const userTenantIndex = pgTable('user_tenant_index', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Stripe webhook idempotency log. Global (no tenant_id, NO RLS) — like user_tenant_index, this is
+// operational data, not tenant-scoped: only Stripe event ids/types/timestamps, no content, no PII. See 0029.
+export const stripeEvents = pgTable('stripe_events', {
+  eventId: text('event_id').primaryKey(),
+  type: text('type').notNull(),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 // G1: admin-issued invite tokens (hash-at-rest). Tenant-scoped + FORCE RLS. See 0018.
 export const tenantInvites = pgTable('tenant_invites', {
   id: uuid('id').primaryKey().defaultRandom(),
