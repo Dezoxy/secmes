@@ -26,7 +26,9 @@ resource "aws_internet_gateway" "this" {
 
 # One public subnet. The instance needs outbound internet for cloudflared, Key Vault, the Arc endpoints, B2,
 # GHCR, and apt; a public subnet + EIP is the cheapest stable-egress option for a single-box experiment.
+# nosemgrep: terraform.aws.security.aws-subnet-has-public-ip-address.aws-subnet-has-public-ip-address
 resource "aws_subnet" "public" {
+  # checkov:skip=CKV_AWS_130: the auto-assigned public IP is EGRESS-ONLY (the security group denies ALL inbound) and is required for first-boot provisioning before the Elastic IP associates; a NAT Gateway (no public IP) is the cost upgrade. Mirrors the live Azure VM's egress-only public IP.
   vpc_id     = aws_vpc.this.id
   cidr_block = "10.40.0.0/24"
   # Auto-assign a public IP at launch so first-boot cloud-init (apt, Docker/awscli/azcmagent downloads, the
