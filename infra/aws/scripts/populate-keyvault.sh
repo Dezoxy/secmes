@@ -72,7 +72,16 @@ WORKDIR="$(mktemp -d)"
 trap 'rm -rf -- "$WORKDIR"' EXIT
 
 # URL-unreserved (alphanumeric subset) of length $1 — matches the charset deploy.sh enforces for role logins.
-gen_alnum() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$1"; }
+# CSPRNG via /dev/urandom. Pipefail-safe: `head` bounds the SOURCE (reads n*8 bytes from the file, exits 0) so
+# `tr` drains a FINITE stream to EOF — no `tr | head` SIGPIPE (which would be 141 under `set -o pipefail`).
+# Truncation to exactly $1 is done in the shell (no trailing `| head`); the loop covers the rare short draw.
+gen_alnum() { # $1 = number of chars
+  local n="$1" out=""
+  while [ "${#out}" -lt "$n" ]; do
+    out="$out$(LC_ALL=C head -c "$((n * 8))" /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9')"
+  done
+  printf '%s' "${out:0:n}"
+}
 
 secret_exists() { az keyvault secret show --vault-name "$KV" --name "$1" --only-show-errors >/dev/null 2>&1; }
 
