@@ -27,11 +27,13 @@ Trust boundaries:
 
 **Spoofing:**
 - Fake Stripe webhook: mitigated by `constructEvent` HMAC-SHA256 signature verification using `STRIPE_WEBHOOK_SECRET`. A 400 is returned on any mismatch; the event is never processed.
+- Replayed / duplicate events: Stripe delivers at-least-once. Each event id is recorded in a global `stripe_events` dedup table (event id PK; no tenant data, no content) via `INSERT … ON CONFLICT DO NOTHING` before dispatch — a redelivery of an already-processed event is skipped. If dispatch **throws** after the claim (a transient Stripe/DB fault), the claim is **released** (row deleted) so Stripe's retry re-processes it: at-least-once is preserved, and the claim covers the same failure domain as the work it guards. Handlers are additionally idempotent (live-state re-fetch + stale-sub guards), so for the success-replay case dedup removes redundant work and duplicate `tenant.plan_changed` audit rows.
 - Operator impersonation: OPERATOR_API_KEY must be a long-lived secret from Key Vault. `timingSafeEqual` from `node:crypto` is used for the comparison, eliminating timing oracle attacks.
 
 **Tampering:**
 - Limit bypass via race on member creation: member-limit is checked at BOTH `createInvite` and `acceptInvite`. The second check (inside the `withTenant` transaction) is the true race-safe gate.
 - Plan downgrade manipulation: no client input flows to plan writes. All plan changes originate from Stripe-verified webhooks or the operator key.
+- Webhook tenant-context (the one **sanctioned exception** to "tenant context only from the verified session", `db/index.ts`): the Stripe webhook is the single place a tenantId reaches `withTenant` from a third-party-relayed value (`metadata.tenantId`) rather than the authenticated request. Safe because (a) the body is Stripe-signature-authenticated, and (b) argus is the **sole writer** of `metadata.tenantId`, set under a verified `auth.tenantId` at checkout creation — Stripe's customer portal cannot edit it. Enforcing controls: `checkout.session.completed` cross-checks the session's `metadata.tenantId` against the Stripe Customer's own metadata, and every webhook-derived tenantId is UUID-validated before opening a `withTenant` transaction; a mismatch or malformed value is logged (metadata only) and skipped — never processed, never 500-looped.
 
 **Information disclosure:**
 - Stripe secret key exposure: delivered as a Key Vault credential file (`STRIPE_SECRET_KEY_FILE`); never in env at rest, never logged.
@@ -46,7 +48,7 @@ Trust boundaries:
 
 1. **Crypto-blind server** — billing touches only plan metadata columns and Stripe IDs; no content or keys involved.
 2. **No secret logging** — `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` are never logged. Only price IDs (non-secret) and config-missing warnings are emitted.
-3. **RLS** — `tenants` has FORCE ROW LEVEL SECURITY (`tenants_self_isolation` policy keyed on `app.tenant_id`); all reads and writes run inside `withTenant(tenantId)` which sets this session variable. No cross-tenant reads possible. Stripe `tenantIdFromCustomer` uses Stripe metadata instead of a DB lookup, avoiding the need for a tenant-less transaction.
+3. **RLS** — `tenants` has FORCE ROW LEVEL SECURITY (`tenants_self_isolation` policy keyed on `app.tenant_id`); all reads and writes run inside `withTenant(tenantId)` which sets this session variable. No cross-tenant reads possible. Stripe `tenantIdFromCustomer` derives the tenant from the Stripe Customer's metadata (argus-written) instead of a DB lookup; the value is UUID-validated before any `withTenant` transaction, and `checkout.session.completed` additionally cross-checks the session metadata against the customer (see §3 Tampering — the sanctioned webhook exception). The `stripe_events` dedup table is intentionally global / no-RLS (operational data, no tenant_id, no content) — like `user_tenant_index`.
 4. **No hand-rolled crypto** — Stripe's `constructEvent` uses the official SDK's HMAC; no primitives in application code.
 5. **Secrets via Key Vault** — `STRIPE_SECRET_KEY_FILE`, `STRIPE_WEBHOOK_SECRET_FILE`, `OPERATOR_API_KEY_FILE` follow the credential-file pattern.
 6. **No admin content access** — billing surfaces expose plan metadata only; no message content, attachments, or keys involved.
@@ -65,5 +67,5 @@ Reviewer gates: `security-boundary-auditor` (plan enforcement paths, operator en
 ## 6. Residual risk
 
 - **Operator key timing-safety**: `timingSafeEqual` (constant-time) is used — no timing oracle risk.
-- **Webhook replay window**: Stripe's `constructEvent` rejects events with a timestamp more than 300 seconds old by default. Events within that window that are replayed would re-run `setPlan` idempotently (same data) — no harm.
+- **Webhook replay window**: Stripe's `constructEvent` rejects events with a timestamp more than 300 seconds old by default. Events within that window that are replayed are now deduped via the `stripe_events` table (event id PK, `ON CONFLICT DO NOTHING`) and skipped before dispatch; even absent that, `setPlan` writes absolute values idempotently. **Retention**: `stripe_events` rows are tiny and low-volume (a handful per subscription change); a periodic prune is a documented follow-up, not yet built.
 - **Stripe outage**: if Stripe is down, checkout/portal fail gracefully; the plan stays as-is. No plan data is lost.

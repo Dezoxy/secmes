@@ -65,7 +65,10 @@ export function asTenantId(value: string): TenantId {
  * role. Both the var and the role reset at COMMIT/ROLLBACK, so nothing leaks across the pool.
  *
  * `tenantId` MUST come from the verified session (the request-scoped tenant guard), never from
- * raw client input — see docs/threat-models/rls-tenant-isolation.md.
+ * raw client input — see docs/threat-models/rls-tenant-isolation.md. The ONE sanctioned exception is the
+ * Stripe webhook (`@Public`): there tenantId derives from the signature-authenticated, argus-written
+ * `metadata.tenantId`, and that path UUID-validates it + cross-checks it against the Stripe Customer before
+ * calling withTenant (see billing.service.ts + docs/threat-models/billing-plan-gating.md §3).
  */
 export async function withTenant<T>(tenantId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
   const tid = asTenantId(tenantId); // fail fast before opening a transaction
