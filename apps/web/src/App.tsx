@@ -14,6 +14,7 @@ const SecurityRoute = lazy(() => import('./routes/SecurityRoute'));
 const SettingsRoute = lazy(() => import('./routes/SettingsRoute'));
 const StorageRoute = lazy(() => import('./routes/StorageRoute'));
 const TransparencyRoute = lazy(() => import('./routes/TransparencyRoute'));
+const V2SketchRoute = lazy(() => import('./routes/V2SketchRoute'));
 
 /**
  * Landing / sign-in screen. Argus exposes one primary passkey entry point and delegates login,
@@ -243,6 +244,8 @@ export default function App() {
           <Route path="/invite" element={<InviteRoute />} />
           <Route path="/auth/callback" element={<AuthCallbackRoute />} />
           <Route path="/transparency" element={<TransparencyRoute />} />
+          <Route path="/v2" element={<V2SketchRoute />} />
+          <Route path="/v2/:sketchId" element={<V2SketchRoute />} />
         </Routes>
       </Suspense>
       <RouteUpdateAction />
