@@ -179,13 +179,20 @@ describe('ConversationManager', () => {
     beforeEach(async () => {
       d2 = await engine.generateDeviceKeys('me:d2-uuid');
       // Simulate own D2 being in the key directory (server device id = 'd2-server-id').
-      claimAll.mockResolvedValue([
-        {
-          deviceId: 'd2-server-id',
-          signaturePublicKey: deviceSignaturePublicKeyB64(d2),
-          keyPackage: serializeKeyPackage(d2.publicPackage),
-        },
-      ]);
+      // prepare() calls claimAll for the PEER to find secondary devices (returns [] — peer is single-device);
+      // confirm() calls claimAll for self ('me-user') to claim enrolled own devices (returns D2).
+      claimAll.mockImplementation(async (userId: string) => {
+        if (userId === 'me-user') {
+          return [
+            {
+              deviceId: 'd2-server-id',
+              signaturePublicKey: deviceSignaturePublicKeyB64(d2),
+              keyPackage: serializeKeyPackage(d2.publicPackage),
+            },
+          ];
+        }
+        return []; // peer has no secondary devices in these tests
+      });
       // D2 has completed the enrollment trust flow — must be in the approved list for self-add.
       // fingerprint must match deviceSignaturePublicKeyB64(d2) so the leaf-key MITM check passes.
       vi.mocked(listEnrollments).mockResolvedValue([
@@ -203,7 +210,8 @@ describe('ConversationManager', () => {
       );
       const session = await mgr.confirm(await mgr.prepare('peer-user'));
 
-      // claimAllKeyPackages called for self-user, deliverWelcome NOT used (multi-device path uses postCommit).
+      // prepare() checks peer secondary devices (returns []), confirm() claims enrolled own devices (D2).
+      expect(claimAll).toHaveBeenCalledWith('peer-user', undefined, 'peer-device');
       expect(claimAll).toHaveBeenCalledWith('me-user', undefined, 'my-server-id');
       expect(deliver).not.toHaveBeenCalled();
       expect(post).toHaveBeenCalledTimes(1);
@@ -259,10 +267,13 @@ describe('ConversationManager', () => {
       );
       await mgr.confirm(await mgr.prepare('peer-user'));
 
-      // Single-device path: deliverWelcome used, postCommit not used, claimAllKeyPackages not called.
+      // prepare() calls claimAll to check for peer secondary devices (returns []).
+      // confirm() skips claimAll (selfDeviceId omitted → single-device path).
       expect(deliver).toHaveBeenCalledTimes(1);
       expect(post).not.toHaveBeenCalled();
-      expect(claimAll).not.toHaveBeenCalled();
+      expect(claimAll).toHaveBeenCalledTimes(1); // only from prepare()
+      expect(claimAll).toHaveBeenCalledWith('peer-user', undefined, 'peer-device');
+      expect(claimAll).not.toHaveBeenCalledWith('me-user', expect.anything(), expect.anything());
     });
   });
 });
