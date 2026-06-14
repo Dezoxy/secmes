@@ -278,7 +278,12 @@ export function useLiveConversations({
       onReady: () => {
         void listEnrollments('pending')
           .then((rows) => {
-            for (const row of rows) onEnrollmentPending?.(row.id);
+            for (const row of rows) {
+              // Mirror the WS event handler: skip enrollments requested by THIS device (D2 should
+              // not see its own pending enrollment as a D1 approval prompt).
+              if (row.requestingDeviceId === deviceId) continue;
+              onEnrollmentPending?.(row.id);
+            }
           })
           .catch(() => {
             /* best-effort — missed enrollments reappear on the next reconnect */

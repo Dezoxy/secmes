@@ -139,9 +139,10 @@ export async function enrollDevice(
         const epochBefore = conversation.epoch;
         await drainCommits(deps, conversationId, conversation, conversation.epoch - 1);
         if (conversation.epoch === epochBefore) {
-          // No commits on the server — this is a legacy no-commit conversation (created via the
-          // pre-B2 deliverWelcome path). postCommit's contiguity guard rejects epoch > 0 when
-          // conversation_commits is empty. Skip without retrying; D2 has no history for it anyway.
+          // Drain found no commits yet the server returned a 409 — the winning commit may not yet
+          // be visible (replication lag or the conflict was spurious). Skip to avoid an infinite
+          // retry loop; the next enrollDevice call (triggered on reconnect or re-approval) will
+          // retry this conversation.
           break;
         }
         // The winning commit may have already added D2 (two D1 tabs racing fan-out). Retrying

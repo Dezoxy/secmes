@@ -793,6 +793,10 @@ export class MessagingService {
       // a malicious member inject an arbitrarily large epoch that blocks all future messaging.
       // body.epoch === expectedEpoch → normal new commit; body.epoch < expectedEpoch → handled by
       // the unique constraint below (own idempotent retry or 409).
+      // Empty commit log: accept any epoch as the first entry. 1:1 conversations and legacy
+      // conversations (created before B1 commit-tracking) never wrote an epoch-0 commit row; their
+      // local MLS group may be at epoch N > 0. sendMessage already skips the epoch gate for
+      // empty-log conversations (maxEpoch === -1 path); postCommit mirrors that here.
       const [slotRow] = await tx
         .select({ currentMax: max(schema.conversationCommits.epoch) })
         .from(schema.conversationCommits)
@@ -805,7 +809,7 @@ export class MessagingService {
       const nextEpoch =
         slotRow?.currentMax !== null && slotRow?.currentMax !== undefined
           ? Number(slotRow.currentMax) + 1
-          : 0;
+          : body.epoch; // empty log → any epoch is valid as the first recorded commit
       if (body.epoch > nextEpoch) {
         throw new ConflictException(
           `non-contiguous epoch: expected ${String(nextEpoch)}, got ${String(body.epoch)}`,
