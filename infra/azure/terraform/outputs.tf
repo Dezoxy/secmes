@@ -40,6 +40,6 @@ output "azure_subscription_id" {
 
 # Convenience: the exact run-command call CD will make (no SSH, no open port).
 output "deploy_run_command_hint" {
-  value       = "az vm run-command invoke -g ${azurerm_resource_group.this.name} -n ${azurerm_linux_virtual_machine.this.name} --command-id RunShellScript --scripts @infra/vm/deploy/deploy.sh"
+  value       = "az vm run-command invoke -g ${azurerm_resource_group.this.name} -n ${azurerm_linux_virtual_machine.this.name} --command-id RunShellScript --scripts @infra/stack/deploy/deploy.sh"
   description = "How the CD pipeline reaches the VM through the Azure control plane."
 }

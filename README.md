@@ -48,7 +48,7 @@ pnpm test
 ### Provision (when you have an Azure subscription)
 
 ```bash
-cd infra/vm/terraform
+cd infra/azure/terraform
 cp terraform.tfvars.example terraform.tfvars   # fill in subscription_id, prefix
 terraform init
 terraform plan

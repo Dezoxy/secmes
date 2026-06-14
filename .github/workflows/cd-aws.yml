@@ -1,0 +1,220 @@
+name: cd-aws
+
+# EXPERIMENT deploy to the parallel AWS EC2 box (Azure Arc for secrets). Tag-triggered like cd.yml — push a
+# tag, approve on GitHub, the instance auto-updates — but on its OWN tag namespace (`aws-v*`), NOT the prod
+# `v*` tags. So a production release never triggers the experiment and never collides on the GHCR image tag
+# (experiment images are `…:aws-vX.Y.Z`). Fully independent of the live Azure deploy: its own `aws-experiment`
+# Environment gate + ENABLE_DEPLOY_AWS kill-switch. The live cd.yml is untouched. See the README + threat model.
+on:
+  push:
+    tags: ['aws-v*.*.*']
+
+# Least privilege. id-token: GitHub OIDC -> AWS IAM role (no stored cloud creds) + cosign keyless signing.
+# packages: write to push images to GHCR. No contents:write.
+permissions:
+  contents: read
+  id-token: write
+  packages: write
+
+concurrency:
+  group: cd-aws-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_TAG: ${{ github.ref_name }}
+
+jobs:
+  # Build, scan, SBOM, keyless-sign both images, push to GHCR. Self-contained (does NOT depend on cd.yml's
+  # images job): signed with THIS workflow's OIDC identity (.../cd-aws.yml@refs/tags/<tag>), which is what the
+  # deploy verifies via ARGUS_COSIGN_WORKFLOW. Gated by ENABLE_DEPLOY_AWS so it never fires until you opt in.
+  # NOTE: only the `deploy` job is behind the `aws-experiment` Environment approval — build+push+sign here run
+  # PRE-approval on any aws-v*.*.* tag push (once the kill-switch is on). Acceptable for a no-real-data experiment;
+  # gate this job behind the environment too if these signed images ever need to be trusted elsewhere.
+  images:
+    if: ${{ vars.ENABLE_DEPLOY_AWS == 'true' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: api
+            context: .
+            dockerfile: apps/api/Dockerfile
+          - name: ingress
+            context: .
+            dockerfile: infra/stack/caddy/Dockerfile
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Resolve image ref (lowercase owner — GHCR requires it)
+        env:
+          OWNER: ${{ github.repository_owner }}
+          NAME: ${{ matrix.name }}
+        run: |
+          REPO_PATH="${REGISTRY}/$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')/argus-${NAME}"
+          echo "IMAGE=${REPO_PATH}:${IMAGE_TAG}" >>"$GITHUB_ENV"
+          echo "CACHE=${REPO_PATH}:buildcache-aws" >>"$GITHUB_ENV"
+
+      - name: GHCR login
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.name }}
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=registry,ref=${{ env.CACHE }}
+          cache-to: type=registry,ref=${{ env.CACHE }},mode=max
+          build-args: |
+            VITE_OIDC_ISSUER=${{ vars.VITE_OIDC_ISSUER }}
+            VITE_OIDC_CLIENT_ID=${{ vars.VITE_OIDC_CLIENT_ID }}
+            VITE_OIDC_REDIRECT_URI=${{ vars.VITE_OIDC_REDIRECT_URI }}
+
+      - name: Trivy image scan (fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}
+          severity: HIGH,CRITICAL
+          exit-code: '1'
+
+      - name: Generate SBOM (syft)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          image: ${{ env.IMAGE }}
+          format: spdx-json
+          output-file: sbom-${{ matrix.name }}.spdx.json
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign image + attest SBOM (keyless via OIDC)
+        run: |
+          cosign sign --yes "$IMAGE"
+          cosign attest --yes --predicate "sbom-${{ matrix.name }}.spdx.json" --type spdxjson "$IMAGE"
+
+  # Roll out to the single EC2 box through the AWS control plane (SSM send-command — no SSH, no inbound port).
+  # CD starts the instance if it's stopped (you stop it by hand to save cost), waits for the SSM agent, then
+  # runs deploy.sh as root with the experiment knobs (Arc token source, skip GlitchTip, verify cd-aws.yml's
+  # signature). The exact-SHA infra files are bundled INTO the command so the box's role stays pull-only.
+  deploy:
+    needs: images
+    if: ${{ vars.ENABLE_DEPLOY_AWS == 'true' }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: argus-aws-rollout
+      cancel-in-progress: false
+    # TWO-LAYER GATE: ENABLE_DEPLOY_AWS is the master kill-switch; the `aws-experiment` GitHub Environment is the
+    # per-release approval gate — configure it with required reviewers so each tagged release PAUSES here for
+    # your approval before the root SSM command runs. The IAM deploy role's OIDC trust is bound to this same
+    # environment subject (infra/aws/terraform/iam.tf).
+    environment: aws-experiment
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b # v6.2.0
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Build the SSM rollout script (bundles exact-SHA infra config)
+        env:
+          GHCR_OWNER: ${{ github.repository_owner }}
+          KEY_VAULT: ${{ vars.AWS_KEY_VAULT_NAME }}
+          GH_REPO: ${{ github.repository }}
+          GHCR_USER: ${{ vars.GHCR_USER || github.repository_owner }}
+          S3_ENDPOINT: ${{ vars.S3_ENDPOINT }}
+          S3_REGION: ${{ vars.S3_REGION }}
+          S3_BUCKET: ${{ vars.S3_BUCKET }}
+          S3_ACCESS_KEY_ID: ${{ vars.S3_ACCESS_KEY_ID }}
+          OIDC_ISSUER: ${{ vars.OIDC_ISSUER }}
+          OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
+        run: |
+          set -euo pipefail
+          # Bundle what deploy.sh reads from the unpacked tree: compose + the secret-fetch unit + deploy.sh, PLUS
+          # the observability config tree + the glitchtip entrypoint (deploy.sh step 1 cp's both even when the
+          # GlitchTip tier is skipped at runtime).
+          tar czf deploy-bundle.tgz compose.prod.yaml infra/stack/secrets infra/stack/deploy infra/stack/observability infra/stack/glitchtip
+          B64="$(base64 -w0 deploy-bundle.tgz)"
+          GHCR_REGISTRY="ghcr.io/$(echo "$GHCR_OWNER" | tr '[:upper:]' '[:lower:]')"
+          # single-quoted echos write LITERAL shell to runcmd.sh ($WORK expands on the box, not in the runner).
+          # POSIX-safe wrapper (set -eu, no pipefail; two-step decode): the SSM AWS-RunShellScript shell isn't
+          # guaranteed to be bash. deploy.sh itself is invoked under an explicit `bash` and keeps full strictness.
+          # shellcheck disable=SC2016
+          {
+            echo 'set -eu'
+            echo 'WORK="$(mktemp -d)"'
+            printf "printf '%%s' '%s' | base64 -d >\"\$WORK/bundle.tgz\"\n" "$B64"
+            echo 'tar xzf "$WORK/bundle.tgz" -C "$WORK"'
+            # Experiment knobs: Arc token source, skip the GlitchTip tier, verify THIS workflow's signature.
+            echo 'export ARGUS_TOKEN_SOURCE=arc ARGUS_SKIP_GLITCHTIP=1 ARGUS_COSIGN_WORKFLOW=.github/workflows/cd-aws.yml'
+            printf 'export ARGUS_KEY_VAULT=%q IMAGE_TAG=%q GHCR_REGISTRY=%q GHCR_USER=%q GH_REPO=%q\n' \
+              "$KEY_VAULT" "$IMAGE_TAG" "$GHCR_REGISTRY" "$GHCR_USER" "$GH_REPO"
+            printf 'export S3_ENDPOINT=%q S3_REGION=%q S3_BUCKET=%q S3_ACCESS_KEY_ID=%q OIDC_ISSUER=%q OIDC_AUDIENCE=%q\n' \
+              "$S3_ENDPOINT" "$S3_REGION" "$S3_BUCKET" "$S3_ACCESS_KEY_ID" "$OIDC_ISSUER" "$OIDC_AUDIENCE"
+            echo 'bash "$WORK/infra/stack/deploy/deploy.sh"'
+            echo 'rm -rf "$WORK"'
+          } >runcmd.sh
+          # SSM AWS-RunShellScript takes a `commands` array; pass the whole script as one element (jq -Rs reads
+          # the file as a single JSON string). Avoids any shell-quoting of the script into the CLI.
+          jq -Rs '{commands: [.]}' <runcmd.sh >ssm-params.json
+
+      - name: Start the instance if stopped, wait for SSM
+        env:
+          IID: ${{ vars.AWS_INSTANCE_ID }}
+        run: |
+          set -euo pipefail
+          aws ec2 start-instances --instance-ids "$IID" >/dev/null
+          aws ec2 wait instance-running --instance-ids "$IID"
+          # Wait (up to ~5 min) for the SSM agent to report Online before send-command.
+          for _ in $(seq 1 60); do
+            PING="$(aws ssm describe-instance-information \
+              --filters "Key=InstanceIds,Values=$IID" \
+              --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null || echo None)"
+            [ "$PING" = "Online" ] && break
+            sleep 5
+          done
+          [ "${PING:-None}" = "Online" ] || { echo "::error::SSM agent not Online for $IID"; exit 1; }
+
+      - name: Roll out via SSM send-command
+        env:
+          IID: ${{ vars.AWS_INSTANCE_ID }}
+        run: |
+          set -euo pipefail
+          CMD_ID="$(aws ssm send-command \
+            --instance-ids "$IID" \
+            --document-name AWS-RunShellScript \
+            --comment "argus-exp deploy ${IMAGE_TAG}" \
+            --timeout-seconds 600 \
+            --parameters file://ssm-params.json \
+            --query 'Command.CommandId' --output text)"
+          echo "SSM command: $CMD_ID"
+          # The built-in command-executed waiter tops out ~100s — far short of a cold deploy (image pulls +
+          # Zitadel first-init). Poll manually up to ~30 min for a terminal status.
+          STATUS=Pending
+          for _ in $(seq 1 120); do
+            STATUS="$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$IID" \
+              --query 'Status' --output text 2>/dev/null || echo Pending)"
+            case "$STATUS" in
+              Success|Failed|Cancelled|TimedOut) break ;;
+            esac
+            sleep 15
+          done
+          echo "::group::deploy stdout (may be truncated by SSM)"
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$IID" \
+            --query 'StandardOutputContent' --output text || true
+          echo "::endgroup::"
+          echo "::group::deploy stderr"
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$IID" \
+            --query 'StandardErrorContent' --output text || true
+          echo "::endgroup::"
+          # deploy.sh is set -e and prints its success sentinel only after the rollout is healthy, so a Success
+          # status == a healthy deploy. Anything else fails the job.
+          [ "$STATUS" = "Success" ] || { echo "::error::SSM rollout status=$STATUS"; exit 1; }

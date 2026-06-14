@@ -35,7 +35,7 @@ updates:
 
   # Terraform providers/modules (azurerm)
   - package-ecosystem: 'terraform'
-    directory: '/infra/vm/terraform'
+    directory: '/infra/azure/terraform'
     schedule:
       interval: 'weekly'
       day: 'monday'
@@ -53,9 +53,9 @@ updates:
     commit-message:
       prefix: 'chore(docker-deps)'
 
-  # Production ingress image base layers (infra/vm/caddy/Dockerfile: node + caddy)
+  # Production ingress image base layers (infra/stack/caddy/Dockerfile: node + caddy)
   - package-ecosystem: 'docker'
-    directory: '/infra/vm/caddy'
+    directory: '/infra/stack/caddy'
     schedule:
       interval: 'weekly'
       day: 'monday'
