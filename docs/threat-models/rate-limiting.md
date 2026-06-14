@@ -165,7 +165,7 @@ rule #3 to the auth zone or it throttles Zitadel's own console; rule #5 governs 
 | 1 | `4rgus.com` | `uri.path starts_with "/ws"` | 30 / min | Managed Challenge | pre-auth WebSocket connect flood — each socket holds a `ConnState` + 10s auth timer in the gateway |
 | 2 | `4rgus.com` | `uri.path eq "/webhooks/stripe"` | 60 / min | Block (1 min) | webhook flood (legit Stripe volume is low; still signature-gated + now idempotent) |
 | 3 | `4rgus.com` | `uri.path starts_with "/api/"` | 600 / min | Managed Challenge | generic API flood on the cheap token-rejection path (well above any legitimate per-user burst) |
-| 4 | `4rgus.com` | `POST /tenants/invites/accept` | 10 / min | Block (5 min) | invite-token guessing before the caller is tenant-bound — complements the in-app per-user cap |
+| 4 | `4rgus.com` | `POST /api/tenants/invites/accept` (the edge sees the `/api` prefix — Caddy strips it only internally; order this rule ABOVE #3 so its tighter limit applies) | 10 / min | Block (5 min) | invite-token guessing before the caller is tenant-bound — complements the in-app per-user cap |
 | 5 | `auth.4rgus.com` | the login + `/oauth/v2/token` endpoints (incl. the `/api/*` Zitadel alias) | 30 / min | Managed Challenge | credential-stuffing / flood against Zitadel |
 
 Also enable Cloudflare **Bot Fight Mode** (Super Bot Fight Mode on Pro+) and keep **"Under Attack" mode** as
