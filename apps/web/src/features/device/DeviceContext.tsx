@@ -170,11 +170,13 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
             .replace(/\//g, '_')
             .replace(/=+$/, '');
           await withdrawDevice(oldSpk, proof);
-          // Clear the old device credential and MLS group states; rebind MSGLOG records to the
-          // new identity so historical messages remain accessible after migration.
-          await keystore.clearDeviceOnly();
-          dev = await keystore.getOrCreateDevice(identity, passphrase);
-          await keystore.rebindMessageLogs(dev);
+          // Reidentify: preserve the signing key under the new composite identity so existing
+          // MLS group states (which embed the private key internally) remain usable. Only the
+          // identity string metadata guards change — the ratchet and leaf-node key are the same.
+          dev = await keystore.reidentifyDevice(storedIdent!, identity, passphrase);
+          await keystore.clearPoolAndPending(); // old key packages are stale after server withdraw
+          await keystore.rebindGroupStates(dev); // update GROUP_STORE identity guards
+          await keystore.rebindMessageLogs(dev); // update MSGLOG identity guards
         } else if (creating) {
           dev = await keystore.getOrCreateDevice(identity, passphrase);
         } else {
@@ -235,12 +237,14 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
             .replace(/\//g, '_')
             .replace(/=+$/, '');
           await withdrawDevice(oldSpk, proof).catch(() => undefined);
-          await keystore.clearDeviceOnly();
           const newUuid = crypto.randomUUID();
           const newIdentity = formatDeviceIdentity(userId, newUuid);
-          const dev = await keystore.getOrCreateDevice(newIdentity, passphrase);
-          if (!dev) throw new Error('could not create migrated device');
-          await keystore.rebindMessageLogs(dev);
+          // Reidentify: same signing key (from restoreAndProvision) under the new composite identity.
+          // On a fresh browser GROUP_STORE and MSGLOG_STORE are empty so rebind calls are no-ops.
+          const dev = await keystore.reidentifyDevice(identity, newIdentity, passphrase);
+          await keystore.clearPoolAndPending(); // discard the restored pool (will re-provision)
+          await keystore.rebindGroupStates(dev); // no-op on a fresh browser
+          await keystore.rebindMessageLogs(dev); // no-op on a fresh browser
           const { pool: provisioned, result } = await provisionDevice(keystore, dev, passphrase);
           setDevice(dev);
           setPool(provisioned);

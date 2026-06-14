@@ -926,28 +926,83 @@ export class DeviceKeystore {
   }
 
   /**
-   * Clear the device credential, key-package pool, pending commits, and MLS group states, while
-   * preserving the message-history log and META salt. Used for the pre-B2 → composite-identity
-   * migration: GROUP_STORE records are credential-bound (the MLS leaf embeds the old signing key),
-   * so they are unusable by a new device — the new device rejoins via enrollment fan-out. MSGLOG
-   * records survive because their sealed blobs use only the conversationId as AAD (not the device
-   * identity); call rebindMessageLogs() after creating the new device to update the metadata guards.
-   * The same passphrase + unchanged META salt → same session key → same MSGLOG decryption.
+   * Clear the device credential while preserving GROUP_STORE, MSGLOG_STORE, and META_STORE.
+   * Only the STORE (sealed device), POOL_STORE (one-time key packages), and PENDING_STORE
+   * (pending commits) are removed. Use reidentifyDevice + clearPoolAndPending + rebindGroupStates
+   * + rebindMessageLogs to migrate the identity string without regenerating the signing key.
    */
   async clearDeviceOnly(): Promise<void> {
     await this.db.delete(STORE, SELF);
     await this.db.delete(POOL_STORE, SELF);
     await this.db.clear(PENDING_STORE);
-    await this.db.clear(GROUP_STORE);
-    this.groupStateVersions.clear();
-    // MSGLOG_STORE and META_STORE are intentionally preserved.
+    // GROUP_STORE, MSGLOG_STORE, and META_STORE are intentionally preserved.
+  }
+
+  /**
+   * Clear only the one-time KeyPackage pool and any pending-commit slots (stale after a device
+   * withdraw + server-side re-provision). The device credential, group states, message logs, and
+   * META salt are left intact. Call after reidentifyDevice to discard the old pool whose HPKE
+   * privates belong to the pre-migration server device row.
+   */
+  async clearPoolAndPending(): Promise<void> {
+    await this.db.delete(POOL_STORE, SELF);
+    await this.db.clear(PENDING_STORE);
+  }
+
+  /**
+   * Reidentify the stored device: unseal it under `oldIdentity`, recreate it with the SAME Ed25519
+   * signing key under `newIdentity` (via engine.exportIdentity + engine.deviceFromIdentity), reseal
+   * under `passphrase`, and write back to STORE. Preserves the signing key so existing MLS group
+   * states (whose serialized ratchet embeds the private key) remain usable; only the identity string
+   * metadata guard changes. Call clearPoolAndPending() + rebindGroupStates() + rebindMessageLogs()
+   * afterwards to bring all metadata guards up to date.
+   */
+  async reidentifyDevice(
+    oldIdentity: string,
+    newIdentity: string,
+    passphrase: string,
+  ): Promise<DeviceKeys> {
+    const stored = (await this.db.get(STORE, SELF)) as StoredDevice | undefined;
+    if (!stored) throw new Error('no device to reidentify');
+    const oldDev = await this.unseal(stored, oldIdentity, passphrase);
+    const idMat = this.engine.exportIdentity(oldDev);
+    const newDev = await this.engine.deviceFromIdentity({ ...idMat, identity: newIdentity });
+    const plaintext = serializeDeviceKeys(newDev);
+    const sealed = await sealBackup(plaintext, passphrase, this.argon);
+    plaintext.fill(0);
+    await this.db.put(STORE, { identity: newIdentity, sealed } satisfies StoredDevice, SELF);
+    return newDev;
+  }
+
+  /**
+   * Rebind all GROUP_STORE records to a new device's identity and signature public key. Safe
+   * because the sealed group-state blobs contain the signing private key internally (via
+   * engine.deserializeConversation), so the metadata guard is the only thing that changes —
+   * the ratchet and leaf-node key are unaffected. Call after reidentifyDevice so loadConversations
+   * can find and load the preserved group states.
+   */
+  async rebindGroupStates(newDevice: DeviceKeys): Promise<void> {
+    const newIdentity = deviceIdentity(newDevice);
+    const newSpk = deviceSignaturePublicKeyB64(newDevice);
+    const recs = (await this.db.getAll(GROUP_STORE)) as StoredGroupState[];
+    if (recs.length === 0) return;
+    const tx = this.db.transaction(GROUP_STORE, 'readwrite');
+    for (const rec of recs) {
+      if (rec.identity !== newIdentity || rec.signaturePublicKey !== newSpk) {
+        await tx.store.put(
+          { ...rec, identity: newIdentity, signaturePublicKey: newSpk },
+          rec.conversationId,
+        );
+      }
+    }
+    await tx.done;
   }
 
   /**
    * Rebind all MSGLOG_STORE records to a new device's identity and signature public key. Safe
    * because the sealed blobs use only the conversationId as AAD — the device identity is a
-   * metadata guard only, not part of the crypto. Call this after clearDeviceOnly() + creating
-   * the new composite-identity device so openLog() can find and return the historical messages.
+   * metadata guard only, not part of the crypto. Call after reidentifyDevice so openLog() can
+   * find and return historical messages.
    */
   async rebindMessageLogs(newDevice: DeviceKeys): Promise<void> {
     const newIdentity = deviceIdentity(newDevice);
