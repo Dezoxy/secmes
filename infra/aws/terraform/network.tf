@@ -27,9 +27,13 @@ resource "aws_internet_gateway" "this" {
 # One public subnet. The instance needs outbound internet for cloudflared, Key Vault, the Arc endpoints, B2,
 # GHCR, and apt; a public subnet + EIP is the cheapest stable-egress option for a single-box experiment.
 resource "aws_subnet" "public" {
-  vpc_id                  = aws_vpc.this.id
-  cidr_block              = "10.40.0.0/24"
-  map_public_ip_on_launch = false # we attach an explicit EIP instead (stable address for the KV allow-list)
+  vpc_id     = aws_vpc.this.id
+  cidr_block = "10.40.0.0/24"
+  # Auto-assign a public IP at launch so first-boot cloud-init (apt, Docker/awscli/azcmagent downloads, the
+  # azcmagent Arc onboarding) has outbound internet IMMEDIATELY — the Elastic IP is associated only AFTER the
+  # instance is created (it depends on the instance id), so without this the box would boot with no egress. The
+  # EIP then swaps in as the stable address the Key Vault firewall allow-lists.
+  map_public_ip_on_launch = true
   tags                    = { Name = "${var.prefix}-public" }
 }
 
