@@ -12,6 +12,7 @@ import {
   V2TransparencySketch,
 } from '../v2/routes';
 import { v2RouteSketches } from '../v2/mocks/sketch-data';
+import { AuthenticatedRouteBoundary } from './AuthenticatedRouteBoundary';
 
 const sketchComponents = {
   landing: V2LandingSketch,
@@ -65,7 +66,7 @@ function V2DevNav({ active }: { active?: string }) {
   );
 }
 
-export default function V2SketchRoute() {
+function V2SketchRouteContent() {
   const { sketchId } = useParams();
 
   if (sketchId === undefined) {
@@ -86,5 +87,13 @@ export default function V2SketchRoute() {
       <Sketch />
       <V2DevNav active={sketchId} />
     </>
+  );
+}
+
+export default function V2SketchRoute() {
+  return (
+    <AuthenticatedRouteBoundary>
+      <V2SketchRouteContent />
+    </AuthenticatedRouteBoundary>
   );
 }
