@@ -7967,10 +7967,17 @@
             "description": "The device's Ed25519 signature public key (base64) — identifies which device to withdraw",
             "maxLength": 512,
             "pattern": "^[A-Za-z0-9+/]+={0,2}$"
+          },
+          "proof": {
+            "type": "string",
+            "description": "base64url Ed25519 proof-of-possession: sign(argus-withdraw:v1\\n${spk}, signaturePrivateKey)",
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
           }
         },
         "required": [
-          "signaturePublicKey"
+          "signaturePublicKey",
+          "proof"
         ],
         "additionalProperties": false
       },

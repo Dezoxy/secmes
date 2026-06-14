@@ -104,6 +104,14 @@ class WithdrawDeviceBodyDto {
     maxLength: 512,
   })
   signaturePublicKey!: string;
+
+  @ApiProperty({
+    description:
+      'base64url Ed25519 proof-of-possession: sign(argus-withdraw:v1\\n${spk}, signaturePrivateKey)',
+    maxLength: 128,
+    pattern: '^[A-Za-z0-9_-]+$',
+  })
+  proof!: string;
 }
 
 @ApiTags('devices')
@@ -220,7 +228,7 @@ export class DevicesController {
     @CurrentAuth() auth: VerifiedAuth,
     @Body(new ZodValidationPipe(WithdrawDeviceBodySchema)) body: WithdrawDeviceBody,
   ): Promise<void> {
-    await this.devices.withdrawDevice(auth, body.signaturePublicKey);
+    await this.devices.withdrawDevice(auth, body.signaturePublicKey, body.proof);
   }
 
   @Get('devices/me/conversations')

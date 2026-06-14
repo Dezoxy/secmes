@@ -27,6 +27,9 @@ export const EnrollmentApproveBodySchema = z
 export type EnrollmentApproveBody = z.infer<typeof EnrollmentApproveBodySchema>;
 
 export const WithdrawDeviceBodySchema = z
-  .object({ signaturePublicKey: z.string().min(1).max(512) })
+  .object({
+    signaturePublicKey: z.string().min(1).max(512),
+    proof: base64url.max(128),
+  })
   .strict();
 export type WithdrawDeviceBody = z.infer<typeof WithdrawDeviceBodySchema>;

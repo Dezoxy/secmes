@@ -7,6 +7,7 @@ import {
   parseDeviceIdentity,
 } from '@argus/crypto';
 
+import { signWithdraw } from '@argus/crypto/device-proof';
 import { restoreAndProvision } from '../../lib/device-restore';
 import { withdrawDevice } from '../../lib/api';
 import { DeviceKeystore } from '../../lib/keystore';
@@ -162,7 +163,12 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
           const oldDev = await keystore.loadDevice(storedIdent!, passphrase);
           if (!oldDev) throw new Error('legacy device not found in keystore');
           const oldSpk = deviceSignaturePublicKeyB64(oldDev);
-          await withdrawDevice(oldSpk);
+          const proofBytes = signWithdraw(oldDev.privatePackage.signaturePrivateKey, oldSpk);
+          const proof = btoa(String.fromCharCode(...proofBytes))
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=+$/, '');
+          await withdrawDevice(oldSpk, proof);
           await keystore.clearDevice();
           dev = await keystore.getOrCreateDevice(identity, passphrase);
         } else if (creating) {

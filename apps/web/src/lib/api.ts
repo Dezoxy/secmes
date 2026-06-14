@@ -915,12 +915,12 @@ export async function rejectEnrollment(enrollmentId: string): Promise<void> {
  * pre-B2 migration to remove the old bare-userId device row so the new composite-identity device
  * is published as non-provisional. Idempotent — no-ops if the device is already gone.
  */
-export async function withdrawDevice(signaturePublicKey: string): Promise<void> {
+export async function withdrawDevice(signaturePublicKey: string, proof: string): Promise<void> {
   unwrapApiResult(
     await requestStatus({
       path: '/devices/me/withdraw',
       method: 'POST',
-      body: { signaturePublicKey },
+      body: { signaturePublicKey, proof },
       requestSchema: WithdrawDeviceBodySchema,
     }),
   );

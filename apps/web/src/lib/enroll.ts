@@ -136,7 +136,14 @@ export async function enrollDevice(
         // the server to E+1, so we need to process the commit stored at epoch E.
         // afterEpoch is an exclusive lower bound: afterEpoch = E-1 fetches commits with epoch > E-1,
         // i.e. epoch E and higher (same pattern as processCommitEvent in messaging.ts).
+        const epochBefore = conversation.epoch;
         await drainCommits(deps, conversationId, conversation, conversation.epoch - 1);
+        if (conversation.epoch === epochBefore) {
+          // No commits on the server — this is a legacy no-commit conversation (created via the
+          // pre-B2 deliverWelcome path). postCommit's contiguity guard rejects epoch > 0 when
+          // conversation_commits is empty. Skip without retrying; D2 has no history for it anyway.
+          break;
+        }
         continue;
       }
       break;

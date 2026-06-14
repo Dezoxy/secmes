@@ -5,7 +5,7 @@ import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
 import { requireUser } from '../messaging/membership.js';
 import { RealtimeBus } from '../realtime/realtime-bus.js';
-import { verifyEnrollApproval } from '@argus/crypto/device-proof';
+import { verifyEnrollApproval, verifyWithdraw } from '@argus/crypto/device-proof';
 import { AuditService } from '../audit/audit.service.js';
 
 export interface EnrollmentRow {
@@ -247,13 +247,18 @@ export class DevicesService {
   /**
    * Permanently delete the caller's own device row (and its key packages via cascade). Used by the
    * legacy pre-B2 migration path: removes the old bare-userId device so the new composite-identity
-   * device is published as non-provisional. Idempotent if the row is already gone.
+   * device is published as non-provisional. Requires an Ed25519 proof-of-possession so a stolen
+   * bearer token alone cannot delete trusted devices and bypass the isProvisional gate. Idempotent.
    */
-  async withdrawDevice(auth: VerifiedAuth, signaturePublicKey: string): Promise<void> {
+  async withdrawDevice(
+    auth: VerifiedAuth,
+    signaturePublicKey: string,
+    proofBase64url: string,
+  ): Promise<void> {
     await withTenant(auth.tenantId, async (tx) => {
       const userId = await requireUser(tx, auth.sub);
       const [device] = await tx
-        .select({ id: schema.devices.id })
+        .select({ id: schema.devices.id, signaturePublicKey: schema.devices.signaturePublicKey })
         .from(schema.devices)
         .where(
           and(
@@ -263,6 +268,16 @@ export class DevicesService {
         )
         .limit(1);
       if (!device) return; // idempotent — already gone
+
+      // Proof-of-possession: caller must sign argus-withdraw:v1\n${spk} with the device private key.
+      // Prevents a stolen bearer token from deleting all trusted devices and bypassing isProvisional.
+      const proven = verifyWithdraw(
+        Buffer.from(device.signaturePublicKey, 'base64'),
+        device.signaturePublicKey,
+        Buffer.from(proofBase64url, 'base64url'),
+      );
+      if (!proven) throw new BadRequestException('invalid withdraw proof');
+
       await tx.delete(schema.devices).where(eq(schema.devices.id, device.id));
     });
 
