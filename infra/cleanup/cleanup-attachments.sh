@@ -29,9 +29,13 @@ BATCH="${CLEANUP_BATCH:-1000}"
 export PGHOST PGUSER PGDATABASE
 export PGPORT="${PGPORT:-5432}"
 export AWS_REGION="${S3_REGION:-eu-central-003}" # EU default (B2 ignores it for routing; the host carries it)
-export AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY_ID"
 
-# --- Secrets from credential files (systemd LoadCredential / Key Vault). Trim the trailing newline. ---
+# --- Secrets stay FILE-BACKED end-to-end. We do NOT `export PGPASSWORD` / `AWS_SECRET_ACCESS_KEY`: an
+#     exported secret is readable via /proc/<pid>/environ (root + same-UID) and is inherited by EVERY child
+#     (psql doesn't need the B2 secret; aws doesn't need the DB password). Instead we materialise a libpq
+#     passfile + an AWS credentials file in a private tmpfs work dir (0600) and point the CLIs at them by
+#     PATH — so no secret VALUE ever enters the environment (invariant #5). The source secrets arrive via
+#     systemd LoadCredential (Key Vault). The work dir is removed on exit. Mirrors infra/backup/backup-db.sh. ---
 read_secret_file() {
   local f="$1"
   [[ -r "$f" ]] || {
@@ -40,10 +44,36 @@ read_secret_file() {
   }
   tr -d '\n' <"$f"
 }
-PGPASSWORD="$(read_secret_file "${CLEANUP_DB_PASSWORD_FILE:?CLEANUP_DB_PASSWORD_FILE required}")"
-export PGPASSWORD
-AWS_SECRET_ACCESS_KEY="$(read_secret_file "${S3_SECRET_ACCESS_KEY_FILE:?S3_SECRET_ACCESS_KEY_FILE required}")"
-export AWS_SECRET_ACCESS_KEY
+
+umask 077
+# Put the secret files under the systemd RuntimeDirectory ($RUNTIME_DIRECTORY) — a service-private tmpfs with
+# NO host-disk backing — rather than /tmp. Fall back to TMPDIR/tmp for a local dry-run. mktemp makes the dir
+# 0700; the trap removes it on exit.
+secbase="${RUNTIME_DIRECTORY:-}"
+secbase="${secbase%%:*}" # first path if systemd gave a colon-separated list
+WORKDIR="$(mktemp -d "${secbase:-${TMPDIR:-/tmp}}/argus-cleanup.XXXXXXXX")"
+trap 'rm -rf -- "$WORKDIR"' EXIT
+
+# libpq passfile (hostname:port:database:username:password). The password's `\` and `:` are escaped per the
+# .pgpass format. psql reads PGPASSFILE — the password never enters the environment or argv.
+_db_pw="$(read_secret_file "${CLEANUP_DB_PASSWORD_FILE:?CLEANUP_DB_PASSWORD_FILE required}")"
+_esc_pw="$(printf '%s' "$_db_pw" | sed -e 's/\\/\\\\/g' -e 's/:/\\:/g')"
+PGPASSFILE="$WORKDIR/pgpass"
+printf '*:*:*:%s:%s\n' "$PGUSER" "$_esc_pw" >"$PGPASSFILE"
+chmod 600 "$PGPASSFILE"
+export PGPASSFILE
+unset _db_pw _esc_pw
+
+# AWS shared-credentials file. The access-key-id is NOT a secret; the secret key rides only in this 0600 file.
+AWS_SHARED_CREDENTIALS_FILE="$WORKDIR/aws-credentials"
+{
+  printf '[default]\n'
+  printf 'aws_access_key_id = %s\n' "$S3_ACCESS_KEY_ID"
+  printf 'aws_secret_access_key = %s\n' \
+    "$(read_secret_file "${S3_SECRET_ACCESS_KEY_FILE:?S3_SECRET_ACCESS_KEY_FILE required}")"
+} >"$AWS_SHARED_CREDENTIALS_FILE"
+chmod 600 "$AWS_SHARED_CREDENTIALS_FILE"
+export AWS_SHARED_CREDENTIALS_FILE
 
 log() { printf '[%s] cleanup: %s\n' "$(date -u +%FT%TZ)" "$*"; }
 

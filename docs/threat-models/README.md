@@ -11,6 +11,7 @@ Per the Definition of Done in `AGENTS.md`, every **security-relevant feature** g
 | `device-lifecycle.md` — device pending→active→revoked, KeyPackage invalidate-not-delete, history readability, "new browser"/"lost phone" | Phase 2 | ☐ TODO |
 | `attachments.md` — server-generated tenant-namespaced object keys, presigned-URL membership checks, blob authz outside RLS | Phase 4 | ✍️ DRAFT — ratify |
 | `rls-tenant-isolation.md` — `set_config('app.tenant_id', …, true)` per-transaction, PgBouncer transaction mode, non-bypass runtime role | Phase 1 | ✍️ DRAFT — ratify |
+| `metadata-exposure.md` — what the crypto-blind server can infer (social graph, timing, device topology, presence); the accepted metadata trade vs. content E2EE | GA (external privacy claims) | ✍️ DRAFT — ratify |
 
 > **MLS library choice:** see [`../mls-library-selection.md`](../mls-library-selection.md) — DRAFT recommendation is **`ts-mls`** (MIT, pure TS; CoreCrypto ruled out as GPL-3.0). `key-directory.md` + `key-backup.md` firm up once that's ratified.
 

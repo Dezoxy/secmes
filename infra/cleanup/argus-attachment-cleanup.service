@@ -47,6 +47,9 @@ Environment=S3_SECRET_ACCESS_KEY_FILE=%d/b2-secret
 # AWS CLI v2 wants a writable HOME/cache, but ProtectHome + ProtectSystem=strict make the FS read-only.
 # Give it a private tmpfs runtime dir as HOME so it never touches the real home.
 RuntimeDirectory=argus-cleanup
+# 0700 (not the 0755 default): the worker now materialises the libpq passfile + AWS credentials file here, on
+# this service-private tmpfs (no host-disk backing) — so other users can't even list it.
+RuntimeDirectoryMode=0700
 Environment=HOME=%t/argus-cleanup
 
 ExecStart=/opt/argus/cleanup/cleanup-attachments.sh

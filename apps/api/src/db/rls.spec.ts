@@ -12,6 +12,7 @@ describe.skipIf(!DB_URL)('RLS tenant isolation', () => {
   let sql: ReturnType<typeof getDb>['sql'];
   let tenantA: string;
   let tenantB: string;
+  const INVITE_TOKEN_HASH = 'rls-spec-invite-token-hash';
 
   // Run `fn` exactly as the app's withTenant() does: non-bypass role + tx-local tenant context.
   function asTenant(tenantId: string, fn: (tx: typeof sql) => unknown): Promise<unknown> {
@@ -31,6 +32,11 @@ describe.skipIf(!DB_URL)('RLS tenant isolation', () => {
               values (${tenantA}, 'ext-a', 'a@a.test')`;
     await sql`insert into users (tenant_id, external_identity_id, email)
               values (${tenantB}, 'ext-b', 'b@b.test')`;
+    // Seed one invite in tenant A to exercise the token-scoped accept-flow policy (migration 0028).
+    await sql`insert into tenant_invites (tenant_id, created_by, token_hash, invitee_email)
+              values (${tenantA},
+                      (select id from users where tenant_id = ${tenantA} limit 1),
+                      ${INVITE_TOKEN_HASH}, 'invitee@a.test')`;
   });
 
   afterAll(async () => {
@@ -124,5 +130,36 @@ describe.skipIf(!DB_URL)('RLS tenant isolation', () => {
         return tx`alter table users no force row level security`;
       }),
     ).rejects.toThrow();
+  });
+
+  // arch-3 fix (migration 0028): the accept-flow carve-out is scoped to a single row via
+  // app.invite_token_hash, so the invite lookup still works AND a bulk cross-tenant read is impossible.
+  it('invite lookup returns only the row matching app.invite_token_hash', async () => {
+    const rows = (await sql.begin(async (tx) => {
+      await tx`set local role argus_app`;
+      await tx`select set_config('app.invite_token_hash', ${INVITE_TOKEN_HASH}, true)`;
+      return tx`select tenant_id, token_hash from tenant_invites`;
+    })) as Array<{ tenant_id: string; token_hash: string }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.tenant_id).toBe(tenantA);
+    expect(rows[0]?.token_hash).toBe(INVITE_TOKEN_HASH);
+  });
+
+  it('tenant_invites read with no tenant + no token hash returns nothing (fail closed)', async () => {
+    const rows = (await sql.begin(async (tx) => {
+      await tx`set local role argus_app`;
+      // Neither app.tenant_id nor app.invite_token_hash set → neither permissive SELECT policy matches.
+      return tx`select id from tenant_invites`;
+    })) as Array<{ id: string }>;
+    expect(rows).toHaveLength(0);
+  });
+
+  // The isolation branch (nullif-cast) still blocks cross-tenant reads on the BOUND path: tenant B must
+  // never see tenant A's invite.
+  it('a bound tenant cannot read another tenant invite row (isolation branch)', async () => {
+    const rows = (await asTenant(tenantB, (tx) => tx`select id from tenant_invites`)) as Array<{
+      id: string;
+    }>;
+    expect(rows).toHaveLength(0);
   });
 });
