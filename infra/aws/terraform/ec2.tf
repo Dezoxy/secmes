@@ -63,12 +63,18 @@ resource "aws_instance" "this" {
     ignore_changes = [ami]
   }
 
-  # Don't boot until the Arc onboarding SP can actually onboard: the role assignment must exist before
-  # cloud-init runs `azcmagent connect`, or a fresh apply races (box boots → connect → SP has no role → fails).
+  # Don't boot until the Arc onboarding can actually succeed. Two prerequisites must exist before cloud-init
+  # runs `azcmagent connect`, or a fresh apply races (box boots → connect → fails, and cloud-init's one-shot
+  # runcmd doesn't retry): (1) the onboarding SP's role assignment, and (2) the HybridCompute/HybridConnectivity
+  # resource providers registered on the subscription (else connect 403s self-registering them — see arc.tf).
   # (The onboarding secret in SSM is already an implicit dep via the user_data templatefile ref. The phase-2
   # Key Vault grant to the Arc machine identity necessarily comes AFTER boot — the machine identity doesn't
   # exist until onboarding — and the secret fetch only runs later at deploy, so that ordering is by design.)
-  depends_on = [azurerm_role_assignment.arc_onboarding]
+  depends_on = [
+    azurerm_role_assignment.arc_onboarding,
+    azurerm_resource_provider_registration.hybrid_compute,
+    azurerm_resource_provider_registration.hybrid_connectivity,
+  ]
 
   tags = { Name = "${var.prefix}-ec2" }
 }

@@ -26,3 +26,11 @@ github_deploy_environment = "aws-experiment"
 # aws_region    = "eu-central-1"   # EU residency
 # instance_type = "t3.medium"      # bump to t3.large if memory-tight
 # admin_cidr    = null             # no inbound SSH; deploys ride SSM, ingress rides the Cloudflare Tunnel
+#
+# NOTE — new AWS "Free plan" accounts: RunInstances rejects non-free-tier types
+# ("not eligible for Free Tier") until you upgrade to a paid plan. Either upgrade
+# (Billing → account), or pick a free-tier-eligible type that still fits the stack,
+# e.g. instance_type = "c7i-flex.large" (2 vCPU / 4 GiB, x86 — matches the Ubuntu
+# AMI; m7i-flex.large gives 8 GiB). Check eligibility:
+#   aws ec2 describe-instance-types --filters Name=free-tier-eligible,Values=true \
+#     --query 'InstanceTypes[].InstanceType' --region eu-central-1

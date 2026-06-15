@@ -1,6 +1,25 @@
 data "azuread_client_config" "current" {}
 
 # ============================================================================================================
+# Azure Arc subscription prerequisites. A first-ever Arc onboarding on a fresh subscription 403s otherwise:
+# `azcmagent connect` attempts to self-register Microsoft.HybridCompute, but the narrowly-scoped onboarding SP
+# (Azure Connected Machine Onboarding role) isn't allowed to register a resource provider — that's a
+# subscription-admin action. Registering them here, where the apply principal holds the rights, closes the gap.
+# The EC2 instance depends_on these (ec2.tf) so the box can't boot-and-onboard before they're Registered.
+# (Microsoft.GuestConfiguration is a third Arc prereq but is NOT needed to reach Connected — only for later
+# guest-config policy / extensions, which this stack doesn't use. The azurerm provider's default `core`
+# registration set does NOT include it, so add it as a third registration here if you ever attach
+# machine-config policy on a fresh subscription.)
+# ============================================================================================================
+resource "azurerm_resource_provider_registration" "hybrid_compute" {
+  name = "Microsoft.HybridCompute"
+}
+
+resource "azurerm_resource_provider_registration" "hybrid_connectivity" {
+  name = "Microsoft.HybridConnectivity"
+}
+
+# ============================================================================================================
 # Azure Arc onboarding identity. The EC2 box runs `azcmagent connect` once at first boot to project itself into
 # Azure as an Arc connected machine — which gives it a real Entra system-assigned managed identity that mints
 # Key Vault tokens on-box (the structural twin of Azure IMDS). The credential used for that ONE onboarding call
