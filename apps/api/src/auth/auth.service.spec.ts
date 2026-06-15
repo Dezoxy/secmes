@@ -15,6 +15,7 @@ import { AuthService } from './auth.service.js';
 const ISSUER = 'https://idp.test/argus';
 const AUDIENCE = 'argus-api';
 const TENANT = '11111111-1111-1111-1111-111111111111';
+const USER_ID = '22222222-2222-2222-2222-222222222222';
 const SUB = 'user-sub-1';
 const ARGUS_SUB = 'argusid:argus-k7m2q9x4f3n8p1w5-otter';
 const SESSION_ID = '33333333-3333-3333-3333-333333333333';
@@ -69,10 +70,11 @@ describe('AuthService.verify', () => {
     aud?: string;
     sub?: string;
     sid?: string;
+    uid?: string;
     expiresInSec?: number;
   }): Promise<string> {
     const now = Math.floor(Date.now() / 1000);
-    return new SignJWT({ sid: opts.sid ?? SESSION_ID })
+    return new SignJWT({ sid: opts.sid ?? SESSION_ID, uid: opts.uid ?? USER_ID })
       .setProtectedHeader({ alg: 'EdDSA', kid: 'argus-session-v1' })
       .setIssuedAt(now)
       .setIssuer(opts.iss ?? 'argus')
@@ -194,6 +196,18 @@ describe('AuthService.verify', () => {
     const res = await svc.verify(await mintArgus({}));
     expect(res.email).toBeUndefined();
     expect(res.name).toBeUndefined();
+  });
+
+  it('argus token exposes userId from the uid JWT claim', async () => {
+    vi.mocked(withRouting).mockResolvedValueOnce({ tenantId: TENANT });
+    const res = await svc.verify(await mintArgus({ uid: USER_ID }));
+    expect(res.userId).toBe(USER_ID);
+  });
+
+  it('Zitadel token does NOT expose userId (no uid claim)', async () => {
+    vi.mocked(withRouting).mockResolvedValueOnce({ tenantId: TENANT });
+    const res = await svc.verify(await mint({}));
+    expect(res.userId).toBeUndefined();
   });
 
   it('Zitadel token still accepted via fallback path (dual-accept backward compat)', async () => {
