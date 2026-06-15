@@ -189,14 +189,17 @@ logout revokes the `sid`; reload restores a session via the cookie. `jwt-auth.gu
   Document the no-RLS justification in the migration comment.
 - Bootstrap `DEFAULT_TENANT_ID` (fixed UUID constant + idempotent `tenants` insert). Bind all new users to it.
 - Registration: `POST /auth/register/redeem { code }` (reuse the 0028 token-hash carve-out) → short-lived
-  **redemption ticket** (don't create the user yet) → `/auth/webauthn/register/options` (set `userID = argus_id`,
-  `residentKey:'required'`, `userVerification:'required'`) → `/auth/webauthn/register/verify`: in ONE tx
+  **redemption ticket** (don't create the user yet) → `/auth/webauthn/register/options` (set
+  `userID = isoUint8Array.fromUTF8String(argus_id)` — SimpleWebAuthn requires `userID` as **bytes**, not a string,
+  ≤64 bytes; `residentKey:'required'`, `userVerification:'required'`) → `/auth/webauthn/register/verify`: in ONE tx
   (mirroring `acceptInvite`) mark the code consumed, insert `users` (tenant=DEFAULT, generated argus-id + display
   name, **no email**), `user_tenant_index { sub:"argusid:"+argus_id }`, `webauthn_credentials`, then mint the
   first session.
 - Login: `/auth/webauthn/authenticate/options` (empty `allowCredentials` → discoverable; user picks passkey, no
-  typed id) → `/verify` (look up by `credential_id` under `withTenant(DEFAULT_TENANT_ID)`, check+bump counter →
-  reject non-increasing counters = clone detection) → mint session.
+  typed id; decode the returned `userHandle` with `isoUint8Array.toUTF8String` to recover the argus-id) → `/verify`
+  (look up by `credential_id` under `withTenant(DEFAULT_TENANT_ID)`, check+bump counter → clone detection: reject
+  ONLY when the stored counter > 0 and the new counter ≤ it. Counters that stay at `0` are NORMAL for synced /
+  platform passkeys (Touch ID, etc.) and must NOT be rejected, or every login after the first breaks) → mint session.
 - **WebAuthn PRF** for local keystore unlock (decision #6): request the PRF extension at register/auth; derive the
   keystore-unlock key from the PRF output so there's **no separate passphrase**; fallback (generated local key +
   recovery artifact) for authenticators without PRF. Touches `apps/web/src/lib/keystore.ts` unlock path.
