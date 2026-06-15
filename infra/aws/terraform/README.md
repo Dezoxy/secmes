@@ -27,15 +27,17 @@ repo-root-relative — matching the `terraform -chdir=infra/aws/terraform` form 
 > skips existing names without `--rotate`, and the six **set-once** secrets are skipped by `put_once` *even
 > with* `--rotate` — so they'd stay dummy. A fresh vault sidesteps all of it.)
 
-1. **Remote state (once):** `infra/aws/scripts/bootstrap-tfstate.sh` → creates the encrypted/locked/versioned
-   S3 backend and writes `infra/aws/terraform/backend.hcl`. Uncomment `backend "s3" {}` in `versions.tf`, then
+Every step has a `make -C infra/aws <target>` (run `make -C infra/aws help` to list them).
+
+1. **Remote state (once):** `make -C infra/aws bootstrap` → creates the encrypted/locked/versioned S3 backend
+   and writes `infra/aws/terraform/backend.hcl`. Then uncomment `backend "s3" {}` in `versions.tf` and
    `terraform -chdir=infra/aws/terraform init -backend-config=backend.hcl -migrate-state`.
 2. **Apply (phase 1):** `cp infra/aws/terraform/real.tfvars.example infra/aws/terraform/real.tfvars` and fill
-   it (`seed_dummy_secrets = false` — TF seeds no app/runtime secrets), then
-   `terraform -chdir=infra/aws/terraform apply -var-file=real.tfvars`. The box boots + onboards into Arc.
-3. **Wait:** `az connectedmachine show -n argus-exp-ec2 -g argus-exp-rg --query status` → `Connected`.
-4. **Apply (phase 2):** `terraform -chdir=infra/aws/terraform apply -var-file=real.tfvars -var arc_machine_connected=true`
-   (grants the Arc identity Key Vault read).
+   it (`seed_dummy_secrets = false` — TF seeds no app/runtime secrets), then `make -C infra/aws apply-1`
+   (`terraform apply` — you confirm `yes`). The box boots + onboards into Arc.
+3. **Wait:** `make -C infra/aws wait-arc` — polls `az connectedmachine … status` until `Connected` (pass
+   `PREFIX=…` if you changed `var.prefix`).
+4. **Apply (phase 2):** `make -C infra/aws apply-2` (grants the Arc identity Key Vault read).
 5. **Populate the vault** with REAL secrets: `infra/aws/scripts/populate-keyvault.sh`. It generates the
    passwords + masterkey and derives the DSNs, then **prompts you (hidden input) for the four external creds**
    it can't generate — never written to a file or shell history (invariant #5):
