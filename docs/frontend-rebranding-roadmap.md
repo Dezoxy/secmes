@@ -1,6 +1,6 @@
 # Frontend Rebranding Roadmap
 
-Status: draft  
+Status: active — partially realized (the `apps/web/src/v2` "Minimal Messenger OS" sketch is live behind the `/v2` sketch routes; the full rebrand has not yet replaced the v1 UI)  
 Scope: `apps/web` React/Vite PWA  
 Goal: make Argus feel like a distinct, modern, privacy-first product instead of a generic dark-purple messenger.
 
