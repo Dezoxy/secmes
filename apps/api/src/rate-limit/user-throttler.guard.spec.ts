@@ -4,7 +4,10 @@ import type { ThrottlerStorage } from '@nestjs/throttler';
 import { describe, expect, it } from 'vitest';
 
 import type { MaybeUnboundAuth } from '../auth/auth.service.js';
+import { PUBLIC_RATE_LIMIT_KEY } from './public-rate-limit.decorator.js';
 import { UserThrottlerGuard } from './user-throttler.guard.js';
+
+const IS_PUBLIC_KEY = 'isPublic';
 
 const AUTH: MaybeUnboundAuth = { sub: 'u1', tenantId: '11111111-1111-1111-1111-111111111111' };
 const UNBOUND_AUTH: MaybeUnboundAuth = { sub: 'u2', tenantId: null };
@@ -20,8 +23,14 @@ class TestGuard extends UserThrottlerGuard {
   }
 }
 
-function makeGuard(isPublic: boolean): TestGuard {
-  const reflector = { getAllAndOverride: () => isPublic } as unknown as Reflector;
+function makeGuard(isPublic: boolean, hasPublicRateLimit = false): TestGuard {
+  const reflector = {
+    getAllAndOverride: (key: string) => {
+      if (key === IS_PUBLIC_KEY) return isPublic;
+      if (key === PUBLIC_RATE_LIMIT_KEY) return hasPublicRateLimit;
+      return undefined;
+    },
+  } as unknown as Reflector;
   const storage = {} as unknown as ThrottlerStorage;
   return new TestGuard({ throttlers: [] }, storage, reflector);
 }
@@ -69,5 +78,9 @@ describe('UserThrottlerGuard — skip predicate', () => {
 
   it('does NOT skip a normal authenticated HTTP route', async () => {
     await expect(makeGuard(false).skip(httpCtx())).resolves.toBe(false);
+  });
+
+  it('does NOT skip a @Public route that also carries @PublicRateLimit() (IP-keyed fallback)', async () => {
+    await expect(makeGuard(true, true).skip(httpCtx())).resolves.toBe(false);
   });
 });
