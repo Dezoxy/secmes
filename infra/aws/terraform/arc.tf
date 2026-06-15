@@ -1,6 +1,45 @@
 data "azuread_client_config" "current" {}
 
 # ============================================================================================================
+# Azure Arc subscription prerequisites. A first-ever Arc onboarding on a fresh subscription 403s otherwise:
+# `azcmagent connect` attempts to self-register Microsoft.HybridCompute, but the narrowly-scoped onboarding SP
+# (Azure Connected Machine Onboarding role) isn't allowed to register a resource provider — that's a
+# subscription-admin action. Registering them here, where the apply principal holds the rights, closes the gap.
+# The EC2 instance depends_on these (ec2.tf) so the box can't boot-and-onboard before they're Registered.
+# (Microsoft.GuestConfiguration is a third Arc prereq but is NOT needed to reach Connected — only for later
+# guest-config policy / extensions, which this stack doesn't use. The azurerm provider's default `core`
+# registration set does NOT include it, so add it as a third registration here if you ever attach
+# machine-config policy on a fresh subscription.)
+#
+# ALREADY-REGISTERED subscriptions: azurerm ERRORS on create when a namespace is already `Registered` (it must
+# be imported into state, not re-created). A FRESH subscription needs nothing — create registers them. But if
+# you re-apply to a sub where these were registered out-of-band (a manual `az provider register`, or a prior
+# deploy), import the two resources FIRST or the apply fails before the ordering fix can help:
+#   terraform import azurerm_resource_provider_registration.hybrid_compute      /subscriptions/<sub-id>/providers/Microsoft.HybridCompute
+#   terraform import azurerm_resource_provider_registration.hybrid_connectivity /subscriptions/<sub-id>/providers/Microsoft.HybridConnectivity
+# ============================================================================================================
+# prevent_destroy: RP registration is SUBSCRIPTION-GLOBAL, not per-deploy state. azurerm's destroy path calls
+# Unregister — which (a) would deregister the provider for the WHOLE subscription (breaking any other Arc use),
+# and (b) Azure rejects anyway while the cloud-init-created (out-of-band, not TF-managed) Arc machine still
+# exists, so `terraform destroy` would fail after the EC2 is gone. To tear the experiment down, relinquish these
+# WITHOUT unregistering: `terraform state rm azurerm_resource_provider_registration.hybrid_compute` (and
+# hybrid_connectivity), then `terraform destroy`. (A cleaner long-term option is to register these in a one-time
+# out-of-band bootstrap step like bootstrap-tfstate.sh, instead of as per-deploy resources — tracked follow-up.)
+resource "azurerm_resource_provider_registration" "hybrid_compute" {
+  name = "Microsoft.HybridCompute"
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "azurerm_resource_provider_registration" "hybrid_connectivity" {
+  name = "Microsoft.HybridConnectivity"
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# ============================================================================================================
 # Azure Arc onboarding identity. The EC2 box runs `azcmagent connect` once at first boot to project itself into
 # Azure as an Arc connected machine — which gives it a real Entra system-assigned managed identity that mints
 # Key Vault tokens on-box (the structural twin of Azure IMDS). The credential used for that ONE onboarding call

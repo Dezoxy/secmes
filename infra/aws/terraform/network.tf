@@ -57,7 +57,7 @@ resource "aws_route_table_association" "public" {
 # optional break-glass SSH rule opens 22 ONLY to var.admin_cidr if you set it — default null = nothing inbound.
 resource "aws_security_group" "instance" {
   name        = "${var.prefix}-sg"
-  description = "argus experiment instance — no inbound (SSM + Cloudflare Tunnel are outbound); egress open."
+  description = "argus experiment instance - no inbound (SSM + Cloudflare Tunnel are outbound); egress open."
   vpc_id      = aws_vpc.this.id
   tags        = { Name = "${var.prefix}-sg" }
 }
