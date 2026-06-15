@@ -45,7 +45,9 @@ export class GdprService {
           .from(schema.users)
           .where(
             and(
-              eq(schema.users.externalIdentityId, auth.sub),
+              auth.userId
+                ? eq(schema.users.id, auth.userId)
+                : eq(schema.users.externalIdentityId, auth.sub),
               eq(schema.users.tenantId, auth.tenantId),
             ),
           )
@@ -459,7 +461,12 @@ async function resolveUserId(
     .select({ id: schema.users.id, externalIdentityId: schema.users.externalIdentityId })
     .from(schema.users)
     .where(
-      and(eq(schema.users.externalIdentityId, auth.sub), eq(schema.users.tenantId, auth.tenantId)),
+      and(
+        auth.userId
+          ? eq(schema.users.id, auth.userId)
+          : eq(schema.users.externalIdentityId, auth.sub),
+        eq(schema.users.tenantId, auth.tenantId),
+      ),
     )
     .limit(1);
   return row;

@@ -161,7 +161,7 @@ export class MessagingService {
   /** Is the verified caller a member of `conversationId`? Used by the realtime gateway's subscribe authz. */
   async isMember(auth: VerifiedAuth, conversationId: string): Promise<boolean> {
     return withTenant(auth.tenantId, async (tx) => {
-      const user = await requireUser(tx, auth.sub);
+      const user = await requireUser(tx, auth);
       const [member] = await tx
         .select({ id: schema.conversationMembers.id })
         .from(schema.conversationMembers)
@@ -186,7 +186,7 @@ export class MessagingService {
     memberUserIds: string[],
   ): Promise<CreatedConversation> {
     return withTenant(auth.tenantId, async (tx) => {
-      const creator = await requireUser(tx, auth.sub);
+      const creator = await requireUser(tx, auth);
 
       const [conv] = await tx
         .insert(schema.conversations)
@@ -226,7 +226,7 @@ export class MessagingService {
     body: DeliverWelcome,
   ): Promise<{ welcomeId: string }> {
     const { welcomeId, recipientSub } = await withTenant(auth.tenantId, async (tx) => {
-      const sender = await requireUser(tx, auth.sub);
+      const sender = await requireUser(tx, auth);
       await requireMembership(tx, conversationId, sender);
 
       // Add the recipient as a member (idempotent — re-delivering to an existing member is a no-op add).
@@ -302,7 +302,7 @@ export class MessagingService {
     limit = 50,
   ): Promise<PendingWelcome[]> {
     return withTenant(auth.tenantId, async (tx) => {
-      const me = await requireUser(tx, auth.sub);
+      const me = await requireUser(tx, auth);
       // Oldest-first + bounded `limit`: the response can't grow without limit if a member spams an offline
       // device. The client fetches each welcome's material (with a proof), joins, consumes, then re-fetches.
       const rows = await tx
@@ -376,7 +376,7 @@ export class MessagingService {
     proof: string,
   ): Promise<WelcomeMaterial> {
     return withTenant(auth.tenantId, async (tx) => {
-      const me = await requireUser(tx, auth.sub);
+      const me = await requireUser(tx, auth);
       await this.requireDeviceProof(tx, me, deviceId, welcomeId, proof, verifyWelcomeFetch);
 
       const [row] = await tx
@@ -415,7 +415,7 @@ export class MessagingService {
     proof: string,
   ): Promise<void> {
     await withTenant(auth.tenantId, async (tx) => {
-      const me = await requireUser(tx, auth.sub);
+      const me = await requireUser(tx, auth);
       await this.requireDeviceProof(tx, me, deviceId, welcomeId, proof, verifyWelcomeConsume);
 
       const deleted = await tx
@@ -447,7 +447,7 @@ export class MessagingService {
     // gateway could push a 'message' frame before the row is durable (phantom delivery if the commit
     // fails) and a recipient that reacts by fetching could race the uncommitted write.
     const { result, event } = await withTenant(auth.tenantId, async (tx) => {
-      const sender = await requireUser(tx, auth.sub);
+      const sender = await requireUser(tx, auth);
       await requireMembership(tx, conversationId, sender);
 
       // Idempotent-retry fast path: if this (conversation, sender, clientMessageId) was already
@@ -594,7 +594,7 @@ export class MessagingService {
     query: ListMessagesQuery,
   ): Promise<MessagePage> {
     return withTenant(auth.tenantId, async (tx) => {
-      const user = await requireUser(tx, auth.sub);
+      const user = await requireUser(tx, auth);
       await requireMembership(tx, conversationId, user);
 
       // Exclusive keyset cursor: rows strictly after the cursor row in (created_at, id) order. The cursor
@@ -655,7 +655,7 @@ export class MessagingService {
     // the caller still being a member of the cursor message's conversation. Bound params, no injection.
     const cursorPos = query.after ? decodeSyncCursor(query.after) : null;
     return withTenant(auth.tenantId, async (tx) => {
-      const user = await requireUser(tx, auth.sub);
+      const user = await requireUser(tx, auth);
 
       const cursor = cursorPos
         ? sql`and (m.created_at, m.id) > (${cursorPos.createdAt}::timestamptz, ${cursorPos.id}::uuid)`
@@ -714,7 +714,7 @@ export class MessagingService {
     body: RecordReceipt,
   ): Promise<void> {
     const userId = await withTenant(auth.tenantId, async (tx) => {
-      const user = await requireUser(tx, auth.sub);
+      const user = await requireUser(tx, auth);
       await requireMembership(tx, conversationId, user);
 
       // Fetch the watermark message's created_at as FULL microsecond text (the driver's JS Date is only
@@ -785,7 +785,7 @@ export class MessagingService {
     body: CommitBody,
   ): Promise<CommitResult> {
     const { result, event, removedSubs } = await withTenant(auth.tenantId, async (tx) => {
-      const sender = await requireUser(tx, auth.sub);
+      const sender = await requireUser(tx, auth);
       await requireMembership(tx, conversationId, sender);
 
       // Contiguity guard: reject commits that skip epochs. A gap commit would poison MAX(epoch) for
@@ -1041,7 +1041,7 @@ export class MessagingService {
     query: ListCommitsQuery,
   ): Promise<FetchedCommit[]> {
     return withTenant(auth.tenantId, async (tx) => {
-      const user = await requireUser(tx, auth.sub);
+      const user = await requireUser(tx, auth);
       await requireMembership(tx, conversationId, user);
 
       const rows = await tx
@@ -1078,7 +1078,7 @@ export class MessagingService {
   /** Per-member delivery/read watermarks in a conversation (metadata). AUTHZ: member-only. */
   async getReceipts(auth: VerifiedAuth, conversationId: string): Promise<ConversationReceipt[]> {
     return withTenant(auth.tenantId, async (tx) => {
-      const user = await requireUser(tx, auth.sub);
+      const user = await requireUser(tx, auth);
       await requireMembership(tx, conversationId, user);
 
       // Drive from MEMBERS (left join receipts) so EVERY member is returned — a member who hasn't acked

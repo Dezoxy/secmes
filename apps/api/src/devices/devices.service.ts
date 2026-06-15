@@ -39,7 +39,7 @@ export class DevicesService {
     deviceId: string,
   ): Promise<EnrollmentRow> {
     const row = await withTenant(auth.tenantId, async (tx) => {
-      const userId = await requireUser(tx, auth.sub);
+      const userId = await requireUser(tx, auth);
 
       // Verify the requesting device belongs to this user (ownership authz — RLS + user_id check).
       const [device] = await tx
@@ -94,7 +94,7 @@ export class DevicesService {
    */
   async listEnrollments(auth: VerifiedAuth, status?: string): Promise<EnrollmentRow[]> {
     return withTenant(auth.tenantId, async (tx) => {
-      const userId = await requireUser(tx, auth.sub);
+      const userId = await requireUser(tx, auth);
       const effectiveStatus = status ?? 'pending';
       // Join the approver's devices row so D2 can verify D1's claimed key package SPK (P1-3).
       const approverDevice = aliasedTable(schema.devices, 'approver_device');
@@ -145,7 +145,7 @@ export class DevicesService {
     proofBase64url: string,
   ): Promise<EnrollmentRow> {
     const row = await withTenant(auth.tenantId, async (tx) => {
-      const userId = await requireUser(tx, auth.sub);
+      const userId = await requireUser(tx, auth);
 
       // Load the pending enrollment (user-scoped by RLS + where clause).
       const [enrollment] = await tx
@@ -243,7 +243,7 @@ export class DevicesService {
    */
   async rejectEnrollment(auth: VerifiedAuth, enrollmentId: string): Promise<void> {
     await withTenant(auth.tenantId, async (tx) => {
-      const userId = await requireUser(tx, auth.sub);
+      const userId = await requireUser(tx, auth);
 
       const [updated] = await tx
         .update(schema.deviceEnrollments)
@@ -277,7 +277,7 @@ export class DevicesService {
     proofBase64url: string,
   ): Promise<void> {
     await withTenant(auth.tenantId, async (tx) => {
-      const userId = await requireUser(tx, auth.sub);
+      const userId = await requireUser(tx, auth);
       const [device] = await tx
         .select({ id: schema.devices.id, signaturePublicKey: schema.devices.signaturePublicKey })
         .from(schema.devices)
@@ -335,7 +335,7 @@ export class DevicesService {
     proofBase64url: string,
   ): Promise<void> {
     await withTenant(auth.tenantId, async (tx) => {
-      const userId = await requireUser(tx, auth.sub);
+      const userId = await requireUser(tx, auth);
 
       // Look up the device FIRST — the proof must be verified against the DB-stored key, never the
       // request body. Verifying a self-attested key (from the request) before confirming the DB row
@@ -396,7 +396,7 @@ export class DevicesService {
    */
   async listMyConversations(auth: VerifiedAuth): Promise<string[]> {
     return withTenant(auth.tenantId, async (tx) => {
-      const userId = await requireUser(tx, auth.sub);
+      const userId = await requireUser(tx, auth);
       const rows = await tx
         .select({ conversationId: schema.conversationMembers.conversationId })
         .from(schema.conversationMembers)

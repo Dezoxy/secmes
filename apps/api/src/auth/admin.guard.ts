@@ -25,7 +25,9 @@ export class AdminGuard implements CanActivate {
         .where(
           and(
             eq(schema.users.tenantId, auth.tenantId),
-            eq(schema.users.externalIdentityId, auth.sub),
+            auth.userId
+              ? eq(schema.users.id, auth.userId)
+              : eq(schema.users.externalIdentityId, auth.sub),
             eq(schema.users.status, 'active'),
           ),
         )

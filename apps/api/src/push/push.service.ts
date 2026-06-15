@@ -59,7 +59,11 @@ export class PushService {
       const [user] = await tx
         .select({ id: schema.users.id })
         .from(schema.users)
-        .where(eq(schema.users.externalIdentityId, auth.sub))
+        .where(
+          auth.userId
+            ? eq(schema.users.id, auth.userId)
+            : eq(schema.users.externalIdentityId, auth.sub),
+        )
         .limit(1);
       if (!user) return; // user not provisioned; silent no-op (PUT is idempotent)
 
@@ -105,7 +109,11 @@ export class PushService {
       const [user] = await tx
         .select({ id: schema.users.id })
         .from(schema.users)
-        .where(eq(schema.users.externalIdentityId, auth.sub))
+        .where(
+          auth.userId
+            ? eq(schema.users.id, auth.userId)
+            : eq(schema.users.externalIdentityId, auth.sub),
+        )
         .limit(1);
       if (!user) return;
 

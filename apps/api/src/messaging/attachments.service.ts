@@ -36,7 +36,7 @@ export class AttachmentsService {
    */
   async createUploadGrant(auth: VerifiedAuth, body: CreateUploadGrant): Promise<UploadGrant> {
     return withTenant(auth.tenantId, async (tx) => {
-      const user = await requireUser(tx, auth.sub);
+      const user = await requireUser(tx, auth);
       await requireMembership(tx, body.conversationId, user);
       // Server-minted, tenant-prefixed (the table CHECK requires `object_key LIKE tenant_id || '/%'`).
       const objectKey = `${auth.tenantId}/${randomUUID()}`;
@@ -65,7 +65,7 @@ export class AttachmentsService {
    */
   async createDownloadGrant(auth: VerifiedAuth, objectKey: string): Promise<DownloadGrant> {
     await withTenant(auth.tenantId, async (tx) => {
-      const user = await requireUser(tx, auth.sub);
+      const user = await requireUser(tx, auth);
       const [att] = await tx
         .select({ conversationId: schema.attachments.conversationId })
         .from(schema.attachments)

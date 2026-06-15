@@ -172,7 +172,9 @@ export class UserService {
         // RLS already scopes to the tenant; the explicit tenant_id predicate is defense-in-depth.
         .where(
           and(
-            eq(schema.users.externalIdentityId, auth.sub),
+            auth.userId
+              ? eq(schema.users.id, auth.userId)
+              : eq(schema.users.externalIdentityId, auth.sub),
             eq(schema.users.tenantId, auth.tenantId),
             eq(schema.users.status, 'active'),
           ),
