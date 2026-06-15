@@ -38,7 +38,8 @@ CREATE POLICY auth_sessions_refresh_lookup ON auth_sessions
   AS PERMISSIVE FOR SELECT
   USING (refresh_token_hash = current_setting('app.session_refresh_hash', true));
 
-GRANT SELECT, INSERT, UPDATE ON auth_sessions TO argus_app;
+GRANT SELECT, INSERT ON auth_sessions TO argus_app;
+GRANT UPDATE (revoked_at, last_used_at) ON auth_sessions TO argus_app;
 
 -- Unique index for O(1) refresh lookup (also enforces no duplicate token hashes).
 CREATE UNIQUE INDEX auth_sessions_refresh_hash_idx ON auth_sessions (refresh_token_hash);

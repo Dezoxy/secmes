@@ -76,4 +76,8 @@ export const SENSITIVE_LIMITS = {
   enrollmentConversationList: 30,
   /** Self device withdrawal — legacy migration or explicit device removal. Very rare; tight cap. */
   deviceWithdraw: 5,
+  /** Refresh token rotation — @Public() but IP-keyed via @PublicRateLimit(). Tight cap since each
+   *  call hits the DB (SHA-256 lookup + mark-and-insert). Generous enough for a sticky session
+   *  (10-min access token → ~3 refreshes/hour max under normal use). */
+  refreshSession: 10,
 } as const;

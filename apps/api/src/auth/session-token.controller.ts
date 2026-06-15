@@ -22,10 +22,14 @@ import {
 import type { Request, Response } from 'express';
 
 import type { VerifiedAuth } from './auth.service.js';
+import { Throttle } from '@nestjs/throttler';
+
 import { AllowUnbound } from './allow-unbound.decorator.js';
 import { CurrentAuth } from './current-auth.decorator.js';
 import { Public } from './public.decorator.js';
 import { COOKIE_NAME, SessionTokenService } from './session-token.service.js';
+import { PublicRateLimit } from '../rate-limit/public-rate-limit.decorator.js';
+import { SENSITIVE_LIMITS, perMinute } from '../rate-limit/rate-limit.constants.js';
 
 const REFRESH_COOKIE_MAX_AGE = 30 * 24 * 60 * 60; // 30 days in seconds
 // API_PATH_PREFIX is the external prefix Caddy (prod) or Vite (dev) maps to the API root.
@@ -59,6 +63,8 @@ export class SessionTokenController {
    */
   @Post('refresh')
   @Public()
+  @PublicRateLimit()
+  @Throttle(perMinute(SENSITIVE_LIMITS.refreshSession))
   @AllowUnbound()
   @ApiOperation({
     summary: 'Rotate refresh token — exchange HttpOnly cookie for a new access token',
