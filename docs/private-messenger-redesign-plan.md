@@ -294,7 +294,10 @@ send an E2EE message → breakglass admin login works (metadata only).
 ### Phase 6 — Decommission enterprise (LAST)
 **Goal:** remove the now-dead enterprise surface; keep recoverable via git history.
 **Changes:** delete SSO module + `tenant_sso_configs`; remove Zitadel from `compose.yaml` +
-`infra/local/zitadel/provision.sh`; delete `POST /tenants` + `CreateWorkspace.tsx`; delete billing module +
+`infra/local/zitadel/provision.sh`; **remove the Zitadel JWKS fallback branch from `auth.service.ts verify()` and the
+`OIDC_JWKS` provider from `auth.module.ts`** (the Phase-1 dual-verify path) — leaving them would have the app try to
+reach a Zitadel that no longer exists and fail this phase's "boots with no Zitadel" check; also drop the now-unused
+IdP email/name JIT claims. Delete `POST /tenants` + `CreateWorkspace.tsx`; delete billing module +
 Stripe webhook; remove plan/SSO gating + the AdminPanel SSO tab. Mark `per-tenant-sso.md` retired. Purge dead
 routing rows: `DELETE FROM user_tenant_index WHERE sub NOT LIKE 'argusid:%'` (legacy Zitadel subs — inert once
 Phase 1 lands). **Leave inert columns** (`stripe_*`, `plan_*`, plus legacy `email` / `external_identity_id` on
