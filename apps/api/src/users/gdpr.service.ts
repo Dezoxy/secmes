@@ -409,6 +409,7 @@ export class GdprService {
       // 1h. Delete the user row — cascades:
       //     • devices → key_packages (cascade), push_subscriptions (cascade)
       //     • key_backups (cascade)
+      //     • auth_sessions (cascade) — migration 0032
       //     • conversation_members (cascade) → conversation_receipts (cascade)
       //     • tenant_invites.created_by (cascade)
       await tx

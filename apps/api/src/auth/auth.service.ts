@@ -55,7 +55,7 @@ export class AuthService {
    * are never merged. See docs/threat-models/session-tokens.md §dual-accept-verify.
    */
   async verify(token: string): Promise<MaybeUnboundAuth> {
-    let payload: Record<string, unknown>;
+    let payload: Record<string, unknown> = {};
     let isArgusMinted = false;
 
     // Argus path: our own EdDSA JWT. Strict iss/aud/alg — no overlap with Zitadel.

@@ -236,7 +236,7 @@ describe('AuthService.verify', () => {
   });
 
   it('argus token signed by argus key but with Zitadel issuer is rejected by both paths', async () => {
-    // argus path: wrong iss → rejects. Zitadel path: argus key can't verify Zitadel-issued token.
+    // argus path: wrong iss → rejects. Zitadel path: JWKS can't verify a token signed by the argus key.
     await expect(
       svc.verify(await mintArgus({ iss: ISSUER, aud: AUDIENCE })),
     ).rejects.toBeInstanceOf(UnauthorizedException);
