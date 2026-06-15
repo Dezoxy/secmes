@@ -1,6 +1,6 @@
 # Threat model: encrypted attachments
 
-> Status: **IMPLEMENTED** (shipped; reviewer-passed — see roadmap). Blocks Phase 4 (checkpoints 33–38). Object storage (Blob/MinIO) lives **outside** Postgres RLS, so the protections RLS gives every other table do not apply here — authz must be enforced explicitly at the API + storage layer.
+> Status: **DRAFT for ratification.** Blocks Phase 4 (checkpoints 33–38). Object storage (Blob/MinIO) lives **outside** Postgres RLS, so the protections RLS gives every other table do not apply here — authz must be enforced explicitly at the API + storage layer.
 
 ## 1. Feature & data flow
 

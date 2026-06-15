@@ -1,6 +1,6 @@
 # Threat model: client device provisioning + KeyPackage pool (live client loop, Slice 2)
 
-> One page. Status: **IMPLEMENTED** (shipped; reviewer-passed — see roadmap). The first client slice of the live message loop: on login, unlock (or
+> One page. Written before code. The first client slice of the live message loop: on login, unlock (or
 > create) the device's sealed keystore and publish a pool of one-time MLS KeyPackages to the key
 > directory (#19) so peers can claim one and add this device to a group.
 

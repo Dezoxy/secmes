@@ -1,6 +1,6 @@
 # Threat model: key backup & recovery
 
-> Status: **IMPLEMENTED** (shipped; reviewer-passed — see roadmap). Blocks Phase 2 (checkpoints 21–23). Fills the empty `kdf_params` in plan §7. The hard tension: **recovery vs. forward secrecy.** Written against the `ts-mls` model (device signature keys + per-epoch group secrets).
+> Status: **DRAFT for ratification.** Blocks Phase 2 (checkpoints 21–23). Fills the empty `kdf_params` in plan §7. The hard tension: **recovery vs. forward secrecy.** Written against the `ts-mls` model (device signature keys + per-epoch group secrets).
 
 ## 1. Feature & data flow
 

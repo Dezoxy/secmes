@@ -1,6 +1,6 @@
 # Threat model: metadata exposure (what the crypto-blind server can infer)
 
-> Status: **IMPLEMENTED** (shipped; reviewer-passed — see roadmap). Consolidates the metadata-disclosure residual that the other notes
+> Status: **DRAFT for ratification.** Consolidates the metadata-disclosure residual that the other notes
 > (`messaging-schema.md`, `realtime-delivery.md`, `delivery-receipts.md`, `pseudonymous-identity.md`,
 > `mls-integration.md`) each reference but none owned. Crypto-blind ≠ metadata-blind: this is the single page
 > that states, end-to-end, what the operator and a DB/infra compromise can learn even though message content

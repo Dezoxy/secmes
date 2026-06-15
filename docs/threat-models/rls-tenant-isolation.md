@@ -1,6 +1,6 @@
 # Threat model: RLS tenant isolation (Postgres)
 
-> Status: **IMPLEMENTED** (shipped; reviewer-passed — see roadmap). Blocks Phase 1 (checkpoints 11–16). Pairs with the `/db-migration` skill, which already emits `ENABLE`+`FORCE ROW LEVEL SECURITY`, a `WITH CHECK` policy on `current_setting('app.tenant_id')`, and a leading `tenant_id` index. This note covers the parts the table DDL **cannot** guarantee on its own.
+> Status: **DRAFT for ratification.** Blocks Phase 1 (checkpoints 11–16). Pairs with the `/db-migration` skill, which already emits `ENABLE`+`FORCE ROW LEVEL SECURITY`, a `WITH CHECK` policy on `current_setting('app.tenant_id')`, and a leading `tenant_id` index. This note covers the parts the table DDL **cannot** guarantee on its own.
 
 ## 1. Feature & data flow
 

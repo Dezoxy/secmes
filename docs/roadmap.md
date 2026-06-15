@@ -62,7 +62,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (ro
 - [x] 17. **MLS integrated** in `packages/crypto` — local encrypt/decrypt smoke test passes 🔒
 - [x] 18. **Device keys** generated client-side, stored in IndexedDB (sealed at rest)
 - [x] 19. **Key directory** — `devices` + `key_packages` tables (RLS); publish/fetch public KeyPackages 🔒
-- [x] 20. **Crypto review #1** — crypto-reviewer pass + threat-model note for the key model; fingerprint/safety-number MITM defense built & wired 🔒
+- [x] 20. **Crypto review #1** — crypto-reviewer pass + threat-model note for the key model 🔒
 - [x] 21. **Passphrase backup** — Argon2id-derived key encrypts private material client-side 🔒
 - [x] 22. **Backup storage** — `key_backups` table (ciphertext only) + backup/restore API 🔒
 - [x] 23. **Recovery proven** — fresh browser → passphrase → restore → recovered identity works for MLS (past message history intentionally not recoverable — forward secrecy)
