@@ -30,8 +30,10 @@ repo-root-relative — matching the `terraform -chdir=infra/aws/terraform` form 
 Every step has a `make -C infra/aws <target>` (run `make -C infra/aws help` to list them).
 
 1. **Remote state (once):** `make -C infra/aws bootstrap` → creates the encrypted/locked/versioned S3 backend
-   and writes `infra/aws/terraform/backend.hcl`. Then uncomment `backend "s3" {}` in `versions.tf` and
-   `terraform -chdir=infra/aws/terraform init -backend-config=backend.hcl -migrate-state`.
+   and writes `infra/aws/terraform/backend.hcl`. The `backend "s3" {}` block is already enabled in `versions.tf`
+   (the default for this deploy), so just initialize against it:
+   `terraform -chdir=infra/aws/terraform init -backend-config=backend.hcl`. (Migrating pre-existing local state?
+   add `-migrate-state`.)
 2. **Apply (phase 1):** `cp infra/aws/terraform/real.tfvars.example infra/aws/terraform/real.tfvars` and fill
    it (`seed_dummy_secrets = false` — TF seeds no app/runtime secrets), then `make -C infra/aws apply-1`
    (`terraform apply` — you confirm `yes`). The box boots + onboards into Arc.
@@ -81,7 +83,7 @@ Every step has a `make -C infra/aws <target>` (run `make -C infra/aws help` to l
 
 ```bash
 cd infra/aws/terraform
-terraform init
+terraform init -backend-config=backend.hcl   # S3 backend is the default — run `make -C infra/aws bootstrap` first
 
 # Phase 1 — create infra; the box boots + onboards itself into Azure Arc.
 terraform apply \
@@ -128,5 +130,9 @@ if 4 GiB is tight: set `-var instance_type=t3.large` and re-apply (a 2-min stop�
 
 ## State
 
-Local `terraform.tfstate` (gitignored) — it holds the Arc onboarding SP id + the OIDC role arn. Migrate to an
-encrypted S3 backend before any shared/CI use (see `versions.tf`).
+Remote **S3 backend** is the default (`backend "s3" {}` in `versions.tf`) — encrypted, locked (DynamoDB), and
+versioned. It holds the Arc onboarding SP id + the KV id + the OIDC role arn (no app/runtime secrets when
+`seed_dummy_secrets = false`), so it must never be local or committed. One-time bootstrap:
+`make -C infra/aws bootstrap` (creates the bucket + lock table + writes `backend.hcl`), then
+`terraform init -backend-config=backend.hcl`. `backend.hcl` is gitignored (machine-specific). Only for a
+throwaway local-state experiment: comment the backend block out and re-`init`.
