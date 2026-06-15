@@ -18,12 +18,25 @@ data "azuread_client_config" "current" {}
 #   terraform import azurerm_resource_provider_registration.hybrid_compute      /subscriptions/<sub-id>/providers/Microsoft.HybridCompute
 #   terraform import azurerm_resource_provider_registration.hybrid_connectivity /subscriptions/<sub-id>/providers/Microsoft.HybridConnectivity
 # ============================================================================================================
+# prevent_destroy: RP registration is SUBSCRIPTION-GLOBAL, not per-deploy state. azurerm's destroy path calls
+# Unregister — which (a) would deregister the provider for the WHOLE subscription (breaking any other Arc use),
+# and (b) Azure rejects anyway while the cloud-init-created (out-of-band, not TF-managed) Arc machine still
+# exists, so `terraform destroy` would fail after the EC2 is gone. To tear the experiment down, relinquish these
+# WITHOUT unregistering: `terraform state rm azurerm_resource_provider_registration.hybrid_compute` (and
+# hybrid_connectivity), then `terraform destroy`. (A cleaner long-term option is to register these in a one-time
+# out-of-band bootstrap step like bootstrap-tfstate.sh, instead of as per-deploy resources — tracked follow-up.)
 resource "azurerm_resource_provider_registration" "hybrid_compute" {
   name = "Microsoft.HybridCompute"
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "azurerm_resource_provider_registration" "hybrid_connectivity" {
   name = "Microsoft.HybridConnectivity"
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # ============================================================================================================
