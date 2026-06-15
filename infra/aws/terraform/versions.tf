@@ -26,12 +26,13 @@ terraform {
     }
   }
 
-  # Local state by default (the experiment). State holds the Arc onboarding SP id, the KV id, and the GitHub
-  # OIDC role arn — DO NOT commit terraform.tfstate. For a REAL deploy use the remote S3 backend (encrypted +
-  # locked + versioned, survives laptop loss): run `scripts/bootstrap-tfstate.sh` (creates the bucket + lock
-  # table + writes backend.hcl from backend.hcl.example), UNCOMMENT the partial block below, then
-  #   terraform init -backend-config=backend.hcl -migrate-state
-  # backend "s3" {}
+  # Remote S3 backend — the DEFAULT for this (real, AWS) deploy: encrypted + locked + versioned state that
+  # survives laptop loss. State holds the Arc onboarding SP id, the KV id, and the GitHub OIDC role arn (no
+  # app/runtime secrets when seed_dummy_secrets=false), so it must never be local or committed. One-time setup:
+  # run `scripts/bootstrap-tfstate.sh` (creates the bucket + lock table + writes backend.hcl from
+  # backend.hcl.example), then `terraform init -backend-config=backend.hcl`. (Only for a throwaway local-state
+  # experiment: comment this partial block back out and re-`init` — but the real deploy always uses S3.)
+  backend "s3" {}
 }
 
 # AWS compute lives in eu-central-1 (Frankfurt) for EU/GDPR residency parity with the live germanywestcentral
