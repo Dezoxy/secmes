@@ -85,6 +85,20 @@ gen_alnum() { # $1 = number of chars
 
 secret_exists() { az keyvault secret show --vault-name "$KV" --name "$1" --only-show-errors >/dev/null 2>&1; }
 
+# Store an Ed25519 PKCS8 PEM key without ever putting it on argv.
+# Generates the key into the secure WORKDIR temp and uploads via --file.
+put_ed25519_key() { # $1 = kv name
+  if [ "$ROTATE" -eq 0 ] && secret_exists "$1"; then
+    log "exists, skipping $1 (use --rotate to overwrite)"
+    return 0
+  fi
+  local f="$WORKDIR/val"
+  openssl genpkey -algorithm Ed25519 -out "$f" 2>/dev/null
+  az keyvault secret set --vault-name "$KV" --name "$1" --file "$f" --encoding utf-8 \
+    --only-show-errors >/dev/null
+  log "set $1 (Ed25519 PKCS8 PEM)"
+}
+
 # Set a secret VALUE without ever putting it on argv: write to the 0700-dir temp file + `--file`. The file is
 # overwritten each call and removed by the EXIT trap (so a value never survives a failure mid-run).
 set_secret() { # $1 = name ; $2 = value
@@ -128,6 +142,7 @@ fi
 # --- Generated runtime secrets (lengths mirror infra/aws/terraform/keyvault.tf's generated_secret_lengths).
 #     Split by rotation safety — see the header note. ---
 # Rotatable (reconciled on the next deploy, or re-read from config each boot):
+put_ed25519_key argus-session-signing-key  # EdDSA JWT signing key (PKCS8 PEM) — rotatable; API re-reads on start
 put argus-redis-password "$(gen_alnum 32)"   # redis requirepass — re-read from its config file each boot
 put argus-backup-db-password "$(gen_alnum 32)"  # argus_backup login — deploy.sh re-applies via ALTER ROLE
 put argus-cleanup-db-password "$(gen_alnum 32)" # argus_cleanup login — deploy.sh re-applies via ALTER ROLE

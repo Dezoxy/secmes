@@ -67,12 +67,17 @@ locals {
     "argus-glitchtip-secret-key"    = 50
     "argus-zitadel-masterkey"       = 32 # Zitadel requires EXACTLY 32 bytes
   }
-  # External credentials — a dummy here is non-functional; cloudflared/GHCR/B2 need the real thing.
+  # External credentials and non-generatable keys — a dummy here is non-functional; replace with real values
+  # before expecting the full stack to reach healthy. See the README and populate-keyvault.sh for how to
+  # generate the Ed25519 key (openssl genpkey -algorithm Ed25519).
   placeholder_secrets = {
     "argus-s3-secret-access-key" = "REPLACE-with-real-B2-secret-access-key"
     "argus-b2-app-key"           = "REPLACE-with-real-B2-backup-app-key"
     "argus-tunnel-token"         = "REPLACE-with-real-cloudflare-tunnel-token"
     "argus-ghcr-token"           = "REPLACE-with-real-ghcr-read-packages-token"
+    # Phase 1 session tokens: generate with `openssl genpkey -algorithm Ed25519` and store the PKCS8 PEM here.
+    # Without a valid key the API cannot start. populate-keyvault.sh generates this automatically.
+    "argus-session-signing-key" = "REPLACE-with-Ed25519-PKCS8-PEM-from-openssl-genpkey"
   }
 }
 
