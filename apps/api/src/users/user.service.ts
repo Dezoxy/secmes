@@ -4,17 +4,37 @@ import type { TenantPlan } from '@argus/contracts';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
+import { generateArgusId, isArgusIdCollision } from './argus-id.js';
 import { generateHandle } from './handle-words.js';
 
 export interface UserRecord {
   id: string;
+  argusId: string;
   email: string;
   displayName: string | null;
   role: string;
   plan?: TenantPlan;
 }
 
-const SELECTION = {
+export interface DirectoryRecord {
+  id: string;
+  email: string;
+  displayName: string | null;
+  role: string;
+}
+
+// Full identity projection — argusId included; used only for /me (getByAuth + provisionFromToken).
+const ME_SELECTION = {
+  id: schema.users.id,
+  argusId: schema.users.argusId,
+  email: schema.users.email,
+  displayName: schema.users.displayName,
+  role: schema.users.role,
+} as const;
+
+// Directory projection — argusId intentionally excluded; used by list() → GET /users.
+// argusId is a user's persistent pseudonymous identity and must not be exposed to all tenant members.
+const DIRECTORY_SELECTION = {
   id: schema.users.id,
   email: schema.users.email,
   displayName: schema.users.displayName,
@@ -88,6 +108,7 @@ export class UserService {
     const email = auth.email;
     for (let attempt = 0; attempt < MAX_HANDLE_ATTEMPTS; attempt++) {
       const displayName = generate();
+      const argusId = generateArgusId();
       try {
         const [user] = await withTenant(auth.tenantId, async (tx) =>
           tx
@@ -97,6 +118,7 @@ export class UserService {
               externalIdentityId: auth.sub,
               email,
               displayName,
+              argusId,
             })
             .onConflictDoUpdate({
               target: [schema.users.tenantId, schema.users.externalIdentityId],
@@ -104,12 +126,13 @@ export class UserService {
               // value, the candidate is discarded so it never reaches the display_name index). A NULL
               // display_name (every legacy name was reset to NULL by migration 0016) is HEALED to the candidate
               // handle — which IS then checked against the unique index, so a collision still regenerates.
+              // argusId is intentionally excluded from SET — immutability is DB-enforced via trigger too.
               set: {
                 email,
                 displayName: sql`coalesce(${schema.users.displayName}, excluded.display_name)`,
               },
             })
-            .returning(SELECTION),
+            .returning(ME_SELECTION),
         );
         // An upsert with RETURNING always yields exactly one row; guard satisfies the type + is defensive.
         if (!user) throw new Error('provisioning returned no row');
@@ -118,6 +141,7 @@ export class UserService {
         // A NEW user's generated handle collided with another member's handle — regenerate and retry. Any
         // other error (incl. a non-handle unique violation) propagates immediately.
         if (isHandleCollision(err)) continue;
+        if (isArgusIdCollision(err)) continue;
         throw err;
       }
     }
@@ -128,10 +152,10 @@ export class UserService {
   }
 
   /** List ACTIVE users in a tenant (the directory), capped by `limit`. RLS scopes it to the tenant. */
-  async list(tenantId: string, limit: number): Promise<UserRecord[]> {
+  async list(tenantId: string, limit: number): Promise<DirectoryRecord[]> {
     return withTenant(tenantId, async (tx) =>
       tx
-        .select(SELECTION)
+        .select(DIRECTORY_SELECTION)
         .from(schema.users)
         .where(eq(schema.users.status, 'active')) // don't surface deactivated/suspended members
         .orderBy(schema.users.email)
@@ -143,7 +167,7 @@ export class UserService {
   async getByAuth(auth: VerifiedAuth): Promise<UserRecord | undefined> {
     const [user] = await withTenant(auth.tenantId, async (tx) =>
       tx
-        .select(SELECTION)
+        .select(ME_SELECTION)
         .from(schema.users)
         // RLS already scopes to the tenant; the explicit tenant_id predicate is defense-in-depth.
         .where(

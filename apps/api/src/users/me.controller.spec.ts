@@ -1,4 +1,3 @@
-import { NotFoundException } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
@@ -33,20 +32,31 @@ describe.skipIf(!DB_URL)('MeController.me', () => {
     }
   });
 
-  it('returns the user for a verified (tenant, sub)', async () => {
+  it('returns the bound user with all fields for a verified (tenant, sub)', async () => {
     const auth: VerifiedAuth = { sub: 'oidc-sub-a', tenantId: tenantA };
     const res = await controller.me(auth);
     expect(res).toEqual({
+      bound: true,
       userId: expect.any(String),
       tenantId: tenantA,
+      argusId: expect.stringMatching(/^argus-[abcdefghjkmnpqrstuvwxyz23456789]{16}-[a-z]+$/),
       email: 'a@a.test',
       displayName: 'Alice',
+      role: 'member',
+      plan: {
+        tier: 'free',
+        memberLimit: 10,
+        ssoEnabled: false,
+        memberCount: expect.any(Number),
+        subscriptionStatus: null,
+      },
     });
   });
 
-  it("cannot resolve another tenant's user even with a real sub (RLS scopes the lookup)", async () => {
-    // tenant A context but B's sub → invisible under RLS → 404, never B's row.
+  it("returns { bound: false } for another tenant's sub (RLS scopes the lookup)", async () => {
+    // tenant A context but B's sub → invisible under RLS → unbound, never B's row.
     const auth: VerifiedAuth = { sub: 'oidc-sub-b', tenantId: tenantA };
-    await expect(controller.me(auth)).rejects.toBeInstanceOf(NotFoundException);
+    const res = await controller.me(auth);
+    expect(res).toEqual({ bound: false });
   });
 });
