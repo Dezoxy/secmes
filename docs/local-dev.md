@@ -5,7 +5,7 @@ Run the whole stack on your machine with Docker Compose — the **same** Compose
 ## Prerequisites
 
 - Docker Desktop (or Docker Engine) running
-- Node + pnpm (via `corepack enable`) — only if you want to run the app on the host instead of in a container
+- Node + pnpm (via `corepack enable`) — required for the documented flow below (`make migrate` / `make seed` / `make api-dev` run on the host and call `pnpm`)
 
 ## Start / stop
 
