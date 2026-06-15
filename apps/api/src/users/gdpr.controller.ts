@@ -35,6 +35,7 @@ import { GdprService } from './gdpr.service.js';
 class ExportProfileDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ format: 'uuid' }) tenantId!: string;
+  @ApiProperty() argusId!: string;
   @ApiProperty({ format: 'email' }) email!: string;
   @ApiProperty({ type: String, nullable: true }) displayName!: string | null;
   @ApiProperty() role!: string;
@@ -120,13 +121,14 @@ class MeExportDto {
     properties: {
       id: { type: 'string', format: 'uuid' },
       tenantId: { type: 'string', format: 'uuid' },
+      argusId: { type: 'string' },
       email: { type: 'string', format: 'email' },
       displayName: { type: 'string', nullable: true },
       role: { type: 'string' },
       status: { type: 'string' },
       createdAt: { type: 'string', format: 'date-time' },
     },
-    required: ['id', 'tenantId', 'email', 'displayName', 'role', 'status', 'createdAt'],
+    required: ['id', 'tenantId', 'argusId', 'email', 'displayName', 'role', 'status', 'createdAt'],
     additionalProperties: false,
   })
   profile!: ExportProfileDto | null;

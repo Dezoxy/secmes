@@ -35,6 +35,7 @@ export class GdprService {
           .select({
             id: schema.users.id,
             tenantId: schema.users.tenantId,
+            argusId: schema.users.argusId,
             email: schema.users.email,
             displayName: schema.users.displayName,
             role: schema.users.role,
@@ -232,6 +233,7 @@ export class GdprService {
       profile: {
         id: profile.id,
         tenantId: profile.tenantId,
+        argusId: profile.argusId,
         email: profile.email,
         displayName: profile.displayName ?? null,
         role: profile.role,
