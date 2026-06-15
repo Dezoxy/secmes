@@ -53,6 +53,10 @@ repo-root-relative — matching the `terraform -chdir=infra/aws/terraform` form 
    42Crunch token (hidden), then sets the cd-aws.yml vars + creates the gated Environment (leaves
    `ENABLE_DEPLOY_AWS=false`). Pre-set any value as an env var to skip its prompt. The Zitadel SPA
    `VITE_OIDC_CLIENT_ID` only exists once Zitadel is up — set a placeholder, configure Zitadel, then re-run.
+
+   > **Shortcut for steps 5–6:** `make -C infra/aws secrets` runs both helpers in order (Key Vault → GitHub)
+   > and stops if the first fails. Individual targets: `make -C infra/aws populate-kv` / `wire-github`.
+
 7. **Deploy:** `gh variable set ENABLE_DEPLOY_AWS --body true`, then `git tag aws-v0.1.0 && git push origin aws-v0.1.0`
    → approve in the `aws-experiment` Environment → SSM rolls out `deploy.sh` (migrate → provision runtime role
    logins → bring the stack up).
