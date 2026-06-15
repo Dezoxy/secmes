@@ -162,7 +162,8 @@ rejected by the trigger; every user row has a unique argus-id.
 **Threat model:** `docs/threat-models/session-tokens.md`.
 **Changes:**
 - `auth_sessions` table (tenant-scoped, FORCE RLS, leading tenant_id index): `id`(sid), `tenant_id`, `user_id`,
-  `refresh_token_hash` (SHA-256 at rest), `expires_at`, `created_at`, `last_used_at`, `revoked_at`.
+  `refresh_token_hash` (SHA-256 at rest), `expires_at`, `created_at`, `last_used_at`, `revoked_at`. Sweep stale rows
+  periodically (`DELETE … WHERE expires_at < now() - interval '7 days'`, e.g. pg_cron) so the table can't grow unbounded.
 - `apps/api/src/auth/session-key.config.ts` (new) — Ed25519 signing key from a Key Vault credential **file**
   (`SESSION_SIGNING_KEY_FILE`), fail-closed like `loadOidcConfig`; dev fallback = ephemeral keypair.
   - **Invariant #4 boundary (decide before coding):** session signing/verification is server-infrastructure auth,
@@ -186,7 +187,8 @@ logout revokes the `sid`; reload restores a session via the cookie. `jwt-auth.gu
 **Changes:**
 - Add `@simplewebauthn/server` (api) + `@simplewebauthn/browser` (web) (one-line dep justification each).
 - `webauthn_credentials` table (tenant-scoped, FORCE RLS): `id`, `tenant_id`, `user_id`,
-  `credential_id` (bytea, globally unique), `public_key` (bytea, COSE), `counter` (bigint), `transports`,
+  `credential_id` (bytea; explicit `UNIQUE INDEX ON webauthn_credentials(credential_id)` — NOT tenant-scoped, so the
+  authenticate step can resolve a credential before tenant context), `public_key` (bytea, COSE), `counter` (bigint), `transports`,
   `device_label`, `created_at`, `last_used_at`. Allow **multiple passkeys per user**. (Do NOT store `argus_id` here —
   it's derivable via `user_id`→`users.argus_id`; a denormalized copy would risk drift. Resolve it through the join.)
 - `webauthn_challenges` table — **no-RLS routing table** (like `user_tenant_index`; no tenant context at
@@ -194,7 +196,9 @@ logout revokes the `sid`; reload restores a session via the cookie. `jwt-auth.gu
   **Consume delete-on-use** — atomic `DELETE … RETURNING` by `ceremony_id` in the verify step so a challenge can't be
   replayed within its TTL; `expires_at` is only a backstop sweep. Document the no-RLS justification in the migration.
 - Bootstrap `DEFAULT_TENANT_ID` (fixed UUID constant + idempotent `tenants` insert). Bind all new users to it.
-- Registration: `POST /auth/register/redeem { code }` (reuse the 0028 token-hash carve-out) → short-lived
+- Registration: `POST /auth/register/redeem { code }` (reuse the 0028 token-hash carve-out; **throttle** via the
+  existing rate-limiter keyed on source IP — the 256-bit token already defeats brute force; this just blocks
+  heavy-path redemption DoS) → short-lived
   **redemption ticket** (don't create the user yet) → `/auth/webauthn/register/options` (set
   `userID = isoUint8Array.fromUTF8String(argus_id)` — SimpleWebAuthn requires `userID` as **bytes**, not a string,
   ≤64 bytes; `residentKey:'required'`, `userVerification:'required'`) → `/auth/webauthn/register/verify`: in ONE tx
