@@ -86,15 +86,15 @@ export class AuthService {
       }
     }
 
-    const sub = typeof payload!.sub === 'string' ? payload!.sub : '';
+    const sub = typeof payload.sub === 'string' ? payload.sub : '';
     if (!sub) throw new UnauthorizedException('token missing sub');
 
     // sid — present only in argus-minted tokens (the session DB row id for revocation).
-    const sid = isArgusMinted && typeof payload!.sid === 'string' ? payload!.sid : undefined;
+    const sid = isArgusMinted && typeof payload.sid === 'string' ? payload.sid : undefined;
 
     // uid — present only in argus-minted tokens (users.id UUID). Enables user lookup by PK instead
     // of by external_identity_id, which carries Zitadel IDs incompatible with argusid:... subjects.
-    const userId = isArgusMinted && typeof payload!.uid === 'string' ? payload!.uid : undefined;
+    const userId = isArgusMinted && typeof payload.uid === 'string' ? payload.uid : undefined;
 
     // Optional verified profile claims (used for JIT provisioning from Zitadel tokens only).
     // Argus-minted tokens carry no IdP claims.
