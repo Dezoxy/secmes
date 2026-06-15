@@ -158,22 +158,29 @@ else
   log "exists, skipping argus-migration-database-url (derived from the set-once owner password)"
 fi
 
-# --- External credentials (operator-supplied via env; fail closed if a NEW secret is needed but unset) ---
-put_external() { # $1 = kv name ; $2 = env var name
+# --- External credentials. The value comes from the env var if set; otherwise, on an interactive terminal,
+#     this PROMPTS for it (hidden — never persisted to a file or shell history; matches invariant #5). Fails
+#     closed if a NEW secret is needed but unset with no TTY (e.g. CI). ---
+put_external() { # $1 = kv name ; $2 = env var name ; $3 = human prompt
   if [ "$ROTATE" -eq 0 ] && secret_exists "$1"; then
     log "exists, skipping $1"
     return 0
   fi
   local val="${!2:-}"
+  if [ -z "$val" ] && [ -t 0 ]; then
+    read -rsp "  $3 ($2): " val
+    echo
+  fi
   [ -n "$val" ] || {
-    log "FATAL: $1 not set and \$$2 is empty — export $2 (the real credential) and re-run"
+    log "FATAL: $1 needs a value — set \$$2, or run interactively to be prompted"
     exit 1
   }
   set_secret "$1" "$val"
+  val=""
 }
-put_external argus-s3-secret-access-key ARGUS_S3_SECRET_ACCESS_KEY
-put_external argus-b2-app-key ARGUS_B2_APP_KEY
-put_external argus-tunnel-token ARGUS_TUNNEL_TOKEN
-put_external argus-ghcr-token ARGUS_GHCR_TOKEN
+put_external argus-s3-secret-access-key ARGUS_S3_SECRET_ACCESS_KEY "B2 attachments-bucket secret access key"
+put_external argus-b2-app-key ARGUS_B2_APP_KEY "B2 db-backups app key"
+put_external argus-tunnel-token ARGUS_TUNNEL_TOKEN "Cloudflare Tunnel token"
+put_external argus-ghcr-token ARGUS_GHCR_TOKEN "GitHub read:packages token (GHCR pull)"
 
 log "done. Mandatory secrets present. Arming secrets (stripe/operator/sentry/zitadel-*-pat) are set later."

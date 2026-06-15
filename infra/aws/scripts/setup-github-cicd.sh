@@ -45,14 +45,28 @@ S3_ENDPOINT="${S3_ENDPOINT:-https://s3.eu-central-003.backblazeb2.com}"
 S3_REGION="${S3_REGION:-eu-central-003}"
 DEPLOY_ENV="${GITHUB_DEPLOY_ENVIRONMENT:-aws-experiment}"
 
-missing=()
-for v in S3_BUCKET S3_ACCESS_KEY_ID OIDC_ISSUER OIDC_AUDIENCE VITE_OIDC_ISSUER VITE_OIDC_CLIENT_ID VITE_OIDC_REDIRECT_URI; do
-  [ -n "${!v:-}" ] || missing+=("$v")
-done
-if [ "${#missing[@]}" -gt 0 ]; then
-  log "FATAL: set these env vars first: ${missing[*]}"
-  exit 1
-fi
+# Each value comes from its env var if set; otherwise, on an interactive terminal, PROMPT for it. These are
+# non-secret config (bucket / OIDC endpoints) so the prompt echoes — read it back as you type. Fails closed if
+# a value is still missing with no TTY (e.g. CI).
+prompt_var() { # $1 = var name ; $2 = human prompt
+  [ -n "${!1:-}" ] && return 0
+  if [ -t 0 ]; then
+    local _v
+    read -rp "  $2 ($1): " _v
+    printf -v "$1" '%s' "$_v"
+  fi
+  [ -n "${!1:-}" ] || {
+    log "FATAL: $1 is required — set it, or run interactively to be prompted"
+    exit 1
+  }
+}
+prompt_var S3_BUCKET "B2 attachments bucket name"
+prompt_var S3_ACCESS_KEY_ID "B2 attachments key ID (non-secret)"
+prompt_var OIDC_ISSUER "Zitadel issuer URL, e.g. https://auth.<domain>"
+prompt_var OIDC_AUDIENCE "Zitadel API audience / project id"
+prompt_var VITE_OIDC_ISSUER "Frontend OIDC issuer (usually same as OIDC_ISSUER)"
+prompt_var VITE_OIDC_CLIENT_ID "Zitadel SPA client id"
+prompt_var VITE_OIDC_REDIRECT_URI "Frontend redirect URI, e.g. https://<app-host>/auth/callback"
 
 setvar() {
   gh variable set "$1" --repo "$REPO" --body "$2" >/dev/null
@@ -78,8 +92,13 @@ setvar VITE_OIDC_REDIRECT_URI "$VITE_OIDC_REDIRECT_URI"
 setvar ENABLE_DEPLOY_AWS false
 
 # --- Optional: 42Crunch token (Actions + Dependabot) ---
-# Read the value from STDIN — `gh secret set` reads stdin only when --body is OMITTED (a `--body -` would set
-# the literal string "-"). STDIN also keeps the token off argv/ps (matches populate-keyvault.sh's hygiene).
+# A SECRET — prompt hidden when unset on a TTY (blank = skip); honours the env var if already set.
+if [ -z "${X42C_API_TOKEN:-}" ] && [ -t 0 ]; then
+  read -rsp "  X42C_API_TOKEN (optional 42Crunch token, blank to skip): " X42C_API_TOKEN
+  echo
+fi
+# Set via STDIN — `gh secret set` reads stdin only when --body is OMITTED (a `--body -` would set the literal
+# string "-"). STDIN also keeps the token off argv/ps (matches populate-keyvault.sh's hygiene).
 if [ -n "${X42C_API_TOKEN:-}" ]; then
   printf '%s' "$X42C_API_TOKEN" | gh secret set X42C_API_TOKEN --repo "$REPO" >/dev/null
   printf '%s' "$X42C_API_TOKEN" | gh secret set X42C_API_TOKEN --repo "$REPO" --app dependabot >/dev/null 2>&1 ||
