@@ -38,7 +38,7 @@ export class DevicesService {
     fingerprint: string,
     deviceId: string,
   ): Promise<EnrollmentRow> {
-    const row = await withTenant(auth.tenantId, async (tx) => {
+    const { row, userSubs } = await withTenant(auth.tenantId, async (tx) => {
       const userId = await requireUser(tx, auth);
 
       // Verify the requesting device belongs to this user (ownership authz — RLS + user_id check).
@@ -69,16 +69,30 @@ export class DevicesService {
         })
         .returning();
       if (!enrollment) throw new Error('enrollment insert returned no row');
-      return enrollment;
+
+      const [userRow] = await tx
+        .select({
+          externalIdentityId: schema.users.externalIdentityId,
+          argusId: schema.users.argusId,
+        })
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+        .limit(1);
+      const subs = userRow
+        ? [userRow.externalIdentityId, `argusid:${userRow.argusId}`]
+        : [auth.sub];
+      return { row: enrollment, userSubs: subs };
     });
 
-    // Nudge D1 out-of-band (WS); if the bus is down, D1 sees the pending enrollment on next poll.
-    this.bus.emitDeviceEnrollmentPending({
-      tenantId: auth.tenantId,
-      enrollmentId: row.id,
-      userSub: auth.sub,
-      requestingDeviceId: row.requestingDeviceId,
-    });
+    // Nudge D1 out-of-band (WS); emit for both token families so argus and Zitadel sockets are reached.
+    for (const userSub of userSubs) {
+      this.bus.emitDeviceEnrollmentPending({
+        tenantId: auth.tenantId,
+        enrollmentId: row.id,
+        userSub,
+        requestingDeviceId: row.requestingDeviceId,
+      });
+    }
 
     await this.audit.record(auth.tenantId, {
       eventType: 'device.enrollment_requested',
@@ -144,7 +158,7 @@ export class DevicesService {
     approvingDeviceId: string,
     proofBase64url: string,
   ): Promise<EnrollmentRow> {
-    const row = await withTenant(auth.tenantId, async (tx) => {
+    const { row, userSubs } = await withTenant(auth.tenantId, async (tx) => {
       const userId = await requireUser(tx, auth);
 
       // Load the pending enrollment (user-scoped by RLS + where clause).
@@ -220,14 +234,27 @@ export class DevicesService {
         .set({ isProvisional: false })
         .where(eq(schema.devices.id, enrollment.requestingDeviceId));
 
-      return updated;
+      const [userRow] = await tx
+        .select({
+          externalIdentityId: schema.users.externalIdentityId,
+          argusId: schema.users.argusId,
+        })
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+        .limit(1);
+      const subs = userRow
+        ? [userRow.externalIdentityId, `argusid:${userRow.argusId}`]
+        : [auth.sub];
+      return { row: updated, userSubs: subs };
     });
 
-    this.bus.emitDeviceEnrollmentApproved({
-      tenantId: auth.tenantId,
-      enrollmentId: row.id,
-      userSub: auth.sub,
-    });
+    for (const userSub of userSubs) {
+      this.bus.emitDeviceEnrollmentApproved({
+        tenantId: auth.tenantId,
+        enrollmentId: row.id,
+        userSub,
+      });
+    }
 
     await this.audit.record(auth.tenantId, {
       eventType: 'device.enrollment_approved',

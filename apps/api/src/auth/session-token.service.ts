@@ -123,6 +123,24 @@ export class SessionTokenService {
     const now = new Date();
 
     const [newSession] = await withTenant(row.tenantId, async (tx) => {
+      // Reject refresh for revoked users: TenantsService.revokeMember sets users.status='revoked'
+      // but does not touch auth_sessions rows. Gate here so a revoked member cannot mint new
+      // tokens for up to 30 days on a stale refresh cookie.
+      const [user] = await tx
+        .select({ status: schema.users.status })
+        .from(schema.users)
+        .where(and(eq(schema.users.id, row.userId), eq(schema.users.tenantId, row.tenantId)))
+        .limit(1);
+      if (!user || user.status !== 'active') {
+        await tx
+          .update(schema.authSessions)
+          .set({ revokedAt: now })
+          .where(
+            and(eq(schema.authSessions.userId, row.userId), isNull(schema.authSessions.revokedAt)),
+          );
+        return [];
+      }
+
       // Optimistic lock: WHERE refresh_token_hash = tokenHash guards against concurrent rotation.
       const revoked = await tx
         .update(schema.authSessions)
