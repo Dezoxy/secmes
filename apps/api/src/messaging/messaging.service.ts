@@ -225,7 +225,7 @@ export class MessagingService {
     conversationId: string,
     body: DeliverWelcome,
   ): Promise<{ welcomeId: string }> {
-    const { welcomeId, recipientSub } = await withTenant(auth.tenantId, async (tx) => {
+    const { welcomeId, recipientSubs } = await withTenant(auth.tenantId, async (tx) => {
       const sender = await requireUser(tx, auth);
       await requireMembership(tx, conversationId, sender);
 
@@ -266,23 +266,26 @@ export class MessagingService {
       const welcome = rows[0];
       if (!welcome) throw new Error('welcome insert returned no row');
 
-      // Resolve the recipient's external subject for the post-commit realtime nudge — an authed socket is
-      // keyed by its verified `sub`, not the argus user id. Same-tx read; the FK above already proved the
-      // recipient exists in this tenant.
+      // Resolve the recipient's subs for the post-commit realtime nudge. Both the Zitadel sub
+      // (externalIdentityId) and the argus sub (argusid:<argus_id>) are collected so sockets
+      // authenticated under either token family receive the nudge.
       const [recipient] = await tx
-        .select({ sub: schema.users.externalIdentityId })
+        .select({ sub: schema.users.externalIdentityId, argusId: schema.users.argusId })
         .from(schema.users)
         .where(
           and(eq(schema.users.tenantId, auth.tenantId), eq(schema.users.id, body.recipientUserId)),
         )
         .limit(1);
-      return { welcomeId: welcome.id, recipientSub: recipient?.sub ?? null };
+      return {
+        welcomeId: welcome.id,
+        recipientSubs: recipient ? [recipient.sub, `argusid:${recipient.argusId}`] : [],
+      };
     });
 
     // Post-commit (same pattern as sendMessage): the Welcome row is durable BEFORE any client is nudged,
     // so a recipient that reacts immediately always finds it. Content-free: ids + the recipient subject
     // only. Best-effort — join-on-connect remains the fallback if the recipient is offline.
-    if (recipientSub) {
+    for (const recipientSub of recipientSubs) {
       this.bus.emitWelcomeCreated({ tenantId: auth.tenantId, conversationId, recipientSub });
     }
     return { welcomeId };
@@ -1010,12 +1013,18 @@ export class MessagingService {
         auth.userId,
       );
 
-      // Nudge welcome recipients — one WS push per unique added user (batch to a single query).
+      // Nudge welcome recipients — one WS push per unique added user per sub family (batch query).
+      // Both the Zitadel sub and argus sub are emitted so sockets authenticated under either token
+      // family receive the nudge.
       const uniqueRecipientIds = [...new Set(body.welcomes.map((w) => w.recipientUserId))];
       if (uniqueRecipientIds.length > 0) {
         const recipients = await withTenant(auth.tenantId, (tx) =>
           tx
-            .select({ id: schema.users.id, sub: schema.users.externalIdentityId })
+            .select({
+              id: schema.users.id,
+              sub: schema.users.externalIdentityId,
+              argusId: schema.users.argusId,
+            })
             .from(schema.users)
             .where(
               and(
@@ -1025,11 +1034,13 @@ export class MessagingService {
             ),
         );
         for (const r of recipients) {
-          this.bus.emitWelcomeCreated({
-            tenantId: auth.tenantId,
-            conversationId,
-            recipientSub: r.sub,
-          });
+          for (const recipientSub of [r.sub, `argusid:${r.argusId}`]) {
+            this.bus.emitWelcomeCreated({
+              tenantId: auth.tenantId,
+              conversationId,
+              recipientSub,
+            });
+          }
         }
       }
 
