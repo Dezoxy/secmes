@@ -76,9 +76,9 @@ export const SENSITIVE_LIMITS = {
   enrollmentConversationList: 30,
   /** Self device withdrawal — legacy migration or explicit device removal. Very rare; tight cap. */
   deviceWithdraw: 5,
-  /** Refresh token rotation — @Public() but session-keyed (cookie prefix) via @PublicRateLimit().
-   *  Tight cap since each call hits the DB (SHA-256 lookup + mark-and-insert). Generous enough for a
-   *  sticky session (10-min access token → ~3 refreshes/hour max under normal use). NAT-safe: each
-   *  session gets its own bucket; the IP fallback only applies when no cookie is present. */
-  refreshSession: 10,
+  /** Refresh token rotation — @Public(), keyed on IP (the only server-verified key before auth).
+   *  Set high enough for NAT-shared IPs (60 offices-users refreshing concurrently ≪ 60/min) while
+   *  still bounding DB flood from a runaway client. Reuse detection (family revocation) is the real
+   *  security control; this limit is a DB-load guard only. */
+  refreshSession: 60,
 } as const;
