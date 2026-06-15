@@ -577,7 +577,12 @@ export class MessagingService {
       this.bus.emitMessageCreated(event);
       // Fire-and-forget content-free push ping. Errors are caught inside notifyConversationMembers;
       // a push failure must never surface to the caller or delay the response.
-      void this.push.notifyConversationMembers(auth.tenantId, conversationId, auth.sub);
+      void this.push.notifyConversationMembers(
+        auth.tenantId,
+        conversationId,
+        auth.sub,
+        auth.userId,
+      );
     }
     return result;
   }
@@ -993,7 +998,12 @@ export class MessagingService {
     // Post-commit: notify all conversation members about the new commit (metadata only, no ciphertext).
     if (event) {
       this.bus.emitCommitCreated(event);
-      void this.push.notifyConversationMembers(auth.tenantId, conversationId, auth.sub);
+      void this.push.notifyConversationMembers(
+        auth.tenantId,
+        conversationId,
+        auth.sub,
+        auth.userId,
+      );
 
       // Nudge welcome recipients — one WS push per unique added user (batch to a single query).
       const uniqueRecipientIds = [...new Set(body.welcomes.map((w) => w.recipientUserId))];

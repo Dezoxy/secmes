@@ -140,16 +140,23 @@ export class PushService {
     tenantId: string,
     conversationId: string,
     senderSub: string,
+    senderUserId?: string,
   ): Promise<void> {
     if (!this.configured) return;
 
     try {
       await withTenant(tenantId, async (tx) => {
-        // Resolve the sender's argus user id for the exclusion filter (senderSub is the OIDC subject).
+        // Resolve the sender's internal user id for the exclusion filter.
+        // senderUserId (uid JWT claim) is preferred for argus-minted tokens;
+        // fall back to externalIdentityId for Zitadel tokens.
         const [sender] = await tx
           .select({ id: schema.users.id })
           .from(schema.users)
-          .where(eq(schema.users.externalIdentityId, senderSub))
+          .where(
+            senderUserId
+              ? eq(schema.users.id, senderUserId)
+              : eq(schema.users.externalIdentityId, senderSub),
+          )
           .limit(1);
         if (!sender) return;
 
