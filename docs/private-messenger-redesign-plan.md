@@ -165,6 +165,10 @@ rejected by the trigger; every user row has a unique argus-id.
   `refresh_token_hash` (SHA-256 at rest), `expires_at`, `created_at`, `last_used_at`, `revoked_at`.
 - `apps/api/src/auth/session-key.config.ts` (new) — Ed25519 signing key from a Key Vault credential **file**
   (`SESSION_SIGNING_KEY_FILE`), fail-closed like `loadOidcConfig`; dev fallback = ephemeral keypair.
+  - **Invariant #4 boundary (decide before coding):** session signing/verification is server-infrastructure auth,
+    NOT E2EE message-key material, so `jose`/Ed25519 standalone in `apps/api/src/auth/` is an **accepted exception**
+    (consistent with the existing `jose` JWT *verification* already there) — it does NOT route through
+    `packages/crypto`. Pre-clear this framing with `security-architect` so the crypto-reviewer doesn't block Phase 1.
 - `auth.service.ts verify()` — verify our JWT (`iss:argus`, `aud:argus-api`, `alg:EdDSA`); keep the `sub` →
   `user_tenant_index` lookup + `MaybeUnboundAuth` return shape unchanged. Drop the IdP email/name JIT claims.
 - Mint/refresh(rotating, single-use, hashed)/logout endpoints; refresh delivered as **HttpOnly + Secure +
@@ -181,28 +185,35 @@ logout revokes the `sid`; reload restores a session via the cookie. `jwt-auth.gu
 **Threat models (write first):** `docs/threat-models/passkey-auth.md`, `registration-and-tenancy.md`.
 **Changes:**
 - Add `@simplewebauthn/server` (api) + `@simplewebauthn/browser` (web) (one-line dep justification each).
-- `webauthn_credentials` table (tenant-scoped, FORCE RLS): `id`, `tenant_id`, `user_id`, `argus_id`,
+- `webauthn_credentials` table (tenant-scoped, FORCE RLS): `id`, `tenant_id`, `user_id`,
   `credential_id` (bytea, globally unique), `public_key` (bytea, COSE), `counter` (bigint), `transports`,
-  `device_label`, `created_at`, `last_used_at`. Allow **multiple passkeys per user**.
+  `device_label`, `created_at`, `last_used_at`. Allow **multiple passkeys per user**. (Do NOT store `argus_id` here —
+  it's derivable via `user_id`→`users.argus_id`; a denormalized copy would risk drift. Resolve it through the join.)
 - `webauthn_challenges` table — **no-RLS routing table** (like `user_tenant_index`; no tenant context at
-  registration; holds only `ceremony_id`, `challenge_hash`, `purpose`, nullable `argus_id`, `expires_at`).
-  Document the no-RLS justification in the migration comment.
+  registration; holds only `ceremony_id` (PK), `challenge_hash`, `purpose`, nullable `argus_id`, `expires_at`).
+  **Consume delete-on-use** — atomic `DELETE … RETURNING` by `ceremony_id` in the verify step so a challenge can't be
+  replayed within its TTL; `expires_at` is only a backstop sweep. Document the no-RLS justification in the migration.
 - Bootstrap `DEFAULT_TENANT_ID` (fixed UUID constant + idempotent `tenants` insert). Bind all new users to it.
 - Registration: `POST /auth/register/redeem { code }` (reuse the 0028 token-hash carve-out) → short-lived
   **redemption ticket** (don't create the user yet) → `/auth/webauthn/register/options` (set
   `userID = isoUint8Array.fromUTF8String(argus_id)` — SimpleWebAuthn requires `userID` as **bytes**, not a string,
   ≤64 bytes; `residentKey:'required'`, `userVerification:'required'`) → `/auth/webauthn/register/verify`: in ONE tx
   (mirroring `acceptInvite`) mark the code consumed, insert `users` (tenant=DEFAULT, generated argus-id + display
-  name, **no email**), `user_tenant_index { sub:"argusid:"+argus_id }`, `webauthn_credentials`, then mint the
-  first session.
+  name, **no email**; set `external_identity_id = "argusid:"+argus_id` so the existing NOT NULL + unique
+  `(tenant_id, external_identity_id)` index keeps working with the self-minted sub), `user_tenant_index {
+  sub:"argusid:"+argus_id }`, `webauthn_credentials`, then mint the first session.
 - Login: `/auth/webauthn/authenticate/options` (empty `allowCredentials` → discoverable; user picks passkey, no
   typed id; decode the returned `userHandle` with `isoUint8Array.toUTF8String` to recover the argus-id) → `/verify`
   (look up by `credential_id` under `withTenant(DEFAULT_TENANT_ID)`, check+bump counter → clone detection: reject
   ONLY when the stored counter > 0 and the new counter ≤ it. Counters that stay at `0` are NORMAL for synced /
   platform passkeys (Touch ID, etc.) and must NOT be rejected, or every login after the first breaks) → mint session.
 - **WebAuthn PRF** for local keystore unlock (decision #6): request the PRF extension at register/auth; derive the
-  keystore-unlock key from the PRF output so there's **no separate passphrase**; fallback (generated local key +
-  recovery artifact) for authenticators without PRF. Touches `apps/web/src/lib/keystore.ts` unlock path.
+  keystore-unlock key from the PRF output so there's **no separate passphrase**. **Fallback (no PRF support):** seal
+  the keystore under a key wrapped by an **admin-issued one-time recovery code** (same Argon2id+AEAD shape as the
+  existing `key_backups` / keystore-v5 passphrase path), shown once at registration and re-entered to unlock on a
+  PRF-less device. Recommended default: **PRF-capable authenticators only**, with the recovery-code path as the
+  documented escape hatch. `passkey-auth.md` MUST specify this exact crypto path before Phase 2 code (confirm with the
+  owner — open item #1). Touches `apps/web/src/lib/keystore.ts` unlock path.
 **Done-when:** full register flow works; expired/replayed challenge rejected; consumed code rejected; counter
 regression rejected; login needs no typed id.
 **Reviewers:** `security-architect`, `crypto-reviewer`, `security-boundary-auditor`.
@@ -231,14 +242,17 @@ the weakest link in an otherwise phishing-resistant design — call it out in th
 **Changes:**
 - Delete `GET /users` directory (`users.controller.ts`, `UserService.list`); add
   `GET /users/lookup?argusId=…` — **exact match only** (no LIKE/prefix/fuzzy), authenticated, hard rate-limited
-  (`SENSITIVE_LIMITS.lookupUser`), **uniform not-found** (no oracle), returns `{ userId, argusId, displayName,
+  (new `SENSITIVE_LIMITS.lookupUser` constant, added to the existing rate-limit set), **uniform not-found** (no oracle), returns `{ userId, argusId, displayName,
   avatarSeed }` and **never email**. The found `userId` feeds the **existing** conversation-create + MLS welcome
   flow unchanged (`createConversation([userId])`).
 - `PUT /users/me { displayName?, avatarSeed? }` — Zod-validated (displayName 1–64 trimmed; `argus_id` not
   accepted). Add `avatar_seed text` column (non-PII) so "change profile picture" cycles the generated avatar;
   keep `@dicebear` client-side default (no blob storage, decision #3).
 - Migration: drop `users_tenant_display_name_idx` (display_name becomes a free, non-unique nickname); make
-  `users.email` nullable and **stop writing it**; add `avatar_seed`.
+  `users.email` nullable, **stop writing it, and `UPDATE users SET email = NULL`** (data-minimisation now, even
+  though the column itself is dropped later); add `avatar_seed`.
+- Code: with `users_tenant_display_name_idx` gone, **simplify the "Adjective Animal" uniqueness retry** in
+  `user.service.ts` / `tenants.service.ts` (the `isHandleCollision` loop) — display names are now free, non-unique.
 - Contracts: remove `UserSummary`/`UserDirectory` + `plan`/`ssoEnabled`/`email` from `/me`; add
   `UserLookupResult`; add `avatarSeed` to `/me`. Regen openapi + 42Crunch.
 **Done-when:** lookup is exact-only + rate-limited + uniform 404; profile update rejects argus_id; no email in any
@@ -262,23 +276,28 @@ send an E2EE message → breakglass admin login works (metadata only).
 **Goal:** remove the now-dead enterprise surface; keep recoverable via git history.
 **Changes:** delete SSO module + `tenant_sso_configs`; remove Zitadel from `compose.yaml` +
 `infra/local/zitadel/provision.sh`; delete `POST /tenants` + `CreateWorkspace.tsx`; delete billing module +
-Stripe webhook; remove plan/SSO gating + the AdminPanel SSO tab. Mark `per-tenant-sso.md` retired. **Leave inert
-columns** (`stripe_*`, `plan_*`, `email`) rather than risky drops — clean up in a later dedicated migration.
+Stripe webhook; remove plan/SSO gating + the AdminPanel SSO tab. Mark `per-tenant-sso.md` retired. Purge dead
+routing rows: `DELETE FROM user_tenant_index WHERE sub NOT LIKE 'argusid:%'` (legacy Zitadel subs — inert once
+Phase 1 lands). **Leave inert columns** (`stripe_*`, `plan_*`, plus legacy `email` / `external_identity_id` on
+pre-redesign rows) rather than risky drops — clean up in a later dedicated migration.
 **Done-when:** app boots with no Zitadel; no orphaned `@Public` routes; CI security scans green.
 **Reviewers:** `infra-reviewer` (compose/secrets/EU-pinning, no dangling secret mounts), `security-boundary-auditor`.
 
 ---
 
 ## 6. Dependencies & sequencing
-- **Phase 0 first** (spine). **Phase 1 ∥ Phase 2** prep; **Phase 3 ∥ Phase 4**. **Phases 1+2 before Phase 5**
-  (client needs the endpoints). **Phase 6 last**.
+- **Phase 0 first** (spine). **Phase 1 ∥ Phase 2** prep; **Phase 3 ∥ Phase 4** (their tables / Argon2id / lookup
+  code can be written in parallel). **Phase 3 cannot FINISH until Phase 1 lands** — breakglass mints its session via
+  Phase-1 machinery. **Phases 1+2 before Phase 5** (client needs the endpoints). **Phase 6 last**.
 - Every phase: CI green (ci · security · codeql) **and** both reviews (Codex + `@claude`) before merge; security
   phases (1–4, 6) also need the named reviewer subagent; Phase 5 needs the `e2e` job.
 
 ## 7. Open items to confirm with the owner during implementation
-- **PRF unavailability fallback** (older authenticators): generated local key + recovery artifact — acceptable?
+- **PRF unavailability fallback** (older authenticators): admin-issued one-time recovery code wrapping the keystore
+  key (see Phase 2) vs. accepting PRF-capable devices only — confirm which the owner wants.
 - **GDPR/erasure** path for `argus_id` and `webauthn_credentials` on account deletion (extend migration 0020 logic).
-- **Breakglass alerting**: with email dropped, an out-of-band alert on breakglass login needs another channel (or none).
+- **Breakglass alerting**: with email dropped, fire an out-of-band alert on `breakglass.login_succeeded` audit rows
+  via an **Azure Monitor log alert** (≈2 lines of Terraform in `infra/azure/terraform/`) → webhook/Teams/PagerDuty.
 - **Admin/members view** fields after email removal (argus_id, display_name, role, created_at only).
 
 ## 8. End-to-end verification (after Phase 5)
