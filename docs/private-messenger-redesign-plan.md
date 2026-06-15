@@ -164,6 +164,11 @@ rejected by the trigger; every user row has a unique argus-id.
 - `auth_sessions` table (tenant-scoped, FORCE RLS, leading tenant_id index): `id`(sid), `tenant_id`, `user_id`,
   `refresh_token_hash` (SHA-256 at rest), `expires_at`, `created_at`, `last_used_at`, `revoked_at`. Sweep stale rows
   periodically (`DELETE … WHERE expires_at < now() - interval '7 days'`, e.g. pg_cron) so the table can't grow unbounded.
+  - **Pre-tenant refresh lookup (required):** the refresh/reload endpoint carries only the cookie (no verified bearer
+    → no tenant), but `auth_sessions` is FORCE-RLS tenant-keyed — so it can't be read/rotated under `withTenant()`. Add
+    a GUC-scoped RLS carve-out `auth_sessions_refresh_lookup` keyed on a transaction-local `app.refresh_token_hash`
+    (mirroring `tenant_invites_accept_flow`, migration 0028) that exposes ONLY the matching row under `withRouting()`;
+    derive `{ tenant_id, user_id, sid }` from it, then rotate/revoke under `withTenant(tenant_id)`.
 - `apps/api/src/auth/session-key.config.ts` (new) — Ed25519 signing key from a Key Vault credential **file**
   (`SESSION_SIGNING_KEY_FILE`), fail-closed like `loadOidcConfig`; dev fallback = ephemeral keypair.
   - **Invariant #4 boundary (decide before coding):** session signing/verification is server-infrastructure auth,
@@ -201,6 +206,12 @@ via the cookie. `jwt-auth.guard.ts` + WS gateway untouched; existing OIDC logins
   **Consume delete-on-use** — atomic `DELETE … RETURNING` by `ceremony_id` in the verify step so a challenge can't be
   replayed within its TTL; `expires_at` is only a backstop sweep. Document the no-RLS justification in the migration.
 - Bootstrap `DEFAULT_TENANT_ID` (fixed UUID constant + idempotent `tenants` insert). Bind all new users to it.
+- **Schema — make `users.email` nullable in THIS phase's migration** (moved up from Phase 4): Phase 2 is the first to
+  insert email-less users and `email` is currently `NOT NULL` (0001), so without this the registration tx fails the
+  not-null constraint before the credential/session are created. Because the legacy `GET /users` directory and `/me`
+  (still live until Phase 4/5) type `email` as a **required** string, also relax `UserSummary.email` and
+  `MeBound.email` to nullable here and have the directory UI tolerate null — so new null-email users don't break those
+  contracts during the transition.
 - Registration: `POST /auth/register/redeem { code }` (reuse the 0028 token-hash carve-out; **throttle** via the
   existing rate-limiter keyed on source IP — the 256-bit token already defeats brute force; this just blocks
   heavy-path redemption DoS) → short-lived
@@ -263,9 +274,10 @@ the weakest link in an otherwise phishing-resistant design — call it out in th
 - `PUT /users/me { displayName?, avatarSeed? }` — Zod-validated (displayName 1–64 trimmed; `argus_id` not
   accepted). Add `avatar_seed text` column (non-PII) so "change profile picture" cycles the generated avatar;
   keep `@dicebear` client-side default (no blob storage, decision #3).
-- Migration: drop `users_tenant_display_name_idx` (display_name becomes a free, non-unique nickname); make
-  `users.email` nullable, **stop writing it, and `UPDATE users SET email = NULL`** (data-minimisation now, even
-  though the column itself is dropped later); add `avatar_seed`.
+- Migration: drop `users_tenant_display_name_idx` (display_name becomes a free, non-unique nickname); add
+  `avatar_seed`. (`users.email` was made nullable in Phase 2.) **Defer the bulk `UPDATE users SET email = NULL`
+  data-minimisation to Phase 5** — running it here would feed null into the still-live `GET /users` / `UserSummary`
+  directory during the Phase 4→5 window; do it together with the directory removal in Phase 5.
 - Code: with `users_tenant_display_name_idx` gone, **simplify the "Adjective Animal" uniqueness retry** in
   `user.service.ts` / `tenants.service.ts` (the `isHandleCollision` loop) — display names are now free, non-unique.
 - Contracts: add `UserLookupResult`; remove `plan`/`ssoEnabled`/`email` from `/me`; add `avatarSeed` to `/me`.
@@ -285,7 +297,8 @@ discovery/`/me` response.
 - **Now remove the directory:** migrate `StartConversation`, `GroupCreateDialog`, and peer-naming off `listUsers()`
   onto `GET /users/lookup` (add-by-argus-id), then delete `GET /users` + `UserService.list` and the
   `UserSummary`/`UserDirectory` contracts in the SAME PR — endpoint and its last callers go together so every phase
-  stays bootable.
+  stays bootable. With the directory (the last reader of `email`) gone, also run the deferred bulk
+  `UPDATE users SET email = NULL` data-minimisation here.
 - Update Playwright E2E (`apps/web/e2e/`) — the `e2e` job gates merges; grep e2e for any changed label/role first.
 **Done-when:** E2E: register with a code → set up passkey → reload stays logged in → add a contact by argus-id →
 send an E2EE message → breakglass admin login works (metadata only).
