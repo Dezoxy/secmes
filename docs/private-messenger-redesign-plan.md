@@ -142,7 +142,7 @@ banned (`argus-no-insecure-random`). `tsconfig` has `noUncheckedIndexedAccess` (
 **Goal:** every user gets an immutable, system-generated argus-id, surfaced in `/me`. OIDC still active.
 **Threat model:** `docs/threat-models/argus-id-identity.md`.
 **Changes:**
-- `apps/api/src/db/migrations/0030_argus_id.sql` — `gen_argus_id()` (plpgsql, unambiguous alphabet `23456789abcdefghjkmnpqrstvwxyz`) that emits the **canonical `argus-<16>-<animal>` shape** — embed a small animal-word array in the SQL (a copy/subset of `HANDLE_ANIMALS`) and append a random one, NOT a static `-id` suffix; otherwise legacy rows get a non-conforming, now-immutable id that `/me` would surface. `alter table users add column argus_id text not null default gen_argus_id()`; `create unique index users_argus_id_idx on users (argus_id)`; **then** add the immutability trigger (`users_argus_id_immutable` + BEFORE UPDATE) AFTER the backfill so it never blocks the column fill. (Alternative: leave the column nullable, backfill explicitly via the app generator, then `set not null` + trigger.) See gotchas #1, #2.
+- `apps/api/src/db/migrations/0030_argus_id.sql` — `gen_argus_id()` (plpgsql, unambiguous alphabet `23456789abcdefghjkmnpqrstvwxyz`) that emits the **canonical `argus-<16>-<animal>` shape** — embed a small animal-word array in the SQL (a copy/subset of `HANDLE_ANIMALS`) and append a random one, NOT a static `-id` suffix; otherwise legacy rows get a non-conforming, now-immutable id that `/me` would surface. **Use a CSPRNG for the randomness** — `pgcrypto`'s `gen_random_bytes()` with **unbiased** sampling (rejection or a wide-modulo reduction), NOT `random()`: these ids are exposed and immutable, so the locked CSPRNG-for-identifiers decision applies to the SQL default too. (Cleanest alternative: keep the column nullable, **backfill explicitly via the app generator `generateArgusId()`**, then `set not null` + add the trigger — avoids a second SQL generator entirely.) `alter table users add column argus_id text not null default gen_argus_id()`; `create unique index users_argus_id_idx on users (argus_id)`; **then** add the immutability trigger (`users_argus_id_immutable` + BEFORE UPDATE) AFTER the backfill so it never blocks the column fill. (Alternative: leave the column nullable, backfill explicitly via the app generator, then `set not null` + trigger.) See gotchas #1, #2.
 - `apps/api/src/users/argus-id.ts` (new) — `generateArgusId()` (CSPRNG `node:crypto.randomInt`, `argus-<16 chars>-<animal>` reusing `HANDLE_ANIMALS`, lowercased; `!` on index access per gotcha #3) + `argus-id.spec.ts`.
 - `apps/api/src/db/schema.ts` — add `argusId: text('argus_id').notNull()` to `users`.
 - `apps/api/src/users/user.service.ts` — add `argusId` to `SELECTION` + `UserRecord`; in `provisionFromToken`
@@ -202,7 +202,10 @@ via the cookie. `jwt-auth.guard.ts` + WS gateway untouched; existing OIDC logins
   `device_label`, `created_at`, `last_used_at`. Allow **multiple passkeys per user**. (Do NOT store `argus_id` here —
   it's derivable via `user_id`→`users.argus_id`; a denormalized copy would risk drift. Resolve it through the join.)
 - `webauthn_challenges` table — **no-RLS routing table** (like `user_tenant_index`; no tenant context at
-  registration; holds only `ceremony_id` (PK), `challenge_hash`, `purpose`, nullable `argus_id`, `expires_at`).
+  registration; holds `ceremony_id` (PK), `challenge_hash`, `purpose`, nullable `argus_id`, `expires_at`, **and the
+  redeemed code's `invite_id` (or `token_hash`)** for register ceremonies). Persisting the code reference is required
+  so `/auth/webauthn/register/verify` can **atomically consume the SAME code** in its transaction — without it, verify
+  can't tie the ceremony back to the redeemed code, which blocks the flow or risks reusable codes.
   **Consume delete-on-use** — atomic `DELETE … RETURNING` by `ceremony_id` in the verify step so a challenge can't be
   replayed within its TTL; `expires_at` is only a backstop sweep. Document the no-RLS justification in the migration.
 - Bootstrap `DEFAULT_TENANT_ID` (fixed UUID constant + idempotent `tenants` insert). Bind all new users to it.
@@ -248,7 +251,8 @@ regression rejected; login needs no typed id.
 **Threat model:** `docs/threat-models/breakglass-admin.md`.
 **Changes:**
 - `admin_credentials` table (tenant-scoped, FORCE RLS, **leading `tenant_id` index**): `tenant_id`, `user_id`,
-  `password_hash`, `salt`, `failed_attempts`, `locked_until`, `updated_at` — `tenant_id` + RLS are mandatory per
+  `username` (the breakglass login id — stored so the endpoint actually validates it, not just any-username+password;
+  hash it if you prefer), `password_hash`, `salt`, `failed_attempts`, `locked_until`, `updated_at` — `tenant_id` + RLS are mandatory per
   invariant #3 (a password-hash table must NOT become a de-facto global no-RLS routing table). **Argon2id** via
   `@noble/hashes/argon2id` (already used for the key-backup KDF — no new dep) at interactive params
   (≈64 MiB / t=3 / p=1), unique CSPRNG salt.
@@ -259,10 +263,12 @@ regression rejected; login needs no typed id.
   would 403 the AdminPanel (or force an unsafe guard bypass).
 - Bootstrap the initial password hash from a Key Vault credential file (`ADMIN_BOOTSTRAP_HASH_FILE`), inserted once
   if the table is empty; rotate via an authenticated `POST /auth/breakglass/rotate`.
-- `POST /auth/breakglass/login { username, password }` (`@Public`, throttled) → on success mint an admin-scoped
-  session (Phase-1 machinery). Lockout after N failures (`locked_until`); **constant-time** path (verify against a
-  dummy hash when the row is missing — no timing oracle); audit every attempt
-  (`breakglass.login_succeeded/failed/locked`) with IP+UA metadata only.
+- `POST /auth/breakglass/login { username, password }` (`@Public`, throttled) → look up `admin_credentials` under
+  `withTenant(DEFAULT_TENANT_ID)` (the tenant is fixed — single-tenant deployment — so no RLS carve-out is needed;
+  the FORCE-RLS policy is satisfied by the hardcoded tenant). On success mint an admin-scoped session (Phase-1
+  machinery). Lockout after N failures (`locked_until`); **constant-time** path (verify against a dummy hash when the
+  row is missing — no timing oracle); audit every attempt (`breakglass.login_succeeded/failed/locked`) with IP+UA
+  metadata only.
 **Done-when:** lockout after N; timing parity user-found vs not; audit rows present; admin-only; cannot read content.
 **Reviewers:** `security-architect`, `crypto-reviewer`, `security-boundary-auditor`. **(Residual: the password is
 the weakest link in an otherwise phishing-resistant design — call it out in the threat model.)**
@@ -276,6 +282,12 @@ the weakest link in an otherwise phishing-resistant design — call it out in th
   (new `SENSITIVE_LIMITS.lookupUser` constant, added to the existing rate-limit set), **uniform not-found** (no oracle), returns `{ userId, argusId, displayName,
   avatarSeed }` and **never email**. The found `userId` feeds the **existing** conversation-create + MLS welcome
   flow unchanged (`createConversation([userId])`).
+- Add a **by-user-id identity path** for peer-naming: `/users/lookup` is argus-id-only, but `peer-naming.ts` resolves
+  a server-provided `senderUserId` (from welcomes/messages) → display metadata. Add a conversation-scoped resolver —
+  e.g. `GET /conversations/:id/members` returning `{ userId, argusId, displayName, avatarSeed }` for members of a
+  conversation the caller belongs to (authz: shared-membership only) — or carry `argusId`/`displayName` in
+  welcome/message metadata. Without it, once `GET /users` is removed (Phase 5) joined/rehydrated conversations can't
+  map a known `userId` → display name.
 - **Keep `GET /users` (and `UserService.list`) for now — do NOT remove it in this phase.** Its web callers
   (`StartConversation`, `GroupCreateDialog`, peer-naming via `listUsers()`) aren't migrated until Phase 5, so deleting
   it here would break starting/adding chats and peer-name resolution in the still-current UI. Removal + caller
@@ -285,8 +297,9 @@ the weakest link in an otherwise phishing-resistant design — call it out in th
   keep `@dicebear` client-side default (no blob storage, decision #3).
 - Migration: drop `users_tenant_display_name_idx` (display_name becomes a free, non-unique nickname); add
   `avatar_seed`. (`users.email` was made nullable in Phase 2.) **Defer the bulk `UPDATE users SET email = NULL`
-  data-minimisation to Phase 5** — running it here would feed null into the still-live `GET /users` / `UserSummary`
-  directory during the Phase 4→5 window; do it together with the directory removal in Phase 5.
+  data-minimisation to Phase 6** — it can't run until the OIDC email writer is gone AND every email reader is migrated
+  (the `GET /users` directory is removed in Phase 5; `DeviceSummary`/`MemberSummary` drop `email` in Phase 6), so
+  Phase 6 runs the erasure.
 - Code: with `users_tenant_display_name_idx` gone, **simplify the "Adjective Animal" uniqueness retry** in
   `user.service.ts` / `tenants.service.ts` (the `isHandleCollision` loop) — display names are now free, non-unique.
 - Contracts: add `UserLookupResult`; remove `plan`/`ssoEnabled`/`email` from `/me`; add `avatarSeed` to `/me`.
@@ -303,8 +316,10 @@ discovery/`/me` response.
 - New screens: auto-try-passkey-else-"I have a registration code" (decision #5) → passkey setup; breakglass admin
   login; **add-contact-by-argus-id** replacing the directory picker; profile edit (name + generated-avatar
   picker). Add `navigator.storage.persist()` on first unlock (decision #7).
-- **Now remove the directory:** migrate `StartConversation`, `GroupCreateDialog`, and peer-naming off `listUsers()`
-  onto `GET /users/lookup` (add-by-argus-id), then delete `GET /users` + `UserService.list` and the
+- **Now remove the directory:** migrate `StartConversation` + `GroupCreateDialog` off `listUsers()` onto
+  `GET /users/lookup` (add-by-argus-id), and migrate `peer-naming.ts` onto the **by-user-id resolver** added in
+  Phase 4 (it resolves `senderUserId`, which `/users/lookup`'s argus-id-only path can't). Then delete `GET /users` +
+  `UserService.list` and the
   `UserSummary`/`UserDirectory` contracts in the SAME PR — endpoint and its last callers go together so every phase
   stays bootable. (The bulk `email` null-out is NOT here — other readers/writers remain until Phase 6.)
 - Update Playwright E2E (`apps/web/e2e/`) — the `e2e` job gates merges; grep e2e for any changed label/role first.
