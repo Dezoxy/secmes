@@ -92,6 +92,7 @@ describe('SessionTokenService (unit)', () => {
       });
       expect(payload.sub).toBe(SUB);
       expect(payload.sid).toBe(SESSION_ID);
+      expect(payload['uid']).toBe(USER_ID); // uid allows user lookup by users.id without external_identity_id
       expect(payload['kid']).toBeUndefined(); // kid is in the header, not payload
     });
 
@@ -162,6 +163,7 @@ describe('SessionTokenService (unit)', () => {
       });
       expect(payload.sub).toBe(SUB);
       expect(payload.sid).toBe(SESSION_ID);
+      expect(payload['uid']).toBe(USER_ID);
     });
 
     it('throws 401 when no matching session row found', async () => {
@@ -189,11 +191,12 @@ describe('SessionTokenService (unit)', () => {
       expect(withTenant).not.toHaveBeenCalled(); // no rotation attempted
     });
 
-    it('throws 401 when optimistic lock fails (concurrent rotation)', async () => {
+    it('throws 401 and revokes session family when optimistic lock fails (concurrent rotation)', async () => {
       vi.mocked(withRouting).mockResolvedValueOnce(makeActiveRow());
-      vi.mocked(withTenant).mockResolvedValueOnce([]); // optimistic lock failed: INSERT skipped
+      vi.mocked(withTenant).mockResolvedValueOnce([]); // lock failed → family revocation + [] returned
 
       await expect(svc.rotateRefresh('f'.repeat(64))).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(withTenant).toHaveBeenCalledTimes(1); // revocation runs inside the same withTenant call
     });
   });
 

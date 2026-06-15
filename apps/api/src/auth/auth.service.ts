@@ -13,6 +13,12 @@ export interface VerifiedAuth {
   tenantId: string;
   /** Session ID from self-minted argus tokens (`sid` JWT claim). Absent for Zitadel tokens. */
   sid?: string;
+  /**
+   * Internal users.id UUID from self-minted argus tokens (`uid` JWT claim). Absent for Zitadel
+   * tokens. Allows user-resolution by PK without relying on external_identity_id, which carries
+   * Zitadel IDs incompatible with argusid:... subjects.
+   */
+  userId?: string;
   /** Verified profile claims (present when the IdP grants email/profile scope). Used for JIT provisioning. */
   email?: string;
   name?: string;
@@ -86,6 +92,10 @@ export class AuthService {
     // sid — present only in argus-minted tokens (the session DB row id for revocation).
     const sid = isArgusMinted && typeof payload!.sid === 'string' ? payload!.sid : undefined;
 
+    // uid — present only in argus-minted tokens (users.id UUID). Enables user lookup by PK instead
+    // of by external_identity_id, which carries Zitadel IDs incompatible with argusid:... subjects.
+    const userId = isArgusMinted && typeof payload!.uid === 'string' ? payload!.uid : undefined;
+
     // Optional verified profile claims (used for JIT provisioning from Zitadel tokens only).
     // Argus-minted tokens carry no IdP claims.
     const email = !isArgusMinted && typeof payload!.email === 'string' ? payload!.email : undefined;
@@ -109,6 +119,6 @@ export class AuthService {
         .then((r) => r[0]),
     );
 
-    return { sub, tenantId: row?.tenantId ?? null, sid, email, name };
+    return { sub, tenantId: row?.tenantId ?? null, sid, userId, email, name };
   }
 }

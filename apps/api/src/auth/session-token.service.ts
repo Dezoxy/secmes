@@ -63,7 +63,7 @@ export class SessionTokenService {
     });
     if (!session) throw new Error('failed to create session row');
 
-    const accessToken = await this.mintAccessToken(opts.sub, session.id);
+    const accessToken = await this.mintAccessToken(opts.sub, session.id, opts.userId);
     return { accessToken, refreshToken, sessionId: session.id };
   }
 
@@ -136,7 +136,21 @@ export class SessionTokenService {
         )
         .returning({ id: schema.authSessions.id });
 
-      if (revoked.length === 0) return []; // concurrent rotation won the race
+      if (revoked.length === 0) {
+        // Optimistic lock missed: the token was already rotated/revoked between the pre-tenant
+        // SELECT and this UPDATE. Treat as a theft signal (same semantics as reuse detection) and
+        // revoke the entire session family so the winner of the race also loses their session.
+        this.logger.warn(
+          `session.rotation_race: revoking all active sessions for user ${row.userId}`,
+        );
+        await tx
+          .update(schema.authSessions)
+          .set({ revokedAt: now })
+          .where(
+            and(eq(schema.authSessions.userId, row.userId), isNull(schema.authSessions.revokedAt)),
+          );
+        return [];
+      }
 
       return tx
         .insert(schema.authSessions)
@@ -152,7 +166,7 @@ export class SessionTokenService {
 
     if (!newSession) throw new UnauthorizedException(INVALID);
 
-    const accessToken = await this.mintAccessToken(row.sub, newSession.id);
+    const accessToken = await this.mintAccessToken(row.sub, newSession.id, row.userId);
     return { accessToken, refreshToken: newRefreshToken, sessionId: newSession.id };
   }
 
@@ -166,9 +180,11 @@ export class SessionTokenService {
     );
   }
 
-  private async mintAccessToken(sub: string, sid: string): Promise<string> {
+  private async mintAccessToken(sub: string, sid: string, userId: string): Promise<string> {
+    // uid: users.id (UUID) lets AuthService map argus tokens to the users table without relying on
+    // external_identity_id, which carries Zitadel IDs and is incompatible with argusid:... subjects.
     // kid: 'argus-session-v1' enables future zero-downtime key rotation without token invalidation.
-    return new SignJWT({ sub, sid })
+    return new SignJWT({ sub, sid, uid: userId })
       .setProtectedHeader({ alg: 'EdDSA', kid: 'argus-session-v1' })
       .setIssuer('argus')
       .setAudience('argus-api')
