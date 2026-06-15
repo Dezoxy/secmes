@@ -142,7 +142,16 @@ banned (`argus-no-insecure-random`). `tsconfig` has `noUncheckedIndexedAccess` (
 **Goal:** every user gets an immutable, system-generated argus-id, surfaced in `/me`. OIDC still active.
 **Threat model:** `docs/threat-models/argus-id-identity.md`.
 **Changes:**
-- `apps/api/src/db/migrations/0030_argus_id.sql` — `gen_argus_id()` (plpgsql, unambiguous alphabet `23456789abcdefghjkmnpqrstvwxyz`) that emits the **canonical `argus-<16>-<animal>` shape** — embed a small animal-word array in the SQL (a copy/subset of `HANDLE_ANIMALS`) and append a random one, NOT a static `-id` suffix; otherwise legacy rows get a non-conforming, now-immutable id that `/me` would surface. **Use a CSPRNG for the randomness** — `pgcrypto`'s `gen_random_bytes()` with **unbiased** sampling (rejection or a wide-modulo reduction), NOT `random()`: these ids are exposed and immutable, so the locked CSPRNG-for-identifiers decision applies to the SQL default too. (Cleanest alternative: keep the column nullable, **backfill explicitly via the app generator `generateArgusId()`**, then `set not null` + add the trigger — avoids a second SQL generator entirely.) `alter table users add column argus_id text not null default gen_argus_id()`; `create unique index users_argus_id_idx on users (argus_id)`; **then** add the immutability trigger (`users_argus_id_immutable` + BEFORE UPDATE) AFTER the backfill so it never blocks the column fill. (Alternative: leave the column nullable, backfill explicitly via the app generator, then `set not null` + trigger.) See gotchas #1, #2.
+- `apps/api/src/db/migrations/0030_argus_id.sql` — **Recommended approach (no SQL random generator):** add `argus_id`
+  nullable, **backfill existing rows explicitly via the app generator `generateArgusId()`** (CSPRNG, canonical
+  `argus-<16>-<animal>`), then `set not null`, `create unique index users_argus_id_idx on users (argus_id)`, and only
+  **then** add the immutability trigger (`users_argus_id_immutable` + BEFORE UPDATE) — so the trigger never blocks the
+  fill. This guarantees the locked format + CSPRNG decision without a second generator, and avoids any extension
+  dependency. **If you instead want a DB `DEFAULT` for raw inserts:** it MUST (a) emit the canonical
+  `argus-<16>-<animal>` shape (embed a small animal array from `HANDLE_ANIMALS` in the SQL — not a static `-id`
+  suffix, which would leave legacy rows a non-conforming immutable id), (b) use a **CSPRNG** — `gen_random_bytes()`
+  with unbiased sampling, NOT `random()` — and (c) first `CREATE EXTENSION IF NOT EXISTS pgcrypto` (no existing
+  migration creates it, so `gen_random_bytes()` would otherwise fail on a fresh DB). See gotchas #1, #2.
 - `apps/api/src/users/argus-id.ts` (new) — `generateArgusId()` (CSPRNG `node:crypto.randomInt`, `argus-<16 chars>-<animal>` reusing `HANDLE_ANIMALS`, lowercased; `!` on index access per gotcha #3) + `argus-id.spec.ts`.
 - `apps/api/src/db/schema.ts` — add `argusId: text('argus_id').notNull()` to `users`.
 - `apps/api/src/users/user.service.ts` — add `argusId` to `SELECTION` + `UserRecord`; in `provisionFromToken`
@@ -231,10 +240,13 @@ via the cookie. `jwt-auth.guard.ts` + WS gateway untouched; existing OIDC logins
   `webauthn_credentials`, then mint the first session. **Do NOT regenerate at verify** — a different value would make a
   later discoverable login's `userHandle` fail to resolve against `users.argus_id` / `user_tenant_index`.
 - Login: `/auth/webauthn/authenticate/options` (empty `allowCredentials` → discoverable; user picks passkey, no
-  typed id; decode the returned `userHandle` with `isoUint8Array.toUTF8String` to recover the argus-id) → `/verify`
-  (look up by `credential_id` under `withTenant(DEFAULT_TENANT_ID)`, check+bump counter → clone detection: reject
-  ONLY when the stored counter > 0 and the new counter ≤ it. Counters that stay at `0` are NORMAL for synced /
-  platform passkeys (Touch ID, etc.) and must NOT be rejected, or every login after the first breaks) → mint session.
+  typed id) → `/verify`: look up the credential by `credential_id` under `withTenant(DEFAULT_TENANT_ID)` and
+  **derive the identity from the STORED credential row** (`credential_id → user_id → users.argus_id`); **mint the
+  session from THAT stored user — never from the client-POSTed `userHandle`.** If `userHandle` is used at all, assert
+  it equals the stored owner's argus-id and reject on mismatch — otherwise a valid credential + a tampered `userHandle`
+  is a **cross-account login**. Then check+bump counter → clone detection: reject ONLY when the stored counter > 0 and
+  the new counter ≤ it (counters that stay at `0` are NORMAL for synced/platform passkeys like Touch ID and must NOT
+  be rejected, or every login after the first breaks) → mint session.
 - **WebAuthn PRF** for local keystore unlock (decision #6): request the PRF extension at register/auth; derive the
   keystore-unlock key from the PRF output so there's **no separate passphrase**. **Fallback (no PRF support):** seal
   the keystore under a key wrapped by an **admin-issued one-time recovery code** (same Argon2id+AEAD shape as the
@@ -336,7 +348,9 @@ reach a Zitadel that no longer exists and fail this phase's "boots with no Zitad
 IdP email/name JIT claims (the last writer of `users.email`). **Run the deferred bulk `UPDATE users SET email = NULL`
 data-minimisation here** — safe only now: the OIDC email writer is gone, the directory reader was removed in Phase 5,
 and the remaining readers `DeviceSummary` (`AdminService.listDevices`) / `MemberSummary` (`TenantsService.listMembers`)
-drop `email` in this phase. Delete `POST /tenants` + `CreateWorkspace.tsx`; delete billing module +
+drop `email` in this phase. **Also null/drop `tenant_invites.invitee_email`** and remove it from the code
+create/list contracts + TeamSettings — the reused invite/code machinery otherwise still stores and exposes invitee
+emails, contradicting the locked "email dropped entirely" decision. Delete `POST /tenants` + `CreateWorkspace.tsx`; delete billing module +
 Stripe webhook; remove plan/SSO gating + the AdminPanel SSO tab. Mark `per-tenant-sso.md` retired. Purge dead
 routing rows: `DELETE FROM user_tenant_index WHERE sub NOT LIKE 'argusid:%'` (legacy Zitadel subs — inert once
 Phase 1 lands). **Leave inert columns** (`stripe_*`, `plan_*`, plus the now-nulled `email` and legacy
