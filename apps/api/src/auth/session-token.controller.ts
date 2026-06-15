@@ -9,6 +9,7 @@ import {
   Req,
   Res,
 } from '@nestjs/common';
+import { AuditService } from '../audit/audit.service.js';
 import {
   ApiBearerAuth,
   ApiHeader,
@@ -47,7 +48,10 @@ class RefreshResponseDto {
 export class SessionTokenController {
   private readonly logger = new Logger(SessionTokenController.name);
 
-  constructor(private readonly sessions: SessionTokenService) {}
+  constructor(
+    private readonly sessions: SessionTokenService,
+    private readonly audit: AuditService,
+  ) {}
 
   /**
    * Rotate the refresh token: present the HttpOnly cookie, receive a new access token + rotated
@@ -132,6 +136,7 @@ export class SessionTokenController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async logout(
     @CurrentAuth() auth: VerifiedAuth,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
     if (auth.userId || auth.sid) {
@@ -140,6 +145,13 @@ export class SessionTokenController {
         sessionId: auth.sid,
       });
     }
+
+    await this.audit.record(auth.tenantId, {
+      eventType: 'session.logout',
+      actorSub: auth.sub,
+      ip: req.ip,
+      userAgent: String(req.headers['user-agent'] ?? ''),
+    });
 
     // Clear the cookie regardless of whether the token carried a sid (Zitadel tokens don't).
     res.clearCookie(COOKIE_NAME, { path: REFRESH_COOKIE_PATH });

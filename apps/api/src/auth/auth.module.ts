@@ -3,6 +3,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { createRemoteJWKSet, type JWTVerifyGetKey } from 'jose';
 
+import { AuditModule } from '../audit/audit.module.js';
 import { DEFAULT_THROTTLE } from '../rate-limit/rate-limit.constants.js';
 import { UserThrottlerGuard } from '../rate-limit/user-throttler.guard.js';
 import { OIDC_CONFIG, OIDC_JWKS, loadOidcConfig, type OidcConfig } from './auth.config.js';
@@ -19,7 +20,7 @@ import { SessionTokenController } from './session-token.controller.js';
 import { SessionTokenService } from './session-token.service.js';
 
 @Module({
-  imports: [ThrottlerModule.forRoot(DEFAULT_THROTTLE)],
+  imports: [ThrottlerModule.forRoot(DEFAULT_THROTTLE), AuditModule],
   controllers: [SessionTokenController],
   providers: [
     { provide: OIDC_CONFIG, useFactory: loadOidcConfig },

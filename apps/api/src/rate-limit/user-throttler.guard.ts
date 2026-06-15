@@ -3,6 +3,7 @@ import { ThrottlerGuard } from '@nestjs/throttler';
 
 import type { MaybeUnboundAuth } from '../auth/auth.service.js';
 import { IS_PUBLIC_KEY } from '../auth/public.decorator.js';
+import { COOKIE_NAME } from '../auth/session-token.service.js';
 import { PUBLIC_RATE_LIMIT_KEY } from './public-rate-limit.decorator.js';
 
 /**
@@ -24,12 +25,20 @@ export class UserThrottlerGuard extends ThrottlerGuard {
     // req.auth is set by JwtAuthGuard. For @AllowUnbound routes, tenantId may be null — use
     // `unbound:<sub>` so the limit is still identity-scoped (not IP), even before binding.
     const auth = req.auth as MaybeUnboundAuth | undefined;
-    const ip = (req.ip as string | undefined) ?? 'unknown';
     if (auth) {
       return Promise.resolve(
         auth.tenantId ? `u:${auth.tenantId}:${auth.sub}` : `unbound:${auth.sub}`,
       );
     }
+    // For @PublicRateLimit() routes: key on the first 16 chars of the refresh cookie when present.
+    // Each session gets its own bucket (NAT-safe; avoids throttling an entire office behind one IP).
+    // 64 bits of prefix is ample for bucketing — the full token never leaves this process.
+    const cookies = req.cookies as Record<string, string | undefined> | undefined;
+    const refreshCookie = cookies?.[COOKIE_NAME];
+    if (refreshCookie && refreshCookie.length >= 16) {
+      return Promise.resolve(`session:${refreshCookie.slice(0, 16)}`);
+    }
+    const ip = (req.ip as string | undefined) ?? 'unknown';
     return Promise.resolve(`ip:${ip}`);
   }
 
