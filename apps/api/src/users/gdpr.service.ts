@@ -196,7 +196,7 @@ export class GdprService {
               eq(schema.auditEvents.tenantId, auth.tenantId),
               or(
                 eq(schema.auditEvents.actorSub, user.externalIdentityId),
-                eq(schema.auditEvents.actorSub, `argusid:${user.id}`),
+                eq(schema.auditEvents.actorSub, `argusid:${user.argusId}`),
               ),
             ),
           )
@@ -412,7 +412,7 @@ export class GdprService {
             eq(schema.auditEvents.tenantId, auth.tenantId),
             or(
               eq(schema.auditEvents.actorSub, user.externalIdentityId),
-              eq(schema.auditEvents.actorSub, `argusid:${user.id}`),
+              eq(schema.auditEvents.actorSub, `argusid:${user.argusId}`),
             ),
           ),
         );
@@ -427,7 +427,7 @@ export class GdprService {
         .delete(schema.users)
         .where(and(eq(schema.users.id, user.id), eq(schema.users.tenantId, auth.tenantId)));
 
-      return { externalId: user.externalIdentityId, userId: user.id, objectKeys };
+      return { externalId: user.externalIdentityId, argusId: user.argusId, objectKeys };
     });
 
     // 2. Clean up the routing index (no RLS — uses withRouting). Best-effort: if this fails
@@ -443,7 +443,7 @@ export class GdprService {
             .where(
               or(
                 eq(schema.userTenantIndex.sub, result.externalId),
-                eq(schema.userTenantIndex.sub, `argusid:${result.userId}`),
+                eq(schema.userTenantIndex.sub, `argusid:${result.argusId}`),
               ),
             );
         });
@@ -475,9 +475,13 @@ export class GdprService {
 async function resolveUserId(
   tx: Tx,
   auth: VerifiedAuth,
-): Promise<{ id: string; externalIdentityId: string } | undefined> {
+): Promise<{ id: string; externalIdentityId: string; argusId: string } | undefined> {
   const [row] = await tx
-    .select({ id: schema.users.id, externalIdentityId: schema.users.externalIdentityId })
+    .select({
+      id: schema.users.id,
+      externalIdentityId: schema.users.externalIdentityId,
+      argusId: schema.users.argusId,
+    })
     .from(schema.users)
     .where(
       and(
