@@ -45,7 +45,7 @@ async function bootstrap(): Promise<void> {
   app.enableCors({
     origin: frontendOrigin,
     credentials: true,
-    allowedHeaders: ['Authorization', 'Content-Type', 'X-Argus-Refresh'],
+    allowedHeaders: ['Authorization', 'Content-Type', 'X-Argus-Refresh', 'X-Confirm-Delete'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   });
 
