@@ -31,7 +31,6 @@ import { COOKIE_NAME, SessionTokenService } from './session-token.service.js';
 import { PublicRateLimit } from '../rate-limit/public-rate-limit.decorator.js';
 import { SENSITIVE_LIMITS, perMinute } from '../rate-limit/rate-limit.constants.js';
 
-const REFRESH_COOKIE_MAX_AGE = 30 * 24 * 60 * 60; // 30 days in seconds
 // API_PATH_PREFIX is the external prefix Caddy (prod) or Vite (dev) maps to the API root.
 // The cookie path must match the browser-visible URL, not the NestJS-internal path.
 // Default '/api' covers both the Vite dev-proxy and the Caddy prod deployment.
@@ -96,15 +95,18 @@ export class SessionTokenController {
       throw new BadRequestException('argus_refresh cookie is missing');
     }
 
-    const { accessToken, refreshToken: newRefreshToken } =
-      await this.sessions.rotateRefresh(refreshToken);
+    const {
+      accessToken,
+      refreshToken: newRefreshToken,
+      expiresAt,
+    } = await this.sessions.rotateRefresh(refreshToken);
 
     res.cookie(COOKIE_NAME, newRefreshToken, {
       httpOnly: true,
       secure: true,
       sameSite: 'strict',
       path: REFRESH_COOKIE_PATH,
-      maxAge: REFRESH_COOKIE_MAX_AGE * 1000, // express uses ms
+      maxAge: Math.max(0, expiresAt.getTime() - Date.now()), // remaining TTL in ms — cookie tracks DB expiry
     });
 
     this.logger.debug(`session refreshed from ${ip}`);

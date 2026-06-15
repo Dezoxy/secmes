@@ -17,6 +17,7 @@ export interface MintedSession {
   accessToken: string;
   refreshToken: string;
   sessionId: string;
+  expiresAt: Date;
 }
 
 function sha256hex(input: string): string {
@@ -64,7 +65,7 @@ export class SessionTokenService {
     if (!session) throw new Error('failed to create session row');
 
     const accessToken = await this.mintAccessToken(opts.sub, session.id, opts.userId);
-    return { accessToken, refreshToken, sessionId: session.id };
+    return { accessToken, refreshToken, sessionId: session.id, expiresAt };
   }
 
   /**
@@ -185,7 +186,12 @@ export class SessionTokenService {
     if (!newSession) throw new UnauthorizedException(INVALID);
 
     const accessToken = await this.mintAccessToken(row.sub, newSession.id, row.userId);
-    return { accessToken, refreshToken: newRefreshToken, sessionId: newSession.id };
+    return {
+      accessToken,
+      refreshToken: newRefreshToken,
+      sessionId: newSession.id,
+      expiresAt: row.expiresAt,
+    };
   }
 
   /**
