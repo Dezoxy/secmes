@@ -246,6 +246,20 @@ export const deviceEnrollments = pgTable('device_enrollments', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
 
+// Phase 1 — self-minted session tokens. Stateful refresh token storage. FORCE RLS, see 0031.
+// Access tokens are stateless JWTs; only refresh state lives here (hashed, never plain).
+export const authSessions = pgTable('auth_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  userId: uuid('user_id').notNull(),
+  sub: text('sub').notNull(), // "argusid:<argus_id>", for access-token re-mint
+  refreshTokenHash: text('refresh_token_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+});
+
 // Append-only audit log (IDs + metadata only — never content/secrets). RLS + grants in 0002.
 export const auditEvents = pgTable('audit_events', {
   id: uuid('id').primaryKey().defaultRandom(),
