@@ -10,6 +10,13 @@ data "azuread_client_config" "current" {}
 # guest-config policy / extensions, which this stack doesn't use. The azurerm provider's default `core`
 # registration set does NOT include it, so add it as a third registration here if you ever attach
 # machine-config policy on a fresh subscription.)
+#
+# ALREADY-REGISTERED subscriptions: azurerm ERRORS on create when a namespace is already `Registered` (it must
+# be imported into state, not re-created). A FRESH subscription needs nothing — create registers them. But if
+# you re-apply to a sub where these were registered out-of-band (a manual `az provider register`, or a prior
+# deploy), import the two resources FIRST or the apply fails before the ordering fix can help:
+#   terraform import azurerm_resource_provider_registration.hybrid_compute      /subscriptions/<sub-id>/providers/Microsoft.HybridCompute
+#   terraform import azurerm_resource_provider_registration.hybrid_connectivity /subscriptions/<sub-id>/providers/Microsoft.HybridConnectivity
 # ============================================================================================================
 resource "azurerm_resource_provider_registration" "hybrid_compute" {
   name = "Microsoft.HybridCompute"
