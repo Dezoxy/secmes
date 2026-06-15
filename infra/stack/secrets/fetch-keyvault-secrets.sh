@@ -71,6 +71,11 @@ SECRETS=(
 # runs degraded until the value is provisioned. Used for the Zitadel Login V2 service-user PAT, which Zitadel
 # only mints AFTER first init — the operator stores it in Key Vault during arming (see vm-zitadel.md).
 OPTIONAL_SECRETS=(
+  # Phase 1 session tokens: Ed25519 signing key (PKCS8 PEM). Seeded EMPTY until the operator generates the key
+  # and stores it in Key Vault (see docs/threat-models/session-tokens.md §invariant-4). The API starts in
+  # ephemeral-key mode (dev) if this file is empty — but NODE_ENV=production will throw at startup, so the
+  # operator MUST provision this before running a production deployment.
+  "argus-session-signing-key=session_signing_key"
   "argus-zitadel-login-pat=zitadel_login_pat"
   # GlitchTip project DSN — a write-only ingest key the operator creates in the GlitchTip UI after
   # the first deploy (arming). Seeded EMPTY until provisioned; the api is a complete no-op without it.

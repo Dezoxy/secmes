@@ -158,6 +158,11 @@ services:
       # G8 Operator: API key for the /operator/* plan-management endpoints.
       # OPTIONAL — endpoints return 401 until provisioned.
       OPERATOR_API_KEY_FILE: /run/secrets/operator_api_key
+      # Phase 1 session tokens: path to the Ed25519 PKCS8 PEM signing key (see session-key.config.ts).
+      # OPTIONAL on first boot — seeded EMPTY until provisioned; the api throws at startup under NODE_ENV=production
+      # with an empty file (invariant: SESSION_SIGNING_KEY_FILE MUST be set in production). Provision the key in
+      # Key Vault (argus-session-signing-key) before the first production deploy.
+      SESSION_SIGNING_KEY_FILE: /run/secrets/session_signing_key
     secrets:
       - database_url
       - s3_secret_access_key
@@ -167,6 +172,7 @@ services:
       - stripe_secret_key
       - stripe_webhook_secret
       - operator_api_key
+      - session_signing_key
     depends_on:
       postgres:
         condition: service_healthy
@@ -799,6 +805,12 @@ secrets:
     # G8 Operator: long-lived API key for /operator/* plan management endpoints. OPTIONAL — seeded
     # EMPTY until provisioned (argus-operator-api-key). Endpoints return 401 when empty.
     file: ${ARGUS_SECRETS_DIR:-./secrets}/operator_api_key
+  session_signing_key:
+    # Phase 1 session tokens: Ed25519 PKCS8 PEM private key for signing argus-minted JWTs. OPTIONAL on first
+    # boot — seeded EMPTY until the operator provisions argus-session-signing-key in Key Vault. The API throws
+    # at startup under NODE_ENV=production when the file is empty or missing (see session-key.config.ts).
+    # Generate once: openssl genpkey -algorithm ed25519 | openssl pkcs8 -topk8 -nocrypt -outform PEM
+    file: ${ARGUS_SECRETS_DIR:-./secrets}/session_signing_key
 
 volumes:
   pgdata:
