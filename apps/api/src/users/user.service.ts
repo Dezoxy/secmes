@@ -4,10 +4,12 @@ import type { TenantPlan } from '@argus/contracts';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
+import { generateArgusId, isArgusIdCollision } from './argus-id.js';
 import { generateHandle } from './handle-words.js';
 
 export interface UserRecord {
   id: string;
+  argusId: string;
   email: string;
   displayName: string | null;
   role: string;
@@ -16,6 +18,7 @@ export interface UserRecord {
 
 const SELECTION = {
   id: schema.users.id,
+  argusId: schema.users.argusId,
   email: schema.users.email,
   displayName: schema.users.displayName,
   role: schema.users.role,
@@ -88,6 +91,7 @@ export class UserService {
     const email = auth.email;
     for (let attempt = 0; attempt < MAX_HANDLE_ATTEMPTS; attempt++) {
       const displayName = generate();
+      const argusId = generateArgusId();
       try {
         const [user] = await withTenant(auth.tenantId, async (tx) =>
           tx
@@ -97,6 +101,7 @@ export class UserService {
               externalIdentityId: auth.sub,
               email,
               displayName,
+              argusId,
             })
             .onConflictDoUpdate({
               target: [schema.users.tenantId, schema.users.externalIdentityId],
@@ -104,6 +109,7 @@ export class UserService {
               // value, the candidate is discarded so it never reaches the display_name index). A NULL
               // display_name (every legacy name was reset to NULL by migration 0016) is HEALED to the candidate
               // handle — which IS then checked against the unique index, so a collision still regenerates.
+              // argusId is intentionally excluded from SET — immutability is DB-enforced via trigger too.
               set: {
                 email,
                 displayName: sql`coalesce(${schema.users.displayName}, excluded.display_name)`,
@@ -118,6 +124,7 @@ export class UserService {
         // A NEW user's generated handle collided with another member's handle — regenerate and retry. Any
         // other error (incl. a non-handle unique violation) propagates immediately.
         if (isHandleCollision(err)) continue;
+        if (isArgusIdCollision(err)) continue;
         throw err;
       }
     }

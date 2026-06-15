@@ -36,6 +36,7 @@ export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   tenantId: uuid('tenant_id').notNull(),
   externalIdentityId: text('external_identity_id').notNull(),
+  argusId: text('argus_id').notNull(),
   email: text('email').notNull(),
   displayName: text('display_name'),
   status: text('status').notNull().default('active'),

@@ -59,6 +59,7 @@ describe('api client', () => {
       bound: true,
       userId,
       tenantId,
+      argusId: 'argus-abcdefghjkmnpqrs-otter',
       email: 'alice@example.com',
       displayName: 'A',
       role: 'member',

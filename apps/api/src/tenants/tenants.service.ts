@@ -14,6 +14,7 @@ import type { MaybeUnboundAuth, VerifiedAuth } from '../auth/auth.service.js';
 import { PaymentRequiredException } from '../common/http-exceptions.js';
 import { schema, withRouting, withTenant } from '../db/index.js';
 import { PlansService } from '../plans/plans.service.js';
+import { generateArgusId, isArgusIdCollision } from '../users/argus-id.js';
 import { generateHandle } from '../users/handle-words.js';
 
 const MAX_HANDLE_ATTEMPTS = 8;
@@ -108,12 +109,20 @@ export class TenantsService {
     for (let attempt = 0; attempt < MAX_HANDLE_ATTEMPTS; attempt++) {
       const tenantId = randomUUID();
       const displayName = generate();
+      const argusId = generateArgusId();
       try {
         const result = await withTenant(tenantId, async (tx) => {
           await tx.insert(schema.tenants).values({ id: tenantId, name });
           const [user] = await tx
             .insert(schema.users)
-            .values({ tenantId, externalIdentityId: sub, email, displayName, role: 'admin' })
+            .values({
+              tenantId,
+              externalIdentityId: sub,
+              email,
+              displayName,
+              role: 'admin',
+              argusId,
+            })
             .returning({ id: schema.users.id });
           if (!user) throw new Error('user insert returned no row');
           await tx.insert(schema.userTenantIndex).values({ sub, tenantId });
@@ -123,6 +132,7 @@ export class TenantsService {
         return result;
       } catch (err) {
         if (isHandleCollision(err) && attempt < MAX_HANDLE_ATTEMPTS - 1) continue;
+        if (isArgusIdCollision(err) && attempt < MAX_HANDLE_ATTEMPTS - 1) continue;
         if (isSubCollision(err)) throw new ConflictException('already bound to a tenant');
         throw err;
       }
@@ -232,6 +242,7 @@ export class TenantsService {
 
     for (let attempt = 0; attempt < MAX_HANDLE_ATTEMPTS; attempt++) {
       const displayName = generate();
+      const argusId = generateArgusId();
       try {
         const result = await withTenant(invite.tenantId, async (tx) => {
           // Race-safety: lock the tenant row before counting members so concurrent acceptInvite
@@ -279,6 +290,7 @@ export class TenantsService {
               email,
               displayName,
               role: 'member',
+              argusId,
             })
             .returning({ id: schema.users.id });
           if (!user) throw new Error('user insert returned no row');
@@ -297,6 +309,7 @@ export class TenantsService {
         return result;
       } catch (err) {
         if (isHandleCollision(err) && attempt < MAX_HANDLE_ATTEMPTS - 1) continue;
+        if (isArgusIdCollision(err) && attempt < MAX_HANDLE_ATTEMPTS - 1) continue;
         if (isSubCollision(err)) throw new ConflictException('already bound to a tenant');
         throw err;
       }

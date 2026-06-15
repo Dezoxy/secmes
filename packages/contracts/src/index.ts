@@ -81,6 +81,7 @@ export const MeBoundSchema = z.object({
   bound: z.literal(true),
   userId: z.string().uuid(),
   tenantId: z.string().uuid(),
+  argusId: z.string(),
   email: z.string().email(),
   displayName: z.string().nullable(),
   role: z.enum(['admin', 'member']),
