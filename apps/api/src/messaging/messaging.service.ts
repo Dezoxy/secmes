@@ -882,13 +882,18 @@ export class MessagingService {
             .onConflictDoNothing();
         }
 
-        // Look up removed members' external subs BEFORE deleting them (needed to evict their live
-        // WS room subscriptions via MemberRemovedEvent post-commit).
+        // Look up removed members' subs BEFORE deleting them (needed to evict their live WS room
+        // subscriptions via MemberRemovedEvent post-commit). Both the Zitadel sub (externalIdentityId)
+        // and the argus sub (argusid:<argus_id>) are collected so that sockets authenticated under
+        // either token family are evicted — gateway matches on state.auth.sub.
         const removedSubs: string[] =
           body.removedUserIds.length > 0
             ? (
                 await tx
-                  .select({ sub: schema.users.externalIdentityId })
+                  .select({
+                    sub: schema.users.externalIdentityId,
+                    argusId: schema.users.argusId,
+                  })
                   .from(schema.users)
                   .where(
                     and(
@@ -896,7 +901,7 @@ export class MessagingService {
                       inArray(schema.users.id, body.removedUserIds),
                     ),
                   )
-              ).map((u) => u.sub)
+              ).flatMap((u) => [u.sub, `argusid:${u.argusId}`])
             : [];
         if (body.removedUserIds.length > 0) {
           await tx.delete(schema.conversationMembers).where(
