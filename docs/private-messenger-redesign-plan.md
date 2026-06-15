@@ -142,7 +142,7 @@ banned (`argus-no-insecure-random`). `tsconfig` has `noUncheckedIndexedAccess` (
 **Goal:** every user gets an immutable, system-generated argus-id, surfaced in `/me`. OIDC still active.
 **Threat model:** `docs/threat-models/argus-id-identity.md`.
 **Changes:**
-- `apps/api/src/db/migrations/0030_argus_id.sql` — `gen_argus_id()` (plpgsql, unambiguous alphabet `23456789abcdefghjkmnpqrstvwxyz`, returns `argus-<16>-id` as the DB fallback); `alter table users add column argus_id text not null default gen_argus_id()`; `create unique index users_argus_id_idx on users (argus_id)`; immutability trigger (`users_argus_id_immutable` + BEFORE UPDATE). See gotchas #1, #2.
+- `apps/api/src/db/migrations/0030_argus_id.sql` — `gen_argus_id()` (plpgsql, unambiguous alphabet `23456789abcdefghjkmnpqrstvwxyz`) that emits the **canonical `argus-<16>-<animal>` shape** — embed a small animal-word array in the SQL (a copy/subset of `HANDLE_ANIMALS`) and append a random one, NOT a static `-id` suffix; otherwise legacy rows get a non-conforming, now-immutable id that `/me` would surface. `alter table users add column argus_id text not null default gen_argus_id()`; `create unique index users_argus_id_idx on users (argus_id)`; **then** add the immutability trigger (`users_argus_id_immutable` + BEFORE UPDATE) AFTER the backfill so it never blocks the column fill. (Alternative: leave the column nullable, backfill explicitly via the app generator, then `set not null` + trigger.) See gotchas #1, #2.
 - `apps/api/src/users/argus-id.ts` (new) — `generateArgusId()` (CSPRNG `node:crypto.randomInt`, `argus-<16 chars>-<animal>` reusing `HANDLE_ANIMALS`, lowercased; `!` on index access per gotcha #3) + `argus-id.spec.ts`.
 - `apps/api/src/db/schema.ts` — add `argusId: text('argus_id').notNull()` to `users`.
 - `apps/api/src/users/user.service.ts` — add `argusId` to `SELECTION` + `UserRecord`; in `provisionFromToken`
@@ -209,9 +209,11 @@ via the cookie. `jwt-auth.guard.ts` + WS gateway untouched; existing OIDC logins
 - **Schema — make `users.email` nullable in THIS phase's migration** (moved up from Phase 4): Phase 2 is the first to
   insert email-less users and `email` is currently `NOT NULL` (0001), so without this the registration tx fails the
   not-null constraint before the credential/session are created. Because the legacy `GET /users` directory and `/me`
-  (still live until Phase 4/5) type `email` as a **required** string, also relax `UserSummary.email` and
-  `MeBound.email` to nullable here and have the directory UI tolerate null — so new null-email users don't break those
-  contracts during the transition.
+  (still live until Phase 4/5) type `email` as a **required** string, also relax **every contract that still selects
+  `users.email`** to nullable here — `UserSummary.email`, `MeBound.email`, **`DeviceSummary.email`
+  (`AdminService.listDevices`), and `MemberSummary.email` (`TenantsService.listMembers`)** — and have the admin/
+  directory UIs tolerate null, so new null-email users don't break those contracts during the transition. (Note:
+  the bulk null-out of EXISTING emails is deferred all the way to Phase 6 — see below.)
 - Registration: `POST /auth/register/redeem { code }` (reuse the 0028 token-hash carve-out; **throttle** via the
   existing rate-limiter keyed on source IP — the 256-bit token already defeats brute force; this just blocks
   heavy-path redemption DoS) → short-lived
@@ -245,11 +247,18 @@ regression rejected; login needs no typed id.
 **Goal:** an emergency admin login that yields an admin session (never a content path).
 **Threat model:** `docs/threat-models/breakglass-admin.md`.
 **Changes:**
-- `admin_credentials` table (tenant-scoped, FORCE RLS): `user_id`, `password_hash`, `salt`, `failed_attempts`,
-  `locked_until`, `updated_at`. **Argon2id** via `@noble/hashes/argon2id` (already used for the key-backup KDF —
-  no new dep) at interactive params (≈64 MiB / t=3 / p=1), unique CSPRNG salt.
-- Bootstrap the initial hash from a Key Vault credential file (`ADMIN_BOOTSTRAP_HASH_FILE`), inserted once if the
-  table is empty; rotate via an authenticated `POST /auth/breakglass/rotate`.
+- `admin_credentials` table (tenant-scoped, FORCE RLS, **leading `tenant_id` index**): `tenant_id`, `user_id`,
+  `password_hash`, `salt`, `failed_attempts`, `locked_until`, `updated_at` — `tenant_id` + RLS are mandatory per
+  invariant #3 (a password-hash table must NOT become a de-facto global no-RLS routing table). **Argon2id** via
+  `@noble/hashes/argon2id` (already used for the key-backup KDF — no new dep) at interactive params
+  (≈64 MiB / t=3 / p=1), unique CSPRNG salt.
+- **Bootstrap a bound admin account** (so the minted session passes the existing `AdminGuard`, which re-reads
+  `users.role` by `external_identity_id = auth.sub` under the session tenant): create a default-tenant `users` row
+  (role `admin`, `external_identity_id = "argusid:"+<admin argus-id>` / its own argus-id) + a `user_tenant_index`
+  binding for that sub + the `admin_credentials` row. Without this, a session minted from `admin_credentials` alone
+  would 403 the AdminPanel (or force an unsafe guard bypass).
+- Bootstrap the initial password hash from a Key Vault credential file (`ADMIN_BOOTSTRAP_HASH_FILE`), inserted once
+  if the table is empty; rotate via an authenticated `POST /auth/breakglass/rotate`.
 - `POST /auth/breakglass/login { username, password }` (`@Public`, throttled) → on success mint an admin-scoped
   session (Phase-1 machinery). Lockout after N failures (`locked_until`); **constant-time** path (verify against a
   dummy hash when the row is missing — no timing oracle); audit every attempt
@@ -297,8 +306,7 @@ discovery/`/me` response.
 - **Now remove the directory:** migrate `StartConversation`, `GroupCreateDialog`, and peer-naming off `listUsers()`
   onto `GET /users/lookup` (add-by-argus-id), then delete `GET /users` + `UserService.list` and the
   `UserSummary`/`UserDirectory` contracts in the SAME PR — endpoint and its last callers go together so every phase
-  stays bootable. With the directory (the last reader of `email`) gone, also run the deferred bulk
-  `UPDATE users SET email = NULL` data-minimisation here.
+  stays bootable. (The bulk `email` null-out is NOT here — other readers/writers remain until Phase 6.)
 - Update Playwright E2E (`apps/web/e2e/`) — the `e2e` job gates merges; grep e2e for any changed label/role first.
 **Done-when:** E2E: register with a code → set up passkey → reload stays logged in → add a contact by argus-id →
 send an E2EE message → breakglass admin login works (metadata only).
@@ -310,11 +318,14 @@ send an E2EE message → breakglass admin login works (metadata only).
 `infra/local/zitadel/provision.sh`; **remove the Zitadel JWKS fallback branch from `auth.service.ts verify()` and the
 `OIDC_JWKS` provider from `auth.module.ts`** (the Phase-1 dual-verify path) — leaving them would have the app try to
 reach a Zitadel that no longer exists and fail this phase's "boots with no Zitadel" check; also drop the now-unused
-IdP email/name JIT claims. Delete `POST /tenants` + `CreateWorkspace.tsx`; delete billing module +
+IdP email/name JIT claims (the last writer of `users.email`). **Run the deferred bulk `UPDATE users SET email = NULL`
+data-minimisation here** — safe only now: the OIDC email writer is gone, the directory reader was removed in Phase 5,
+and the remaining readers `DeviceSummary` (`AdminService.listDevices`) / `MemberSummary` (`TenantsService.listMembers`)
+drop `email` in this phase. Delete `POST /tenants` + `CreateWorkspace.tsx`; delete billing module +
 Stripe webhook; remove plan/SSO gating + the AdminPanel SSO tab. Mark `per-tenant-sso.md` retired. Purge dead
 routing rows: `DELETE FROM user_tenant_index WHERE sub NOT LIKE 'argusid:%'` (legacy Zitadel subs — inert once
-Phase 1 lands). **Leave inert columns** (`stripe_*`, `plan_*`, plus legacy `email` / `external_identity_id` on
-pre-redesign rows) rather than risky drops — clean up in a later dedicated migration.
+Phase 1 lands). **Leave inert columns** (`stripe_*`, `plan_*`, plus the now-nulled `email` and legacy
+`external_identity_id` columns) rather than risky drops — clean up in a later dedicated migration.
 **Done-when:** app boots with no Zitadel; no orphaned `@Public` routes; CI security scans green.
 **Reviewers:** `infra-reviewer` (compose/secrets/EU-pinning, no dangling secret mounts), `security-boundary-auditor`.
 
