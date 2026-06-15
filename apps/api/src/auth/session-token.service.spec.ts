@@ -206,7 +206,7 @@ describe('SessionTokenService (unit)', () => {
     it('calls withTenant to set revoked_at', async () => {
       vi.mocked(withTenant).mockResolvedValueOnce(undefined);
 
-      await svc.revokeSession(SESSION_ID, TENANT);
+      await svc.revokeSession(TENANT, { sessionId: SESSION_ID });
 
       expect(withTenant).toHaveBeenCalledWith(TENANT, expect.any(Function));
     });

@@ -1366,7 +1366,7 @@
     },
     "/auth/session/logout": {
       "post": {
-        "description": "Revokes the auth_sessions row identified by the `sid` claim in the access token. The argus_refresh HttpOnly cookie is cleared.",
+        "description": "For argus-minted tokens, revokes all active auth_sessions rows for the authenticated user (equivalent to logging out from all devices). The argus_refresh HttpOnly cookie is cleared.",
         "operationId": "logoutSession",
         "parameters": [],
         "responses": {

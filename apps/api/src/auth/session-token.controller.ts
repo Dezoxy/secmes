@@ -106,8 +106,9 @@ export class SessionTokenController {
   }
 
   /**
-   * Revoke the caller's current session (logout). Requires a valid argus-minted bearer token
-   * (the `sid` claim identifies which session to revoke). The refresh cookie is cleared.
+   * Revoke the caller's current session (logout). For argus-minted tokens, ALL active sessions
+   * for the user are revoked (covers the case where the access token's sid has already been
+   * rotated, leaving a newer refresh chain active). The refresh cookie is cleared.
    */
   @Post('logout')
   @ApiBearerAuth()
@@ -115,8 +116,8 @@ export class SessionTokenController {
     summary: 'Revoke the current argus session (logout)',
     operationId: 'logoutSession',
     description:
-      'Revokes the auth_sessions row identified by the `sid` claim in the access token. ' +
-      'The argus_refresh HttpOnly cookie is cleared.',
+      'For argus-minted tokens, revokes all active auth_sessions rows for the authenticated user ' +
+      '(equivalent to logging out from all devices). The argus_refresh HttpOnly cookie is cleared.',
   })
   @ApiNoContentResponse({ description: 'session revoked' })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
@@ -125,8 +126,11 @@ export class SessionTokenController {
     @CurrentAuth() auth: VerifiedAuth,
     @Res({ passthrough: true }) res: Response,
   ): Promise<void> {
-    if (auth.sid) {
-      await this.sessions.revokeSession(auth.sid, auth.tenantId);
+    if (auth.userId || auth.sid) {
+      await this.sessions.revokeSession(auth.tenantId, {
+        userId: auth.userId,
+        sessionId: auth.sid,
+      });
     }
 
     // Clear the cookie regardless of whether the token carried a sid (Zitadel tokens don't).

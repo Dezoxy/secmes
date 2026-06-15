@@ -170,14 +170,37 @@ export class SessionTokenService {
     return { accessToken, refreshToken: newRefreshToken, sessionId: newSession.id };
   }
 
-  /** Revoke a specific session (logout). */
-  async revokeSession(sessionId: string, tenantId: string): Promise<void> {
-    await withTenant(tenantId, (tx) =>
-      tx
-        .update(schema.authSessions)
-        .set({ revokedAt: new Date() })
-        .where(eq(schema.authSessions.id, sessionId)),
-    );
+  /**
+   * Revoke on logout. When `userId` is present (argus token), revoke ALL active sessions for the
+   * user — this covers the case where the access token's `sid` points to an already-rotated row
+   * while the current refresh chain lives in a newer row. Effectively "logout from all devices."
+   * When only `sessionId` is available (Zitadel token, no uid claim), fall back to revoking just
+   * that row (best-effort; Zitadel tokens have no associated auth_sessions row anyway).
+   */
+  async revokeSession(
+    tenantId: string,
+    opts: { userId?: string; sessionId?: string },
+  ): Promise<void> {
+    if (opts.userId) {
+      await withTenant(tenantId, (tx) =>
+        tx
+          .update(schema.authSessions)
+          .set({ revokedAt: new Date() })
+          .where(
+            and(
+              eq(schema.authSessions.userId, opts.userId!),
+              isNull(schema.authSessions.revokedAt),
+            ),
+          ),
+      );
+    } else if (opts.sessionId) {
+      await withTenant(tenantId, (tx) =>
+        tx
+          .update(schema.authSessions)
+          .set({ revokedAt: new Date() })
+          .where(eq(schema.authSessions.id, opts.sessionId!)),
+      );
+    }
   }
 
   private async mintAccessToken(sub: string, sid: string, userId: string): Promise<string> {
