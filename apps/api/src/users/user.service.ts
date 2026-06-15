@@ -16,9 +16,26 @@ export interface UserRecord {
   plan?: TenantPlan;
 }
 
-const SELECTION = {
+export interface DirectoryRecord {
+  id: string;
+  email: string;
+  displayName: string | null;
+  role: string;
+}
+
+// Full identity projection — argusId included; used only for /me (getByAuth + provisionFromToken).
+const ME_SELECTION = {
   id: schema.users.id,
   argusId: schema.users.argusId,
+  email: schema.users.email,
+  displayName: schema.users.displayName,
+  role: schema.users.role,
+} as const;
+
+// Directory projection — argusId intentionally excluded; used by list() → GET /users.
+// argusId is a user's persistent pseudonymous identity and must not be exposed to all tenant members.
+const DIRECTORY_SELECTION = {
+  id: schema.users.id,
   email: schema.users.email,
   displayName: schema.users.displayName,
   role: schema.users.role,
@@ -115,7 +132,7 @@ export class UserService {
                 displayName: sql`coalesce(${schema.users.displayName}, excluded.display_name)`,
               },
             })
-            .returning(SELECTION),
+            .returning(ME_SELECTION),
         );
         // An upsert with RETURNING always yields exactly one row; guard satisfies the type + is defensive.
         if (!user) throw new Error('provisioning returned no row');
@@ -135,10 +152,10 @@ export class UserService {
   }
 
   /** List ACTIVE users in a tenant (the directory), capped by `limit`. RLS scopes it to the tenant. */
-  async list(tenantId: string, limit: number): Promise<UserRecord[]> {
+  async list(tenantId: string, limit: number): Promise<DirectoryRecord[]> {
     return withTenant(tenantId, async (tx) =>
       tx
-        .select(SELECTION)
+        .select(DIRECTORY_SELECTION)
         .from(schema.users)
         .where(eq(schema.users.status, 'active')) // don't surface deactivated/suspended members
         .orderBy(schema.users.email)
@@ -150,7 +167,7 @@ export class UserService {
   async getByAuth(auth: VerifiedAuth): Promise<UserRecord | undefined> {
     const [user] = await withTenant(auth.tenantId, async (tx) =>
       tx
-        .select(SELECTION)
+        .select(ME_SELECTION)
         .from(schema.users)
         // RLS already scopes to the tenant; the explicit tenant_id predicate is defense-in-depth.
         .where(
