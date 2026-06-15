@@ -36,30 +36,23 @@ repo-root-relative — matching the `terraform -chdir=infra/aws/terraform` form 
 3. **Wait:** `az connectedmachine show -n argus-exp-ec2 -g argus-exp-rg --query status` → `Connected`.
 4. **Apply (phase 2):** `terraform -chdir=infra/aws/terraform apply -var-file=real.tfvars -var arc_machine_connected=true`
    (grants the Arc identity Key Vault read).
-5. **Populate the vault** with REAL secrets. The four external creds are long-lived cloud credentials — per
-   invariant #5, **don't put them in an env file**; enter them transiently (hidden, kept out of shell history):
-   ```bash
-   for v in ARGUS_S3_SECRET_ACCESS_KEY ARGUS_B2_APP_KEY ARGUS_TUNNEL_TOKEN ARGUS_GHCR_TOKEN; do
-     read -rsp "$v: " "$v"; echo; export "$v"
-   done
-   infra/aws/scripts/populate-keyvault.sh   # generates passwords + masterkey, derives the DSNs; idempotent
-   ```
-   Sources: Backblaze console → Application Keys (the **attachments** bucket key gives the *keyID* [non-secret →
-   `S3_ACCESS_KEY_ID` in step 6] plus this *applicationKey* secret; the **db-backups** key is separate);
-   Cloudflare Zero Trust → Networks → Tunnels (the tunnel token); a GitHub PAT with `read:packages` (GHCR pull).
+5. **Populate the vault** with REAL secrets: `infra/aws/scripts/populate-keyvault.sh`. It generates the
+   passwords + masterkey and derives the DSNs, then **prompts you (hidden input) for the four external creds**
+   it can't generate — never written to a file or shell history (invariant #5):
+   - B2 **attachments**-bucket secret access key — Backblaze → Application Keys (its *keyID* is non-secret and
+     goes in step 6 as `S3_ACCESS_KEY_ID`; this is the *applicationKey* secret);
+   - B2 **db-backups** app key (a separate key);
+   - **Cloudflare Tunnel** token — Cloudflare Zero Trust → Networks → Tunnels;
+   - **GHCR** token — a GitHub PAT with `read:packages`.
+
+   (Pre-set any as an env var, e.g. `ARGUS_TUNNEL_TOKEN=…`, for an unattended run; idempotent — re-run safe.)
    Your machine must reach the KV through its **default-deny firewall** — set `seed_admin_ip` in `real.tfvars`
    (your /32) or run the helper from a host that egresses via the EC2 EIP, else the writes get a 403.
-6. **Wire GitHub.** The config below is **non-secret** (the access-key-id rides in every presigned URL; the
-   OIDC values are public endpoints) — exporting it inline is fine. The optional 42Crunch token IS a secret, so
-   prompt for it. Then run the helper:
-   ```bash
-   export S3_BUCKET=… S3_ACCESS_KEY_ID=… OIDC_ISSUER=… OIDC_AUDIENCE=… \
-          VITE_OIDC_ISSUER=… VITE_OIDC_CLIENT_ID=… VITE_OIDC_REDIRECT_URI=…
-   read -rsp 'X42C_API_TOKEN (optional, blank to skip): ' X42C_API_TOKEN; echo; export X42C_API_TOKEN
-   infra/aws/scripts/setup-github-cicd.sh   # sets cd-aws.yml vars from TF outputs + the gated Environment; ENABLE_DEPLOY_AWS=false
-   ```
-   The Zitadel SPA `VITE_OIDC_CLIENT_ID` only exists once Zitadel is up — set a placeholder, configure Zitadel,
-   then re-set it and rebuild the web bundle.
+6. **Wire GitHub:** `infra/aws/scripts/setup-github-cicd.sh`. It pulls the AWS values from `terraform output`
+   and **prompts for the non-secret config** (S3 bucket + key id, the OIDC / VITE_OIDC values) plus the optional
+   42Crunch token (hidden), then sets the cd-aws.yml vars + creates the gated Environment (leaves
+   `ENABLE_DEPLOY_AWS=false`). Pre-set any value as an env var to skip its prompt. The Zitadel SPA
+   `VITE_OIDC_CLIENT_ID` only exists once Zitadel is up — set a placeholder, configure Zitadel, then re-run.
 7. **Deploy:** `gh variable set ENABLE_DEPLOY_AWS --body true`, then `git tag aws-v0.1.0 && git push origin aws-v0.1.0`
    → approve in the `aws-experiment` Environment → SSM rolls out `deploy.sh` (migrate → provision runtime role
    logins → bring the stack up).
