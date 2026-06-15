@@ -170,14 +170,19 @@ rejected by the trigger; every user row has a unique argus-id.
     NOT E2EE message-key material, so `jose`/Ed25519 standalone in `apps/api/src/auth/` is an **accepted exception**
     (consistent with the existing `jose` JWT *verification* already there) — it does NOT route through
     `packages/crypto`. Pre-clear this framing with `security-architect` so the crypto-reviewer doesn't block Phase 1.
-- `auth.service.ts verify()` — verify our JWT (`iss:argus`, `aud:argus-api`, `alg:EdDSA`); keep the `sub` →
-  `user_tenant_index` lookup + `MaybeUnboundAuth` return shape unchanged. Drop the IdP email/name JIT claims.
+- `auth.service.ts verify()` — **dual-accept during the transition** (behind a flag): try our self-minted JWT
+  (`iss:argus`, `aud:argus-api`, `alg:EdDSA`) first, then fall back to Zitadel JWKS verification. Both resolve to the
+  same `{ sub, tenantId }` (the `user_tenant_index` lookup + `MaybeUnboundAuth` shape are unchanged). **This dual
+  mode is REQUIRED**: the frontend stays on `oidc-client-ts` until Phase 5, so dropping Zitadel verification here would
+  401 every still-OIDC API/WS call. Keep the IdP email/name JIT claims while OIDC users still exist (dropped in Phase 6).
 - Mint/refresh(rotating, single-use, hashed)/logout endpoints; refresh delivered as **HttpOnly + Secure +
   SameSite=Strict** cookie scoped to the refresh path; require an `X-Argus-Refresh` header (CSRF). Access token
   10 min; refresh 30-day sliding.
-- `auth.module.ts` — swap `OIDC_JWKS` provider for the session public key.
-**Done-when:** verify() accepts our JWT and rejects alg-confusion/`none`/wrong-iss; refresh rotation is single-use;
-logout revokes the `sid`; reload restores a session via the cookie. `jwt-auth.guard.ts` + WS gateway untouched.
+- `auth.module.ts` — **add** the session public-key provider ALONGSIDE `OIDC_JWKS` (do NOT remove OIDC). Zitadel
+  verification is torn out only in Phase 6, once the passkey client (Phase 5) is the sole login path.
+**Done-when:** verify() accepts our JWT **and still accepts Zitadel tokens** (dual mode) and rejects
+alg-confusion/`none`/wrong-iss; refresh rotation is single-use; logout revokes the `sid`; reload restores a session
+via the cookie. `jwt-auth.guard.ts` + WS gateway untouched; existing OIDC logins keep working.
 **Reviewers:** `security-architect` (trust boundary), `crypto-reviewer` (EdDSA + refresh hashing/rotation),
 `security-boundary-auditor` (cookie/CSRF, no token logging).
 
@@ -199,13 +204,16 @@ logout revokes the `sid`; reload restores a session via the cookie. `jwt-auth.gu
 - Registration: `POST /auth/register/redeem { code }` (reuse the 0028 token-hash carve-out; **throttle** via the
   existing rate-limiter keyed on source IP — the 256-bit token already defeats brute force; this just blocks
   heavy-path redemption DoS) → short-lived
-  **redemption ticket** (don't create the user yet) → `/auth/webauthn/register/options` (set
-  `userID = isoUint8Array.fromUTF8String(argus_id)` — SimpleWebAuthn requires `userID` as **bytes**, not a string,
-  ≤64 bytes; `residentKey:'required'`, `userVerification:'required'`) → `/auth/webauthn/register/verify`: in ONE tx
-  (mirroring `acceptInvite`) mark the code consumed, insert `users` (tenant=DEFAULT, generated argus-id + display
-  name, **no email**; set `external_identity_id = "argusid:"+argus_id` so the existing NOT NULL + unique
-  `(tenant_id, external_identity_id)` index keeps working with the self-minted sub), `user_tenant_index {
-  sub:"argusid:"+argus_id }`, `webauthn_credentials`, then mint the first session.
+  **redemption ticket** (don't create the user yet). **Generate the argus-id ONCE here and persist it on the ticket /
+  challenge row** — the SAME value must flow through options, verify, the user insert, and the sub. →
+  `/auth/webauthn/register/options` (set `userID = isoUint8Array.fromUTF8String(argus_id)` from the ticket —
+  SimpleWebAuthn requires `userID` as **bytes**, not a string, ≤64 bytes; `residentKey:'required'`,
+  `userVerification:'required'`) → `/auth/webauthn/register/verify`: in ONE tx (mirroring `acceptInvite`) mark the
+  code consumed, insert `users` (tenant=DEFAULT, **the ticket's argus-id** + display name, **no email**; set
+  `external_identity_id = "argusid:"+argus_id` so the existing NOT NULL + unique `(tenant_id, external_identity_id)`
+  index keeps working with the self-minted sub), `user_tenant_index { sub:"argusid:"+argus_id }`,
+  `webauthn_credentials`, then mint the first session. **Do NOT regenerate at verify** — a different value would make a
+  later discoverable login's `userHandle` fail to resolve against `users.argus_id` / `user_tenant_index`.
 - Login: `/auth/webauthn/authenticate/options` (empty `allowCredentials` → discoverable; user picks passkey, no
   typed id; decode the returned `userHandle` with `isoUint8Array.toUTF8String` to recover the argus-id) → `/verify`
   (look up by `credential_id` under `withTenant(DEFAULT_TENANT_ID)`, check+bump counter → clone detection: reject
@@ -244,11 +252,14 @@ the weakest link in an otherwise phishing-resistant design — call it out in th
 **Threat models:** `docs/threat-models/discovery-by-argus-id.md` (+ supersede `user-directory.md`),
 `profile-edit.md`.
 **Changes:**
-- Delete `GET /users` directory (`users.controller.ts`, `UserService.list`); add
-  `GET /users/lookup?argusId=…` — **exact match only** (no LIKE/prefix/fuzzy), authenticated, hard rate-limited
+- Add `GET /users/lookup?argusId=…` — **exact match only** (no LIKE/prefix/fuzzy), authenticated, hard rate-limited
   (new `SENSITIVE_LIMITS.lookupUser` constant, added to the existing rate-limit set), **uniform not-found** (no oracle), returns `{ userId, argusId, displayName,
   avatarSeed }` and **never email**. The found `userId` feeds the **existing** conversation-create + MLS welcome
   flow unchanged (`createConversation([userId])`).
+- **Keep `GET /users` (and `UserService.list`) for now — do NOT remove it in this phase.** Its web callers
+  (`StartConversation`, `GroupCreateDialog`, peer-naming via `listUsers()`) aren't migrated until Phase 5, so deleting
+  it here would break starting/adding chats and peer-name resolution in the still-current UI. Removal + caller
+  migration happen together in Phase 5.
 - `PUT /users/me { displayName?, avatarSeed? }` — Zod-validated (displayName 1–64 trimmed; `argus_id` not
   accepted). Add `avatar_seed text` column (non-PII) so "change profile picture" cycles the generated avatar;
   keep `@dicebear` client-side default (no blob storage, decision #3).
@@ -257,8 +268,8 @@ the weakest link in an otherwise phishing-resistant design — call it out in th
   though the column itself is dropped later); add `avatar_seed`.
 - Code: with `users_tenant_display_name_idx` gone, **simplify the "Adjective Animal" uniqueness retry** in
   `user.service.ts` / `tenants.service.ts` (the `isHandleCollision` loop) — display names are now free, non-unique.
-- Contracts: remove `UserSummary`/`UserDirectory` + `plan`/`ssoEnabled`/`email` from `/me`; add
-  `UserLookupResult`; add `avatarSeed` to `/me`. Regen openapi + 42Crunch.
+- Contracts: add `UserLookupResult`; remove `plan`/`ssoEnabled`/`email` from `/me`; add `avatarSeed` to `/me`.
+  **Keep `UserSummary`/`UserDirectory` until Phase 5** (they back the still-live `GET /users`). Regen openapi + 42Crunch.
 **Done-when:** lookup is exact-only + rate-limited + uniform 404; profile update rejects argus_id; no email in any
 discovery/`/me` response.
 **Reviewers:** `security-boundary-auditor` (enumeration resistance, RLS, no PII leak), `/api-spec`.
@@ -271,6 +282,10 @@ discovery/`/me` response.
 - New screens: auto-try-passkey-else-"I have a registration code" (decision #5) → passkey setup; breakglass admin
   login; **add-contact-by-argus-id** replacing the directory picker; profile edit (name + generated-avatar
   picker). Add `navigator.storage.persist()` on first unlock (decision #7).
+- **Now remove the directory:** migrate `StartConversation`, `GroupCreateDialog`, and peer-naming off `listUsers()`
+  onto `GET /users/lookup` (add-by-argus-id), then delete `GET /users` + `UserService.list` and the
+  `UserSummary`/`UserDirectory` contracts in the SAME PR — endpoint and its last callers go together so every phase
+  stays bootable.
 - Update Playwright E2E (`apps/web/e2e/`) — the `e2e` job gates merges; grep e2e for any changed label/role first.
 **Done-when:** E2E: register with a code → set up passkey → reload stays logged in → add a contact by argus-id →
 send an E2EE message → breakglass admin login works (metadata only).
