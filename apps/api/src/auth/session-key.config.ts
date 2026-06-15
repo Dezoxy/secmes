@@ -27,7 +27,9 @@ export async function loadSessionKeys(): Promise<SessionKeyPair> {
     // The file path comes from the operator (env), never from user input.
     // eslint-disable-next-line security/detect-non-literal-fs-filename
     const pem = await readFile(keyFile, 'utf8');
-    const privateKey = (await importPKCS8(pem.trim(), 'EdDSA')) as CryptoKey;
+    // extractable: true required to call exportJWK for public-key derivation below.
+    // The private key itself never leaves this module — the option only allows the JWK export.
+    const privateKey = (await importPKCS8(pem.trim(), 'EdDSA', { extractable: true })) as CryptoKey;
     // Derive the public key: export the private JWK, strip the private scalar (d), reimport.
     const jwk = await exportJWK(privateKey);
     const publicKey = (await importJWK(

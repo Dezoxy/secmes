@@ -42,8 +42,15 @@ export class SessionTokenService {
     const refreshTokenHash = sha256hex(refreshToken);
     const expiresAt = new Date(Date.now() + REFRESH_TTL_MS);
 
-    const [session] = await withTenant(opts.tenantId, (tx) =>
-      tx
+    const [session] = await withTenant(opts.tenantId, async (tx) => {
+      // Ensure the argusid sub has a tenant binding so AuthService.verify() can derive tenantId
+      // from the access token on all subsequent requests. user_tenant_index has no RLS; upsert is
+      // safe here. Must run before the session INSERT so verify() never sees tenantId: null.
+      await tx
+        .insert(schema.userTenantIndex)
+        .values({ sub: opts.sub, tenantId: opts.tenantId })
+        .onConflictDoNothing();
+      return tx
         .insert(schema.authSessions)
         .values({
           tenantId: opts.tenantId,
@@ -52,8 +59,8 @@ export class SessionTokenService {
           refreshTokenHash,
           expiresAt,
         })
-        .returning({ id: schema.authSessions.id }),
-    );
+        .returning({ id: schema.authSessions.id });
+    });
     if (!session) throw new Error('failed to create session row');
 
     const accessToken = await this.mintAccessToken(opts.sub, session.id);
@@ -108,27 +115,45 @@ export class SessionTokenService {
 
     if (row.expiresAt < new Date()) throw new UnauthorizedException(INVALID);
 
-    // Rotate: swap to a new token, optimistic-lock on the old hash to handle rare concurrent rotations.
+    // Mark-and-insert rotation: revoke the old token row and insert a new one in a single
+    // transaction. The old row stays in the DB with revokedAt set, so presenting it later
+    // triggers reuse detection (theft signal) even if the attacker rotated first.
     const newRefreshToken = randomBytes(32).toString('hex');
     const newHash = sha256hex(newRefreshToken);
+    const now = new Date();
 
-    const updated = await withTenant(row.tenantId, (tx) =>
-      tx
+    const [newSession] = await withTenant(row.tenantId, async (tx) => {
+      // Optimistic lock: WHERE refresh_token_hash = tokenHash guards against concurrent rotation.
+      const revoked = await tx
         .update(schema.authSessions)
-        .set({ refreshTokenHash: newHash, lastUsedAt: new Date() })
+        .set({ revokedAt: now, lastUsedAt: now })
         .where(
           and(
             eq(schema.authSessions.id, row.id),
-            eq(schema.authSessions.refreshTokenHash, tokenHash), // optimistic lock
+            eq(schema.authSessions.refreshTokenHash, tokenHash),
+            isNull(schema.authSessions.revokedAt),
           ),
         )
-        .returning({ id: schema.authSessions.id }),
-    );
+        .returning({ id: schema.authSessions.id });
 
-    if (updated.length === 0) throw new UnauthorizedException(INVALID);
+      if (revoked.length === 0) return []; // concurrent rotation won the race
 
-    const accessToken = await this.mintAccessToken(row.sub, row.id);
-    return { accessToken, refreshToken: newRefreshToken, sessionId: row.id };
+      return tx
+        .insert(schema.authSessions)
+        .values({
+          tenantId: row.tenantId,
+          userId: row.userId,
+          sub: row.sub,
+          refreshTokenHash: newHash,
+          expiresAt: row.expiresAt,
+        })
+        .returning({ id: schema.authSessions.id });
+    });
+
+    if (!newSession) throw new UnauthorizedException(INVALID);
+
+    const accessToken = await this.mintAccessToken(row.sub, newSession.id);
+    return { accessToken, refreshToken: newRefreshToken, sessionId: newSession.id };
   }
 
   /** Revoke a specific session (logout). */

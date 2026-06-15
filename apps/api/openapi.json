@@ -117,7 +117,9 @@
           }
         ],
         "summary": "List all devices in the tenant (admin only)",
-        "tags": ["admin"]
+        "tags": [
+          "admin"
+        ]
       }
     },
     "/admin/devices/{deviceId}": {
@@ -236,7 +238,9 @@
           }
         ],
         "summary": "Revoke a device (admin only) — hard-delete, cascades key packages",
-        "tags": ["admin"]
+        "tags": [
+          "admin"
+        ]
       }
     },
     "/admin/audit": {
@@ -376,7 +380,9 @@
           }
         ],
         "summary": "List tenant audit events, newest first (admin only)",
-        "tags": ["admin"]
+        "tags": [
+          "admin"
+        ]
       }
     },
     "/auth/session": {
@@ -496,7 +502,9 @@
           }
         ],
         "summary": "Start session: JIT-provision the user + record login",
-        "tags": ["auth"]
+        "tags": [
+          "auth"
+        ]
       },
       "delete": {
         "operationId": "endSession",
@@ -614,7 +622,9 @@
           }
         ],
         "summary": "Record session end (logout)",
-        "tags": ["auth"]
+        "tags": [
+          "auth"
+        ]
       }
     },
     "/me": {
@@ -633,17 +643,23 @@
                       "properties": {
                         "bound": {
                           "type": "boolean",
-                          "enum": [false]
+                          "enum": [
+                            false
+                          ]
                         }
                       },
-                      "required": ["bound"]
+                      "required": [
+                        "bound"
+                      ]
                     },
                     {
                       "type": "object",
                       "properties": {
                         "bound": {
                           "type": "boolean",
-                          "enum": [true]
+                          "enum": [
+                            true
+                          ]
                         },
                         "userId": {
                           "type": "string",
@@ -676,14 +692,21 @@
                         },
                         "role": {
                           "type": "string",
-                          "enum": ["admin", "member"]
+                          "enum": [
+                            "admin",
+                            "member"
+                          ]
                         },
                         "plan": {
                           "type": "object",
                           "properties": {
                             "tier": {
                               "type": "string",
-                              "enum": ["free", "pro", "enterprise"]
+                              "enum": [
+                                "free",
+                                "pro",
+                                "enterprise"
+                              ]
                             },
                             "memberLimit": {
                               "type": "integer",
@@ -838,7 +861,9 @@
           }
         ],
         "summary": "Current authenticated user or unbound state",
-        "tags": ["users"]
+        "tags": [
+          "users"
+        ]
       },
       "delete": {
         "description": "Permanently deletes the authenticated user account and all associated metadata. Irreversible. Requires the `X-Confirm-Delete: my-account` header.",
@@ -957,7 +982,9 @@
           }
         ],
         "summary": "Delete account (GDPR Art. 17 — right to erasure)",
-        "tags": ["users"]
+        "tags": [
+          "users"
+        ]
       }
     },
     "/users": {
@@ -1089,7 +1116,9 @@
           }
         ],
         "summary": "List users in the caller's tenant",
-        "tags": ["users"]
+        "tags": [
+          "users"
+        ]
       }
     },
     "/me/export": {
@@ -1205,7 +1234,9 @@
           }
         ],
         "summary": "Export all account metadata (GDPR Art. 20)",
-        "tags": ["users"]
+        "tags": [
+          "users"
+        ]
       }
     },
     "/auth/session/refresh": {
@@ -1328,7 +1359,9 @@
           }
         },
         "summary": "Rotate refresh token — exchange HttpOnly cookie for a new access token",
-        "tags": ["auth"]
+        "tags": [
+          "auth"
+        ]
       }
     },
     "/auth/session/logout": {
@@ -1437,7 +1470,9 @@
           }
         ],
         "summary": "Revoke the current argus session (logout)",
-        "tags": ["auth"]
+        "tags": [
+          "auth"
+        ]
       }
     },
     "/billing/checkout": {
@@ -1552,7 +1587,9 @@
           }
         ],
         "summary": "Create a Stripe Checkout session to subscribe to Pro or Enterprise",
-        "tags": ["billing"]
+        "tags": [
+          "billing"
+        ]
       }
     },
     "/billing/portal": {
@@ -1667,7 +1704,9 @@
           }
         ],
         "summary": "Create a Stripe Billing Portal session to manage the subscription",
-        "tags": ["billing"]
+        "tags": [
+          "billing"
+        ]
       }
     },
     "/billing/status": {
@@ -1782,7 +1821,9 @@
           }
         ],
         "summary": "Get the current billing/plan status for the tenant",
-        "tags": ["billing"]
+        "tags": [
+          "billing"
+        ]
       }
     },
     "/admin/sso-config": {
@@ -1806,7 +1847,12 @@
                     },
                     "providerType": {
                       "type": "string",
-                      "enum": ["oidc_generic", "google", "entra", "okta"]
+                      "enum": [
+                        "oidc_generic",
+                        "google",
+                        "entra",
+                        "okta"
+                      ]
                     },
                     "providerName": {
                       "type": "string",
@@ -1953,7 +1999,9 @@
           }
         ],
         "summary": "Get tenant SSO config (admin only). Returns null body if not configured.",
-        "tags": ["admin"]
+        "tags": [
+          "admin"
+        ]
       },
       "post": {
         "operationId": "createSsoConfig",
@@ -2096,7 +2144,9 @@
           }
         ],
         "summary": "Configure SSO for this tenant (admin only). Provisions a Zitadel org + IdP.",
-        "tags": ["admin"]
+        "tags": [
+          "admin"
+        ]
       },
       "patch": {
         "operationId": "updateSsoConfig",
@@ -2229,7 +2279,9 @@
           }
         ],
         "summary": "Update tenant SSO config (admin only). Does not touch the client secret.",
-        "tags": ["admin"]
+        "tags": [
+          "admin"
+        ]
       },
       "delete": {
         "operationId": "deleteSsoConfig",
@@ -2335,7 +2387,9 @@
           }
         ],
         "summary": "Remove tenant SSO config and delete Zitadel org (admin only).",
-        "tags": ["admin"]
+        "tags": [
+          "admin"
+        ]
       }
     },
     "/admin/sso-config/secret": {
@@ -2463,7 +2517,9 @@
           }
         ],
         "summary": "Rotate the SSO client secret (admin only). New secret forwarded to Zitadel.",
-        "tags": ["admin"]
+        "tags": [
+          "admin"
+        ]
       }
     },
     "/devices/me/enrollment": {
@@ -2589,7 +2645,9 @@
           }
         ],
         "summary": "Register D2's pending enrollment request (D2 side)",
-        "tags": ["devices"]
+        "tags": [
+          "devices"
+        ]
       }
     },
     "/devices/enrollments": {
@@ -2603,7 +2661,11 @@
             "in": "query",
             "description": "Filter by status (default: pending)",
             "schema": {
-              "enum": ["pending", "approved", "rejected"],
+              "enum": [
+                "pending",
+                "approved",
+                "rejected"
+              ],
               "type": "string"
             }
           }
@@ -2720,7 +2782,9 @@
           }
         ],
         "summary": "List enrollment requests for the authenticated user (D1 side)",
-        "tags": ["devices"]
+        "tags": [
+          "devices"
+        ]
       }
     },
     "/devices/enrollments/{id}/approve": {
@@ -2859,7 +2923,9 @@
           }
         ],
         "summary": "D1 approves D2's enrollment (requires enroll-proof)",
-        "tags": ["devices"]
+        "tags": [
+          "devices"
+        ]
       }
     },
     "/devices/enrollments/{id}/reject": {
@@ -2981,7 +3047,9 @@
           }
         ],
         "summary": "D1 rejects D2's enrollment",
-        "tags": ["devices"]
+        "tags": [
+          "devices"
+        ]
       }
     },
     "/devices/me/withdraw": {
@@ -3100,7 +3168,9 @@
           }
         ],
         "summary": "Permanently remove this device (legacy migration or explicit device removal)",
-        "tags": ["devices"]
+        "tags": [
+          "devices"
+        ]
       }
     },
     "/devices/me/migrate": {
@@ -3219,7 +3289,9 @@
           }
         ],
         "summary": "Atomically migrate device to composite identity (pre-B2 → B2)",
-        "tags": ["devices"]
+        "tags": [
+          "devices"
+        ]
       }
     },
     "/devices/me/conversations": {
@@ -3335,7 +3407,9 @@
           }
         ],
         "summary": "List the caller's conversation IDs (enrollment fan-out diff)",
-        "tags": ["devices"]
+        "tags": [
+          "devices"
+        ]
       }
     },
     "/devices/me/key-packages": {
@@ -3460,7 +3534,9 @@
           }
         ],
         "summary": "Register the caller's device + publish one-time-use KeyPackages",
-        "tags": ["key-directory"]
+        "tags": [
+          "key-directory"
+        ]
       }
     },
     "/users/{userId}/key-package/claim": {
@@ -3587,7 +3663,9 @@
           }
         ],
         "summary": "Claim a fresh one-time-use KeyPackage for a user",
-        "tags": ["key-directory"]
+        "tags": [
+          "key-directory"
+        ]
       }
     },
     "/users/{userId}/key-packages/claim-all": {
@@ -3743,7 +3821,9 @@
           }
         ],
         "summary": "Claim one KeyPackage per device of a user (group-add)",
-        "tags": ["key-directory"]
+        "tags": [
+          "key-directory"
+        ]
       }
     },
     "/devices/me/key-packages/revoke": {
@@ -3868,7 +3948,9 @@
           }
         ],
         "summary": "Revoke the caller's own device's UNCLAIMED KeyPackages",
-        "tags": ["key-directory"]
+        "tags": [
+          "key-directory"
+        ]
       }
     },
     "/backups/me": {
@@ -3986,7 +4068,9 @@
           }
         ],
         "summary": "Store/replace the caller's sealed backup",
-        "tags": ["key-backup"]
+        "tags": [
+          "key-backup"
+        ]
       },
       "get": {
         "operationId": "getBackup",
@@ -4099,7 +4183,9 @@
           }
         ],
         "summary": "Fetch the caller's sealed backup for restore",
-        "tags": ["key-backup"]
+        "tags": [
+          "key-backup"
+        ]
       }
     },
     "/conversations": {
@@ -4224,7 +4310,9 @@
           }
         ],
         "summary": "Create a conversation with the caller + members",
-        "tags": ["messaging"]
+        "tags": [
+          "messaging"
+        ]
       }
     },
     "/conversations/{conversationId}/messages": {
@@ -4361,7 +4449,9 @@
           }
         ],
         "summary": "Send (store) a ciphertext message to a conversation",
-        "tags": ["messaging"]
+        "tags": [
+          "messaging"
+        ]
       },
       "get": {
         "operationId": "listMessages",
@@ -4510,7 +4600,9 @@
           }
         ],
         "summary": "List a conversation's ciphertext messages (member-only, paginated)",
-        "tags": ["messaging"]
+        "tags": [
+          "messaging"
+        ]
       }
     },
     "/conversations/{conversationId}/commits": {
@@ -4658,7 +4750,9 @@
           }
         ],
         "summary": "Submit a staged MLS membership commit to win the epoch slot",
-        "tags": ["messaging"]
+        "tags": [
+          "messaging"
+        ]
       },
       "get": {
         "description": "Returns commits in epoch-ascending order. Pass the current local epoch as `afterEpoch` to fetch only commits not yet applied. Clients must call this on connect and on every `commit` WS event.",
@@ -4812,7 +4906,9 @@
           }
         ],
         "summary": "Drain a conversation's commits after a given epoch (member-only)",
-        "tags": ["messaging"]
+        "tags": [
+          "messaging"
+        ]
       }
     },
     "/sync": {
@@ -4951,7 +5047,9 @@
           }
         ],
         "summary": "Catch up on messages across all the caller's conversations since a cursor",
-        "tags": ["messaging"]
+        "tags": [
+          "messaging"
+        ]
       }
     },
     "/conversations/{conversationId}/receipts": {
@@ -5081,7 +5179,9 @@
           }
         ],
         "summary": "Advance the caller's delivered/read watermark in a conversation",
-        "tags": ["messaging"]
+        "tags": [
+          "messaging"
+        ]
       },
       "get": {
         "operationId": "getReceipts",
@@ -5210,7 +5310,9 @@
           }
         ],
         "summary": "Per-member delivered/read watermarks for a conversation",
-        "tags": ["messaging"]
+        "tags": [
+          "messaging"
+        ]
       }
     },
     "/conversations/{conversationId}/welcomes": {
@@ -5347,7 +5449,9 @@
           }
         ],
         "summary": "Add a member and deliver their MLS Welcome (member-only)",
-        "tags": ["messaging"]
+        "tags": [
+          "messaging"
+        ]
       }
     },
     "/welcomes": {
@@ -5492,7 +5596,9 @@
           }
         ],
         "summary": "Fetch the calling device's pending welcomes to join (caller + device scoped, bounded)",
-        "tags": ["messaging"]
+        "tags": [
+          "messaging"
+        ]
       }
     },
     "/welcomes/{welcomeId}/material": {
@@ -5642,7 +5748,9 @@
           }
         ],
         "summary": "Fetch one welcome's sealed join material (device proof-of-possession required)",
-        "tags": ["messaging"]
+        "tags": [
+          "messaging"
+        ]
       }
     },
     "/welcomes/{welcomeId}": {
@@ -5785,7 +5893,9 @@
           }
         ],
         "summary": "Consume (delete) a welcome after joining (recipient device only)",
-        "tags": ["messaging"]
+        "tags": [
+          "messaging"
+        ]
       }
     },
     "/attachments": {
@@ -5910,7 +6020,9 @@
           }
         ],
         "summary": "Mint an upload grant for an encrypted attachment (member-only)",
-        "tags": ["messaging"]
+        "tags": [
+          "messaging"
+        ]
       }
     },
     "/attachments/download-url": {
@@ -6045,7 +6157,9 @@
           }
         ],
         "summary": "Mint a download grant for an encrypted attachment (member-only)",
-        "tags": ["messaging"]
+        "tags": [
+          "messaging"
+        ]
       }
     },
     "/push/subscription": {
@@ -6163,7 +6277,9 @@
           }
         ],
         "summary": "Register or update the caller's device push subscription",
-        "tags": ["push"]
+        "tags": [
+          "push"
+        ]
       },
       "delete": {
         "operationId": "unsubscribePush",
@@ -6282,7 +6398,9 @@
           }
         ],
         "summary": "Remove the caller's push subscription for a specific device",
-        "tags": ["push"]
+        "tags": [
+          "push"
+        ]
       }
     },
     "/tenants": {
@@ -6407,7 +6525,9 @@
           }
         ],
         "summary": "Create a new tenant and become its first admin",
-        "tags": ["tenants"]
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/tenants/invites": {
@@ -6522,7 +6642,9 @@
           }
         ],
         "summary": "Create a single-use invite token (admin only)",
-        "tags": ["tenants"]
+        "tags": [
+          "tenants"
+        ]
       },
       "get": {
         "operationId": "listInvites",
@@ -6639,7 +6761,9 @@
           }
         ],
         "summary": "List active invites for the tenant (admin only)",
-        "tags": ["tenants"]
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/tenants/invites/{id}": {
@@ -6758,7 +6882,9 @@
           }
         ],
         "summary": "Revoke an invite (admin only)",
-        "tags": ["tenants"]
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/tenants/invites/accept": {
@@ -6883,7 +7009,9 @@
           }
         ],
         "summary": "Accept an invite and join a tenant",
-        "tags": ["tenants"]
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/tenants/members": {
@@ -7002,7 +7130,9 @@
           }
         ],
         "summary": "List active members of the tenant (admin only)",
-        "tags": ["tenants"]
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/tenants/members/{userId}/role": {
@@ -7121,7 +7251,9 @@
           }
         ],
         "summary": "Change a member's role (admin only)",
-        "tags": ["tenants"]
+        "tags": [
+          "tenants"
+        ]
       }
     },
     "/tenants/members/{userId}": {
@@ -7240,7 +7372,9 @@
           }
         ],
         "summary": "Revoke a member (admin only, soft-delete)",
-        "tags": ["tenants"]
+        "tags": [
+          "tenants"
+        ]
       }
     }
   },
@@ -7353,7 +7487,14 @@
             "maxLength": 40
           }
         },
-        "required": ["id", "eventType", "actorSub", "actorDisplayName", "ip", "createdAt"],
+        "required": [
+          "id",
+          "eventType",
+          "actorSub",
+          "actorDisplayName",
+          "ip",
+          "createdAt"
+        ],
         "additionalProperties": false
       },
       "AdminAuditResponseDto": {
@@ -7372,7 +7513,9 @@
             "maxLength": 65536
           }
         },
-        "required": ["events"],
+        "required": [
+          "events"
+        ],
         "additionalProperties": false
       },
       "UserSummaryDto": {
@@ -7395,7 +7538,11 @@
             "maxLength": 65536
           }
         },
-        "required": ["id", "email", "displayName"],
+        "required": [
+          "id",
+          "email",
+          "displayName"
+        ],
         "additionalProperties": false
       },
       "ExportDeviceDto": {
@@ -7414,7 +7561,10 @@
             "maxLength": 40
           }
         },
-        "required": ["id", "createdAt"],
+        "required": [
+          "id",
+          "createdAt"
+        ],
         "additionalProperties": false
       },
       "ExportKeyBackupDto": {
@@ -7438,7 +7588,11 @@
             "maxLength": 40
           }
         },
-        "required": ["exists", "createdAt", "updatedAt"],
+        "required": [
+          "exists",
+          "createdAt",
+          "updatedAt"
+        ],
         "additionalProperties": false
       },
       "ExportConversationDto": {
@@ -7457,7 +7611,10 @@
             "maxLength": 40
           }
         },
-        "required": ["id", "createdAt"],
+        "required": [
+          "id",
+          "createdAt"
+        ],
         "additionalProperties": false
       },
       "ExportMessageBucketDto": {
@@ -7487,7 +7644,12 @@
             "maxLength": 40
           }
         },
-        "required": ["conversationId", "count", "firstAt", "lastAt"],
+        "required": [
+          "conversationId",
+          "count",
+          "firstAt",
+          "lastAt"
+        ],
         "additionalProperties": false
       },
       "ExportMessageSummaryDto": {
@@ -7506,7 +7668,10 @@
             "maxItems": 1000
           }
         },
-        "required": ["totalCount", "byConversation"],
+        "required": [
+          "totalCount",
+          "byConversation"
+        ],
         "additionalProperties": false
       },
       "ExportAttachmentDto": {
@@ -7549,7 +7714,14 @@
             "maxLength": 40
           }
         },
-        "required": ["id", "conversationId", "objectKey", "byteSize", "createdAt", "expiresAt"],
+        "required": [
+          "id",
+          "conversationId",
+          "objectKey",
+          "byteSize",
+          "createdAt",
+          "expiresAt"
+        ],
         "additionalProperties": false
       },
       "ExportPushSubscriptionDto": {
@@ -7574,7 +7746,11 @@
             "maxLength": 40
           }
         },
-        "required": ["id", "endpointPrefix", "createdAt"],
+        "required": [
+          "id",
+          "endpointPrefix",
+          "createdAt"
+        ],
         "additionalProperties": false
       },
       "ExportAuditEventDto": {
@@ -7608,7 +7784,12 @@
             "description": "non-sensitive metadata IDs only — never content or keys"
           }
         },
-        "required": ["id", "eventType", "createdAt", "metadata"],
+        "required": [
+          "id",
+          "eventType",
+          "createdAt",
+          "metadata"
+        ],
         "additionalProperties": false
       },
       "ExportInviteDto": {
@@ -7654,7 +7835,14 @@
             "maxLength": 40
           }
         },
-        "required": ["id", "inviteeEmail", "createdAt", "expiresAt", "acceptedAt", "revokedAt"],
+        "required": [
+          "id",
+          "inviteeEmail",
+          "createdAt",
+          "expiresAt",
+          "acceptedAt",
+          "revokedAt"
+        ],
         "additionalProperties": false
       },
       "MeExportDto": {
@@ -7662,7 +7850,9 @@
         "properties": {
           "schemaVersion": {
             "type": "string",
-            "enum": ["1"]
+            "enum": [
+              "1"
+            ]
           },
           "exportedAt": {
             "type": "string",
@@ -7811,7 +8001,9 @@
             "maxLength": 65536
           }
         },
-        "required": ["accessToken"],
+        "required": [
+          "accessToken"
+        ],
         "additionalProperties": false
       },
       "CheckoutUrlDto": {
@@ -7825,7 +8017,9 @@
             "maxLength": 65536
           }
         },
-        "required": ["url"],
+        "required": [
+          "url"
+        ],
         "additionalProperties": false
       },
       "PortalUrlDto": {
@@ -7839,7 +8033,9 @@
             "maxLength": 65536
           }
         },
-        "required": ["url"],
+        "required": [
+          "url"
+        ],
         "additionalProperties": false
       },
       "BillingStatusDto": {
@@ -7847,7 +8043,11 @@
         "properties": {
           "tier": {
             "type": "string",
-            "enum": ["free", "pro", "enterprise"]
+            "enum": [
+              "free",
+              "pro",
+              "enterprise"
+            ]
           },
           "memberLimit": {
             "type": "integer",
@@ -7878,7 +8078,13 @@
             "nullable": true
           }
         },
-        "required": ["tier", "memberLimit", "ssoEnabled", "memberCount", "subscriptionStatus"],
+        "required": [
+          "tier",
+          "memberLimit",
+          "ssoEnabled",
+          "memberCount",
+          "subscriptionStatus"
+        ],
         "additionalProperties": false
       },
       "CreateSsoConfigBodyDto": {
@@ -7886,7 +8092,12 @@
         "properties": {
           "providerType": {
             "type": "string",
-            "enum": ["oidc_generic", "google", "entra", "okta"]
+            "enum": [
+              "oidc_generic",
+              "google",
+              "entra",
+              "okta"
+            ]
           },
           "providerName": {
             "type": "string",
@@ -7910,7 +8121,13 @@
             "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
           }
         },
-        "required": ["providerType", "providerName", "issuerUrl", "clientId", "clientSecret"],
+        "required": [
+          "providerType",
+          "providerName",
+          "issuerUrl",
+          "clientId",
+          "clientSecret"
+        ],
         "additionalProperties": false
       },
       "SsoConfigDto": {
@@ -7924,7 +8141,12 @@
           },
           "providerType": {
             "type": "string",
-            "enum": ["oidc_generic", "google", "entra", "okta"]
+            "enum": [
+              "oidc_generic",
+              "google",
+              "entra",
+              "okta"
+            ]
           },
           "providerName": {
             "type": "string",
@@ -8002,7 +8224,9 @@
             "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
           }
         },
-        "required": ["clientSecret"],
+        "required": [
+          "clientSecret"
+        ],
         "additionalProperties": false
       },
       "EnrollmentRegisterBodyDto": {
@@ -8022,7 +8246,10 @@
             "maxLength": 36
           }
         },
-        "required": ["fingerprint", "deviceId"],
+        "required": [
+          "fingerprint",
+          "deviceId"
+        ],
         "additionalProperties": false
       },
       "EnrollmentDto": {
@@ -8054,7 +8281,12 @@
           },
           "status": {
             "type": "string",
-            "enum": ["pending", "approved", "rejected", "expired"]
+            "enum": [
+              "pending",
+              "approved",
+              "rejected",
+              "expired"
+            ]
           },
           "createdAt": {
             "type": "string",
@@ -8113,7 +8345,10 @@
             "pattern": "^[A-Za-z0-9_-]+$"
           }
         },
-        "required": ["approvingDeviceId", "proof"],
+        "required": [
+          "approvingDeviceId",
+          "proof"
+        ],
         "additionalProperties": false
       },
       "WithdrawDeviceBodyDto": {
@@ -8132,7 +8367,10 @@
             "pattern": "^[A-Za-z0-9_-]+$"
           }
         },
-        "required": ["signaturePublicKey", "proof"],
+        "required": [
+          "signaturePublicKey",
+          "proof"
+        ],
         "additionalProperties": false
       },
       "MigrateDeviceBodyDto": {
@@ -8151,7 +8389,10 @@
             "pattern": "^[A-Za-z0-9_-]+$"
           }
         },
-        "required": ["signaturePublicKey", "proof"],
+        "required": [
+          "signaturePublicKey",
+          "proof"
+        ],
         "additionalProperties": false
       },
       "ConversationListDto": {
@@ -8168,7 +8409,9 @@
             "maxItems": 1000
           }
         },
-        "required": ["conversationIds"],
+        "required": [
+          "conversationIds"
+        ],
         "additionalProperties": false
       },
       "PublishKeyPackagesBody": {
@@ -8192,7 +8435,10 @@
             "type": "array"
           }
         },
-        "required": ["signaturePublicKey", "keyPackages"],
+        "required": [
+          "signaturePublicKey",
+          "keyPackages"
+        ],
         "additionalProperties": false
       },
       "PublishResultDto": {
@@ -8216,7 +8462,11 @@
             "maximum": 9007199254740991
           }
         },
-        "required": ["deviceId", "published", "available"],
+        "required": [
+          "deviceId",
+          "published",
+          "available"
+        ],
         "additionalProperties": false
       },
       "ClaimedKeyPackageDto": {
@@ -8240,7 +8490,11 @@
             "maxLength": 65536
           }
         },
-        "required": ["deviceId", "signaturePublicKey", "keyPackage"],
+        "required": [
+          "deviceId",
+          "signaturePublicKey",
+          "keyPackage"
+        ],
         "additionalProperties": false
       },
       "RevokeKeyPackagesBody": {
@@ -8253,7 +8507,9 @@
             "pattern": "^[A-Za-z0-9+/]+={0,2}$"
           }
         },
-        "required": ["signaturePublicKey"],
+        "required": [
+          "signaturePublicKey"
+        ],
         "additionalProperties": false
       },
       "RevokeResultDto": {
@@ -8266,7 +8522,9 @@
             "maximum": 9007199254740991
           }
         },
-        "required": ["revoked"],
+        "required": [
+          "revoked"
+        ],
         "additionalProperties": false
       },
       "BackupBody": {
@@ -8280,7 +8538,9 @@
             "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
           }
         },
-        "required": ["backup"],
+        "required": [
+          "backup"
+        ],
         "additionalProperties": false
       },
       "CreateConversationBody": {
@@ -8299,7 +8559,9 @@
             }
           }
         },
-        "required": ["memberUserIds"],
+        "required": [
+          "memberUserIds"
+        ],
         "additionalProperties": false
       },
       "CreatedConversationDto": {
@@ -8312,7 +8574,9 @@
             "maxLength": 36
           }
         },
-        "required": ["conversationId"],
+        "required": [
+          "conversationId"
+        ],
         "additionalProperties": false
       },
       "SendMessageBody": {
@@ -8351,7 +8615,12 @@
             "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
           }
         },
-        "required": ["clientMessageId", "ciphertext", "alg", "epoch"],
+        "required": [
+          "clientMessageId",
+          "ciphertext",
+          "alg",
+          "epoch"
+        ],
         "additionalProperties": false
       },
       "SentMessageDto": {
@@ -8374,7 +8643,11 @@
             "description": "true if an idempotent retry matched an existing message"
           }
         },
-        "required": ["messageId", "createdAt", "deduplicated"],
+        "required": [
+          "messageId",
+          "createdAt",
+          "deduplicated"
+        ],
         "additionalProperties": false
       },
       "CommitWelcomeBodyDto": {
@@ -8405,7 +8678,12 @@
             "pattern": "^[A-Za-z0-9+/]+={0,2}$"
           }
         },
-        "required": ["recipientUserId", "recipientDeviceId", "welcome", "ratchetTree"],
+        "required": [
+          "recipientUserId",
+          "recipientDeviceId",
+          "welcome",
+          "ratchetTree"
+        ],
         "additionalProperties": false
       },
       "CommitBodyDto": {
@@ -8492,7 +8770,11 @@
             "description": "true if own idempotent retry matched an existing commit"
           }
         },
-        "required": ["id", "epoch", "deduplicated"],
+        "required": [
+          "id",
+          "epoch",
+          "deduplicated"
+        ],
         "additionalProperties": false
       },
       "FetchedCommitDto": {
@@ -8538,7 +8820,14 @@
             "maxLength": 40
           }
         },
-        "required": ["id", "clientCommitId", "epoch", "senderUserId", "commit", "createdAt"],
+        "required": [
+          "id",
+          "clientCommitId",
+          "epoch",
+          "senderUserId",
+          "commit",
+          "createdAt"
+        ],
         "additionalProperties": false
       },
       "FetchedMessageDto": {
@@ -8626,7 +8915,9 @@
             "maxLength": 36
           }
         },
-        "required": ["messages"],
+        "required": [
+          "messages"
+        ],
         "additionalProperties": false
       },
       "SyncedMessageDto": {
@@ -8721,7 +9012,9 @@
             "pattern": "^[A-Za-z0-9_-]+$"
           }
         },
-        "required": ["messages"],
+        "required": [
+          "messages"
+        ],
         "additionalProperties": false
       },
       "RecordReceiptBody": {
@@ -8729,7 +9022,10 @@
         "properties": {
           "status": {
             "type": "string",
-            "enum": ["delivered", "read"]
+            "enum": [
+              "delivered",
+              "read"
+            ]
           },
           "throughMessageId": {
             "type": "string",
@@ -8739,7 +9035,10 @@
             "maxLength": 36
           }
         },
-        "required": ["status", "throughMessageId"],
+        "required": [
+          "status",
+          "throughMessageId"
+        ],
         "additionalProperties": false
       },
       "ConversationReceiptDto": {
@@ -8781,7 +9080,9 @@
             "maxLength": 40
           }
         },
-        "required": ["userId"],
+        "required": [
+          "userId"
+        ],
         "additionalProperties": false
       },
       "DeliverWelcomeBody": {
@@ -8814,7 +9115,12 @@
             "pattern": "^[A-Za-z0-9+/]+={0,2}$"
           }
         },
-        "required": ["recipientUserId", "recipientDeviceId", "welcome", "ratchetTree"],
+        "required": [
+          "recipientUserId",
+          "recipientDeviceId",
+          "welcome",
+          "ratchetTree"
+        ],
         "additionalProperties": false
       },
       "DeliveredWelcomeDto": {
@@ -8827,7 +9133,9 @@
             "maxLength": 36
           }
         },
-        "required": ["welcomeId"],
+        "required": [
+          "welcomeId"
+        ],
         "additionalProperties": false
       },
       "PendingWelcomeDto": {
@@ -8860,7 +9168,12 @@
             "maxLength": 40
           }
         },
-        "required": ["id", "conversationId", "senderUserId", "createdAt"],
+        "required": [
+          "id",
+          "conversationId",
+          "senderUserId",
+          "createdAt"
+        ],
         "additionalProperties": false
       },
       "WelcomeMaterialDto": {
@@ -8879,7 +9192,10 @@
             "pattern": "^[A-Za-z0-9+/]+={0,2}$"
           }
         },
-        "required": ["welcome", "ratchetTree"],
+        "required": [
+          "welcome",
+          "ratchetTree"
+        ],
         "additionalProperties": false
       },
       "CreateUploadGrantBody": {
@@ -8900,7 +9216,10 @@
             "format": "int64"
           }
         },
-        "required": ["conversationId", "byteSize"],
+        "required": [
+          "conversationId",
+          "byteSize"
+        ],
         "additionalProperties": false
       },
       "UploadGrantDto": {
@@ -8919,7 +9238,10 @@
             "maxLength": 65536
           }
         },
-        "required": ["objectKey", "uploadUrl"],
+        "required": [
+          "objectKey",
+          "uploadUrl"
+        ],
         "additionalProperties": false
       },
       "CreateDownloadGrantBody": {
@@ -8932,7 +9254,9 @@
             "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
           }
         },
-        "required": ["objectKey"],
+        "required": [
+          "objectKey"
+        ],
         "additionalProperties": false
       },
       "DownloadGrantDto": {
@@ -8945,7 +9269,9 @@
             "maxLength": 65536
           }
         },
-        "required": ["url"],
+        "required": [
+          "url"
+        ],
         "additionalProperties": false
       },
       "PushSubscriptionBody": {
@@ -8970,7 +9296,11 @@
             "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
           }
         },
-        "required": ["p256dh", "auth", "endpoint"],
+        "required": [
+          "p256dh",
+          "auth",
+          "endpoint"
+        ],
         "additionalProperties": false
       },
       "SubscribePushBody": {
@@ -8987,7 +9317,10 @@
             "$ref": "#/components/schemas/PushSubscriptionBody"
           }
         },
-        "required": ["deviceId", "subscription"],
+        "required": [
+          "deviceId",
+          "subscription"
+        ],
         "additionalProperties": false
       },
       "CreateTenantResponseDto": {
@@ -9006,7 +9339,10 @@
             "maxLength": 36
           }
         },
-        "required": ["tenantId", "userId"],
+        "required": [
+          "tenantId",
+          "userId"
+        ],
         "additionalProperties": false
       },
       "CreateInviteResponseDto": {
@@ -9031,7 +9367,11 @@
             "maxLength": 40
           }
         },
-        "required": ["inviteId", "token", "expiresAt"],
+        "required": [
+          "inviteId",
+          "token",
+          "expiresAt"
+        ],
         "additionalProperties": false
       },
       "InviteSummaryDto": {
@@ -9076,7 +9416,14 @@
             "maxLength": 40
           }
         },
-        "required": ["id", "inviteeEmail", "expiresAt", "acceptedAt", "revokedAt", "createdAt"],
+        "required": [
+          "id",
+          "inviteeEmail",
+          "expiresAt",
+          "acceptedAt",
+          "revokedAt",
+          "createdAt"
+        ],
         "additionalProperties": false
       },
       "AcceptInviteResponseDto": {
@@ -9095,7 +9442,10 @@
             "maxLength": 36
           }
         },
-        "required": ["tenantId", "userId"],
+        "required": [
+          "tenantId",
+          "userId"
+        ],
         "additionalProperties": false
       },
       "MemberSummaryDto": {
@@ -9120,16 +9470,27 @@
           },
           "role": {
             "type": "string",
-            "enum": ["admin", "member"]
+            "enum": [
+              "admin",
+              "member"
+            ]
           }
         },
-        "required": ["userId", "email", "displayName", "role"],
+        "required": [
+          "userId",
+          "email",
+          "displayName",
+          "role"
+        ],
         "additionalProperties": false
       },
       "ErrorResponse": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["statusCode", "message"],
+        "required": [
+          "statusCode",
+          "message"
+        ],
         "properties": {
           "statusCode": {
             "type": "integer",

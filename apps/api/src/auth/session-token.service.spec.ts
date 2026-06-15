@@ -29,6 +29,10 @@ vi.mock('../db/index.js', () => ({
       lastUsedAt: 'last_used_at',
       revokedAt: 'revoked_at',
     },
+    userTenantIndex: {
+      sub: 'sub',
+      tenantId: 'tenant_id',
+    },
   },
 }));
 
@@ -136,7 +140,7 @@ describe('SessionTokenService (unit)', () => {
   describe('rotateRefresh', () => {
     it('returns new access+refresh tokens and updates the row', async () => {
       vi.mocked(withRouting).mockResolvedValueOnce(makeActiveRow());
-      vi.mocked(withTenant).mockResolvedValueOnce([{ id: SESSION_ID }]); // UPDATE returning
+      vi.mocked(withTenant).mockResolvedValueOnce([{ id: SESSION_ID }]); // INSERT new session returning
 
       const { accessToken, refreshToken, sessionId } = await svc.rotateRefresh('a'.repeat(64));
 
@@ -147,7 +151,7 @@ describe('SessionTokenService (unit)', () => {
 
     it('access token has correct sub and sid after rotation', async () => {
       vi.mocked(withRouting).mockResolvedValueOnce(makeActiveRow());
-      vi.mocked(withTenant).mockResolvedValueOnce([{ id: SESSION_ID }]);
+      vi.mocked(withTenant).mockResolvedValueOnce([{ id: SESSION_ID }]); // INSERT new session returning
 
       const { accessToken } = await svc.rotateRefresh('b'.repeat(64));
 
@@ -187,7 +191,7 @@ describe('SessionTokenService (unit)', () => {
 
     it('throws 401 when optimistic lock fails (concurrent rotation)', async () => {
       vi.mocked(withRouting).mockResolvedValueOnce(makeActiveRow());
-      vi.mocked(withTenant).mockResolvedValueOnce([]); // UPDATE returns 0 rows
+      vi.mocked(withTenant).mockResolvedValueOnce([]); // optimistic lock failed: INSERT skipped
 
       await expect(svc.rotateRefresh('f'.repeat(64))).rejects.toBeInstanceOf(UnauthorizedException);
     });

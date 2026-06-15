@@ -28,7 +28,10 @@ import { Public } from './public.decorator.js';
 import { COOKIE_NAME, SessionTokenService } from './session-token.service.js';
 
 const REFRESH_COOKIE_MAX_AGE = 30 * 24 * 60 * 60; // 30 days in seconds
-const REFRESH_COOKIE_PATH = '/auth/session/refresh';
+// API_PATH_PREFIX is the external prefix Caddy (prod) or Vite (dev) maps to the API root.
+// The cookie path must match the browser-visible URL, not the NestJS-internal path.
+// Default '/api' covers both the Vite dev-proxy and the Caddy prod deployment.
+const REFRESH_COOKIE_PATH = (process.env['API_PATH_PREFIX'] ?? '/api') + '/auth/session/refresh';
 const CSRF_HEADER = 'x-argus-refresh';
 
 class RefreshResponseDto {
