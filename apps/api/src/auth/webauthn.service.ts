@@ -368,7 +368,9 @@ export class WebAuthnService {
           credential: {
             id: isoBase64URL.fromBuffer(cred.credentialId as unknown as Uint8Array<ArrayBuffer>),
             publicKey: new Uint8Array(cred.publicKey as Buffer),
-            counter: Number(cred.counter),
+            // Pass 0 so the library skips its own counter check — we do it below with BigInt
+            // precision and route regressions through the audit path (passkey-auth.md §T5).
+            counter: 0,
             transports: (cred.transports ?? []) as Parameters<
               typeof verifyAuthenticationResponse
             >[0]['credential']['transports'],
@@ -383,6 +385,7 @@ export class WebAuthnService {
 
         // Clone detection (passkey-auth.md §T5): allow counter=0; reject only regression from >0.
         // BigInt comparison avoids precision loss for very large counter values.
+        // NOTE: we pass counter:0 above so the library skips its check; this block is the only gate.
         if (cred.counter > 0n && BigInt(newCounter) <= cred.counter) {
           regressionArgusId = cred.argusId;
           throw new UnauthorizedException(

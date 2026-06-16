@@ -1475,6 +1475,774 @@
         ]
       }
     },
+    "/auth/register/redeem": {
+      "post": {
+        "description": "Validates the admin-issued invite code (single-use, 5-min expiry). Returns a ceremonyId that must be passed to /auth/webauthn/register/options.",
+        "operationId": "redeemInviteCode",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedeemCodeBodyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CeremonyResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid or expired invite code",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Plan upgrade required — current plan does not include this feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted to perform this action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Redeem an invite code and open a passkey registration ceremony",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/webauthn/register/options": {
+      "post": {
+        "description": "Returns PublicKeyCredentialCreationOptions. Pass the result to navigator.credentials.create().",
+        "operationId": "getRegistrationOptions",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterOptionsBodyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "PublicKeyCredentialCreationOptions JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "challenge",
+                    "rp",
+                    "user",
+                    "pubKeyCredParams"
+                  ],
+                  "properties": {
+                    "challenge": {
+                      "type": "string",
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                      "maxLength": 65536
+                    },
+                    "rp": {
+                      "type": "object",
+                      "required": [
+                        "name"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "maxLength": 65536
+                        },
+                        "name": {
+                          "type": "string",
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "maxLength": 65536
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "user": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "name",
+                        "displayName"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "maxLength": 65536
+                        },
+                        "name": {
+                          "type": "string",
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "maxLength": 65536
+                        },
+                        "displayName": {
+                          "type": "string",
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "maxLength": 65536
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "pubKeyCredParams": {
+                      "type": "array",
+                      "maxItems": 20,
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "alg",
+                          "type"
+                        ],
+                        "properties": {
+                          "alg": {
+                            "type": "integer",
+                            "format": "int64",
+                            "maximum": 9007199254740991
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "public-key"
+                            ]
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "timeout": {
+                      "type": "integer",
+                      "format": "int64",
+                      "maximum": 9007199254740991
+                    },
+                    "excludeCredentials": {
+                      "type": "array",
+                      "maxItems": 100,
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "type"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                            "maxLength": 65536
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "public-key"
+                            ]
+                          },
+                          "transports": {
+                            "type": "array",
+                            "maxItems": 10,
+                            "items": {
+                              "type": "string",
+                              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                              "maxLength": 65536
+                            }
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "authenticatorSelection": {
+                      "type": "object",
+                      "properties": {
+                        "residentKey": {
+                          "type": "string",
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "maxLength": 65536
+                        },
+                        "userVerification": {
+                          "type": "string",
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "maxLength": 65536
+                        },
+                        "requireResidentKey": {
+                          "type": "boolean"
+                        },
+                        "authenticatorAttachment": {
+                          "type": "string",
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "maxLength": 65536
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "attestation": {
+                      "type": "string",
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                      "maxLength": 65536
+                    },
+                    "extensions": {
+                      "type": "object",
+                      "properties": {
+                        "prf": {
+                          "type": "object",
+                          "properties": {},
+                          "additionalProperties": false
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "ceremony not found or expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Plan upgrade required — current plan does not include this feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted to perform this action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get WebAuthn registration options",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/webauthn/register/verify": {
+      "post": {
+        "description": "Atomically: delete the ceremony, consume the invite, create the user, register the passkey, mint a session. Returns an access token and sets an HttpOnly refresh cookie.",
+        "operationId": "verifyRegistration",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterVerifyBodyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "attestation verification failed or ceremony not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Plan upgrade required — current plan does not include this feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted to perform this action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Verify passkey registration and create account",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/webauthn/authenticate/options": {
+      "post": {
+        "description": "Returns an empty allowCredentials list — discoverable flow, no username/argus-id required. Pass options to navigator.credentials.get().",
+        "operationId": "getAuthenticationOptions",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticateOptionsResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Plan upgrade required — current plan does not include this feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted to perform this action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get WebAuthn authentication options (discoverable credentials)",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/webauthn/authenticate/verify": {
+      "post": {
+        "description": "Verifies the WebAuthn assertion. Identity is resolved from the stored credential row only — the client-posted userHandle is cross-checked but never trusted as the authority. Counter regression (possible clone) returns 401.",
+        "operationId": "verifyAuthentication",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthenticateVerifyBodyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTokenResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "assertion failed, userHandle mismatch, or counter regression",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Plan upgrade required — current plan does not include this feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted to perform this action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Verify passkey assertion and mint session",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/billing/checkout": {
       "post": {
         "operationId": "billingCheckout",
@@ -7528,6 +8296,7 @@
           },
           "email": {
             "type": "string",
+            "nullable": true,
             "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
             "maxLength": 65536
           },
@@ -8003,6 +8772,396 @@
         },
         "required": [
           "accessToken"
+        ],
+        "additionalProperties": false
+      },
+      "RedeemCodeBodyDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Admin-issued invite code (256-bit hex string)",
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "maxLength": 65536
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "additionalProperties": false
+      },
+      "CeremonyResponseDto": {
+        "type": "object",
+        "properties": {
+          "ceremonyId": {
+            "type": "string",
+            "description": "Opaque ceremony ID; pass to the next step in the ceremony",
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "maxLength": 65536
+          }
+        },
+        "required": [
+          "ceremonyId"
+        ],
+        "additionalProperties": false
+      },
+      "RegisterOptionsBodyDto": {
+        "type": "object",
+        "properties": {
+          "ceremonyId": {
+            "type": "string",
+            "description": "Ceremony ID returned by /auth/register/redeem",
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "maxLength": 65536
+          }
+        },
+        "required": [
+          "ceremonyId"
+        ],
+        "additionalProperties": false
+      },
+      "RegisterVerifyBodyDto": {
+        "type": "object",
+        "properties": {
+          "ceremonyId": {
+            "type": "string",
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "maxLength": 65536
+          },
+          "registrationResponse": {
+            "type": "object",
+            "required": [
+              "id",
+              "rawId",
+              "response",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                "maxLength": 65536
+              },
+              "rawId": {
+                "type": "string",
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                "maxLength": 65536
+              },
+              "response": {
+                "type": "object",
+                "required": [
+                  "clientDataJSON",
+                  "attestationObject"
+                ],
+                "properties": {
+                  "clientDataJSON": {
+                    "type": "string",
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                    "maxLength": 65536
+                  },
+                  "attestationObject": {
+                    "type": "string",
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                    "maxLength": 65536
+                  },
+                  "authenticatorData": {
+                    "type": "string",
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                    "maxLength": 65536
+                  },
+                  "transports": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                      "maxLength": 65536
+                    },
+                    "maxItems": 1000
+                  }
+                },
+                "additionalProperties": false
+              },
+              "authenticatorAttachment": {
+                "type": "string",
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                "maxLength": 65536
+              },
+              "clientExtensionResults": {
+                "type": "object",
+                "properties": {
+                  "credProps": {
+                    "type": "object",
+                    "properties": {
+                      "rk": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "prf": {
+                    "type": "object",
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "results": {
+                        "type": "object",
+                        "properties": {
+                          "first": {
+                            "type": "string",
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                            "maxLength": 65536
+                          },
+                          "second": {
+                            "type": "string",
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                            "maxLength": 65536
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "public-key"
+                ]
+              }
+            },
+            "description": "PublicKeyCredential JSON from navigator.credentials.create()",
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ceremonyId"
+        ],
+        "additionalProperties": false
+      },
+      "AccessTokenResponseDto": {
+        "type": "object",
+        "properties": {
+          "accessToken": {
+            "type": "string",
+            "description": "10-minute EdDSA JWT; store in memory only, never in local/session storage",
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "maxLength": 65536
+          }
+        },
+        "required": [
+          "accessToken"
+        ],
+        "additionalProperties": false
+      },
+      "AuthenticateOptionsResponseDto": {
+        "type": "object",
+        "properties": {
+          "ceremonyId": {
+            "type": "string",
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "maxLength": 65536
+          },
+          "options": {
+            "type": "object",
+            "required": [
+              "challenge"
+            ],
+            "properties": {
+              "challenge": {
+                "type": "string",
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                "maxLength": 65536
+              },
+              "timeout": {
+                "type": "integer",
+                "format": "int64",
+                "maximum": 9007199254740991
+              },
+              "rpId": {
+                "type": "string",
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                "maxLength": 65536
+              },
+              "allowCredentials": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "type"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                      "maxLength": 65536
+                    },
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "public-key"
+                      ]
+                    },
+                    "transports": {
+                      "type": "array",
+                      "maxItems": 10,
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                        "maxLength": 65536
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "userVerification": {
+                "type": "string",
+                "enum": [
+                  "required",
+                  "preferred",
+                  "discouraged"
+                ]
+              },
+              "extensions": {
+                "type": "object",
+                "properties": {
+                  "prf": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              "hints": {
+                "type": "array",
+                "maxItems": 10,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                  "maxLength": 65536
+                }
+              }
+            },
+            "description": "PublicKeyCredentialRequestOptions for navigator.credentials.get()",
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ceremonyId"
+        ],
+        "additionalProperties": false
+      },
+      "AuthenticateVerifyBodyDto": {
+        "type": "object",
+        "properties": {
+          "ceremonyId": {
+            "type": "string",
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "maxLength": 65536
+          },
+          "authenticationResponse": {
+            "type": "object",
+            "required": [
+              "id",
+              "rawId",
+              "response",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                "maxLength": 65536
+              },
+              "rawId": {
+                "type": "string",
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                "maxLength": 65536
+              },
+              "response": {
+                "type": "object",
+                "required": [
+                  "clientDataJSON",
+                  "authenticatorData",
+                  "signature"
+                ],
+                "properties": {
+                  "clientDataJSON": {
+                    "type": "string",
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                    "maxLength": 65536
+                  },
+                  "authenticatorData": {
+                    "type": "string",
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                    "maxLength": 65536
+                  },
+                  "signature": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9+/]+={0,2}$",
+                    "maxLength": 65536
+                  },
+                  "userHandle": {
+                    "type": "string",
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                    "maxLength": 65536
+                  }
+                },
+                "additionalProperties": false
+              },
+              "authenticatorAttachment": {
+                "type": "string",
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                "maxLength": 65536
+              },
+              "clientExtensionResults": {
+                "type": "object",
+                "properties": {
+                  "prf": {
+                    "type": "object",
+                    "properties": {
+                      "results": {
+                        "type": "object",
+                        "properties": {
+                          "first": {
+                            "type": "string",
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                            "maxLength": 65536
+                          },
+                          "second": {
+                            "type": "string",
+                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                            "maxLength": 65536
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "public-key"
+                ]
+              }
+            },
+            "description": "PublicKeyCredential JSON from navigator.credentials.get()",
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "ceremonyId"
         ],
         "additionalProperties": false
       },

@@ -40,7 +40,7 @@ GRANT SELECT, INSERT, UPDATE ON webauthn_credentials TO argus_app;
 -- ceremony_id UUID (122+ bits of randomness). See registration-and-tenancy.md §T5.
 CREATE TABLE webauthn_challenges (
   ceremony_id    uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
-  challenge_hash text        NOT NULL,  -- SHA-256 hex of the raw WebAuthn challenge bytes (never raw bytes in DB)
+  challenge_hash text        NOT NULL,  -- hex of the 32 raw CSPRNG challenge bytes (NOT a hash; see redeemCode/getAuthenticationOptions)
   purpose        text        NOT NULL,  -- 'register' | 'authenticate'
   argus_id       text,                  -- generated at redeem; same value must flow to options → verify → user insert
   invite_id      uuid,                  -- invite consumed atomically in register/verify tx (registration-and-tenancy.md §T2)

@@ -302,7 +302,7 @@ export const webauthnCredentials = pgTable('webauthn_credentials', {
 // Delete-on-use (DELETE…RETURNING) in service code. See docs/threat-models/registration-and-tenancy.md §T5.
 export const webauthnChallenges = pgTable('webauthn_challenges', {
   ceremonyId: uuid('ceremony_id').primaryKey().defaultRandom(),
-  challengeHash: text('challenge_hash').notNull(), // SHA-256 hex of raw challenge bytes
+  challengeHash: text('challenge_hash').notNull(), // hex of 32 raw CSPRNG challenge bytes (not a hash)
   purpose: text('purpose').notNull(), // 'register' | 'authenticate'
   argusId: text('argus_id'), // generated at redeem; same value flows through options → verify → user insert
   inviteId: uuid('invite_id'), // consumed atomically in register/verify tx
