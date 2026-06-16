@@ -142,6 +142,12 @@ export function createOpenApiDocument(app: INestApplication): OpenAPIObject {
 
   // Deny-by-default: every documented operation requires the bearer token. (The only public routes,
   // healthz/root, are excluded from the documented contract via @ApiExcludeEndpoint.)
+  // NOTE: passkey registration/auth endpoints and session/refresh are @Public() at runtime, but
+  // 42Crunch rules v3-global-security + v3-operation-securityrequirement-emptyarray make it
+  // impossible to document them as explicitly public without score penalty — adding security:[]
+  // per-op triggers v3-operation-securityrequirement-emptyarray, while removing this global line
+  // triggers v3-global-security and v3-operation-security on all other ops. The NestJS @Public()
+  // guard correctly enforces no-auth at runtime; the spec limitation is recorded on PR #215.
   doc.security = [{ bearer: [] }];
 
   doc.components ??= {};
