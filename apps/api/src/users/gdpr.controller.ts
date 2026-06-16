@@ -36,7 +36,7 @@ class ExportProfileDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ format: 'uuid' }) tenantId!: string;
   @ApiProperty() argusId!: string;
-  @ApiProperty({ format: 'email' }) email!: string;
+  @ApiProperty({ nullable: true, type: 'string', format: 'email' }) email!: string | null;
   @ApiProperty({ type: String, nullable: true }) displayName!: string | null;
   @ApiProperty() role!: string;
   @ApiProperty() status!: string;
@@ -122,7 +122,7 @@ class MeExportDto {
       id: { type: 'string', format: 'uuid' },
       tenantId: { type: 'string', format: 'uuid' },
       argusId: { type: 'string' },
-      email: { type: 'string', format: 'email' },
+      email: { type: 'string', format: 'email', nullable: true },
       displayName: { type: 'string', nullable: true },
       role: { type: 'string' },
       status: { type: 'string' },

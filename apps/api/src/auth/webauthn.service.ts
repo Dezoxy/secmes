@@ -374,6 +374,7 @@ export class WebAuthnService {
   async verifyAuthentication(
     ceremonyId: string,
     response: AuthenticationResponseJSON,
+    requestContext: { ip: string; userAgent: string } = { ip: '', userAgent: '' },
   ): Promise<MintedSession> {
     // Delete challenge first (outside withTenant so we can pass it into the tenant tx).
     const [challenge] = await withRouting((tx) =>
@@ -502,6 +503,8 @@ export class WebAuthnService {
           .record(DEFAULT_TENANT_ID, {
             eventType: 'passkey.counter_regression',
             actorSub: `argusid:${regressionArgusId}`,
+            ip: requestContext.ip || null,
+            userAgent: requestContext.userAgent || null,
           })
           .catch((auditErr: unknown) =>
             this.logger.error('failed to write counter_regression audit event', auditErr),

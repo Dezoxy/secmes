@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, HttpStatus, Logger, Post, Res } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Ip, Logger, Post, Req, Res } from '@nestjs/common';
 import {
   ApiBody,
   ApiCreatedResponse,
@@ -10,7 +10,7 @@ import {
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from '@simplewebauthn/server';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 
 import {
   type AuthenticateVerifyRequest,
@@ -400,10 +400,13 @@ export class WebAuthnController {
   async verifyAuthentication(
     @Body(new ZodValidationPipe(AuthenticateVerifyRequestSchema)) body: AuthenticateVerifyRequest,
     @Res({ passthrough: true }) res: Response,
+    @Req() req: Request,
+    @Ip() ip: string,
   ): Promise<AccessTokenResponseDto> {
     const session = await this.webauthn.verifyAuthentication(
       body.ceremonyId,
       body.authenticationResponse as unknown as AuthenticationResponseJSON,
+      { ip, userAgent: String(req.headers['user-agent'] ?? '') },
     );
     res.cookie(COOKIE_NAME, session.refreshToken, {
       httpOnly: true,

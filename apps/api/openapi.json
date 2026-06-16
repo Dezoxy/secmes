@@ -8191,8 +8191,10 @@
           },
           "email": {
             "type": "string",
+            "nullable": true,
+            "format": "email",
             "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
-            "maxLength": 65536
+            "maxLength": 320
           },
           "signaturePublicKeyPrefix": {
             "type": "string",
@@ -8659,6 +8661,7 @@
               "email": {
                 "type": "string",
                 "format": "email",
+                "nullable": true,
                 "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
                 "maxLength": 320
               },
@@ -10609,8 +10612,10 @@
           },
           "email": {
             "type": "string",
+            "nullable": true,
+            "format": "email",
             "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
-            "maxLength": 65536
+            "maxLength": 320
           },
           "displayName": {
             "type": "string",
