@@ -344,7 +344,12 @@ export class WebAuthnService {
           })
           .from(schema.webauthnCredentials)
           .innerJoin(schema.users, eq(schema.users.id, schema.webauthnCredentials.userId))
-          .where(eq(schema.webauthnCredentials.credentialId, rawId))
+          .where(
+            and(
+              eq(schema.webauthnCredentials.credentialId, rawId),
+              eq(schema.users.status, 'active'),
+            ),
+          )
           .limit(1)
           .then((r) => r[0]);
 
