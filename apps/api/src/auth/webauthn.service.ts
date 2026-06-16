@@ -22,7 +22,7 @@ import type {
   RegistrationResponseJSON,
 } from '@simplewebauthn/server';
 import { isoBase64URL, isoUint8Array } from '@simplewebauthn/server/helpers';
-import { and, count, eq, gt, isNull, sql } from 'drizzle-orm';
+import { and, count, eq, gt, isNull, lt, sql } from 'drizzle-orm';
 
 import { schema, withRouting, withTenant } from '../db/index.js';
 import { PaymentRequiredException } from '../common/http-exceptions.js';
@@ -92,7 +92,10 @@ export class WebAuthnService {
     });
 
     if (!invite) throw new UnauthorizedException(INVALID);
-    if (invite.tenantId !== DEFAULT_TENANT_ID) throw new UnauthorizedException(INVALID);
+    // Any valid admin-issued invite is accepted here — the user always lands in
+    // DEFAULT_TENANT_ID regardless of which tenant issued the invite.  The old
+    // tenantId === DEFAULT_TENANT_ID guard prevented admins on non-default tenants
+    // from issuing passkey invites via POST /tenants/invites.
     if (invite.acceptedAt !== null) throw new UnauthorizedException(INVALID);
     if (invite.revokedAt !== null) throw new UnauthorizedException(INVALID);
     if (invite.expiresAt < new Date()) throw new UnauthorizedException(INVALID);
@@ -302,6 +305,15 @@ export class WebAuthnService {
 
   /** Generate authentication options with empty allowCredentials (discoverable — no oracle). */
   async getAuthenticationOptions(): Promise<{ ceremonyId: string; options: object }> {
+    // Opportunistic sweep of expired challenges — backstop cleanup so abandoned ceremonies
+    // (unauthenticated endpoint, no guaranteed verify call) don't accumulate indefinitely.
+    // Primary replay protection is still delete-on-use in verifyAuthentication/verifyRegistration.
+    await withRouting((tx) =>
+      tx
+        .delete(schema.webauthnChallenges)
+        .where(lt(schema.webauthnChallenges.expiresAt, new Date())),
+    );
+
     const challengeBytes = randomBytes(32);
     const challengeHex = challengeBytes.toString('hex');
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
