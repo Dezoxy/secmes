@@ -3,6 +3,7 @@ import { ThrottlerGuard } from '@nestjs/throttler';
 
 import type { MaybeUnboundAuth } from '../auth/auth.service.js';
 import { IS_PUBLIC_KEY } from '../auth/public.decorator.js';
+import { PUBLIC_RATE_LIMIT_KEY } from './public-rate-limit.decorator.js';
 
 /**
  * Global rate-limit guard for AUTHENTICATED abuse. Keys on the VERIFIED account (`tenant:sub`) so a limit is
@@ -23,23 +24,32 @@ export class UserThrottlerGuard extends ThrottlerGuard {
     // req.auth is set by JwtAuthGuard. For @AllowUnbound routes, tenantId may be null — use
     // `unbound:<sub>` so the limit is still identity-scoped (not IP), even before binding.
     const auth = req.auth as MaybeUnboundAuth | undefined;
-    const ip = (req.ip as string | undefined) ?? 'unknown';
     if (auth) {
       return Promise.resolve(
         auth.tenantId ? `u:${auth.tenantId}:${auth.sub}` : `unbound:${auth.sub}`,
       );
     }
+    // @PublicRateLimit() routes fall through to IP — the only server-verified key available
+    // before auth runs. The refresh limit is set high enough (see refreshSession) that a NAT'd
+    // office is unlikely to hit it under normal use. Cookie-prefix keying was rejected: the cookie
+    // is client-supplied, so an attacker could rotate fake values to escape per-IP budgeting.
+    const ip = (req.ip as string | undefined) ?? 'unknown';
     return Promise.resolve(`ip:${ip}`);
   }
 
   protected override shouldSkip(context: ExecutionContext): Promise<boolean> {
     // Skip non-HTTP (the WS gateway authenticates itself with a first-frame token) and @Public routes
     // (health/version) — the same exemptions the auth guard makes, so the two stay in lockstep.
+    // Exception: @PublicRateLimit() opts a route back in (IP-keyed fallback, not identity-keyed).
     if (context.getType() !== 'http') return Promise.resolve(true);
-    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
-      context.getHandler(),
-      context.getClass(),
+    const handler = context.getHandler();
+    const cls = context.getClass();
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [handler, cls]);
+    if (!isPublic) return Promise.resolve(false);
+    const hasPublicRateLimit = this.reflector.getAllAndOverride<boolean>(PUBLIC_RATE_LIMIT_KEY, [
+      handler,
+      cls,
     ]);
-    return Promise.resolve(isPublic ?? false);
+    return Promise.resolve(!hasPublicRateLimit);
   }
 }

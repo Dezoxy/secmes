@@ -38,8 +38,8 @@ export class DevicesService {
     fingerprint: string,
     deviceId: string,
   ): Promise<EnrollmentRow> {
-    const row = await withTenant(auth.tenantId, async (tx) => {
-      const userId = await requireUser(tx, auth.sub);
+    const { row, userSubs } = await withTenant(auth.tenantId, async (tx) => {
+      const userId = await requireUser(tx, auth);
 
       // Verify the requesting device belongs to this user (ownership authz — RLS + user_id check).
       const [device] = await tx
@@ -69,16 +69,30 @@ export class DevicesService {
         })
         .returning();
       if (!enrollment) throw new Error('enrollment insert returned no row');
-      return enrollment;
+
+      const [userRow] = await tx
+        .select({
+          externalIdentityId: schema.users.externalIdentityId,
+          argusId: schema.users.argusId,
+        })
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+        .limit(1);
+      const subs = userRow
+        ? [userRow.externalIdentityId, `argusid:${userRow.argusId}`]
+        : [auth.sub];
+      return { row: enrollment, userSubs: subs };
     });
 
-    // Nudge D1 out-of-band (WS); if the bus is down, D1 sees the pending enrollment on next poll.
-    this.bus.emitDeviceEnrollmentPending({
-      tenantId: auth.tenantId,
-      enrollmentId: row.id,
-      userSub: auth.sub,
-      requestingDeviceId: row.requestingDeviceId,
-    });
+    // Nudge D1 out-of-band (WS); emit for both token families so argus and Zitadel sockets are reached.
+    for (const userSub of userSubs) {
+      this.bus.emitDeviceEnrollmentPending({
+        tenantId: auth.tenantId,
+        enrollmentId: row.id,
+        userSub,
+        requestingDeviceId: row.requestingDeviceId,
+      });
+    }
 
     await this.audit.record(auth.tenantId, {
       eventType: 'device.enrollment_requested',
@@ -94,7 +108,7 @@ export class DevicesService {
    */
   async listEnrollments(auth: VerifiedAuth, status?: string): Promise<EnrollmentRow[]> {
     return withTenant(auth.tenantId, async (tx) => {
-      const userId = await requireUser(tx, auth.sub);
+      const userId = await requireUser(tx, auth);
       const effectiveStatus = status ?? 'pending';
       // Join the approver's devices row so D2 can verify D1's claimed key package SPK (P1-3).
       const approverDevice = aliasedTable(schema.devices, 'approver_device');
@@ -144,8 +158,8 @@ export class DevicesService {
     approvingDeviceId: string,
     proofBase64url: string,
   ): Promise<EnrollmentRow> {
-    const row = await withTenant(auth.tenantId, async (tx) => {
-      const userId = await requireUser(tx, auth.sub);
+    const { row, userSubs } = await withTenant(auth.tenantId, async (tx) => {
+      const userId = await requireUser(tx, auth);
 
       // Load the pending enrollment (user-scoped by RLS + where clause).
       const [enrollment] = await tx
@@ -220,14 +234,27 @@ export class DevicesService {
         .set({ isProvisional: false })
         .where(eq(schema.devices.id, enrollment.requestingDeviceId));
 
-      return updated;
+      const [userRow] = await tx
+        .select({
+          externalIdentityId: schema.users.externalIdentityId,
+          argusId: schema.users.argusId,
+        })
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+        .limit(1);
+      const subs = userRow
+        ? [userRow.externalIdentityId, `argusid:${userRow.argusId}`]
+        : [auth.sub];
+      return { row: updated, userSubs: subs };
     });
 
-    this.bus.emitDeviceEnrollmentApproved({
-      tenantId: auth.tenantId,
-      enrollmentId: row.id,
-      userSub: auth.sub,
-    });
+    for (const userSub of userSubs) {
+      this.bus.emitDeviceEnrollmentApproved({
+        tenantId: auth.tenantId,
+        enrollmentId: row.id,
+        userSub,
+      });
+    }
 
     await this.audit.record(auth.tenantId, {
       eventType: 'device.enrollment_approved',
@@ -243,7 +270,7 @@ export class DevicesService {
    */
   async rejectEnrollment(auth: VerifiedAuth, enrollmentId: string): Promise<void> {
     await withTenant(auth.tenantId, async (tx) => {
-      const userId = await requireUser(tx, auth.sub);
+      const userId = await requireUser(tx, auth);
 
       const [updated] = await tx
         .update(schema.deviceEnrollments)
@@ -277,7 +304,7 @@ export class DevicesService {
     proofBase64url: string,
   ): Promise<void> {
     await withTenant(auth.tenantId, async (tx) => {
-      const userId = await requireUser(tx, auth.sub);
+      const userId = await requireUser(tx, auth);
       const [device] = await tx
         .select({ id: schema.devices.id, signaturePublicKey: schema.devices.signaturePublicKey })
         .from(schema.devices)
@@ -335,7 +362,7 @@ export class DevicesService {
     proofBase64url: string,
   ): Promise<void> {
     await withTenant(auth.tenantId, async (tx) => {
-      const userId = await requireUser(tx, auth.sub);
+      const userId = await requireUser(tx, auth);
 
       // Look up the device FIRST — the proof must be verified against the DB-stored key, never the
       // request body. Verifying a self-attested key (from the request) before confirming the DB row
@@ -396,7 +423,7 @@ export class DevicesService {
    */
   async listMyConversations(auth: VerifiedAuth): Promise<string[]> {
     return withTenant(auth.tenantId, async (tx) => {
-      const userId = await requireUser(tx, auth.sub);
+      const userId = await requireUser(tx, auth);
       const rows = await tx
         .select({ conversationId: schema.conversationMembers.conversationId })
         .from(schema.conversationMembers)

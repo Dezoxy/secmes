@@ -76,4 +76,9 @@ export const SENSITIVE_LIMITS = {
   enrollmentConversationList: 30,
   /** Self device withdrawal — legacy migration or explicit device removal. Very rare; tight cap. */
   deviceWithdraw: 5,
+  /** Refresh token rotation — @Public(), keyed on IP (the only server-verified key before auth).
+   *  Set high enough for NAT-shared IPs (60 offices-users refreshing concurrently ≪ 60/min) while
+   *  still bounding DB flood from a runaway client. Reuse detection (family revocation) is the real
+   *  security control; this limit is a DB-load guard only. */
+  refreshSession: 60,
 } as const;

@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, or, sql } from 'drizzle-orm';
 
 import type { AuditEventSummary, DeviceSummary } from '@argus/contracts';
 import type { VerifiedAuth } from '../auth/auth.service.js';
@@ -113,7 +113,10 @@ export class AdminService {
           schema.users,
           and(
             eq(schema.users.tenantId, schema.auditEvents.tenantId),
-            eq(schema.users.externalIdentityId, sql`${schema.auditEvents.actorSub}`),
+            or(
+              eq(schema.users.externalIdentityId, schema.auditEvents.actorSub),
+              eq(sql`'argusid:' || ${schema.users.argusId}`, schema.auditEvents.actorSub),
+            ),
           ),
         )
         .where(

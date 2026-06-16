@@ -8,14 +8,24 @@ import { schema, type Tx } from '../db/index.js';
 // `Tx` so the check runs in the SAME RLS-scoped transaction as the write it guards.
 
 /**
- * Resolve the VERIFIED caller (OIDC sub) to an ACTIVE tenant user id. Never trusts a client-supplied id, and
+ * Resolve the VERIFIED caller to an ACTIVE tenant user id. Never trusts a client-supplied id, and
  * only resolves an active user — a soft-deleted/suspended member with a still-valid bearer token can't act.
+ *
+ * Accepts either a full auth object (preferred — handles both argus and Zitadel tokens) or a plain
+ * sub string for call sites that only have the sub available.
  */
-export async function requireUser(tx: Tx, sub: string): Promise<string> {
+export async function requireUser(
+  tx: Tx,
+  auth: { sub: string; userId?: string } | string,
+): Promise<string> {
+  const resolved = typeof auth === 'string' ? { sub: auth, userId: undefined } : auth;
+  const userCondition = resolved.userId
+    ? eq(schema.users.id, resolved.userId)
+    : eq(schema.users.externalIdentityId, resolved.sub);
   const [user] = await tx
     .select({ id: schema.users.id })
     .from(schema.users)
-    .where(and(eq(schema.users.externalIdentityId, sub), eq(schema.users.status, 'active')))
+    .where(and(userCondition, eq(schema.users.status, 'active')))
     .limit(1);
   if (!user) throw new BadRequestException('user not provisioned or not active');
   return user.id;

@@ -45,7 +45,9 @@ export class GdprService {
           .from(schema.users)
           .where(
             and(
-              eq(schema.users.externalIdentityId, auth.sub),
+              auth.userId
+                ? eq(schema.users.id, auth.userId)
+                : eq(schema.users.externalIdentityId, auth.sub),
               eq(schema.users.tenantId, auth.tenantId),
             ),
           )
@@ -175,8 +177,12 @@ export class GdprService {
           );
       }),
 
-      // Audit events where actor = this identity (own activity only, not admin observations)
+      // Audit events where actor = this identity (own activity only, not admin observations).
+      // Both the Zitadel sub (externalIdentityId) and the argus sub (argusid:<users.id>) are
+      // included so that users who have used both token families get a complete export.
       withTenant(auth.tenantId, async (tx) => {
+        const user = await resolveUserId(tx, auth);
+        if (!user) return [];
         return tx
           .select({
             id: schema.auditEvents.id,
@@ -188,7 +194,10 @@ export class GdprService {
           .where(
             and(
               eq(schema.auditEvents.tenantId, auth.tenantId),
-              eq(schema.auditEvents.actorSub, auth.sub),
+              or(
+                eq(schema.auditEvents.actorSub, user.externalIdentityId),
+                eq(schema.auditEvents.actorSub, `argusid:${user.argusId}`),
+              ),
             ),
           )
           .orderBy(schema.auditEvents.createdAt);
@@ -394,26 +403,31 @@ export class GdprService {
       //     a string, not a UUID FK to users); rows survive user deletion otherwise. Erasing
       //     personal data from the audit log is required under GDPR Art. 17; the audit trail
       //     retains event type and tenant context for any rows created by other actors.
+      //     Both Zitadel and argus subjects are erased so token-family switches don't leave orphans.
       //     Requires migration 0021 (grant delete on audit_events to argus_app).
       await tx
         .delete(schema.auditEvents)
         .where(
           and(
             eq(schema.auditEvents.tenantId, auth.tenantId),
-            eq(schema.auditEvents.actorSub, auth.sub),
+            or(
+              eq(schema.auditEvents.actorSub, user.externalIdentityId),
+              eq(schema.auditEvents.actorSub, `argusid:${user.argusId}`),
+            ),
           ),
         );
 
       // 1h. Delete the user row — cascades:
       //     • devices → key_packages (cascade), push_subscriptions (cascade)
       //     • key_backups (cascade)
+      //     • auth_sessions (cascade) — migration 0032
       //     • conversation_members (cascade) → conversation_receipts (cascade)
       //     • tenant_invites.created_by (cascade)
       await tx
         .delete(schema.users)
         .where(and(eq(schema.users.id, user.id), eq(schema.users.tenantId, auth.tenantId)));
 
-      return { externalId: user.externalIdentityId, objectKeys };
+      return { externalId: user.externalIdentityId, argusId: user.argusId, objectKeys };
     });
 
     // 2. Clean up the routing index (no RLS — uses withRouting). Best-effort: if this fails
@@ -422,9 +436,16 @@ export class GdprService {
     if (result) {
       try {
         await withRouting(async (tx) => {
+          // Delete both the Zitadel sub and the argus sub — a user who has used both token
+          // families has two entries; missing either would leave a stale routing binding.
           await tx
             .delete(schema.userTenantIndex)
-            .where(eq(schema.userTenantIndex.sub, result.externalId));
+            .where(
+              or(
+                eq(schema.userTenantIndex.sub, result.externalId),
+                eq(schema.userTenantIndex.sub, `argusid:${result.argusId}`),
+              ),
+            );
         });
       } catch (err) {
         this.logger.warn(
@@ -454,12 +475,21 @@ export class GdprService {
 async function resolveUserId(
   tx: Tx,
   auth: VerifiedAuth,
-): Promise<{ id: string; externalIdentityId: string } | undefined> {
+): Promise<{ id: string; externalIdentityId: string; argusId: string } | undefined> {
   const [row] = await tx
-    .select({ id: schema.users.id, externalIdentityId: schema.users.externalIdentityId })
+    .select({
+      id: schema.users.id,
+      externalIdentityId: schema.users.externalIdentityId,
+      argusId: schema.users.argusId,
+    })
     .from(schema.users)
     .where(
-      and(eq(schema.users.externalIdentityId, auth.sub), eq(schema.users.tenantId, auth.tenantId)),
+      and(
+        auth.userId
+          ? eq(schema.users.id, auth.userId)
+          : eq(schema.users.externalIdentityId, auth.sub),
+        eq(schema.users.tenantId, auth.tenantId),
+      ),
     )
     .limit(1);
   return row;

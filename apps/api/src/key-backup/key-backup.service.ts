@@ -59,7 +59,11 @@ async function resolveUserId(tx: Tx, auth: VerifiedAuth): Promise<string> {
   const [user] = await tx
     .select({ id: schema.users.id })
     .from(schema.users)
-    .where(eq(schema.users.externalIdentityId, auth.sub))
+    .where(
+      auth.userId
+        ? eq(schema.users.id, auth.userId)
+        : eq(schema.users.externalIdentityId, auth.sub),
+    )
     .limit(1);
   if (!user) throw new BadRequestException('user not provisioned; sign in first');
   return user.id;
