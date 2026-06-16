@@ -118,6 +118,7 @@ export class WebAuthnService {
               purpose: 'register',
               argusId,
               inviteId: invite.id,
+              inviteTenantId: invite.tenantId,
               expiresAt,
             })
             .returning({ ceremonyId: schema.webauthnChallenges.ceremonyId }),
@@ -178,39 +179,49 @@ export class WebAuthnService {
     ceremonyId: string,
     response: RegistrationResponseJSON,
   ): Promise<MintedSession> {
+    // Step A — delete challenge (webauthn_challenges has no RLS; withRouting is correct).
+    // First committer wins; a replay finds no row.
+    const [challenge] = await withRouting((tx) =>
+      tx
+        .delete(schema.webauthnChallenges)
+        .where(
+          and(
+            eq(schema.webauthnChallenges.ceremonyId, ceremonyId),
+            eq(schema.webauthnChallenges.purpose, 'register'),
+            gt(schema.webauthnChallenges.expiresAt, new Date()),
+          ),
+        )
+        .returning(),
+    );
+    if (!challenge?.argusId || !challenge.inviteId || !challenge.inviteTenantId) {
+      throw new UnauthorizedException('ceremony not found, expired, or already used');
+    }
+
+    // Step B — consume the invite under the tenant that ISSUED it.
+    // tenant_invites RLS: tenant_id = app.tenant_id, so the issuing tenant context is required.
+    // Invites created via POST /tenants/invites carry the creator's tenant_id, which may differ
+    // from DEFAULT_TENANT_ID (passkey users always land in DEFAULT_TENANT_ID regardless).
+    const [marked] = await withTenant(challenge.inviteTenantId, (tx) =>
+      tx
+        .update(schema.tenantInvites)
+        .set({ acceptedAt: new Date() })
+        .where(
+          and(
+            eq(schema.tenantInvites.id, challenge.inviteId!),
+            isNull(schema.tenantInvites.acceptedAt),
+            isNull(schema.tenantInvites.revokedAt),
+          ),
+        )
+        .returning({ id: schema.tenantInvites.id }),
+    );
+    if (!marked) throw new ConflictException('invite already used');
+
+    // Step C — verify WebAuthn attestation and create the user + credential under DEFAULT_TENANT_ID.
+    // Retry loop handles display-name collisions (handle_words collision → pick a new handle).
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       const displayName = generateHandle();
       try {
         const result = await withTenant(DEFAULT_TENANT_ID, async (tx) => {
-          // Delete-on-use — first committer wins; a replay finds no row.
-          const [challenge] = await tx
-            .delete(schema.webauthnChallenges)
-            .where(
-              and(
-                eq(schema.webauthnChallenges.ceremonyId, ceremonyId),
-                eq(schema.webauthnChallenges.purpose, 'register'),
-                gt(schema.webauthnChallenges.expiresAt, new Date()),
-              ),
-            )
-            .returning();
-          if (!challenge?.argusId || !challenge.inviteId) {
-            throw new UnauthorizedException('ceremony not found, expired, or already used');
-          }
-
-          // Atomically consume the invite (RLS: tenant_id = DEFAULT_TENANT_ID).
-          const [marked] = await tx
-            .update(schema.tenantInvites)
-            .set({ acceptedAt: new Date() })
-            .where(
-              and(
-                eq(schema.tenantInvites.id, challenge.inviteId),
-                isNull(schema.tenantInvites.acceptedAt),
-                isNull(schema.tenantInvites.revokedAt),
-              ),
-            )
-            .returning({ id: schema.tenantInvites.id });
-          if (!marked) throw new ConflictException('invite already used');
-
           // Verify WebAuthn attestation.
           const verification = await verifyRegistrationResponse({
             response,
@@ -256,9 +267,8 @@ export class WebAuthnService {
             .values({
               tenantId: DEFAULT_TENANT_ID,
               externalIdentityId: sub,
-              argusId: challenge.argusId,
+              argusId: challenge.argusId!, // non-null: guarded above
               displayName,
-              email: null,
               role: 'member',
               status: 'active',
             })
@@ -279,12 +289,6 @@ export class WebAuthnService {
             backedUp: credentialBackedUp,
             transports: credential.transports ?? null,
           });
-
-          // Record who accepted (audit trail).
-          await tx
-            .update(schema.tenantInvites)
-            .set({ acceptedBy: user.id })
-            .where(eq(schema.tenantInvites.id, challenge.inviteId));
 
           this.logger.log(`passkey registered: argusId=${challenge.argusId}`);
           return { tenantId: DEFAULT_TENANT_ID, userId: user.id, sub };
@@ -368,10 +372,13 @@ export class WebAuthnService {
     );
     if (!challenge) throw new UnauthorizedException('ceremony not found, expired, or already used');
 
-    const rawId = Buffer.from(isoBase64URL.toBuffer(response.rawId));
     let regressionArgusId: string | null = null;
 
     try {
+      // Decode rawId inside the try so a malformed base64url value returns 401, not 500.
+      // (Challenge is already deleted above; any decode error here is still a controlled failure.)
+      const rawId = Buffer.from(isoBase64URL.toBuffer(response.rawId));
+
       const result = await withTenant(DEFAULT_TENANT_ID, async (tx) => {
         // Identity from stored credential only — never from the client-posted userHandle.
         const cred = await tx
