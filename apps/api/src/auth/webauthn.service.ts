@@ -84,6 +84,7 @@ export class WebAuthnService {
           expiresAt: schema.tenantInvites.expiresAt,
           acceptedAt: schema.tenantInvites.acceptedAt,
           revokedAt: schema.tenantInvites.revokedAt,
+          inviteeEmail: schema.tenantInvites.inviteeEmail,
         })
         .from(schema.tenantInvites)
         .where(eq(schema.tenantInvites.tokenHash, tokenHash))
@@ -92,6 +93,10 @@ export class WebAuthnService {
     });
 
     if (!invite) throw new UnauthorizedException(INVALID);
+    // Reject email-scoped invites: this path has no verified email, so a forwarded
+    // or leaked code would let the wrong person register. Email-scoped invites must
+    // go through the Zitadel OIDC flow where the email is verified by the IdP.
+    if (invite.inviteeEmail !== null) throw new UnauthorizedException(INVALID);
     // Any valid admin-issued invite is accepted here — the user always lands in
     // DEFAULT_TENANT_ID regardless of which tenant issued the invite.  The old
     // tenantId === DEFAULT_TENANT_ID guard prevented admins on non-default tenants
@@ -209,18 +214,23 @@ export class WebAuthnService {
           challenge.inviteId,
           async (tx) => {
             // Consume invite — exposed by tenant_invites_passkey_consume PERMISSIVE policy.
+            // Re-check expiry at consume time: the challenge window is 5 min but the invite
+            // itself may expire within that window. Without this check a just-expired invite
+            // could create a user (redeemCode enforces expiry at redeem, not at verify).
+            const now = new Date();
             const [marked] = await tx
               .update(schema.tenantInvites)
-              .set({ acceptedAt: new Date() })
+              .set({ acceptedAt: now })
               .where(
                 and(
                   eq(schema.tenantInvites.id, challenge.inviteId!),
                   isNull(schema.tenantInvites.acceptedAt),
                   isNull(schema.tenantInvites.revokedAt),
+                  gt(schema.tenantInvites.expiresAt, now),
                 ),
               )
               .returning({ id: schema.tenantInvites.id });
-            if (!marked) throw new ConflictException('invite already used');
+            if (!marked) throw new ConflictException('invite already used or expired');
 
             // Verify WebAuthn attestation.
             const verification = await verifyRegistrationResponse({
