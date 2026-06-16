@@ -4,6 +4,7 @@ import { randomBytes, createHash } from 'node:crypto';
 
 import {
   ConflictException,
+  HttpException,
   Injectable,
   Logger,
   NotFoundException,
@@ -290,6 +291,9 @@ export class WebAuthnService {
         return this.sessions.mintSession(result);
       } catch (err) {
         if (isHandleCollision(err) && attempt < MAX_ATTEMPTS - 1) continue;
+        // Remap non-HTTP library errors (e.g. WebAuthnError from verifyRegistrationResponse)
+        // to 401 — NestJS would otherwise return 500 for internal SimpleWebAuthn rejections.
+        if (!(err instanceof HttpException)) throw new UnauthorizedException('registration failed');
         throw err;
       }
     }
@@ -466,6 +470,9 @@ export class WebAuthnService {
             this.logger.error('failed to write counter_regression audit event', auditErr),
           );
       }
+      // Remap non-HTTP library errors (e.g. WebAuthnError from verifyAuthenticationResponse)
+      // to 401 — NestJS would otherwise return 500 for internal SimpleWebAuthn rejections.
+      if (!(err instanceof HttpException)) throw new UnauthorizedException('authentication failed');
       throw err;
     }
   }

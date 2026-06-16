@@ -58,15 +58,18 @@ class RegisterVerifyBodyDto {
     // No top-level required[] here — NestJS Swagger uses the ! marker to mark the outer
     // property required in the parent DTO; inner required arrays at this level prevent that.
     properties: {
-      id: { type: 'string' },
-      rawId: { type: 'string' },
+      // WebAuthn binary fields are base64url (RFC 4648 §5, uses - and _ not + and /).
+      // Explicit pattern overrides patternForName() in openapi.ts which would wrongly
+      // apply the standard-base64 pattern to any field named 'signature'.
+      id: { type: 'string', pattern: '^[A-Za-z0-9_-]+$' },
+      rawId: { type: 'string', pattern: '^[A-Za-z0-9_-]+$' },
       response: {
         type: 'object',
         required: ['clientDataJSON', 'attestationObject'],
         properties: {
-          clientDataJSON: { type: 'string' },
-          attestationObject: { type: 'string' },
-          authenticatorData: { type: 'string' },
+          clientDataJSON: { type: 'string', pattern: '^[A-Za-z0-9_-]+$' },
+          attestationObject: { type: 'string', pattern: '^[A-Za-z0-9_-]+$' },
+          authenticatorData: { type: 'string', pattern: '^[A-Za-z0-9_-]+$' },
           transports: { type: 'array', items: { type: 'string' } },
         },
       },
@@ -105,16 +108,19 @@ class AuthenticateVerifyBodyDto {
     type: 'object',
     // No top-level required[] — same reason as RegisterVerifyBodyDto.registrationResponse.
     properties: {
-      id: { type: 'string' },
-      rawId: { type: 'string' },
+      // WebAuthn binary fields are base64url (RFC 4648 §5, uses - and _ not + and /).
+      // Explicit pattern overrides patternForName() in openapi.ts which would wrongly
+      // apply the standard-base64 pattern to any field named 'signature'.
+      id: { type: 'string', pattern: '^[A-Za-z0-9_-]+$' },
+      rawId: { type: 'string', pattern: '^[A-Za-z0-9_-]+$' },
       response: {
         type: 'object',
         required: ['clientDataJSON', 'authenticatorData', 'signature'],
         properties: {
-          clientDataJSON: { type: 'string' },
-          authenticatorData: { type: 'string' },
-          signature: { type: 'string' },
-          userHandle: { type: 'string' },
+          clientDataJSON: { type: 'string', pattern: '^[A-Za-z0-9_-]+$' },
+          authenticatorData: { type: 'string', pattern: '^[A-Za-z0-9_-]+$' },
+          signature: { type: 'string', pattern: '^[A-Za-z0-9_-]+$' },
+          userHandle: { type: 'string', pattern: '^[A-Za-z0-9_-]+$' },
         },
       },
       authenticatorAttachment: { type: 'string' },

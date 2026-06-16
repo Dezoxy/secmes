@@ -8834,12 +8834,12 @@
             "properties": {
               "id": {
                 "type": "string",
-                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                "pattern": "^[A-Za-z0-9_-]+$",
                 "maxLength": 65536
               },
               "rawId": {
                 "type": "string",
-                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                "pattern": "^[A-Za-z0-9_-]+$",
                 "maxLength": 65536
               },
               "response": {
@@ -8851,17 +8851,17 @@
                 "properties": {
                   "clientDataJSON": {
                     "type": "string",
-                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                    "pattern": "^[A-Za-z0-9_-]+$",
                     "maxLength": 65536
                   },
                   "attestationObject": {
                     "type": "string",
-                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                    "pattern": "^[A-Za-z0-9_-]+$",
                     "maxLength": 65536
                   },
                   "authenticatorData": {
                     "type": "string",
-                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                    "pattern": "^[A-Za-z0-9_-]+$",
                     "maxLength": 65536
                   },
                   "transports": {
@@ -9067,12 +9067,12 @@
             "properties": {
               "id": {
                 "type": "string",
-                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                "pattern": "^[A-Za-z0-9_-]+$",
                 "maxLength": 65536
               },
               "rawId": {
                 "type": "string",
-                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                "pattern": "^[A-Za-z0-9_-]+$",
                 "maxLength": 65536
               },
               "response": {
@@ -9085,22 +9085,22 @@
                 "properties": {
                   "clientDataJSON": {
                     "type": "string",
-                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                    "pattern": "^[A-Za-z0-9_-]+$",
                     "maxLength": 65536
                   },
                   "authenticatorData": {
                     "type": "string",
-                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                    "pattern": "^[A-Za-z0-9_-]+$",
                     "maxLength": 65536
                   },
                   "signature": {
                     "type": "string",
-                    "pattern": "^[A-Za-z0-9+/]+={0,2}$",
+                    "pattern": "^[A-Za-z0-9_-]+$",
                     "maxLength": 65536
                   },
                   "userHandle": {
                     "type": "string",
-                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                    "pattern": "^[A-Za-z0-9_-]+$",
                     "maxLength": 65536
                   }
                 },
