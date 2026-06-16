@@ -24,7 +24,7 @@ import type {
 import { isoBase64URL, isoUint8Array } from '@simplewebauthn/server/helpers';
 import { and, count, eq, gt, isNull, lt, sql } from 'drizzle-orm';
 
-import { schema, withRouting, withTenant } from '../db/index.js';
+import { schema, withRouting, withTenant, withTenantAndInvite } from '../db/index.js';
 import { PaymentRequiredException } from '../common/http-exceptions.js';
 import { generateArgusId, isArgusIdCollision } from '../users/argus-id.js';
 import { generateHandle, isHandleCollision } from '../users/handle-words.js';
@@ -118,7 +118,6 @@ export class WebAuthnService {
               purpose: 'register',
               argusId,
               inviteId: invite.id,
-              inviteTenantId: invite.tenantId,
               expiresAt,
             })
             .returning({ ceremonyId: schema.webauthnChallenges.ceremonyId }),
@@ -193,106 +192,108 @@ export class WebAuthnService {
         )
         .returning(),
     );
-    if (!challenge?.argusId || !challenge.inviteId || !challenge.inviteTenantId) {
+    if (!challenge?.argusId || !challenge.inviteId) {
       throw new UnauthorizedException('ceremony not found, expired, or already used');
     }
 
-    // Step B — consume the invite under the tenant that ISSUED it.
-    // tenant_invites RLS: tenant_id = app.tenant_id, so the issuing tenant context is required.
-    // Invites created via POST /tenants/invites carry the creator's tenant_id, which may differ
-    // from DEFAULT_TENANT_ID (passkey users always land in DEFAULT_TENANT_ID regardless).
-    const [marked] = await withTenant(challenge.inviteTenantId, (tx) =>
-      tx
-        .update(schema.tenantInvites)
-        .set({ acceptedAt: new Date() })
-        .where(
-          and(
-            eq(schema.tenantInvites.id, challenge.inviteId!),
-            isNull(schema.tenantInvites.acceptedAt),
-            isNull(schema.tenantInvites.revokedAt),
-          ),
-        )
-        .returning({ id: schema.tenantInvites.id }),
-    );
-    if (!marked) throw new ConflictException('invite already used');
-
-    // Step C — verify WebAuthn attestation and create the user + credential under DEFAULT_TENANT_ID.
-    // Retry loop handles display-name collisions (handle_words collision → pick a new handle).
+    // Step B — single atomic transaction: consume invite + verify WebAuthn + insert user/credential.
+    // withTenantAndInvite sets BOTH app.tenant_id=DEFAULT_TENANT_ID and app.current_invite_id so
+    // the tenant_invites_passkey_consume PERMISSIVE policy (migration 0036) exposes the invite row
+    // regardless of which tenant originally issued it. Rollback on any failure (handle collision,
+    // attestation failure, or member-limit) leaves the invite unconsumed — user retries from redeem.
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       const displayName = generateHandle();
       try {
-        const result = await withTenant(DEFAULT_TENANT_ID, async (tx) => {
-          // Verify WebAuthn attestation.
-          const verification = await verifyRegistrationResponse({
-            response,
-            expectedChallenge: expectedChallengeFromHex(challenge.challengeHash),
-            expectedRPID: this.rpID,
-            expectedOrigin: this.expectedOrigin,
-            requireUserVerification: true,
-          });
-          if (!verification.verified || !verification.registrationInfo) {
-            throw new UnauthorizedException('attestation verification failed');
-          }
-
-          const { credential, aaguid, credentialBackedUp } = verification.registrationInfo;
-          const sub = `argusid:${challenge.argusId}`;
-
-          // Race-safe member limit check: lock the tenant row so concurrent registrations
-          // cannot both pass and overshoot the limit (mirrors acceptInvite in tenants.service.ts).
-          const [tenantRow] = await tx
-            .select({ memberLimit: schema.tenants.memberLimit })
-            .from(schema.tenants)
-            .where(eq(schema.tenants.id, DEFAULT_TENANT_ID))
-            .for('update');
-          if (tenantRow?.memberLimit !== null && tenantRow?.memberLimit !== undefined) {
-            const [countRow] = await tx
-              .select({ count: count() })
-              .from(schema.users)
+        const result = await withTenantAndInvite(
+          DEFAULT_TENANT_ID,
+          challenge.inviteId,
+          async (tx) => {
+            // Consume invite — exposed by tenant_invites_passkey_consume PERMISSIVE policy.
+            const [marked] = await tx
+              .update(schema.tenantInvites)
+              .set({ acceptedAt: new Date() })
               .where(
                 and(
-                  eq(schema.users.tenantId, DEFAULT_TENANT_ID),
-                  eq(schema.users.status, 'active'),
+                  eq(schema.tenantInvites.id, challenge.inviteId!),
+                  isNull(schema.tenantInvites.acceptedAt),
+                  isNull(schema.tenantInvites.revokedAt),
                 ),
-              );
-            if ((countRow?.count ?? 0) >= tenantRow.memberLimit) {
-              throw new PaymentRequiredException(
-                'This workspace has reached its member limit. Ask the workspace admin to upgrade.',
-              );
+              )
+              .returning({ id: schema.tenantInvites.id });
+            if (!marked) throw new ConflictException('invite already used');
+
+            // Verify WebAuthn attestation.
+            const verification = await verifyRegistrationResponse({
+              response,
+              expectedChallenge: expectedChallengeFromHex(challenge.challengeHash),
+              expectedRPID: this.rpID,
+              expectedOrigin: this.expectedOrigin,
+              requireUserVerification: true,
+            });
+            if (!verification.verified || !verification.registrationInfo) {
+              throw new UnauthorizedException('attestation verification failed');
             }
-          }
 
-          // Insert user (email=NULL — Phase 2 passkey users are email-less).
-          const [user] = await tx
-            .insert(schema.users)
-            .values({
+            const { credential, aaguid, credentialBackedUp } = verification.registrationInfo;
+            const sub = `argusid:${challenge.argusId}`;
+
+            // Race-safe member limit check: lock the tenant row so concurrent registrations
+            // cannot both pass and overshoot the limit (mirrors acceptInvite in tenants.service.ts).
+            const [tenantRow] = await tx
+              .select({ memberLimit: schema.tenants.memberLimit })
+              .from(schema.tenants)
+              .where(eq(schema.tenants.id, DEFAULT_TENANT_ID))
+              .for('update');
+            if (tenantRow?.memberLimit !== null && tenantRow?.memberLimit !== undefined) {
+              const [countRow] = await tx
+                .select({ count: count() })
+                .from(schema.users)
+                .where(
+                  and(
+                    eq(schema.users.tenantId, DEFAULT_TENANT_ID),
+                    eq(schema.users.status, 'active'),
+                  ),
+                );
+              if ((countRow?.count ?? 0) >= tenantRow.memberLimit) {
+                throw new PaymentRequiredException(
+                  'This workspace has reached its member limit. Ask the workspace admin to upgrade.',
+                );
+              }
+            }
+
+            // Insert user (email=NULL — Phase 2 passkey users are email-less).
+            const [user] = await tx
+              .insert(schema.users)
+              .values({
+                tenantId: DEFAULT_TENANT_ID,
+                externalIdentityId: sub,
+                argusId: challenge.argusId!, // non-null: guarded above
+                displayName,
+                role: 'member',
+                status: 'active',
+              })
+              .returning({ id: schema.users.id });
+            if (!user) throw new Error('user insert returned no row');
+
+            // Bind sub → tenantId (routing table, no RLS).
+            await tx.insert(schema.userTenantIndex).values({ sub, tenantId: DEFAULT_TENANT_ID });
+
+            // Store WebAuthn credential (RLS: tenant_id = DEFAULT_TENANT_ID).
+            await tx.insert(schema.webauthnCredentials).values({
               tenantId: DEFAULT_TENANT_ID,
-              externalIdentityId: sub,
-              argusId: challenge.argusId!, // non-null: guarded above
-              displayName,
-              role: 'member',
-              status: 'active',
-            })
-            .returning({ id: schema.users.id });
-          if (!user) throw new Error('user insert returned no row');
+              userId: user.id,
+              credentialId: Buffer.from(isoBase64URL.toBuffer(credential.id)),
+              publicKey: Buffer.from(credential.publicKey),
+              counter: BigInt(credential.counter),
+              aaguid: aaguid && aaguid !== '00000000-0000-0000-0000-000000000000' ? aaguid : null,
+              backedUp: credentialBackedUp,
+              transports: credential.transports ?? null,
+            });
 
-          // Bind sub → tenantId (routing table, no RLS).
-          await tx.insert(schema.userTenantIndex).values({ sub, tenantId: DEFAULT_TENANT_ID });
-
-          // Store WebAuthn credential (RLS: tenant_id = DEFAULT_TENANT_ID).
-          await tx.insert(schema.webauthnCredentials).values({
-            tenantId: DEFAULT_TENANT_ID,
-            userId: user.id,
-            credentialId: Buffer.from(isoBase64URL.toBuffer(credential.id)),
-            publicKey: Buffer.from(credential.publicKey),
-            counter: BigInt(credential.counter),
-            aaguid: aaguid && aaguid !== '00000000-0000-0000-0000-000000000000' ? aaguid : null,
-            backedUp: credentialBackedUp,
-            transports: credential.transports ?? null,
-          });
-
-          this.logger.log(`passkey registered: argusId=${challenge.argusId}`);
-          return { tenantId: DEFAULT_TENANT_ID, userId: user.id, sub };
-        });
+            this.logger.log(`passkey registered: argusId=${challenge.argusId}`);
+            return { tenantId: DEFAULT_TENANT_ID, userId: user.id, sub };
+          },
+        );
 
         // Mint first session post-commit (separate tx; user_tenant_index row now exists).
         return this.sessions.mintSession(result);

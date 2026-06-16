@@ -306,6 +306,5 @@ export const webauthnChallenges = pgTable('webauthn_challenges', {
   purpose: text('purpose').notNull(), // 'register' | 'authenticate'
   argusId: text('argus_id'), // generated at redeem; same value flows through options → verify → user insert
   inviteId: uuid('invite_id'), // consumed atomically in register/verify tx
-  inviteTenantId: uuid('invite_tenant_id'), // tenant that issued the invite; needed to UPDATE under correct RLS tenant
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
