@@ -18,10 +18,12 @@ import {
 } from './session-key.config.js';
 import { SessionTokenController } from './session-token.controller.js';
 import { SessionTokenService } from './session-token.service.js';
+import { WebAuthnController } from './webauthn.controller.js';
+import { WebAuthnService } from './webauthn.service.js';
 
 @Module({
   imports: [ThrottlerModule.forRoot(DEFAULT_THROTTLE), AuditModule],
-  controllers: [SessionTokenController],
+  controllers: [SessionTokenController, WebAuthnController],
   providers: [
     { provide: OIDC_CONFIG, useFactory: loadOidcConfig },
     {
@@ -71,11 +73,12 @@ import { SessionTokenService } from './session-token.service.js';
     },
     AuthService,
     SessionTokenService,
+    WebAuthnService,
     // Order matters: JwtAuthGuard runs FIRST (sets req.auth from the verified token), then the throttle
     // guard keys the limit on that verified user. Both are global (APP_GUARD).
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: UserThrottlerGuard },
   ],
-  exports: [AuthService, SessionTokenService],
+  exports: [AuthService, SessionTokenService, WebAuthnService],
 })
 export class AuthModule {}

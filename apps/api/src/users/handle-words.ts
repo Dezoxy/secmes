@@ -425,3 +425,29 @@ export function generateHandle(): string {
   const animal = HANDLE_ANIMALS[randomInt(HANDLE_ANIMALS.length)];
   return `${adjective} ${animal}`;
 }
+
+/** The unique index whose 23505 violation means a display_name collision (within a tenant). */
+export const HANDLE_UNIQUE_INDEX = 'users_tenant_display_name_idx';
+
+/** True iff err (or any error in its .cause chain) is a Postgres 23505 against the handle index. */
+export function isHandleCollision(err: unknown): boolean {
+  let cur: unknown = err;
+  for (let depth = 0; cur != null && depth < 5; depth++) {
+    if (typeof cur !== 'object') break;
+    const o = cur as {
+      code?: unknown;
+      constraint_name?: unknown;
+      constraint?: unknown;
+      cause?: unknown;
+    };
+    if (o.code === '23505') {
+      const c =
+        (typeof o.constraint_name === 'string' && o.constraint_name) ||
+        (typeof o.constraint === 'string' && o.constraint) ||
+        '';
+      if (c === HANDLE_UNIQUE_INDEX) return true;
+    }
+    cur = o.cause;
+  }
+  return false;
+}

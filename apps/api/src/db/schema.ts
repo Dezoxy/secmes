@@ -1,6 +1,7 @@
 import {
   bigint,
   boolean,
+  customType,
   inet,
   integer,
   jsonb,
@@ -9,6 +10,13 @@ import {
   timestamp,
   uuid,
 } from 'drizzle-orm/pg-core';
+
+// bytea column type — used for WebAuthn credential blobs (raw bytes, not base64).
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return 'bytea';
+  },
+});
 
 // Typed table definitions for query building. The authoritative DDL — including RLS
 // policies, FORCE RLS, indexes and grants — lives in ./migrations/*.sql (Drizzle's schema
@@ -37,7 +45,7 @@ export const users = pgTable('users', {
   tenantId: uuid('tenant_id').notNull(),
   externalIdentityId: text('external_identity_id').notNull(),
   argusId: text('argus_id').notNull(),
-  email: text('email').notNull(),
+  email: text('email'),
   displayName: text('display_name'),
   status: text('status').notNull().default('active'),
   role: text('role').notNull().default('member'),
@@ -270,4 +278,33 @@ export const auditEvents = pgTable('audit_events', {
   userAgent: text('user_agent'),
   metadata: jsonb('metadata'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Phase 2 — WebAuthn passkey credentials. One row per registered passkey. FORCE RLS, see 0033.
+// credential_id is stored as raw bytes (bytea); encode/decode at the service boundary.
+// See docs/threat-models/passkey-auth.md.
+export const webauthnCredentials = pgTable('webauthn_credentials', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  userId: uuid('user_id').notNull(),
+  credentialId: bytea('credential_id').notNull(),
+  publicKey: bytea('public_key').notNull(), // COSE-encoded; server-auth only, not E2EE
+  counter: bigint('counter', { mode: 'bigint' }).notNull().default(BigInt(0)),
+  aaguid: uuid('aaguid'), // best-effort, often zero under attestationType:'none'
+  backedUp: boolean('backed_up').notNull().default(false),
+  transports: text('transports').array(),
+  deviceLabel: text('device_label'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+});
+
+// Phase 2 — ephemeral ceremony state. No-RLS routing table; access gated by ceremony_id UUID.
+// Delete-on-use (DELETE…RETURNING) in service code. See docs/threat-models/registration-and-tenancy.md §T5.
+export const webauthnChallenges = pgTable('webauthn_challenges', {
+  ceremonyId: uuid('ceremony_id').primaryKey().defaultRandom(),
+  challengeHash: text('challenge_hash').notNull(), // SHA-256 hex of raw challenge bytes
+  purpose: text('purpose').notNull(), // 'register' | 'authenticate'
+  argusId: text('argus_id'), // generated at redeem; same value flows through options → verify → user insert
+  inviteId: uuid('invite_id'), // consumed atomically in register/verify tx
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });

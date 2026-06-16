@@ -77,12 +77,54 @@ export type TenantPlan = z.infer<typeof TenantPlanSchema>;
 export const MeUnboundSchema = z.object({ bound: z.literal(false) });
 export type MeUnbound = z.infer<typeof MeUnboundSchema>;
 
+// ── WebAuthn / passkey (Phase 2) ──────────────────────────────────────────────────────────────
+
+export const RedeemCodeRequestSchema = z.object({
+  code: z.string().min(1).max(256),
+});
+export type RedeemCodeRequest = z.infer<typeof RedeemCodeRequestSchema>;
+
+export const RedeemCodeResponseSchema = z.object({
+  ceremonyId: z.string().uuid(),
+});
+export type RedeemCodeResponse = z.infer<typeof RedeemCodeResponseSchema>;
+
+export const RegisterOptionsRequestSchema = z.object({
+  ceremonyId: z.string().uuid(),
+});
+export type RegisterOptionsRequest = z.infer<typeof RegisterOptionsRequestSchema>;
+
+export const RegisterVerifyRequestSchema = z.object({
+  ceremonyId: z.string().uuid(),
+  registrationResponse: z.record(z.string(), z.unknown()),
+});
+export type RegisterVerifyRequest = z.infer<typeof RegisterVerifyRequestSchema>;
+
+export const AuthenticateOptionsResponseSchema = z.object({
+  ceremonyId: z.string().uuid(),
+  options: z.record(z.string(), z.unknown()),
+});
+export type AuthenticateOptionsResponse = z.infer<typeof AuthenticateOptionsResponseSchema>;
+
+export const AuthenticateVerifyRequestSchema = z.object({
+  ceremonyId: z.string().uuid(),
+  authenticationResponse: z.record(z.string(), z.unknown()),
+});
+export type AuthenticateVerifyRequest = z.infer<typeof AuthenticateVerifyRequestSchema>;
+
+export const AccessTokenResponseSchema = z.object({
+  accessToken: z.string().min(1),
+});
+export type AccessTokenResponse = z.infer<typeof AccessTokenResponseSchema>;
+
+// ────────────────────────────────────────────────────────────────────────────────────────────────
+
 export const MeBoundSchema = z.object({
   bound: z.literal(true),
   userId: z.string().uuid(),
   tenantId: z.string().uuid(),
   argusId: z.string(),
-  email: z.string().email(),
+  email: z.string().email().nullable(),
   displayName: z.string().nullable(),
   role: z.enum(['admin', 'member']),
   plan: TenantPlanSchema,
@@ -117,7 +159,7 @@ export type RevokeKeyPackagesResponse = z.infer<typeof RevokeKeyPackagesResponse
 
 export const UserSummarySchema = z.object({
   id: z.string().uuid(),
-  email: z.string().email(),
+  email: z.string().email().nullable(),
   displayName: z.string().nullable(),
 });
 export type UserSummary = z.infer<typeof UserSummarySchema>;
@@ -459,7 +501,7 @@ export type InviteSummary = z.infer<typeof InviteSummarySchema>;
 
 export const MemberSummarySchema = z.object({
   userId: z.string().uuid(),
-  email: z.string().email(),
+  email: z.string().email().nullable(),
   displayName: z.string().nullable(),
   role: z.enum(['admin', 'member']),
 });
@@ -469,7 +511,7 @@ export const DeviceSummarySchema = z.object({
   deviceId: z.string().uuid(),
   userId: z.string().uuid(),
   displayName: z.string().max(128).nullable(),
-  email: z.string().email(),
+  email: z.string().email().nullable(),
   signaturePublicKeyPrefix: z.string().max(12),
   createdAt: z.string().datetime(),
 });
@@ -551,7 +593,7 @@ export const MeExportSchema = z.object({
       id: z.string().uuid(),
       tenantId: z.string().uuid(),
       argusId: z.string(),
-      email: z.string().email(),
+      email: z.string().email().nullable(),
       displayName: z.string().nullable(),
       role: z.string().max(32),
       status: z.string().max(32),

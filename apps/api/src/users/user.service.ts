@@ -10,7 +10,7 @@ import { generateHandle } from './handle-words.js';
 export interface UserRecord {
   id: string;
   argusId: string;
-  email: string;
+  email: string | null;
   displayName: string | null;
   role: string;
   plan?: TenantPlan;
@@ -18,7 +18,7 @@ export interface UserRecord {
 
 export interface DirectoryRecord {
   id: string;
-  email: string;
+  email: string | null;
   displayName: string | null;
   role: string;
 }
