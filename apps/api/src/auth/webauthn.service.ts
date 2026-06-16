@@ -425,10 +425,25 @@ export class WebAuthnService {
           );
         }
 
-        await tx
+        // Optimistic lock: include the stored counter in the WHERE so concurrent requests
+        // with the same credential cannot both win — the second sees 0 rows updated and
+        // is treated as a potential clone (passkey-auth.md §T5).
+        const updated = await tx
           .update(schema.webauthnCredentials)
           .set({ counter: BigInt(newCounter), lastUsedAt: new Date() })
-          .where(eq(schema.webauthnCredentials.id, cred.id));
+          .where(
+            and(
+              eq(schema.webauthnCredentials.id, cred.id),
+              eq(schema.webauthnCredentials.counter, cred.counter),
+            ),
+          )
+          .returning({ id: schema.webauthnCredentials.id });
+        if (!updated.length) {
+          regressionArgusId = cred.argusId;
+          throw new UnauthorizedException(
+            'counter regression detected — possible credential clone',
+          );
+        }
 
         this.logger.log(`passkey authenticated: argusId=${cred.argusId}`);
         return {

@@ -8831,12 +8831,6 @@
           },
           "registrationResponse": {
             "type": "object",
-            "required": [
-              "id",
-              "rawId",
-              "response",
-              "type"
-            ],
             "properties": {
               "id": {
                 "type": "string",
@@ -8939,7 +8933,8 @@
           }
         },
         "required": [
-          "ceremonyId"
+          "ceremonyId",
+          "registrationResponse"
         ],
         "additionalProperties": false
       },
@@ -9069,12 +9064,6 @@
           },
           "authenticationResponse": {
             "type": "object",
-            "required": [
-              "id",
-              "rawId",
-              "response",
-              "type"
-            ],
             "properties": {
               "id": {
                 "type": "string",
@@ -9162,7 +9151,8 @@
           }
         },
         "required": [
-          "ceremonyId"
+          "ceremonyId",
+          "authenticationResponse"
         ],
         "additionalProperties": false
       },

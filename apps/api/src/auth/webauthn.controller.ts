@@ -55,7 +55,8 @@ class RegisterVerifyBodyDto {
 
   @ApiProperty({
     type: 'object',
-    required: ['id', 'rawId', 'response', 'type'],
+    // No top-level required[] here — NestJS Swagger uses the ! marker to mark the outer
+    // property required in the parent DTO; inner required arrays at this level prevent that.
     properties: {
       id: { type: 'string' },
       rawId: { type: 'string' },
@@ -102,7 +103,7 @@ class AuthenticateVerifyBodyDto {
 
   @ApiProperty({
     type: 'object',
-    required: ['id', 'rawId', 'response', 'type'],
+    // No top-level required[] — same reason as RegisterVerifyBodyDto.registrationResponse.
     properties: {
       id: { type: 'string' },
       rawId: { type: 'string' },
