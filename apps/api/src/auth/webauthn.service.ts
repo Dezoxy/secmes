@@ -241,7 +241,7 @@ export class WebAuthnService {
           await tx.insert(schema.webauthnCredentials).values({
             tenantId: DEFAULT_TENANT_ID,
             userId: user.id,
-            credentialId: Buffer.from(credential.id),
+            credentialId: Buffer.from(isoBase64URL.toBuffer(credential.id)),
             publicKey: Buffer.from(credential.publicKey),
             counter: BigInt(credential.counter),
             aaguid: aaguid && aaguid !== '00000000-0000-0000-0000-000000000000' ? aaguid : null,
@@ -382,7 +382,8 @@ export class WebAuthnService {
         const { newCounter } = verification.authenticationInfo;
 
         // Clone detection (passkey-auth.md §T5): allow counter=0; reject only regression from >0.
-        if (Number(cred.counter) > 0 && newCounter <= Number(cred.counter)) {
+        // BigInt comparison avoids precision loss for very large counter values.
+        if (cred.counter > 0n && BigInt(newCounter) <= cred.counter) {
           regressionArgusId = cred.argusId;
           throw new UnauthorizedException(
             'counter regression detected — possible credential clone',
