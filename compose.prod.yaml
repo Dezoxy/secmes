@@ -125,6 +125,12 @@ services:
       S3_FORCE_PATH_STYLE: 'false' # B2 uses virtual-host style
       OIDC_ISSUER: ${OIDC_ISSUER:-}
       OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
+      # Phase 2 WebAuthn: required for passkey registration and login to work in production.
+      # FRONTEND_ORIGIN also drives the CORS policy in main.ts. Both default to the public
+      # hostname; override via .env.prod if the deployment uses a different domain.
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-https://4rgus.com}
+      WEBAUTHN_RP_NAME: ${WEBAUTHN_RP_NAME:-argus}
+      WEBAUTHN_RP_ID: ${WEBAUTHN_RP_ID:-4rgus.com}
       # Error tracking (#48 Slice B) — DSN-GATED: SENTRY_DSN_FILE unset/empty = a complete no-op.
       # The DSN is delivered as a mounted file (sentry_dsn Docker secret, sourced from Key Vault as
       # argus-sentry-dsn). The fetch script seeds an EMPTY file on first boot; the api stays disabled

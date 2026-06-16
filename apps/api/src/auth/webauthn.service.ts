@@ -64,6 +64,13 @@ export class WebAuthnService {
     this.rpName = process.env['WEBAUTHN_RP_NAME'] ?? 'argus';
     this.rpID = process.env['WEBAUTHN_RP_ID'] ?? 'localhost';
     this.expectedOrigin = process.env['FRONTEND_ORIGIN'] ?? 'http://localhost:5173';
+    // Fail startup in production before a single request is served — a localhost RP ID means
+    // the browser will reject every WebAuthn option and assertion silently.
+    if (process.env['NODE_ENV'] === 'production' && this.rpID === 'localhost') {
+      throw new Error(
+        'WEBAUTHN_RP_ID must be set to the public domain in production (not "localhost")',
+      );
+    }
   }
 
   /**
