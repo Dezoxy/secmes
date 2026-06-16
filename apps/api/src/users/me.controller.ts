@@ -39,7 +39,7 @@ export class MeController {
             userId: { type: 'string', format: 'uuid' },
             tenantId: { type: 'string', format: 'uuid' },
             argusId: { type: 'string' },
-            email: { type: 'string', format: 'email' },
+            email: { type: 'string', format: 'email', nullable: true },
             displayName: { type: 'string', nullable: true },
             role: { type: 'string', enum: ['admin', 'member'] },
             plan: {

@@ -681,6 +681,7 @@
                         "email": {
                           "type": "string",
                           "format": "email",
+                          "nullable": true,
                           "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
                           "maxLength": 320
                         },

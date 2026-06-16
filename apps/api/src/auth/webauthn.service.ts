@@ -21,9 +21,10 @@ import type {
   RegistrationResponseJSON,
 } from '@simplewebauthn/server';
 import { isoBase64URL, isoUint8Array } from '@simplewebauthn/server/helpers';
-import { and, eq, gt, isNull, sql } from 'drizzle-orm';
+import { and, count, eq, gt, isNull, sql } from 'drizzle-orm';
 
 import { schema, withRouting, withTenant } from '../db/index.js';
+import { PaymentRequiredException } from '../common/http-exceptions.js';
 import { generateArgusId, isArgusIdCollision } from '../users/argus-id.js';
 import { generateHandle, isHandleCollision } from '../users/handle-words.js';
 import type { MintedSession } from './session-token.service.js';
@@ -78,6 +79,7 @@ export class WebAuthnService {
       return tx
         .select({
           id: schema.tenantInvites.id,
+          tenantId: schema.tenantInvites.tenantId,
           expiresAt: schema.tenantInvites.expiresAt,
           acceptedAt: schema.tenantInvites.acceptedAt,
           revokedAt: schema.tenantInvites.revokedAt,
@@ -89,6 +91,7 @@ export class WebAuthnService {
     });
 
     if (!invite) throw new UnauthorizedException(INVALID);
+    if (invite.tenantId !== DEFAULT_TENANT_ID) throw new UnauthorizedException(INVALID);
     if (invite.acceptedAt !== null) throw new UnauthorizedException(INVALID);
     if (invite.revokedAt !== null) throw new UnauthorizedException(INVALID);
     if (invite.expiresAt < new Date()) throw new UnauthorizedException(INVALID);
@@ -218,6 +221,30 @@ export class WebAuthnService {
 
           const { credential, aaguid, credentialBackedUp } = verification.registrationInfo;
           const sub = `argusid:${challenge.argusId}`;
+
+          // Race-safe member limit check: lock the tenant row so concurrent registrations
+          // cannot both pass and overshoot the limit (mirrors acceptInvite in tenants.service.ts).
+          const [tenantRow] = await tx
+            .select({ memberLimit: schema.tenants.memberLimit })
+            .from(schema.tenants)
+            .where(eq(schema.tenants.id, DEFAULT_TENANT_ID))
+            .for('update');
+          if (tenantRow?.memberLimit !== null && tenantRow?.memberLimit !== undefined) {
+            const [countRow] = await tx
+              .select({ count: count() })
+              .from(schema.users)
+              .where(
+                and(
+                  eq(schema.users.tenantId, DEFAULT_TENANT_ID),
+                  eq(schema.users.status, 'active'),
+                ),
+              );
+            if ((countRow?.count ?? 0) >= tenantRow.memberLimit) {
+              throw new PaymentRequiredException(
+                'This workspace has reached its member limit. Ask the workspace admin to upgrade.',
+              );
+            }
+          }
 
           // Insert user (email=NULL — Phase 2 passkey users are email-less).
           const [user] = await tx
