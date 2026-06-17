@@ -63,7 +63,9 @@
       "Bash($HOME/.42crunch/bin/42c-ast *)",
       "Bash(/Users/horvathtoom/.42crunch/bin/42c-ast *)",
       "Bash(~/.42crunch/bin/42c-ast *)",
-      "Bash(TRIAL_TOKEN=*)",
+      "Bash(TRIAL_TOKEN=* $HOME/.42crunch/bin/42c-ast *)",
+      "Bash(TRIAL_TOKEN=* /Users/horvathtoom/.42crunch/bin/42c-ast *)",
+      "Bash(TRIAL_TOKEN=* ~/.42crunch/bin/42c-ast *)",
 
       "Bash(find *)",
       "Bash(ls *)",

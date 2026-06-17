@@ -642,6 +642,7 @@ export const MeExportSchema = z.object({
       argusId: z.string(),
       email: z.string().email().nullable(),
       displayName: z.string().nullable(),
+      avatarSeed: z.string().nullable(),
       role: z.string().max(32),
       status: z.string().max(32),
       createdAt: z.string().datetime(),
@@ -697,7 +698,9 @@ export const MeExportSchema = z.object({
       id: z.string().uuid(),
       eventType: z.string().max(64),
       createdAt: z.string().datetime(),
-      metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).nullable(),
+      metadata: z
+        .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]))
+        .nullable(),
     }),
   ),
   invitesCreated: z.array(
