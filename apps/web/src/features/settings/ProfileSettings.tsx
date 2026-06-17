@@ -148,7 +148,12 @@ export function ProfileSettings({
       <div>
         <span className="mb-2 block text-sm font-medium text-white/70">Argus ID</span>
         <div className="flex gap-2">
-          <input value={profile.id} readOnly className={`${INPUT} font-mono text-xs`} />
+          <input
+            value={profile.id}
+            readOnly
+            aria-label="Argus ID"
+            className={`${INPUT} font-mono text-xs`}
+          />
           <Button variant="subtle" onClick={() => void copyId()}>
             {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
             {copied ? 'Copied' : 'Copy'}
