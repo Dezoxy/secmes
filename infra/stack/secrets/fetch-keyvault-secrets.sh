@@ -89,6 +89,11 @@ OPTIONAL_SECRETS=(
   # G8 Operator: API key for /operator/* plan-management endpoints. Seeded EMPTY until provisioned.
   # OperatorGuard returns 401 when the file is empty.
   "argus-operator-api-key=operator_api_key"
+  # Phase 3 Breakglass admin: Argon2id hash (JSON) for the emergency admin login. Seeded EMPTY until
+  # the operator provisions it (`pnpm --filter @argus/api generate-admin-hash > /tmp/hash.json`, then
+  # store the contents in Key Vault as argus-admin-bootstrap-hash). Absent = 503 on
+  # /auth/breakglass/login only; the rest of the API is unaffected. See docs/threat-models/breakglass-admin.md.
+  "argus-admin-bootstrap-hash=admin_bootstrap_hash"
 )
 
 log() { printf 'argus-secrets: %s\n' "$*" >&2; } # names/status only — NEVER a secret value

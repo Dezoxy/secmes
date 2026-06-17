@@ -308,3 +308,19 @@ export const webauthnChallenges = pgTable('webauthn_challenges', {
   inviteId: uuid('invite_id'), // consumed atomically in register/verify tx
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
+
+// Phase 3 — breakglass admin credential. Argon2id-hashed password + lockout state. FORCE RLS, see 0037.
+// See docs/threat-models/breakglass-admin.md.
+export const adminCredentials = pgTable('admin_credentials', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  userId: uuid('user_id').notNull(),
+  username: text('username').notNull(),
+  passwordHash: text('password_hash').notNull(), // base64 raw 32-byte Argon2id output; never plaintext
+  salt: text('salt').notNull(), // base64 16-byte CSPRNG salt
+  kdfParams: jsonb('kdf_params').notNull().$type<{ m: number; t: number; p: number }>(),
+  failedAttempts: integer('failed_attempts').notNull().default(0),
+  lockedUntil: timestamp('locked_until', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});

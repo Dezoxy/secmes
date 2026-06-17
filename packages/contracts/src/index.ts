@@ -347,6 +347,23 @@ export const EnrollmentApproveBodySchema = z
   .strict();
 export type EnrollmentApproveBody = z.infer<typeof EnrollmentApproveBodySchema>;
 
+// Phase 3 — breakglass admin login + password rotation.
+export const BreakglassLoginRequestSchema = z
+  .object({
+    username: z.string().min(1).max(128),
+    password: z.string().min(1).max(1024),
+  })
+  .strict();
+export type BreakglassLoginRequest = z.infer<typeof BreakglassLoginRequestSchema>;
+
+export const BreakglassRotateRequestSchema = z
+  .object({
+    currentPassword: z.string().min(1).max(1024),
+    newPassword: z.string().min(12).max(1024),
+  })
+  .strict();
+export type BreakglassRotateRequest = z.infer<typeof BreakglassRotateRequestSchema>;
+
 export const EnrollmentSchema = z
   .object({
     id: z.string().uuid(),
