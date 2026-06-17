@@ -141,18 +141,6 @@ services:
       DATABASE_URL_FILE: /run/secrets/database_url
       S3_SECRET_ACCESS_KEY_FILE: /run/secrets/s3_secret_access_key
       REDIS_URL_FILE: /run/secrets/redis_url
-      # G8 Billing: non-secret Stripe config (price IDs ride in every Checkout URL anyway).
-      APP_BASE_URL: ${APP_BASE_URL:-https://4rgus.com}
-      STRIPE_PRO_PRICE_ID: ${STRIPE_PRO_PRICE_ID:-}
-      STRIPE_ENTERPRISE_PRICE_ID: ${STRIPE_ENTERPRISE_PRICE_ID:-}
-      # G8 Billing: secrets delivered as credential FILES (never plain env — invariant #5).
-      # OPTIONAL — seeded EMPTY until the operator stores them in Key Vault; billing runs in no-op mode
-      # until provisioned (checkout/portal/webhook all fail gracefully with a logged warning).
-      STRIPE_SECRET_KEY_FILE: /run/secrets/stripe_secret_key
-      STRIPE_WEBHOOK_SECRET_FILE: /run/secrets/stripe_webhook_secret
-      # G8 Operator: API key for the /operator/* plan-management endpoints.
-      # OPTIONAL — endpoints return 401 until provisioned.
-      OPERATOR_API_KEY_FILE: /run/secrets/operator_api_key
       # Phase 1 session tokens: path to the Ed25519 PKCS8 PEM signing key (see session-key.config.ts).
       # MANDATORY — argus-session-signing-key is in the fetch script's required set, so the secret fetch FAILS
       # CLOSED if it's absent (the API never even boots to hit the empty-file guard). Provision the key in Key
@@ -167,9 +155,6 @@ services:
       - s3_secret_access_key
       - redis_url
       - sentry_dsn
-      - stripe_secret_key
-      - stripe_webhook_secret
-      - operator_api_key
       - session_signing_key
       - admin_bootstrap_hash
     depends_on:
@@ -585,18 +570,6 @@ secrets:
     # OPTIONAL: fetched from Key Vault (argus-sentry-dsn); seeded EMPTY on first boot so the mount
     # resolves (api is a no-op until provisioned). Operator provisions AFTER the GlitchTip UI is live.
     file: ${ARGUS_SECRETS_DIR:-./secrets}/sentry_dsn
-  stripe_secret_key:
-    # G8 Billing: Stripe API secret key (sk_live_…). OPTIONAL — seeded EMPTY until operator provisions
-    # in Key Vault (argus-stripe-secret-key). Billing endpoints return errors until provisioned.
-    file: ${ARGUS_SECRETS_DIR:-./secrets}/stripe_secret_key
-  stripe_webhook_secret:
-    # G8 Billing: Stripe webhook endpoint signing secret (whsec_…). OPTIONAL — seeded EMPTY until
-    # provisioned (argus-stripe-webhook-secret). Webhook signature check fails-safe when empty.
-    file: ${ARGUS_SECRETS_DIR:-./secrets}/stripe_webhook_secret
-  operator_api_key:
-    # G8 Operator: long-lived API key for /operator/* plan management endpoints. OPTIONAL — seeded
-    # EMPTY until provisioned (argus-operator-api-key). Endpoints return 401 when empty.
-    file: ${ARGUS_SECRETS_DIR:-./secrets}/operator_api_key
   session_signing_key:
     # Phase 1 session tokens: Ed25519 PKCS8 PEM private key for signing argus-minted (passkey) session JWTs.
     # MANDATORY — in the fetch script's required set, so a missing argus-session-signing-key fails the fetch

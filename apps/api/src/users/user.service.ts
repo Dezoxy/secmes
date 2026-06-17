@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { and, count, eq, isNull, ne, or } from 'drizzle-orm';
-import type { TenantPlan, UpdateProfile, UserLookupResult } from '@argus/contracts';
+import { and, eq } from 'drizzle-orm';
+import type { UpdateProfile, UserLookupResult } from '@argus/contracts';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
@@ -11,7 +11,6 @@ export interface UserRecord {
   displayName: string | null;
   avatarSeed: string | null;
   role: string;
-  plan?: TenantPlan;
 }
 
 // Identity projection for /me (getByAuth). Mapped to UserRecord — not exposed verbatim.
@@ -44,47 +43,12 @@ export class UserService {
         .limit(1),
     );
     if (!user) return undefined;
-
-    // Fetch plan columns + active member count (excludes breakglass-admin) in a second
-    // tenant-scoped transaction. Needed by /me for billing-aware settings UI (removed in Phase 5
-    // once the frontend fetches /billing/status independently).
-    const [tenantRow, countRow] = await withTenant(auth.tenantId, async (tx) => {
-      const [plan] = await tx
-        .select({
-          planTier: schema.tenants.planTier,
-          memberLimit: schema.tenants.memberLimit,
-          ssoEnabled: schema.tenants.ssoEnabled,
-          subscriptionStatus: schema.tenants.subscriptionStatus,
-        })
-        .from(schema.tenants)
-        .where(eq(schema.tenants.id, auth.tenantId))
-        .limit(1);
-      const [cnt] = await tx
-        .select({ count: count() })
-        .from(schema.users)
-        .where(
-          and(
-            eq(schema.users.status, 'active'),
-            or(isNull(schema.users.displayName), ne(schema.users.displayName, 'breakglass-admin')),
-          ),
-        );
-      return [plan, cnt] as const;
-    });
-
     return {
       id: user.id,
       argusId: user.argusId,
       displayName: user.displayName,
       avatarSeed: user.avatarSeed,
       role: user.role,
-      plan: {
-        tier: (tenantRow?.planTier ?? 'free') as TenantPlan['tier'],
-        memberLimit: tenantRow?.memberLimit ?? null,
-        ssoEnabled: tenantRow?.ssoEnabled ?? false,
-        memberCount: countRow?.count ?? 0,
-        subscriptionStatus:
-          (tenantRow?.subscriptionStatus as TenantPlan['subscriptionStatus']) ?? null,
-      },
     };
   }
 

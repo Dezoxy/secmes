@@ -1,5 +1,9 @@
 # Threat model: G2 Per-tenant SSO
 
+> **RETIRED (Phase 6, 2026-06-17).** The per-tenant SSO feature was removed in the enterprise teardown —
+> auth is passkey-only now. The SSO module, `tenant_sso_configs` table, and Zitadel management client are
+> gone. Kept for history; see `docs/threat-models/phase-6-decommission.md`.
+
 ## Scope
 
 G2 adds per-tenant OIDC SSO: each tenant admin can configure their org's OIDC IdP (Entra/Okta/Google/generic OIDC). Argus lazily provisions one Zitadel org + IdP per tenant on first configuration and exposes a set of admin-only endpoints for lifecycle management (create, update, rotate secret, delete).

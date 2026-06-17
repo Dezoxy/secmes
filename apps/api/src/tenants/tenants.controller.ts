@@ -13,7 +13,6 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
-  ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNoContentResponse,
@@ -25,31 +24,18 @@ import {
 } from '@nestjs/swagger';
 
 import { ApiProperty } from '@nestjs/swagger';
-import { AllowUnbound } from '../auth/allow-unbound.decorator.js';
-import type { MaybeUnboundAuth, VerifiedAuth } from '../auth/auth.service.js';
+import type { VerifiedAuth } from '../auth/auth.service.js';
 import { AdminGuard } from '../auth/admin.guard.js';
 import { CurrentAuth } from '../auth/current-auth.decorator.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { perMinute, SENSITIVE_LIMITS } from '../rate-limit/rate-limit.constants.js';
 import {
-  type AcceptInviteBody,
-  AcceptInviteBodySchema,
-  type CreateInviteBody,
-  CreateInviteBodySchema,
   type CreateInviteResponse,
-  type CreateTenantBody,
-  CreateTenantBodySchema,
-  type CreateTenantResponse,
   type InviteSummary,
   type MemberSummary,
 } from '@argus/contracts';
 import { TenantsService } from './tenants.service.js';
 import { z } from 'zod';
-
-class CreateTenantResponseDto {
-  @ApiProperty({ format: 'uuid' }) tenantId!: string;
-  @ApiProperty({ format: 'uuid' }) userId!: string;
-}
 
 class CreateInviteResponseDto {
   @ApiProperty({ format: 'uuid' }) inviteId!: string;
@@ -58,14 +44,8 @@ class CreateInviteResponseDto {
   @ApiProperty({ format: 'date-time' }) expiresAt!: string;
 }
 
-class AcceptInviteResponseDto {
-  @ApiProperty({ format: 'uuid' }) tenantId!: string;
-  @ApiProperty({ format: 'uuid' }) userId!: string;
-}
-
 class InviteSummaryDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
-  @ApiProperty({ nullable: true, type: 'string' }) inviteeEmail!: string | null;
   @ApiProperty({ format: 'date-time' }) expiresAt!: string;
   @ApiProperty({ nullable: true, type: 'string', format: 'date-time' }) acceptedAt!: string | null;
   @ApiProperty({ nullable: true, type: 'string', format: 'date-time' }) revokedAt!: string | null;
@@ -74,7 +54,6 @@ class InviteSummaryDto {
 
 class MemberSummaryDto {
   @ApiProperty({ format: 'uuid' }) userId!: string;
-  @ApiProperty({ nullable: true, type: 'string', format: 'email' }) email!: string | null;
   @ApiProperty({ nullable: true, type: 'string' }) displayName!: string | null;
   @ApiProperty({ enum: ['admin', 'member'] }) role!: 'admin' | 'member';
 }
@@ -87,35 +66,13 @@ const SetRoleBodySchema = z.object({ role: z.enum(['admin', 'member']) }).strict
 export class TenantsController {
   constructor(private readonly tenants: TenantsService) {}
 
-  // ── Tenant creation ──────────────────────────────────────────────────────────
-
-  @Post()
-  @AllowUnbound()
-  @Throttle(perMinute(SENSITIVE_LIMITS.createTenant))
-  @ApiOperation({
-    summary: 'Create a new tenant and become its first admin',
-    operationId: 'createTenant',
-  })
-  @ApiCreatedResponse({
-    description: 'tenant created; caller is now admin',
-    type: CreateTenantResponseDto,
-  })
-  @ApiConflictResponse({ description: 'caller is already bound to a tenant' })
-  @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
-  async create(
-    @CurrentAuth() auth: MaybeUnboundAuth,
-    @Body(new ZodValidationPipe(CreateTenantBodySchema)) body: CreateTenantBody,
-  ): Promise<CreateTenantResponse> {
-    return this.tenants.createTenant(auth, body.name);
-  }
-
   // ── Invites ──────────────────────────────────────────────────────────────────
 
   @Post('invites')
   @UseGuards(AdminGuard)
   @Throttle(perMinute(SENSITIVE_LIMITS.createInvite))
   @ApiOperation({
-    summary: 'Create a single-use invite token (admin only)',
+    summary: 'Create a single-use invite/registration code (admin only)',
     operationId: 'createInvite',
   })
   @ApiCreatedResponse({
@@ -124,11 +81,8 @@ export class TenantsController {
   })
   @ApiForbiddenResponse({ description: 'caller is not an admin' })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
-  async createInvite(
-    @CurrentAuth() auth: VerifiedAuth,
-    @Body(new ZodValidationPipe(CreateInviteBodySchema)) body: CreateInviteBody,
-  ): Promise<CreateInviteResponse> {
-    return this.tenants.createInvite(auth, body.inviteeEmail);
+  async createInvite(@CurrentAuth() auth: VerifiedAuth): Promise<CreateInviteResponse> {
+    return this.tenants.createInvite(auth);
   }
 
   @Get('invites')
@@ -143,7 +97,6 @@ export class TenantsController {
     const rows = await this.tenants.listInvites(auth);
     return rows.map((r) => ({
       id: r.id,
-      inviteeEmail: r.inviteeEmail,
       expiresAt: r.expiresAt.toISOString(),
       acceptedAt: r.acceptedAt?.toISOString() ?? null,
       revokedAt: r.revokedAt?.toISOString() ?? null,
@@ -163,20 +116,6 @@ export class TenantsController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<void> {
     return this.tenants.revokeInvite(auth, id);
-  }
-
-  @Post('invites/accept')
-  @AllowUnbound()
-  @Throttle(perMinute(SENSITIVE_LIMITS.acceptInvite))
-  @ApiOperation({ summary: 'Accept an invite and join a tenant', operationId: 'acceptInvite' })
-  @ApiCreatedResponse({ description: 'user joined the tenant', type: AcceptInviteResponseDto })
-  @ApiForbiddenResponse({ description: 'invalid or expired invite' })
-  @ApiConflictResponse({ description: 'caller is already bound to a tenant' })
-  async acceptInvite(
-    @CurrentAuth() auth: MaybeUnboundAuth,
-    @Body(new ZodValidationPipe(AcceptInviteBodySchema)) body: AcceptInviteBody,
-  ) {
-    return this.tenants.acceptInvite(auth, body.token);
   }
 
   // ── Members ──────────────────────────────────────────────────────────────────

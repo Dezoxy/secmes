@@ -37,7 +37,7 @@ interface AuthState {
   login: () => Promise<void>;
   /** Revoke the current session. */
   logout: () => Promise<void>;
-  /** Re-fetch /me — call after createTenant or acceptInvite. */
+  /** Re-fetch /me — call after a profile change (e.g. display name / avatar update). */
   refreshProfile: () => Promise<void>;
   /**
    * Apply a token+profile obtained outside the normal login flow (registration, breakglass).
@@ -108,9 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
     };
   }, []); // boot effect: runs once on mount
 
-  // Refresh timer: keep access token alive while the tab is open.
-  // Keyed on `authenticated` so unbound users (authenticated but no profile) still get refreshes
-  // during the onboarding flow before they create/join a workspace.
+  // Refresh timer: keep access token alive while the tab is open. Keyed on `authenticated`.
   useEffect(() => {
     if (demoMode) return;
     const timer = setInterval(() => {
@@ -172,8 +170,7 @@ export function useAuth(): AuthState {
   return ctx;
 }
 
-/** Gate a route: demo mode passes through; otherwise require an authenticated session.
- * OnboardingGate (inside the chat route) handles the authenticated-but-unbound case. */
+/** Gate a route: demo mode passes through; otherwise require an authenticated session. */
 export function RequireAuth({ children }: { children: ReactNode }): ReactNode {
   const { ready, demoMode: demo, authenticated } = useAuth();
   if (!ready) {

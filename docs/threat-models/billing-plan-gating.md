@@ -1,5 +1,10 @@
 # Threat model: billing and plan gating
 
+> **RETIRED (Phase 6, 2026-06-17).** Billing/Stripe and plan-gating were removed in the enterprise
+> teardown — the invite-only model has no plans or member limits. The billing/plans/webhooks modules and
+> the plan/stripe columns' readers are gone. Kept for history; see
+> `docs/threat-models/phase-6-decommission.md`.
+
 ## 1. Feature & data flow
 
 G8 adds plan tiers (free / pro / enterprise) stored on the `tenants` table, enforced at the NestJS layer. Stripe handles payment; the server never handles raw card data — only Stripe price IDs and customer/subscription IDs (non-secret metadata). Stripe webhooks drive plan assignment after payment.

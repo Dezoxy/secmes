@@ -1,76 +1,13 @@
-import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
-import { and, count, eq, isNull, ne, or } from 'drizzle-orm';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { sql } from 'drizzle-orm';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { and, eq, isNull, ne, or, sql } from 'drizzle-orm';
+import { createHash, randomBytes } from 'node:crypto';
 
 import { AuditService } from '../audit/audit.service.js';
-import type { MaybeUnboundAuth, VerifiedAuth } from '../auth/auth.service.js';
-import { PaymentRequiredException } from '../common/http-exceptions.js';
-import { schema, withRouting, withTenant } from '../db/index.js';
-import { PlansService } from '../plans/plans.service.js';
-import { generateArgusId, isArgusIdCollision } from '../users/argus-id.js';
-import { generateHandle } from '../users/handle-words.js';
-
-const MAX_HANDLE_ATTEMPTS = 8;
-const HANDLE_UNIQUE_INDEX = 'users_tenant_display_name_idx';
-
-function isHandleCollision(err: unknown): boolean {
-  let cur: unknown = err;
-  for (let depth = 0; cur != null && depth < 5; depth++) {
-    if (typeof cur !== 'object') break;
-    const o = cur as {
-      code?: unknown;
-      constraint_name?: unknown;
-      constraint?: unknown;
-      cause?: unknown;
-    };
-    if (o.code === '23505') {
-      const c =
-        (typeof o.constraint_name === 'string' && o.constraint_name) ||
-        (typeof o.constraint === 'string' && o.constraint) ||
-        '';
-      if (c === HANDLE_UNIQUE_INDEX) return true;
-    }
-    cur = o.cause;
-  }
-  return false;
-}
-
-function isSubCollision(err: unknown): boolean {
-  let cur: unknown = err;
-  for (let depth = 0; cur != null && depth < 5; depth++) {
-    if (typeof cur !== 'object') break;
-    const o = cur as {
-      code?: unknown;
-      constraint_name?: unknown;
-      constraint?: unknown;
-      cause?: unknown;
-    };
-    if (o.code === '23505') {
-      const c =
-        (typeof o.constraint_name === 'string' && o.constraint_name) ||
-        (typeof o.constraint === 'string' && o.constraint) ||
-        '';
-      if (c === 'user_tenant_index_pkey') return true;
-    }
-    cur = o.cause;
-  }
-  return false;
-}
+import type { VerifiedAuth } from '../auth/auth.service.js';
+import { schema, withTenant } from '../db/index.js';
 
 function sha256hex(input: string): string {
   return createHash('sha256').update(input).digest('hex');
-}
-
-export interface CreateTenantResult {
-  tenantId: string;
-  userId: string;
 }
 
 export interface CreateInviteResult {
@@ -80,76 +17,16 @@ export interface CreateInviteResult {
   expiresAt: string;
 }
 
-export interface AcceptInviteResult {
-  tenantId: string;
-  userId: string;
-}
-
 @Injectable()
 export class TenantsService {
-  constructor(
-    private readonly audit: AuditService,
-    private readonly plans: PlansService,
-  ) {}
+  constructor(private readonly audit: AuditService) {}
+
   /**
-   * Create a new tenant and its first admin user atomically.
-   * Three rows are inserted: `tenants`, `users` (role: admin), `user_tenant_index`.
-   * Throws 409 if the user is already bound (sub PK conflict).
+   * Create an invite token (admin-minted registration code) for the caller's tenant. Returns the
+   * plaintext token once — never stored. The code is the membership gate: it is redeemed by the
+   * passkey registration flow (auth/webauthn redeemCode), single-use and delete-on-use.
    */
-  async createTenant(
-    auth: MaybeUnboundAuth,
-    name: string,
-    generate: () => string = generateHandle,
-  ): Promise<CreateTenantResult> {
-    const { sub, email } = auth;
-    if (auth.tenantId) throw new ConflictException('already bound to a tenant');
-    if (!email)
-      throw new BadRequestException('token is missing the email claim required to provision');
-
-    for (let attempt = 0; attempt < MAX_HANDLE_ATTEMPTS; attempt++) {
-      const tenantId = randomUUID();
-      const displayName = generate();
-      const argusId = generateArgusId();
-      try {
-        const result = await withTenant(tenantId, async (tx) => {
-          await tx.insert(schema.tenants).values({ id: tenantId, name });
-          const [user] = await tx
-            .insert(schema.users)
-            .values({
-              tenantId,
-              externalIdentityId: sub,
-              email,
-              displayName,
-              role: 'admin',
-              argusId,
-            })
-            .returning({ id: schema.users.id });
-          if (!user) throw new Error('user insert returned no row');
-          await tx.insert(schema.userTenantIndex).values({ sub, tenantId });
-          return { tenantId, userId: user.id };
-        });
-        await this.audit.record(result.tenantId, { eventType: 'tenant.created', actorSub: sub });
-        return result;
-      } catch (err) {
-        if (isHandleCollision(err) && attempt < MAX_HANDLE_ATTEMPTS - 1) continue;
-        if (isArgusIdCollision(err) && attempt < MAX_HANDLE_ATTEMPTS - 1) continue;
-        if (isSubCollision(err)) throw new ConflictException('already bound to a tenant');
-        throw err;
-      }
-    }
-    throw new Error('handle exhausted after max attempts');
-  }
-
-  /** Create an invite token for a tenant. Returns the plaintext token once — never stored. */
-  async createInvite(auth: VerifiedAuth, inviteeEmail?: string): Promise<CreateInviteResult> {
-    // Enforce member limit — check before creating the invite so admins get immediate feedback.
-    const plan = await this.plans.getPlan(auth.tenantId);
-    if (plan.memberLimit !== null && plan.memberCount >= plan.memberLimit) {
-      throw new PaymentRequiredException(
-        `Member limit reached (${plan.memberCount}/${plan.memberLimit}). Upgrade your plan to add more members.`,
-      );
-    }
-
+  async createInvite(auth: VerifiedAuth): Promise<CreateInviteResult> {
     const raw = randomBytes(32).toString('base64url');
     const tokenHash = sha256hex(raw);
 
@@ -175,7 +52,6 @@ export class TenantsService {
           tenantId: auth.tenantId,
           createdBy: me.id,
           tokenHash,
-          inviteeEmail: inviteeEmail ?? null,
         })
         .returning({
           id: schema.tenantInvites.id,
@@ -191,148 +67,12 @@ export class TenantsService {
     };
   }
 
-  /**
-   * Accept an invite — look up by token_hash (withRouting, cross-tenant), validate, then atomically
-   * create the user + binding in the invite's tenant. Uniform "invalid or expired" error (no oracle).
-   */
-  async acceptInvite(
-    auth: MaybeUnboundAuth,
-    token: string,
-    generate: () => string = generateHandle,
-  ): Promise<AcceptInviteResult> {
-    if (auth.tenantId) throw new ConflictException('already bound to a tenant');
-    if (!auth.email)
-      throw new BadRequestException('token is missing the email claim required to provision');
-
-    const tokenHash = sha256hex(token);
-    const INVALID = 'invalid or expired invite';
-
-    // Cross-tenant lookup: withRouting sets role=argus_app without app.tenant_id. We additionally set a
-    // transaction-local app.invite_token_hash; the tenant_invites_accept_flow RLS policy (migration 0028)
-    // exposes ONLY the row whose token_hash matches it, so even this query cannot read another tenant's
-    // invites. The explicit token_hash filter below is retained for the unique-index lookup + defense-in-depth.
-    const invite = await withRouting(async (tx) => {
-      await tx.execute(sql`select set_config('app.invite_token_hash', ${tokenHash}, true)`);
-      return tx
-        .select({
-          id: schema.tenantInvites.id,
-          tenantId: schema.tenantInvites.tenantId,
-          inviteeEmail: schema.tenantInvites.inviteeEmail,
-          expiresAt: schema.tenantInvites.expiresAt,
-          acceptedAt: schema.tenantInvites.acceptedAt,
-          revokedAt: schema.tenantInvites.revokedAt,
-        })
-        .from(schema.tenantInvites)
-        .where(eq(schema.tenantInvites.tokenHash, tokenHash))
-        .limit(1)
-        .then((r) => r[0]);
-    });
-
-    if (!invite) throw new ForbiddenException(INVALID);
-    if (invite.acceptedAt !== null) throw new ForbiddenException(INVALID);
-    if (invite.revokedAt !== null) throw new ForbiddenException(INVALID);
-    if (invite.expiresAt < new Date()) throw new ForbiddenException(INVALID);
-
-    // Email-hint check (case-folded). If no hint, any verified identity can accept.
-    if (invite.inviteeEmail !== null) {
-      if ((auth.email ?? '').toLowerCase() !== invite.inviteeEmail.toLowerCase()) {
-        throw new ForbiddenException(INVALID);
-      }
-    }
-
-    const { sub, email } = auth;
-
-    for (let attempt = 0; attempt < MAX_HANDLE_ATTEMPTS; attempt++) {
-      const displayName = generate();
-      const argusId = generateArgusId();
-      try {
-        const result = await withTenant(invite.tenantId, async (tx) => {
-          // Race-safety: lock the tenant row before counting members so concurrent acceptInvite
-          // calls with different invites cannot both pass the limit check and both insert a user.
-          const [tenantRow] = await tx
-            .select({ memberLimit: schema.tenants.memberLimit })
-            .from(schema.tenants)
-            .where(eq(schema.tenants.id, invite.tenantId))
-            .for('update');
-          if (tenantRow?.memberLimit !== null && tenantRow?.memberLimit !== undefined) {
-            const [countRow] = await tx
-              .select({ count: count() })
-              .from(schema.users)
-              .where(
-                and(
-                  eq(schema.users.tenantId, invite.tenantId),
-                  eq(schema.users.status, 'active'),
-                  or(
-                    isNull(schema.users.displayName),
-                    ne(schema.users.displayName, 'breakglass-admin'),
-                  ),
-                ),
-              );
-            if ((countRow?.count ?? 0) >= tenantRow.memberLimit) {
-              throw new PaymentRequiredException(
-                'This workspace has reached its member limit. Ask the workspace admin to upgrade.',
-              );
-            }
-          }
-
-          // Mark invite accepted atomically — first committer wins for ALL callers (not just same-sub
-          // races). The RETURNING check enforces single-use: if accepted_at is already set (another
-          // user beat us here), this UPDATE matches 0 rows → uniform INVALID 403, no user is created.
-          const [marked] = await tx
-            .update(schema.tenantInvites)
-            .set({ acceptedAt: new Date() })
-            .where(
-              and(
-                eq(schema.tenantInvites.id, invite.id),
-                isNull(schema.tenantInvites.acceptedAt),
-                isNull(schema.tenantInvites.revokedAt),
-              ),
-            )
-            .returning({ id: schema.tenantInvites.id });
-          if (!marked) throw new ForbiddenException(INVALID);
-
-          const [user] = await tx
-            .insert(schema.users)
-            .values({
-              tenantId: invite.tenantId,
-              externalIdentityId: sub,
-              email,
-              displayName,
-              role: 'member',
-              argusId,
-            })
-            .returning({ id: schema.users.id });
-          if (!user) throw new Error('user insert returned no row');
-
-          await tx.insert(schema.userTenantIndex).values({ sub, tenantId: invite.tenantId });
-
-          // Record who accepted (audit trail). Second UPDATE is safe: within the same tx, marked.id is set.
-          await tx
-            .update(schema.tenantInvites)
-            .set({ acceptedBy: user.id })
-            .where(eq(schema.tenantInvites.id, invite.id));
-
-          return { tenantId: invite.tenantId, userId: user.id };
-        });
-        await this.audit.record(result.tenantId, { eventType: 'invite.accepted', actorSub: sub });
-        return result;
-      } catch (err) {
-        if (isHandleCollision(err) && attempt < MAX_HANDLE_ATTEMPTS - 1) continue;
-        if (isArgusIdCollision(err) && attempt < MAX_HANDLE_ATTEMPTS - 1) continue;
-        if (isSubCollision(err)) throw new ConflictException('already bound to a tenant');
-        throw err;
-      }
-    }
-    throw new Error('handle exhausted after max attempts');
-  }
-
   /** List active (not accepted, not revoked, not expired) invites for the caller's tenant. */
   async listInvites(auth: VerifiedAuth) {
     return withTenant(auth.tenantId, (tx) =>
       tx
         .select({
           id: schema.tenantInvites.id,
-          inviteeEmail: schema.tenantInvites.inviteeEmail,
           expiresAt: schema.tenantInvites.expiresAt,
           acceptedAt: schema.tenantInvites.acceptedAt,
           revokedAt: schema.tenantInvites.revokedAt,
@@ -376,7 +116,6 @@ export class TenantsService {
       tx
         .select({
           userId: schema.users.id,
-          email: schema.users.email,
           displayName: schema.users.displayName,
           role: schema.users.role,
         })

@@ -47,21 +47,8 @@ export const SENSITIVE_LIMITS = {
   subscribePush: 20,
   /** Admin device revoke — low cap; rare action, prevents bulk device purge floods. */
   adminDeviceRevoke: 12,
-  /** Tenant creation — one per identity; 5/min hard cap prevents squatting floods. */
-  createTenant: 5,
-  /** Invite issuance — admin action; low cap prevents harvesting. */
+  /** Invite/registration-code issuance — admin action; low cap prevents harvesting. */
   createInvite: 20,
-  /** Invite acceptance — unbound user; brute-force protection for token guessing (256-bit entropy makes
-   *  it infeasible, but the cap adds a second layer at negligible cost). */
-  acceptInvite: 10,
-  /** SSO config creation — admin; 5/min caps Zitadel org provisioning storms. */
-  createSsoConfig: 5,
-  /** SSO config update — admin; allows quick iteration on settings. */
-  updateSsoConfig: 10,
-  /** SSO secret rotation — admin; low cap prevents credential churn abuse. */
-  rotateSsoSecret: 5,
-  /** SSO config deletion — admin; Zitadel org teardown; low cap. */
-  deleteSsoConfig: 5,
   /** DSAR export — heavy parallel DB read; tight cap discourages scraping. Per hour, not per minute. */
   exportMyData: 2,
   /** Account deletion — irreversible cascade; low cap prevents accidental hammering. Per day. */

@@ -40,16 +40,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "caller is not an admin",
             "content": {
@@ -153,16 +143,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -303,16 +283,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "caller is not an admin",
             "content": {
@@ -433,16 +403,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -531,16 +491,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -659,16 +609,6 @@
           },
           "401": {
             "description": "invalid or expired invite code",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -953,16 +893,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -1076,16 +1006,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -1181,16 +1101,6 @@
           },
           "401": {
             "description": "Missing or invalid bearer token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1312,16 +1222,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -1427,16 +1327,6 @@
           },
           "401": {
             "description": "invalid credentials",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1561,16 +1451,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "caller does not hold a breakglass (Argus-minted) session",
             "content": {
@@ -1643,1053 +1523,6 @@
         ]
       }
     },
-    "/billing/checkout": {
-      "post": {
-        "operationId": "billingCheckout",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "Stripe-hosted checkout URL",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CheckoutUrlDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "admin role required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Create a Stripe Checkout session to subscribe to Pro or Enterprise",
-        "tags": [
-          "billing"
-        ]
-      }
-    },
-    "/billing/portal": {
-      "post": {
-        "operationId": "billingPortal",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "Stripe Billing Portal URL",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PortalUrlDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "admin role required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Create a Stripe Billing Portal session to manage the subscription",
-        "tags": [
-          "billing"
-        ]
-      }
-    },
-    "/billing/status": {
-      "get": {
-        "operationId": "billingStatus",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "billing and plan status",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BillingStatusDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "admin role required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get the current billing/plan status for the tenant",
-        "tags": [
-          "billing"
-        ]
-      }
-    },
-    "/admin/sso-config": {
-      "get": {
-        "operationId": "getSsoConfig",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "SSO config, or null if not yet configured",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "nullable": true,
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "format": "uuid",
-                      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-                      "maxLength": 36
-                    },
-                    "providerType": {
-                      "type": "string",
-                      "enum": [
-                        "oidc_generic",
-                        "google",
-                        "entra",
-                        "okta"
-                      ]
-                    },
-                    "providerName": {
-                      "type": "string",
-                      "maxLength": 100,
-                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-                    },
-                    "issuerUrl": {
-                      "type": "string",
-                      "maxLength": 512,
-                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-                    },
-                    "clientId": {
-                      "type": "string",
-                      "maxLength": 256,
-                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-                    },
-                    "loginUrl": {
-                      "type": "string",
-                      "maxLength": 1024,
-                      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-                    },
-                    "createdAt": {
-                      "type": "string",
-                      "format": "date-time",
-                      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-                      "maxLength": 40
-                    },
-                    "updatedAt": {
-                      "type": "string",
-                      "format": "date-time",
-                      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-                      "maxLength": 40
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "providerType",
-                    "providerName",
-                    "issuerUrl",
-                    "clientId",
-                    "loginUrl",
-                    "createdAt",
-                    "updatedAt"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "caller is not an admin",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Get tenant SSO config (admin only). Returns null body if not configured.",
-        "tags": [
-          "admin"
-        ]
-      },
-      "post": {
-        "operationId": "createSsoConfig",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateSsoConfigBodyDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "SSO configured",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SsoConfigDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "caller is not an admin",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "SSO already configured",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Zitadel management not configured or unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Configure SSO for this tenant (admin only). Provisions a Zitadel org + IdP.",
-        "tags": [
-          "admin"
-        ]
-      },
-      "patch": {
-        "operationId": "updateSsoConfig",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateSsoConfigBodyDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "SSO config updated",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SsoConfigDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "caller is not an admin",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "SSO not configured",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Zitadel management not configured or unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Update tenant SSO config (admin only). Does not touch the client secret.",
-        "tags": [
-          "admin"
-        ]
-      },
-      "delete": {
-        "operationId": "deleteSsoConfig",
-        "parameters": [],
-        "responses": {
-          "204": {
-            "description": "SSO config deleted"
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "caller is not an admin",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "SSO not configured",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Remove tenant SSO config and delete Zitadel org (admin only).",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
-    "/admin/sso-config/secret": {
-      "patch": {
-        "operationId": "rotateSsoSecret",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RotateSsoSecretBodyDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "secret rotated"
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "caller is not an admin",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "SSO not configured",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Zitadel management not configured or unavailable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Rotate the SSO client secret (admin only). New secret forwarded to Zitadel.",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
     "/devices/me/enrollment": {
       "post": {
         "description": "D2 publishes its public fingerprint to signal it wants to be linked. D1 is nudged via WebSocket and must approve via POST /devices/enrollments/:id/approve. Expires in 15 minutes.",
@@ -2728,16 +1561,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2865,16 +1688,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3014,16 +1827,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -3130,16 +1933,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3259,16 +2052,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -3380,16 +2163,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -3490,16 +2263,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3689,16 +2452,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -3799,16 +2552,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3920,16 +2663,6 @@
           },
           "401": {
             "description": "Missing or invalid bearer token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4056,16 +2789,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -4166,16 +2889,6 @@
           },
           "401": {
             "description": "Missing or invalid bearer token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4301,16 +3014,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -4422,16 +3125,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4588,16 +3281,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -4707,16 +3390,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4835,16 +3508,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -4942,16 +3605,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5069,16 +3722,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5208,16 +3851,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5367,16 +4000,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -5499,16 +4122,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5673,16 +4286,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -5838,16 +4441,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -5979,16 +4572,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -6111,16 +4694,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -6234,16 +4807,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6381,16 +4944,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -6520,16 +5073,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6680,16 +5223,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -6825,16 +5358,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -6952,16 +5475,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -7071,16 +5584,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7209,16 +5712,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -7330,16 +5823,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -7412,133 +5895,6 @@
         ]
       }
     },
-    "/tenants": {
-      "post": {
-        "operationId": "createTenant",
-        "parameters": [],
-        "responses": {
-          "201": {
-            "description": "tenant created; caller is now admin",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreateTenantResponseDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "caller is already bound to a tenant",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Create a new tenant and become its first admin",
-        "tags": [
-          "tenants"
-        ]
-      }
-    },
     "/tenants/invites": {
       "post": {
         "operationId": "createInvite",
@@ -7566,16 +5922,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7650,7 +5996,7 @@
             "bearer": []
           }
         ],
-        "summary": "Create a single-use invite token (admin only)",
+        "summary": "Create a single-use invite/registration code (admin only)",
         "tags": [
           "tenants"
         ]
@@ -7685,16 +6031,6 @@
           },
           "401": {
             "description": "Missing or invalid bearer token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7814,16 +6150,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "caller is not an admin",
             "content": {
@@ -7896,133 +6222,6 @@
         ]
       }
     },
-    "/tenants/invites/accept": {
-      "post": {
-        "operationId": "acceptInvite",
-        "parameters": [],
-        "responses": {
-          "201": {
-            "description": "user joined the tenant",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AcceptInviteResponseDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid bearer token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "invalid or expired invite",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "caller is already bound to a tenant",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Accept an invite and join a tenant",
-        "tags": [
-          "tenants"
-        ]
-      }
-    },
     "/tenants/members": {
       "get": {
         "operationId": "listMembers",
@@ -8054,16 +6253,6 @@
           },
           "401": {
             "description": "Missing or invalid bearer token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8183,16 +6372,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "cannot remove the last admin",
             "content": {
@@ -8296,16 +6475,6 @@
           },
           "401": {
             "description": "Missing or invalid bearer token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8429,13 +6598,6 @@
             "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
             "maxLength": 65536
           },
-          "email": {
-            "type": "string",
-            "nullable": true,
-            "format": "email",
-            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
-            "maxLength": 320
-          },
           "signaturePublicKeyPrefix": {
             "type": "string",
             "maxLength": 12,
@@ -8453,7 +6615,6 @@
           "deviceId",
           "userId",
           "displayName",
-          "email",
           "signaturePublicKeyPrefix",
           "createdAt"
         ],
@@ -8965,229 +7126,6 @@
         "required": [
           "currentPassword",
           "newPassword"
-        ],
-        "additionalProperties": false
-      },
-      "CheckoutUrlDto": {
-        "type": "object",
-        "properties": {
-          "url": {
-            "type": "string",
-            "description": "Stripe-hosted checkout URL",
-            "format": "uri",
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-            "maxLength": 65536
-          }
-        },
-        "required": [
-          "url"
-        ],
-        "additionalProperties": false
-      },
-      "PortalUrlDto": {
-        "type": "object",
-        "properties": {
-          "url": {
-            "type": "string",
-            "description": "Stripe Billing Portal URL",
-            "format": "uri",
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-            "maxLength": 65536
-          }
-        },
-        "required": [
-          "url"
-        ],
-        "additionalProperties": false
-      },
-      "BillingStatusDto": {
-        "type": "object",
-        "properties": {
-          "tier": {
-            "type": "string",
-            "enum": [
-              "free",
-              "pro",
-              "enterprise"
-            ]
-          },
-          "memberLimit": {
-            "type": "integer",
-            "nullable": true,
-            "format": "int64",
-            "maximum": 9007199254740991
-          },
-          "ssoEnabled": {
-            "type": "boolean"
-          },
-          "memberCount": {
-            "type": "integer",
-            "format": "int64",
-            "maximum": 9007199254740991
-          },
-          "subscriptionStatus": {
-            "type": "string",
-            "enum": [
-              "active",
-              "trialing",
-              "past_due",
-              "canceled",
-              "incomplete",
-              "incomplete_expired",
-              "unpaid",
-              "paused"
-            ],
-            "nullable": true
-          }
-        },
-        "required": [
-          "tier",
-          "memberLimit",
-          "ssoEnabled",
-          "memberCount",
-          "subscriptionStatus"
-        ],
-        "additionalProperties": false
-      },
-      "CreateSsoConfigBodyDto": {
-        "type": "object",
-        "properties": {
-          "providerType": {
-            "type": "string",
-            "enum": [
-              "oidc_generic",
-              "google",
-              "entra",
-              "okta"
-            ]
-          },
-          "providerName": {
-            "type": "string",
-            "maxLength": 100,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          },
-          "issuerUrl": {
-            "type": "string",
-            "maxLength": 512,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          },
-          "clientId": {
-            "type": "string",
-            "maxLength": 256,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          },
-          "clientSecret": {
-            "type": "string",
-            "maxLength": 1024,
-            "writeOnly": true,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          }
-        },
-        "required": [
-          "providerType",
-          "providerName",
-          "issuerUrl",
-          "clientId",
-          "clientSecret"
-        ],
-        "additionalProperties": false
-      },
-      "SsoConfigDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-            "maxLength": 36
-          },
-          "providerType": {
-            "type": "string",
-            "enum": [
-              "oidc_generic",
-              "google",
-              "entra",
-              "okta"
-            ]
-          },
-          "providerName": {
-            "type": "string",
-            "maxLength": 100,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          },
-          "issuerUrl": {
-            "type": "string",
-            "maxLength": 512,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          },
-          "clientId": {
-            "type": "string",
-            "maxLength": 256,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          },
-          "loginUrl": {
-            "type": "string",
-            "maxLength": 1024,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          }
-        },
-        "required": [
-          "id",
-          "providerType",
-          "providerName",
-          "issuerUrl",
-          "clientId",
-          "loginUrl",
-          "createdAt",
-          "updatedAt"
-        ],
-        "additionalProperties": false
-      },
-      "UpdateSsoConfigBodyDto": {
-        "type": "object",
-        "properties": {
-          "providerName": {
-            "type": "string",
-            "maxLength": 100,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          },
-          "issuerUrl": {
-            "type": "string",
-            "maxLength": 512,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          },
-          "clientId": {
-            "type": "string",
-            "maxLength": 256,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          }
-        },
-        "additionalProperties": false
-      },
-      "RotateSsoSecretBodyDto": {
-        "type": "object",
-        "properties": {
-          "clientSecret": {
-            "type": "string",
-            "maxLength": 1024,
-            "writeOnly": true,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          }
-        },
-        "required": [
-          "clientSecret"
         ],
         "additionalProperties": false
       },
@@ -9707,13 +7645,6 @@
             "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
             "maxLength": 36
           },
-          "inviteeEmail": {
-            "type": "string",
-            "format": "email",
-            "nullable": true,
-            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
-            "maxLength": 320
-          },
           "createdAt": {
             "type": "string",
             "format": "date-time",
@@ -9743,7 +7674,6 @@
         },
         "required": [
           "id",
-          "inviteeEmail",
           "createdAt",
           "expiresAt",
           "acceptedAt",
@@ -9792,13 +7722,6 @@
                 "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
                 "maxLength": 65536
               },
-              "email": {
-                "type": "string",
-                "format": "email",
-                "nullable": true,
-                "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
-                "maxLength": 320
-              },
               "displayName": {
                 "type": "string",
                 "nullable": true,
@@ -9832,7 +7755,6 @@
               "id",
               "tenantId",
               "argusId",
-              "email",
               "displayName",
               "avatarSeed",
               "role",
@@ -10814,28 +8736,6 @@
         ],
         "additionalProperties": false
       },
-      "CreateTenantResponseDto": {
-        "type": "object",
-        "properties": {
-          "tenantId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-            "maxLength": 36
-          },
-          "userId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-            "maxLength": 36
-          }
-        },
-        "required": [
-          "tenantId",
-          "userId"
-        ],
-        "additionalProperties": false
-      },
       "CreateInviteResponseDto": {
         "type": "object",
         "properties": {
@@ -10874,12 +8774,6 @@
             "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
             "maxLength": 36
           },
-          "inviteeEmail": {
-            "type": "string",
-            "nullable": true,
-            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
-            "maxLength": 65536
-          },
           "expiresAt": {
             "type": "string",
             "format": "date-time",
@@ -10909,33 +8803,10 @@
         },
         "required": [
           "id",
-          "inviteeEmail",
           "expiresAt",
           "acceptedAt",
           "revokedAt",
           "createdAt"
-        ],
-        "additionalProperties": false
-      },
-      "AcceptInviteResponseDto": {
-        "type": "object",
-        "properties": {
-          "tenantId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-            "maxLength": 36
-          },
-          "userId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-            "maxLength": 36
-          }
-        },
-        "required": [
-          "tenantId",
-          "userId"
         ],
         "additionalProperties": false
       },
@@ -10947,13 +8818,6 @@
             "format": "uuid",
             "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
             "maxLength": 36
-          },
-          "email": {
-            "type": "string",
-            "nullable": true,
-            "format": "email",
-            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
-            "maxLength": 320
           },
           "displayName": {
             "type": "string",
@@ -10971,7 +8835,6 @@
         },
         "required": [
           "userId",
-          "email",
           "displayName",
           "role"
         ],

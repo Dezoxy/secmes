@@ -92,7 +92,6 @@ export class MeController {
       avatarSeed: user.avatarSeed,
       role: user.role,
       isBreakglass: user.displayName === 'breakglass-admin' || undefined,
-      plan: user.plan,
     });
   }
 
