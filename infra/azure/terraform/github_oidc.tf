@@ -9,16 +9,19 @@ resource "azuread_service_principal" "github_deploy" {
   client_id = azuread_application.github_deploy.client_id
 }
 
-# Trust GitHub Actions runs of this repo. Default subject = the `main` branch; the release-on-tag deploy runs
-# in the `prod` GitHub Environment, so set var.github_deploy_subject to bind to that environment (its
-# OIDC token's subject is `...:environment:prod`, which the `main`-ref default would reject).
+# Trust GitHub Actions runs of this repo. Default subject = the protected `prod` GitHub Environment, where
+# the release-on-tag deploy runs (cd.yml `environment: prod`) — mirroring the AWS twin
+# (infra/aws/terraform/iam.tf). The deploy's OIDC token subject is `...:environment:prod`, so binding the
+# default to the environment is the fail-safe choice: a raw `main`-ref token can't satisfy it, keeping the
+# required-reviewer environment gate in front of the root-capable run-command role. Override via
+# var.github_deploy_subject only for non-standard setups.
 resource "azuread_application_federated_identity_credential" "github_deploy" {
   application_id = azuread_application.github_deploy.id
   display_name   = "github-actions-deploy"
   description    = "GitHub Actions OIDC for ${var.github_owner}/${var.github_repo}"
   audiences      = ["api://AzureADTokenExchange"]
   issuer         = "https://token.actions.githubusercontent.com"
-  subject        = coalesce(var.github_deploy_subject, "repo:${var.github_owner}/${var.github_repo}:ref:refs/heads/main")
+  subject        = coalesce(var.github_deploy_subject, "repo:${var.github_owner}/${var.github_repo}:environment:prod")
 }
 
 # Least-privilege custom role: just enough to invoke run-command on the VM (not the broad built-in
