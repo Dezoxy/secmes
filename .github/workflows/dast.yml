@@ -54,10 +54,6 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 12
-    env:
-      DATABASE_URL: postgres://argus@localhost:5432/argus
-      REDIS_URL: redis://localhost:6379
-      PORT: '3000'
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
@@ -70,7 +66,12 @@ jobs:
       - name: Build API + workspace deps
         run: pnpm --filter @argus/api... build
 
+      # DB env is scoped to the steps that need it (migrate + the API server) — NOT job-level — so the
+      # "Generate OpenAPI spec" step runs WITHOUT DATABASE_URL. With it, the generator's Nest app opens a
+      # module-level Postgres pool that app.close() doesn't own, so it hangs after writing the file.
       - name: Apply DB migrations
+        env:
+          DATABASE_URL: postgres://argus@localhost:5432/argus
         run: pnpm --filter @argus/api db:migrate
 
       - name: Generate OpenAPI spec
@@ -78,6 +79,10 @@ jobs:
 
       - name: Start the API and wait for /healthz
         working-directory: apps/api
+        env:
+          DATABASE_URL: postgres://argus@localhost:5432/argus
+          REDIS_URL: redis://localhost:6379
+          PORT: '3000'
         run: |
           set -euo pipefail
           node dist/main.js &
