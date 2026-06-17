@@ -89,11 +89,11 @@ test('mobile settings sections expose current state and focus section content', 
   expect(panelBox!.height).toBeGreaterThanOrEqual(757);
   expect(panelBox!.height).toBeLessThanOrEqual(763);
 
-  const securitySection = dialog.getByRole('button', { name: 'Security & Recovery' });
+  const securitySection = dialog.getByRole('button', { name: 'Security', exact: true });
 
   await securitySection.click();
 
-  const securityContent = dialog.getByRole('region', { name: 'Security & Recovery settings' });
+  const securityContent = dialog.getByRole('region', { name: 'Security settings' });
   await expect(securityContent).toBeVisible();
   await expect(securityContent).toBeFocused();
 
