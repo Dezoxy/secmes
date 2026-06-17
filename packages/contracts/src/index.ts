@@ -94,10 +94,8 @@ export const RegisterOptionsRequestSchema = z.object({
 });
 export type RegisterOptionsRequest = z.infer<typeof RegisterOptionsRequestSchema>;
 
-export const RegisterOptionsResponseSchema = z.object({
-  ceremonyId: z.string().uuid(),
-  options: z.record(z.string(), z.unknown()),
-});
+// The backend returns the raw PublicKeyCredentialCreationOptions JSON directly.
+export const RegisterOptionsResponseSchema = z.record(z.string(), z.unknown());
 export type RegisterOptionsResponse = z.infer<typeof RegisterOptionsResponseSchema>;
 
 export const RegisterVerifyRequestSchema = z.object({

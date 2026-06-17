@@ -28,7 +28,7 @@ export function RegisterScreen({ onRegistered, onBack }: RegisterScreenProps) {
     try {
       setStep('ceremony');
       const { ceremonyId } = await redeemCode(code.trim());
-      const { options } = await getRegisterOptions(ceremonyId);
+      const options = await getRegisterOptions(ceremonyId);
       const regResponse = await startRegistration({
         optionsJSON: options as unknown as PublicKeyCredentialCreationOptionsJSON,
       });

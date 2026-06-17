@@ -131,10 +131,9 @@ export async function redeemCode(code: string): Promise<{ ceremonyId: string }> 
   );
 }
 
-/** Get WebAuthn creation options for the given ceremony (POST /auth/webauthn/register/options). */
-export async function getRegisterOptions(
-  ceremonyId: string,
-): Promise<{ ceremonyId: string; options: Record<string, unknown> }> {
+/** Get WebAuthn creation options for the given ceremony (POST /auth/webauthn/register/options).
+ * Returns the raw PublicKeyCredentialCreationOptions JSON to pass to startRegistration(). */
+export async function getRegisterOptions(ceremonyId: string): Promise<Record<string, unknown>> {
   return unwrapApiResult(
     await requestJson({
       path: '/auth/webauthn/register/options',
