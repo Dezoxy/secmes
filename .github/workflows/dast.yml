@@ -28,7 +28,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write # upload scan findings to Code Scanning Alerts
     services:
       postgres:
         image: postgres:16-alpine
@@ -99,5 +98,16 @@ jobs:
         with:
           target-url: http://localhost:3000
           api-definition: apps/api/openapi.json
-          upload-to-code-scanning: true
+          # SARIF/Code-Scanning upload is OFF: the freemium action's SARIF KDB conversion is unreliable
+          # (crashes in build_scan_kdb). Capture the scan report as a build artifact for review instead.
+          upload-to-code-scanning: false
+          scan-report: scan-report.json
           log-level: info
+
+      - name: Upload DAST scan report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: dast-scan-report
+          path: scan-report.json
+          if-no-files-found: ignore
