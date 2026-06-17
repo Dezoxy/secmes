@@ -37,8 +37,10 @@ touches it, so any CORS rule there is pure attack surface.
   `s3_head` only if the client starts probing object existence; it does not today.
 - **`allowedHeaders: ["content-type"]`** — with presigned URLs the auth rides in the query string
   (`X-Amz-Signature`), so `Authorization` is **not** allowed. `content-type` covers the upload preflight.
-- **`exposeHeaders: ["ETag"]`** — lets the client read the upload response. Optional (integrity is the GCM
-  tag, not the ETag) but harmless.
+- **`exposeHeaders: ["etag"]`** — lets the client read the upload response. Optional (integrity is the GCM
+  tag, not the ETag) but harmless. **Lowercase on purpose:** B2 canonicalizes CORS header names to lowercase
+  on storage, so keep `allowedHeaders`/`exposeHeaders` lowercase here — that's the form the live bucket
+  reports back, and convergence compares against it (`deploy.sh` also lowercases both sides defensively).
 - **`maxAgeSeconds: 3600`** — caches the preflight for an hour; no `OPTIONS` round-trip per attachment.
 
 ### This is one of two halves
@@ -63,23 +65,27 @@ blocks a good rollout). Threat model: [`docs/threat-models/b2-cors-convergence.m
 ### The CORS app key (you must provision it once)
 
 CORS is a bucket-config operation; the runtime attachment/backup keys are file-scoped and deliberately cannot
-do it. Mint **one dedicated B2 application key** for it:
+do it. Mint **one dedicated B2 application key**, restricted to this bucket. B2 has **no granular CORS
+capability** — `writeBuckets` is the coarsest write needed and `listBuckets` reads it back — so the **bucket
+restriction is the security control** that keeps the key away from the `db-…` backup bucket (cleartext
+metadata) and every file. Native B2 auth needs both halves: `keyId:applicationKey` (the keyId is non-secret).
 
-- **Capabilities:** `listBuckets`, `readBucketCors`, `writeBucketCors` — **not** the coarse `writeBuckets`,
-  and **no** file capabilities. (If your B2 account only exposes `writeBuckets`, the bucket restriction below
-  becomes the load-bearing control.)
-- **Bucket restriction:** restricted to **`attachment-r8xq4m7z2p9n6k3v` only**. This is what guarantees the
-  key can never touch the `db-…` backup bucket (cleartext metadata) or any file. `deploy.sh` asserts the
-  authorized bucket name matches and fails closed otherwise.
+```bash
+# 1. Mint the key (from your workstation; the box has no b2 CLI). Prints "<keyId> <applicationKey>".
+b2 key create --bucket attachment-r8xq4m7z2p9n6k3v argus-cors-key listBuckets,writeBuckets
 
-Then wire it up (native B2 auth needs `keyId:applicationKey`):
+# 2. Store the applicationKey SECRET in Key Vault (via --file, never argv; see populate-keyvault.sh).
+umask 077; printf '%s' '<applicationKey>' >/tmp/corskey
+az keyvault secret set --vault-name <vault> --name argus-b2-cors-app-key --file /tmp/corskey --encoding utf-8
+rm -P /tmp/corskey   # macOS has no `shred`; -P overwrites before unlinking
 
-- Store the **applicationKey secret** in Key Vault as `argus-b2-cors-app-key` (via `populate-keyvault.sh`).
-- Set the **keyId** (non-secret) as the GitHub repo variable `B2_CORS_KEY_ID` (via `setup-github-cicd.sh`, or
-  `gh variable set B2_CORS_KEY_ID --body <keyId>`).
+# 3. Set the keyId (NON-secret) as the repo variable that switches convergence on.
+gh variable set B2_CORS_KEY_ID --repo <owner/repo> --body '<keyId>'
+```
 
-Until `B2_CORS_KEY_ID` is set, `deploy.sh` **skips** CORS convergence with a log line (opt-in, non-breaking) —
-apply manually in the meantime via the break-glass path below.
+`deploy.sh` asserts the authorized bucket name matches `attachment-r8xq4m7z2p9n6k3v` and fails closed otherwise.
+Until `B2_CORS_KEY_ID` is set it **skips** CORS convergence with a log line (opt-in, non-breaking) — apply
+manually in the meantime via the break-glass path below.
 
 ## Applying the rule manually (break-glass)
 

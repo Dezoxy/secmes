@@ -4,7 +4,7 @@
     "allowedOrigins": ["https://4rgus.com"],
     "allowedOperations": ["s3_put", "s3_get"],
     "allowedHeaders": ["content-type"],
-    "exposeHeaders": ["ETag"],
+    "exposeHeaders": ["etag"],
     "maxAgeSeconds": 3600
   }
 ]
