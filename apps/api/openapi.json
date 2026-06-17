@@ -385,924 +385,6 @@
         ]
       }
     },
-    "/auth/session": {
-      "post": {
-        "operationId": "startSession",
-        "parameters": [
-          {
-            "name": "user-agent",
-            "in": "header",
-            "description": "optional client hint, audited",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-              "maxLength": 65536
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "user provisioned and login recorded"
-          },
-          "400": {
-            "description": "token missing the email claim required to provision",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Start session: JIT-provision the user + record login",
-        "tags": [
-          "auth"
-        ]
-      },
-      "delete": {
-        "operationId": "endSession",
-        "parameters": [
-          {
-            "name": "user-agent",
-            "in": "header",
-            "description": "optional client hint, audited",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-              "maxLength": 65536
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "logout recorded"
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Record session end (logout)",
-        "tags": [
-          "auth"
-        ]
-      }
-    },
-    "/me": {
-      "get": {
-        "operationId": "getMe",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "user profile or unbound state",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "type": "object",
-                      "properties": {
-                        "bound": {
-                          "type": "boolean",
-                          "enum": [
-                            false
-                          ]
-                        }
-                      },
-                      "required": [
-                        "bound"
-                      ]
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "bound": {
-                          "type": "boolean",
-                          "enum": [
-                            true
-                          ]
-                        },
-                        "userId": {
-                          "type": "string",
-                          "format": "uuid",
-                          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-                          "maxLength": 36
-                        },
-                        "tenantId": {
-                          "type": "string",
-                          "format": "uuid",
-                          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-                          "maxLength": 36
-                        },
-                        "argusId": {
-                          "type": "string",
-                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-                          "maxLength": 65536
-                        },
-                        "displayName": {
-                          "type": "string",
-                          "nullable": true,
-                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-                          "maxLength": 65536
-                        },
-                        "avatarSeed": {
-                          "type": "string",
-                          "nullable": true,
-                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-                          "maxLength": 65536
-                        },
-                        "role": {
-                          "type": "string",
-                          "enum": [
-                            "admin",
-                            "member"
-                          ]
-                        },
-                        "isBreakglass": {
-                          "type": "boolean"
-                        }
-                      },
-                      "required": [
-                        "bound",
-                        "userId",
-                        "tenantId",
-                        "argusId",
-                        "displayName",
-                        "avatarSeed",
-                        "role"
-                      ]
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Current authenticated user or unbound state",
-        "tags": [
-          "users"
-        ]
-      },
-      "put": {
-        "operationId": "updateMe",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateProfileBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "profile updated"
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Update own display name / avatar seed",
-        "tags": [
-          "users"
-        ]
-      },
-      "delete": {
-        "description": "Permanently deletes the authenticated user account and all associated metadata. Irreversible. Requires the `X-Confirm-Delete: my-account` header.",
-        "operationId": "deleteMyAccount",
-        "parameters": [
-          {
-            "name": "X-Confirm-Delete",
-            "in": "header",
-            "description": "Must be set to \"my-account\" to confirm intentional deletion.",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-              "maxLength": 65536
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "account deleted"
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid bearer token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Delete account (GDPR Art. 17 — right to erasure)",
-        "tags": [
-          "users"
-        ]
-      }
-    },
-    "/users/lookup": {
-      "get": {
-        "operationId": "lookupUser",
-        "parameters": [
-          {
-            "name": "argusId",
-            "required": true,
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "maxLength": 128,
-              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserLookupResultDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "no active user with that argus-id",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Look up a user by exact argus-id",
-        "tags": [
-          "users"
-        ]
-      }
-    },
-    "/me/export": {
-      "get": {
-        "description": "Returns a JSON snapshot of every piece of metadata this server holds about the authenticated user. Message content is end-to-end encrypted and is never included.",
-        "operationId": "exportMyData",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "account data export",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MeExportDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid bearer token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Export all account metadata (GDPR Art. 20)",
-        "tags": [
-          "users"
-        ]
-      }
-    },
     "/auth/session/refresh": {
       "post": {
         "description": "Single-use refresh: the old cookie is revoked. Requires X-Argus-Refresh: 1 header (CSRF) and the argus_refresh HttpOnly cookie. Reuse of an already-rotated cookie triggers full session-family revocation.",
@@ -4495,6 +3577,682 @@
         "summary": "List the caller's conversation IDs (enrollment fan-out diff)",
         "tags": [
           "devices"
+        ]
+      }
+    },
+    "/me": {
+      "get": {
+        "operationId": "getMe",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "user profile or unbound state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "bound": {
+                          "type": "boolean",
+                          "enum": [
+                            false
+                          ]
+                        }
+                      },
+                      "required": [
+                        "bound"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "bound": {
+                          "type": "boolean",
+                          "enum": [
+                            true
+                          ]
+                        },
+                        "userId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+                          "maxLength": 36
+                        },
+                        "tenantId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+                          "maxLength": 36
+                        },
+                        "argusId": {
+                          "type": "string",
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "maxLength": 65536
+                        },
+                        "displayName": {
+                          "type": "string",
+                          "nullable": true,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "maxLength": 65536
+                        },
+                        "avatarSeed": {
+                          "type": "string",
+                          "nullable": true,
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "maxLength": 65536
+                        },
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "admin",
+                            "member"
+                          ]
+                        },
+                        "isBreakglass": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "bound",
+                        "userId",
+                        "tenantId",
+                        "argusId",
+                        "displayName",
+                        "avatarSeed",
+                        "role"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Plan upgrade required — current plan does not include this feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted to perform this action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Current authenticated user or unbound state",
+        "tags": [
+          "users"
+        ]
+      },
+      "put": {
+        "operationId": "updateMe",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProfileBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "profile updated"
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Plan upgrade required — current plan does not include this feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted to perform this action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update own display name / avatar seed",
+        "tags": [
+          "users"
+        ]
+      },
+      "delete": {
+        "description": "Permanently deletes the authenticated user account and all associated metadata. Irreversible. Requires the `X-Confirm-Delete: my-account` header.",
+        "operationId": "deleteMyAccount",
+        "parameters": [
+          {
+            "name": "X-Confirm-Delete",
+            "in": "header",
+            "description": "Must be set to \"my-account\" to confirm intentional deletion.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "maxLength": 65536
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "account deleted"
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Plan upgrade required — current plan does not include this feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted to perform this action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Delete account (GDPR Art. 17 — right to erasure)",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/users/lookup": {
+      "get": {
+        "operationId": "lookupUser",
+        "parameters": [
+          {
+            "name": "argusId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserLookupResultDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Plan upgrade required — current plan does not include this feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted to perform this action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "no active user with that argus-id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Look up a user by exact argus-id",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/me/export": {
+      "get": {
+        "description": "Returns a JSON snapshot of every piece of metadata this server holds about the authenticated user. Message content is end-to-end encrypted and is never included.",
+        "operationId": "exportMyData",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "account data export",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeExportDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Plan upgrade required — current plan does not include this feature.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted to perform this action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Export all account metadata (GDPR Art. 20)",
+        "tags": [
+          "users"
         ]
       }
     },
@@ -8771,535 +8529,6 @@
         ],
         "additionalProperties": false
       },
-      "UpdateProfileBody": {
-        "type": "object",
-        "properties": {
-          "displayName": {
-            "type": "string",
-            "description": "new display name (1–64 chars, trimmed)",
-            "minLength": 1,
-            "maxLength": 64,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          },
-          "avatarSeed": {
-            "type": "string",
-            "description": "aesthetic seed token for deterministic avatar generation (≤64 chars)",
-            "maxLength": 64,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          }
-        },
-        "additionalProperties": false
-      },
-      "UserLookupResultDto": {
-        "type": "object",
-        "properties": {
-          "userId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-            "maxLength": 36
-          },
-          "argusId": {
-            "type": "string",
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-            "maxLength": 65536
-          },
-          "displayName": {
-            "type": "string",
-            "nullable": true,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-            "maxLength": 65536
-          },
-          "avatarSeed": {
-            "type": "string",
-            "nullable": true,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-            "maxLength": 65536
-          }
-        },
-        "required": [
-          "userId",
-          "argusId",
-          "displayName",
-          "avatarSeed"
-        ],
-        "additionalProperties": false
-      },
-      "ExportDeviceDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-            "maxLength": 36
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          }
-        },
-        "required": [
-          "id",
-          "createdAt"
-        ],
-        "additionalProperties": false
-      },
-      "ExportKeyBackupDto": {
-        "type": "object",
-        "properties": {
-          "exists": {
-            "type": "boolean"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true,
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true,
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          }
-        },
-        "required": [
-          "exists",
-          "createdAt",
-          "updatedAt"
-        ],
-        "additionalProperties": false
-      },
-      "ExportConversationDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-            "maxLength": 36
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          }
-        },
-        "required": [
-          "id",
-          "createdAt"
-        ],
-        "additionalProperties": false
-      },
-      "ExportMessageBucketDto": {
-        "type": "object",
-        "properties": {
-          "conversationId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-            "maxLength": 36
-          },
-          "count": {
-            "type": "number",
-            "format": "int64",
-            "maximum": 9007199254740991
-          },
-          "firstAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          },
-          "lastAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          }
-        },
-        "required": [
-          "conversationId",
-          "count",
-          "firstAt",
-          "lastAt"
-        ],
-        "additionalProperties": false
-      },
-      "ExportMessageSummaryDto": {
-        "type": "object",
-        "properties": {
-          "totalCount": {
-            "type": "number",
-            "format": "int64",
-            "maximum": 9007199254740991
-          },
-          "byConversation": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ExportMessageBucketDto"
-            },
-            "maxItems": 1000
-          }
-        },
-        "required": [
-          "totalCount",
-          "byConversation"
-        ],
-        "additionalProperties": false
-      },
-      "ExportAttachmentDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-            "maxLength": 36
-          },
-          "conversationId": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-            "maxLength": 36
-          },
-          "objectKey": {
-            "type": "string",
-            "description": "server-issued blob reference",
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-            "maxLength": 65536
-          },
-          "byteSize": {
-            "type": "number",
-            "format": "int64",
-            "maximum": 9007199254740991
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true,
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          }
-        },
-        "required": [
-          "id",
-          "conversationId",
-          "objectKey",
-          "byteSize",
-          "createdAt",
-          "expiresAt"
-        ],
-        "additionalProperties": false
-      },
-      "ExportPushSubscriptionDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-            "maxLength": 36
-          },
-          "endpointPrefix": {
-            "type": "string",
-            "description": "first 40 chars of the push endpoint URL (service identification only)",
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-            "maxLength": 65536
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          }
-        },
-        "required": [
-          "id",
-          "endpointPrefix",
-          "createdAt"
-        ],
-        "additionalProperties": false
-      },
-      "ExportAuditEventDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-            "maxLength": 36
-          },
-          "eventType": {
-            "type": "string",
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-            "maxLength": 65536
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          },
-          "metadata": {
-            "type": "object",
-            "nullable": true,
-            "additionalProperties": {
-              "oneOf": [
-                {
-                  "type": "string",
-                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-                  "maxLength": 65536
-                },
-                {
-                  "type": "number",
-                  "format": "int64",
-                  "maximum": 9007199254740991
-                },
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-                    "maxLength": 65536
-                  },
-                  "maxItems": 1000
-                }
-              ]
-            },
-            "description": "non-sensitive metadata IDs only — never content or keys"
-          }
-        },
-        "required": [
-          "id",
-          "eventType",
-          "createdAt",
-          "metadata"
-        ],
-        "additionalProperties": false
-      },
-      "ExportInviteDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-            "maxLength": 36
-          },
-          "inviteeEmail": {
-            "type": "string",
-            "format": "email",
-            "nullable": true,
-            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
-            "maxLength": 320
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          },
-          "acceptedAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true,
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          },
-          "revokedAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true,
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          }
-        },
-        "required": [
-          "id",
-          "inviteeEmail",
-          "createdAt",
-          "expiresAt",
-          "acceptedAt",
-          "revokedAt"
-        ],
-        "additionalProperties": false
-      },
-      "MeExportDto": {
-        "type": "object",
-        "properties": {
-          "schemaVersion": {
-            "type": "string",
-            "enum": [
-              "1"
-            ]
-          },
-          "exportedAt": {
-            "type": "string",
-            "format": "date-time",
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          },
-          "notice": {
-            "type": "string",
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-            "maxLength": 65536
-          },
-          "profile": {
-            "type": "object",
-            "nullable": true,
-            "properties": {
-              "id": {
-                "type": "string",
-                "format": "uuid",
-                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-                "maxLength": 36
-              },
-              "tenantId": {
-                "type": "string",
-                "format": "uuid",
-                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-                "maxLength": 36
-              },
-              "argusId": {
-                "type": "string",
-                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-                "maxLength": 65536
-              },
-              "email": {
-                "type": "string",
-                "format": "email",
-                "nullable": true,
-                "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
-                "maxLength": 320
-              },
-              "displayName": {
-                "type": "string",
-                "nullable": true,
-                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-                "maxLength": 65536
-              },
-              "avatarSeed": {
-                "type": "string",
-                "nullable": true,
-                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-                "maxLength": 65536
-              },
-              "role": {
-                "type": "string",
-                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-                "maxLength": 65536
-              },
-              "status": {
-                "type": "string",
-                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-                "maxLength": 65536
-              },
-              "createdAt": {
-                "type": "string",
-                "format": "date-time",
-                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-                "maxLength": 40
-              }
-            },
-            "required": [
-              "id",
-              "tenantId",
-              "argusId",
-              "email",
-              "displayName",
-              "avatarSeed",
-              "role",
-              "status",
-              "createdAt"
-            ],
-            "additionalProperties": false
-          },
-          "devices": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ExportDeviceDto"
-            },
-            "maxItems": 1000
-          },
-          "keyBackup": {
-            "$ref": "#/components/schemas/ExportKeyBackupDto"
-          },
-          "conversations": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ExportConversationDto"
-            },
-            "maxItems": 1000
-          },
-          "messageSummary": {
-            "$ref": "#/components/schemas/ExportMessageSummaryDto"
-          },
-          "attachments": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ExportAttachmentDto"
-            },
-            "maxItems": 1000
-          },
-          "pushSubscriptions": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ExportPushSubscriptionDto"
-            },
-            "maxItems": 1000
-          },
-          "auditEvents": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ExportAuditEventDto"
-            },
-            "maxItems": 1000
-          },
-          "invitesCreated": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ExportInviteDto"
-            },
-            "maxItems": 1000
-          }
-        },
-        "required": [
-          "schemaVersion",
-          "exportedAt",
-          "notice",
-          "devices",
-          "keyBackup",
-          "conversations",
-          "messageSummary",
-          "attachments",
-          "pushSubscriptions",
-          "auditEvents",
-          "invitesCreated"
-        ],
-        "additionalProperties": false
-      },
       "RefreshResponseDto": {
         "type": "object",
         "properties": {
@@ -10144,6 +9373,535 @@
         },
         "required": [
           "conversationIds"
+        ],
+        "additionalProperties": false
+      },
+      "UpdateProfileBody": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "description": "new display name (1–64 chars, trimmed)",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "avatarSeed": {
+            "type": "string",
+            "description": "aesthetic seed token for deterministic avatar generation (≤64 chars)",
+            "maxLength": 64,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UserLookupResultDto": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "maxLength": 36
+          },
+          "argusId": {
+            "type": "string",
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "maxLength": 65536
+          },
+          "displayName": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "maxLength": 65536
+          },
+          "avatarSeed": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "maxLength": 65536
+          }
+        },
+        "required": [
+          "userId",
+          "argusId",
+          "displayName",
+          "avatarSeed"
+        ],
+        "additionalProperties": false
+      },
+      "ExportDeviceDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "maxLength": 36
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "id",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "ExportKeyBackupDto": {
+        "type": "object",
+        "properties": {
+          "exists": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "exists",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "ExportConversationDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "maxLength": 36
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "id",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "ExportMessageBucketDto": {
+        "type": "object",
+        "properties": {
+          "conversationId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "maxLength": 36
+          },
+          "count": {
+            "type": "number",
+            "format": "int64",
+            "maximum": 9007199254740991
+          },
+          "firstAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          },
+          "lastAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "conversationId",
+          "count",
+          "firstAt",
+          "lastAt"
+        ],
+        "additionalProperties": false
+      },
+      "ExportMessageSummaryDto": {
+        "type": "object",
+        "properties": {
+          "totalCount": {
+            "type": "number",
+            "format": "int64",
+            "maximum": 9007199254740991
+          },
+          "byConversation": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExportMessageBucketDto"
+            },
+            "maxItems": 1000
+          }
+        },
+        "required": [
+          "totalCount",
+          "byConversation"
+        ],
+        "additionalProperties": false
+      },
+      "ExportAttachmentDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "maxLength": 36
+          },
+          "conversationId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "maxLength": 36
+          },
+          "objectKey": {
+            "type": "string",
+            "description": "server-issued blob reference",
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "maxLength": 65536
+          },
+          "byteSize": {
+            "type": "number",
+            "format": "int64",
+            "maximum": 9007199254740991
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "id",
+          "conversationId",
+          "objectKey",
+          "byteSize",
+          "createdAt",
+          "expiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "ExportPushSubscriptionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "maxLength": 36
+          },
+          "endpointPrefix": {
+            "type": "string",
+            "description": "first 40 chars of the push endpoint URL (service identification only)",
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "maxLength": 65536
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "id",
+          "endpointPrefix",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "ExportAuditEventDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "maxLength": 36
+          },
+          "eventType": {
+            "type": "string",
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "maxLength": 65536
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          },
+          "metadata": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                  "maxLength": 65536
+                },
+                {
+                  "type": "number",
+                  "format": "int64",
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                    "maxLength": 65536
+                  },
+                  "maxItems": 1000
+                }
+              ]
+            },
+            "description": "non-sensitive metadata IDs only — never content or keys"
+          }
+        },
+        "required": [
+          "id",
+          "eventType",
+          "createdAt",
+          "metadata"
+        ],
+        "additionalProperties": false
+      },
+      "ExportInviteDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "maxLength": 36
+          },
+          "inviteeEmail": {
+            "type": "string",
+            "format": "email",
+            "nullable": true,
+            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+            "maxLength": 320
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          },
+          "acceptedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          },
+          "revokedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "id",
+          "inviteeEmail",
+          "createdAt",
+          "expiresAt",
+          "acceptedAt",
+          "revokedAt"
+        ],
+        "additionalProperties": false
+      },
+      "MeExportDto": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "enum": [
+              "1"
+            ]
+          },
+          "exportedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          },
+          "notice": {
+            "type": "string",
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "maxLength": 65536
+          },
+          "profile": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+                "maxLength": 36
+              },
+              "tenantId": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+                "maxLength": 36
+              },
+              "argusId": {
+                "type": "string",
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                "maxLength": 65536
+              },
+              "email": {
+                "type": "string",
+                "format": "email",
+                "nullable": true,
+                "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+                "maxLength": 320
+              },
+              "displayName": {
+                "type": "string",
+                "nullable": true,
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                "maxLength": 65536
+              },
+              "avatarSeed": {
+                "type": "string",
+                "nullable": true,
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                "maxLength": 65536
+              },
+              "role": {
+                "type": "string",
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                "maxLength": 65536
+              },
+              "status": {
+                "type": "string",
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                "maxLength": 65536
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+                "maxLength": 40
+              }
+            },
+            "required": [
+              "id",
+              "tenantId",
+              "argusId",
+              "email",
+              "displayName",
+              "avatarSeed",
+              "role",
+              "status",
+              "createdAt"
+            ],
+            "additionalProperties": false
+          },
+          "devices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExportDeviceDto"
+            },
+            "maxItems": 1000
+          },
+          "keyBackup": {
+            "$ref": "#/components/schemas/ExportKeyBackupDto"
+          },
+          "conversations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExportConversationDto"
+            },
+            "maxItems": 1000
+          },
+          "messageSummary": {
+            "$ref": "#/components/schemas/ExportMessageSummaryDto"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExportAttachmentDto"
+            },
+            "maxItems": 1000
+          },
+          "pushSubscriptions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExportPushSubscriptionDto"
+            },
+            "maxItems": 1000
+          },
+          "auditEvents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExportAuditEventDto"
+            },
+            "maxItems": 1000
+          },
+          "invitesCreated": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExportInviteDto"
+            },
+            "maxItems": 1000
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "exportedAt",
+          "notice",
+          "devices",
+          "keyBackup",
+          "conversations",
+          "messageSummary",
+          "attachments",
+          "pushSubscriptions",
+          "auditEvents",
+          "invitesCreated"
         ],
         "additionalProperties": false
       },

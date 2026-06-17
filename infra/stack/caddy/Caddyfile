@@ -26,46 +26,6 @@
 	}
 }
 
-# --- Self-hosted Zitadel (OIDC issuer https://auth.4rgus.com) -------------------------------------------
-# This host is matched FIRST (more specific than the catch-all :8080 app site below); cloudflared forwards
-# the original Host header, so Caddy routes by it. Zitadel speaks gRPC (console + APIs) over HTTP/2, so the
-# upstream is dialled h2c (HTTP/2 cleartext) — the documented Zitadel-behind-a-proxy setup. Note: NO
-# X-Frame-Options here — oidc-client-ts silent-renew loads the authorize endpoint in a hidden iframe, and
-# Zitadel sets its own framing/security headers. TLS terminates at Cloudflare; this stays plain HTTP on :8080.
-http://auth.4rgus.com:8080 {
-	# Bare root → the Login V2 UI (mirrors the canonical compose's priority-400 `zitadel-root-rewrite`:
-	# Path(`/`) → replacepath /ui/v2/login/ → login service). Without this, hitting the bare auth domain
-	# falls through to the API server instead of the login page.
-	@root path /
-	handle @root {
-		rewrite * /ui/v2/login/
-		reverse_proxy zitadel-login:3000
-	}
-	# Login V2 UI is a separate container; everything else (OIDC/OAuth/JWKS/console/gRPC) is the main server.
-	@login path /ui/v2/login /ui/v2/login/*
-	handle @login {
-		reverse_proxy zitadel-login:3000
-	}
-	# Zitadel's public API alias under /api/* must have the prefix STRIPPED before it reaches the server (the
-	# console + Login V2 call the API via this alias). `handle_path` strips the matched prefix, mirroring the
-	# canonical v4.15 compose's `zitadel-strip-api` stripprefix — e.g. /api/oauth/v2/keys -> /oauth/v2/keys.
-	handle_path /api/* {
-		reverse_proxy h2c://zitadel:8080 {
-			# Strip TE: trailers before the h2c upstream — Zitadel's official Caddy guide documents that
-			# forwarding it makes error responses hang indefinitely (gRPC-gateway interaction).
-			header_up -TE
-		}
-	}
-	# Everything else (OIDC/OAuth/JWKS/console/gRPC at the root) → the identity server.
-	handle {
-		reverse_proxy h2c://zitadel:8080 {
-			# Strip TE: trailers before the h2c upstream — Zitadel's official Caddy guide documents that
-			# forwarding it makes error responses hang indefinitely (gRPC-gateway interaction).
-			header_up -TE
-		}
-	}
-}
-
 # --- Grafana (observability dashboards, https://grafana.4rgus.com) — roadmap #47 ------------------------
 # Admin surface: gated by Cloudflare Access at the edge (identity) + Grafana's own login; NEVER public. Caddy
 # just forwards (Grafana speaks plain HTTP/1.1, no h2c). Prometheus + Alertmanager are NOT routed here — they
@@ -93,14 +53,13 @@ http://glitchtip.4rgus.com:8080 {
 	header {
 		# script-src is strict 'self' — no inline scripts (index.html only loads /src/main.tsx as a module) and
 		# ts-mls is pure JS (no wasm-eval), so injected/foreign script can't run to read decrypted content or keys
-		# (the core control). connect-src: same-origin REST+WS ('self' covers wss), the Zitadel OIDC issuer
-		# (discovery/JWKS/token + refresh-token silent renew — no iframe, so no frame-src needed), and B2 presigned
+		# (the core control). connect-src: same-origin REST+WS ('self' covers wss) and B2 presigned
 		# upload/download (virtual-host bucket SUBDOMAIN — S3_FORCE_PATH_STYLE=false). img data:/blob: = generated
 		# avatars + decrypted attachment object URLs. style 'unsafe-inline' for React/Tailwind inline styles.
 		# connect-src lists the same-origin WS origin (wss://4rgus.com) EXPLICITLY, not just 'self': only CSP
 		# Level 3 browsers resolve 'self' to ws(s) schemes, so older ones would block the live socket (silent
 		# delivery failure). A SPLIT deploy (VITE_API_URL/VITE_WS_URL on another host) must add that origin too.
-		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' wss://4rgus.com https://auth.4rgus.com https://s3.eu-central-003.backblazeb2.com https://*.s3.eu-central-003.backblazeb2.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' wss://4rgus.com https://s3.eu-central-003.backblazeb2.com https://*.s3.eu-central-003.backblazeb2.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests"
 		Permissions-Policy "accelerometer=(), autoplay=(), bluetooth=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()"
 		Referrer-Policy no-referrer
 		X-Content-Type-Options nosniff

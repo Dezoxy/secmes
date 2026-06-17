@@ -7,7 +7,7 @@
 VENV := .venv
 .DEFAULT_GOAL := help
 
-.PHONY: help tools scan-py clean-tools up auth-provision migrate seed api-dev down logs ps reset
+.PHONY: help tools scan-py clean-tools up migrate seed api-dev down logs ps reset
 
 # Compose project name (compose.yaml `name:`) — used to address named volumes from `docker run`.
 COMPOSE_PROJECT := argus-local
@@ -32,21 +32,13 @@ scan-py: ## Run the Python security scanners locally (semgrep + checkov)
 clean-tools: ## Remove the Python venv
 	rm -rf $(VENV)
 
-up: ## Start the local stack (postgres, redis, minio, zitadel) + provision OIDC
-	docker compose up -d --build postgres redis minio minio-setup zitadel-db zitadel-bootstrap-perms zitadel zitadel-login
-	$(MAKE) auth-provision
+up: ## Start the local stack (postgres, redis, minio)
+	docker compose up -d --build postgres redis minio minio-setup
 	@echo ""
-	@echo "Stack up. One-time: add '127.0.0.1 zitadel' to /etc/hosts (see docs/local-auth.md)."
+	@echo "Stack up. Auth is passkey-only — no IdP to provision (see docs/local-auth.md)."
 	@echo "Then:  make migrate && make seed         # apply schema + seed the dev tenant"
-	@echo "       make api-dev                      # API on :3000 (host; reads generated OIDC env)"
+	@echo "       make api-dev                      # API on :3000 (host; ephemeral dev session key)"
 	@echo "       pnpm --filter @argus/web dev      # http://localhost:5173"
-	@echo "Login: admin@argus-local.zitadel / Password1!"
-
-auth-provision: ## (Re)provision Zitadel project/app/Action and materialise OIDC env files
-	docker compose run --rm zitadel-provision
-	@docker run --rm -v $(COMPOSE_PROJECT)_zitadel-bootstrap:/b alpine:3.20 cat /b/api.env.local > .env.local
-	@docker run --rm -v $(COMPOSE_PROJECT)_zitadel-bootstrap:/b alpine:3.20 cat /b/web.env.local > apps/web/.env.local
-	@echo "[auth] wrote .env.local + apps/web/.env.local"
 
 migrate: ## Apply DB migrations to the local Postgres (owner connection)
 	DATABASE_URL="$(LOCAL_DATABASE_URL)" pnpm --filter @argus/api db:migrate
@@ -54,10 +46,10 @@ migrate: ## Apply DB migrations to the local Postgres (owner connection)
 seed: ## Seed the local dev tenant (DEV_TENANT_ID) — the Action maps every login into it
 	DATABASE_URL="$(LOCAL_DATABASE_URL)" pnpm --filter @argus/api db:seed:dev
 
-api-dev: ## Run the API on the host (loads generated OIDC env; needs the stack up + the /etc/hosts line)
-	set -a; . ./.env.local; set +a; \
+api-dev: ## Run the API on the host (passkey auth; ephemeral dev session key; needs the stack up)
 	DATABASE_URL="$(LOCAL_DATABASE_URL)" \
 	REDIS_URL="redis://localhost:6379" \
+	FRONTEND_ORIGIN="http://localhost:5173" WEBAUTHN_RP_ID="localhost" \
 	S3_ENDPOINT="http://127.0.0.1:9000" S3_REGION="us-east-1" S3_BUCKET="argus-attachments" \
 	S3_ACCESS_KEY_ID="minioadmin" S3_SECRET_ACCESS_KEY="minioadmin" S3_FORCE_PATH_STYLE="true" \
 	pnpm --filter @argus/api dev
@@ -71,6 +63,6 @@ logs: ## Tail local stack logs
 ps: ## Show local stack status
 	docker compose ps
 
-reset: ## Stop the local stack and WIPE data volumes + generated OIDC env files
+reset: ## Stop the local stack and WIPE data volumes + any local override env files
 	docker compose down -v
 	rm -f .env.local apps/web/.env.local

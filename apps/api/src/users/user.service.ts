@@ -1,11 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { and, count, eq, isNull, ne, or, sql } from 'drizzle-orm';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { and, count, eq, isNull, ne, or } from 'drizzle-orm';
 import type { TenantPlan, UpdateProfile, UserLookupResult } from '@argus/contracts';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
-import { generateArgusId, isArgusIdCollision } from './argus-id.js';
-import { generateHandle } from './handle-words.js';
 
 export interface UserRecord {
   id: string;
@@ -16,12 +14,10 @@ export interface UserRecord {
   plan?: TenantPlan;
 }
 
-// Full identity projection for /me (getByAuth + provisionFromToken). email is included
-// so provisionFromToken can write it; it is NOT in UserRecord (not exposed to controllers).
+// Identity projection for /me (getByAuth). Mapped to UserRecord — not exposed verbatim.
 const ME_SELECTION = {
   id: schema.users.id,
   argusId: schema.users.argusId,
-  email: schema.users.email,
   displayName: schema.users.displayName,
   avatarSeed: schema.users.avatarSeed,
   role: schema.users.role,
@@ -29,65 +25,6 @@ const ME_SELECTION = {
 
 @Injectable()
 export class UserService {
-  /**
-   * JIT-provision the user from VERIFIED token claims (idempotent upsert keyed on
-   * (tenant_id, external_identity_id)). Runs under the tenant's RLS context.
-   *
-   * Display names are free nicknames (unique index dropped in 0038) — no retry loop needed.
-   * A short retry loop is kept only for the (vanishingly rare) argus_id collision.
-   */
-  async provisionFromToken(
-    auth: VerifiedAuth,
-    generate: () => string = generateHandle,
-  ): Promise<UserRecord> {
-    if (!auth.email) {
-      throw new BadRequestException(
-        'token is missing the email claim required to provision a user',
-      );
-    }
-    const email = auth.email;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const displayName = generate();
-      const argusId = generateArgusId();
-      try {
-        const [user] = await withTenant(auth.tenantId, async (tx) =>
-          tx
-            .insert(schema.users)
-            .values({
-              tenantId: auth.tenantId,
-              externalIdentityId: auth.sub,
-              email,
-              displayName,
-              argusId,
-            })
-            .onConflictDoUpdate({
-              target: [schema.users.tenantId, schema.users.externalIdentityId],
-              // EXISTING user: refresh email; KEEP their display name if they have one (coalesce returns the
-              // existing value). A NULL display_name is healed to the candidate on next login.
-              // argusId is intentionally excluded from SET — immutability is DB-enforced via trigger.
-              set: {
-                email,
-                displayName: sql`coalesce(${schema.users.displayName}, excluded.display_name)`,
-              },
-            })
-            .returning(ME_SELECTION),
-        );
-        if (!user) throw new Error('provisioning returned no row');
-        return {
-          id: user.id,
-          argusId: user.argusId,
-          displayName: user.displayName,
-          avatarSeed: user.avatarSeed,
-          role: user.role,
-        };
-      } catch (err) {
-        if (isArgusIdCollision(err)) continue;
-        throw err;
-      }
-    }
-    throw new Error('could not allocate a unique argus-id after 3 attempts');
-  }
-
   /** Read the user for a verified identity within their tenant. Undefined if not yet provisioned. */
   async getByAuth(auth: VerifiedAuth): Promise<UserRecord | undefined> {
     const [user] = await withTenant(auth.tenantId, async (tx) =>

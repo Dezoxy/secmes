@@ -114,7 +114,7 @@ jobs:
           retention-days: 7
 
   # Invariant #3 guard: the prod stack must publish NO host ports — cloudflared's outbound tunnel is the only
-  # ingress, and every data service (postgres/redis/api/zitadel*/prometheus/grafana/alertmanager) stays on the
+  # ingress, and every data service (postgres/redis/api/prometheus/grafana/alertmanager) stays on the
   # internal Docker network. A stray `ports:` mapping (e.g. exposing redis or /metrics) would breach it; this
   # fails the build mechanically (see docs/threat-models/observability.md + vm-ingress.md).
   compose-guard:

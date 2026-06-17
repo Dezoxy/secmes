@@ -18,17 +18,8 @@ WORKDIR /repo
 # `packages/*` on install (incl. @argus/contracts, which needs zod), so a filtered install would starve it.
 COPY . .
 RUN pnpm install --frozen-lockfile
-# OIDC config is BUILD-TIME for the PWA: Vite only embeds `VITE_*` at build, and the client gates real auth
-# on `VITE_OIDC_ISSUER` + `VITE_OIDC_CLIENT_ID` (else it runs in demo mode and sends no bearer token). Pass
-# them as build args (compose.prod.yaml forwards them). Empty defaults until self-hosted Zitadel lands
-# (roadmap #9) — wiring them now so a real build ships a real client, not a demo one.
-ARG VITE_OIDC_ISSUER=""
-ARG VITE_OIDC_CLIENT_ID=""
-ARG VITE_OIDC_REDIRECT_URI=""
-ENV VITE_OIDC_ISSUER=$VITE_OIDC_ISSUER \
-    VITE_OIDC_CLIENT_ID=$VITE_OIDC_CLIENT_ID \
-    VITE_OIDC_REDIRECT_URI=$VITE_OIDC_REDIRECT_URI
-# `prepare` already built packages/*; build the PWA itself → apps/web/dist.
+# Auth is passkey-only (Phase 6) — the PWA has no build-time OIDC config. `prepare` already built
+# packages/*; build the PWA itself → apps/web/dist.
 RUN pnpm --filter @argus/web build
 
 # ---- runtime: Caddy serving the built PWA + proxying the API ----

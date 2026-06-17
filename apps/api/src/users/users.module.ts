@@ -11,8 +11,8 @@ import { UsersController } from './users.controller.js';
 @Module({
   imports: [BlobStoreModule],
   controllers: [MeController, UsersController, GdprController],
-  // AuditService added directly (not via AuditModule) to avoid a circular import —
-  // AuditModule imports UsersModule for its AuthSessionController.
+  // AuditService is provided directly (it has no dependencies) rather than importing AuditModule,
+  // keeping this module's wiring flat.
   providers: [UserService, GdprService, AuditService],
   exports: [UserService],
 })
