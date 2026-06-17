@@ -92,11 +92,14 @@ export class UsersController {
     @Query(new ZodValidationPipe(LookupQuerySchema)) query: LookupQuery,
   ): Promise<UserLookupResultDto> {
     const result = await this.users.lookupByArgusId(auth.tenantId, query.argusId);
-    // Audit every lookup (found and not-found) — targetArgusId is pseudonymous, not PII.
+    // Sanitise before writing to audit: only log argusId verbatim when it is a
+    // well-formed argus-id. Free-text queries could contain secrets or presigned URLs.
+    const ARGUS_ID_RE = /^argus-[abcdefghjkmnpqrstuvwxyz23456789]{16}-[a-z]+$/;
+    const safeArgusId = ARGUS_ID_RE.test(query.argusId) ? query.argusId : '<invalid-format>';
     await this.audit.record(auth.tenantId, {
       eventType: 'users.lookup',
       actorSub: auth.sub,
-      metadata: { targetArgusId: query.argusId, found: result !== null },
+      metadata: { targetArgusId: safeArgusId, found: result !== null },
     });
     if (!result) throw new NotFoundException();
     return result;
