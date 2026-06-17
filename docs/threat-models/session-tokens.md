@@ -164,6 +164,38 @@ on `kid`, and phase out `v1` over a 10-minute window with zero forced re-logins.
 
 ---
 
+## §invariant-4 key provisioning
+
+`argus-session-signing-key` is a **mandatory** secret in `infra/stack/secrets/fetch-keyvault-secrets.sh`.
+An absent or empty value makes the API fail at boot (fail-closed, per invariant #5). The key must be
+provisioned in the target Key Vault **before the first deploy** and whenever you rotate it.
+
+**Generate an Ed25519 PKCS8 PEM key and store it:**
+
+```bash
+# AWS — use the bundled helper (idempotent; add --rotate to overwrite):
+infra/aws/scripts/populate-keyvault.sh  # runs put_ed25519_key argus-session-signing-key
+
+# Azure Key Vault (manual one-liner; requires az CLI + Key Vault write permission):
+TMPKEY=$(mktemp) && \
+  openssl genpkey -algorithm Ed25519 -out "$TMPKEY" 2>/dev/null && \
+  az keyvault secret set \
+    --vault-name "<your-vault-name>" \
+    --name argus-session-signing-key \
+    --file "$TMPKEY" \
+    --encoding utf-8 \
+    --only-show-errors >/dev/null && \
+  rm -f "$TMPKEY" && \
+  echo "argus-session-signing-key provisioned"
+```
+
+**Rotation**: generate a fresh key with the same commands. The API reads `SESSION_SIGNING_KEY_FILE` at
+startup, so rotation takes effect on the next deploy (or container restart). All outstanding access
+tokens (10-min TTL) expire naturally; refresh tokens remain valid and issue new access tokens signed
+with the new key. There is no forced re-login window beyond the 10-minute access-token TTL.
+
+---
+
 ## Invariants check
 
 | # | Invariant | Status |

@@ -19,8 +19,8 @@ class UserSummaryDto {
   @ApiProperty()
   id!: string;
 
-  @ApiProperty()
-  email!: string;
+  @ApiProperty({ type: String, nullable: true })
+  email!: string | null;
 
   @ApiProperty({ type: String, nullable: true })
   displayName!: string | null;

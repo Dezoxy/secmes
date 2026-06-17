@@ -35,7 +35,7 @@ class DeviceSummaryDto {
   @ApiProperty({ format: 'uuid' }) deviceId!: string;
   @ApiProperty({ format: 'uuid' }) userId!: string;
   @ApiProperty({ nullable: true, type: 'string' }) displayName!: string | null;
-  @ApiProperty() email!: string;
+  @ApiProperty({ nullable: true, type: 'string', format: 'email' }) email!: string | null;
   @ApiProperty({ maxLength: 12, description: 'First 12 chars of the base64 signature public key' })
   signaturePublicKeyPrefix!: string;
   @ApiProperty({ format: 'date-time' }) createdAt!: string;

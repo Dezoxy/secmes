@@ -94,4 +94,31 @@ export async function withRouting<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
   });
 }
 
+/**
+ * Run `fn` inside a transaction scoped to `tenantId` with `app.current_invite_id` also set.
+ *
+ * Used exclusively by verifyRegistration to atomically consume a `tenant_invites` row that
+ * belongs to ANY tenant (not necessarily `tenantId`) and insert the new user + credential
+ * under `tenantId` in ONE transaction. The `tenant_invites_passkey_consume` PERMISSIVE policy
+ * (migration 0036) exposes the invite row when `id = app.current_invite_id`, OR-ing with the
+ * standard `tenant_id = app.tenant_id` isolation policy so no existing access is removed.
+ *
+ * The `inviteId` comes from our own `webauthn_challenges` row (stored at redeem time, not
+ * supplied by the client at verify time), so the GUC-scoped policy cannot be abused to target
+ * arbitrary invite rows.
+ */
+export async function withTenantAndInvite<T>(
+  tenantId: string,
+  inviteId: string,
+  fn: (tx: Tx) => Promise<T>,
+): Promise<T> {
+  const tid = asTenantId(tenantId);
+  return getDb().db.transaction(async (tx) => {
+    await tx.execute(dsql`set local role argus_app`);
+    await tx.execute(dsql`select set_config('app.tenant_id', ${tid}, true)`);
+    await tx.execute(dsql`select set_config('app.current_invite_id', ${inviteId}, true)`);
+    return fn(tx);
+  });
+}
+
 export { schema };

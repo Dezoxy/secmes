@@ -81,4 +81,10 @@ export const SENSITIVE_LIMITS = {
    *  still bounding DB flood from a runaway client. Reuse detection (family revocation) is the real
    *  security control; this limit is a DB-load guard only. */
   refreshSession: 60,
+  /** Passkey invite-code redemption — @Public(), IP-keyed. 256-bit CSPRNG code makes brute-force
+   *  infeasible; this cap is a heavy-path DoS guard only. */
+  passkeyRedeem: 10,
+  /** Passkey authentication (options + verify) — @Public(), IP-keyed. Discoverable login has no
+   *  enumeration oracle (empty allowCredentials); cap is a DB-load guard only. */
+  passkeyAuthenticate: 30,
 } as const;

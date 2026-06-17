@@ -70,7 +70,7 @@ export class AdminService {
           ),
         )
         .orderBy(schema.users.displayName, schema.devices.createdAt),
-    ).then((rows) =>
+    ).then((rows): DeviceSummary[] =>
       rows.map((r) => ({
         deviceId: r.deviceId,
         userId: r.userId,

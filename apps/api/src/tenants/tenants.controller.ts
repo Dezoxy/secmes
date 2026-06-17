@@ -74,7 +74,7 @@ class InviteSummaryDto {
 
 class MemberSummaryDto {
   @ApiProperty({ format: 'uuid' }) userId!: string;
-  @ApiProperty() email!: string;
+  @ApiProperty({ nullable: true, type: 'string', format: 'email' }) email!: string | null;
   @ApiProperty({ nullable: true, type: 'string' }) displayName!: string | null;
   @ApiProperty({ enum: ['admin', 'member'] }) role!: 'admin' | 'member';
 }
