@@ -8,7 +8,9 @@
 #
 # Operator-supplied values via env (no sane default → required): S3_BUCKET, S3_ACCESS_KEY_ID.
 # Optional via env: X42C_API_TOKEN (42Crunch), GHCR_USER (default = repo owner), S3_ENDPOINT / S3_REGION
-#   (default B2 eu-central-003), GH_REVIEWER_ID (default = the authenticated gh user), GITHUB_DEPLOY_ENVIRONMENT
+#   (default B2 eu-central-003), B2_CORS_KEY_ID (non-secret keyId for converge-on-deploy attachment CORS — leave
+#   unset until you've minted the bucket-restricted CORS key; deploy.sh skips CORS convergence while it's unset),
+#   GH_REVIEWER_ID (default = the authenticated gh user), GITHUB_DEPLOY_ENVIRONMENT
 #   (default aws-experiment — MUST match var.github_deploy_environment in Terraform).
 set -euo pipefail
 
@@ -77,6 +79,14 @@ setvar S3_ENDPOINT "$S3_ENDPOINT"
 setvar S3_REGION "$S3_REGION"
 setvar S3_BUCKET "$S3_BUCKET"
 setvar S3_ACCESS_KEY_ID "$S3_ACCESS_KEY_ID" # non-secret (rides in every presigned URL); secret is in Key Vault
+# B2 CORS app-key ID — non-secret keyId for converge-on-deploy attachment CORS (the secret half is
+# argus-b2-cors-app-key in Key Vault). OPTIONAL: only set once you've minted the bucket-restricted CORS key;
+# while the repo var is unset/empty, deploy.sh skips CORS convergence (opt-in, non-breaking).
+if [ -n "${B2_CORS_KEY_ID:-}" ]; then
+  setvar B2_CORS_KEY_ID "$B2_CORS_KEY_ID"
+else
+  log "skip B2_CORS_KEY_ID (unset — attachment CORS convergence stays off until provisioned)"
+fi
 # Master kill-switch OFF until you're ready (flip to true to enable the tag-triggered deploy).
 setvar ENABLE_DEPLOY_AWS false
 

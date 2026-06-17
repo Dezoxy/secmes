@@ -2,8 +2,11 @@
 
 Source-of-truth for the **CORS** configuration of the two private EU Backblaze B2 buckets. The buckets
 themselves are created by hand in the B2 console (there is no Terraform provider for B2 in this repo); this
-directory exists so the **CORS rules don't live only in the console** where they silently drift. Apply the
-JSON here whenever the rule or the deployment origin changes.
+directory exists so the **CORS rules don't live only in the console** where they silently drift.
+[`attachment-bucket-cors.json`](attachment-bucket-cors.json) is **applied automatically on every deploy** —
+`deploy.sh` reconciles the live attachment bucket's CORS to this file (see
+[_How it's applied_](#how-its-applied--converge-on-deploy) below), so a console edit is undone on the next
+deploy. Edit the JSON, merge, deploy — that's the workflow.
 
 ## The two buckets get opposite treatment
 
@@ -49,10 +52,40 @@ The browser→B2 leg only works if **both** agree:
 
 If you change the deployment domain, update **both** (`FRONTEND_ORIGIN`, the Caddyfile CSP, and this rule).
 
-## Applying the rule
+## How it's applied — converge-on-deploy
 
-Authorize the B2 CLI with a bucket-scoped application key (never the master key), then push the rule. CLI
-syntax differs by major version:
+`deploy.sh` (step 6c, run on the VM via the cloud control plane after the stack is healthy) reconciles the
+live attachment bucket's CORS to this JSON every deploy: it reads the current rule over B2's **native** API,
+and writes only on drift, then re-verifies. Idempotent and self-healing — a manual console change is reverted
+on the next deploy. A convergence failure **fails the deploy** (after the app is already healthy, so it never
+blocks a good rollout). Threat model: [`docs/threat-models/b2-cors-convergence.md`](../../docs/threat-models/b2-cors-convergence.md).
+
+### The CORS app key (you must provision it once)
+
+CORS is a bucket-config operation; the runtime attachment/backup keys are file-scoped and deliberately cannot
+do it. Mint **one dedicated B2 application key** for it:
+
+- **Capabilities:** `listBuckets`, `readBucketCors`, `writeBucketCors` — **not** the coarse `writeBuckets`,
+  and **no** file capabilities. (If your B2 account only exposes `writeBuckets`, the bucket restriction below
+  becomes the load-bearing control.)
+- **Bucket restriction:** restricted to **`attachment-r8xq4m7z2p9n6k3v` only**. This is what guarantees the
+  key can never touch the `db-…` backup bucket (cleartext metadata) or any file. `deploy.sh` asserts the
+  authorized bucket name matches and fails closed otherwise.
+
+Then wire it up (native B2 auth needs `keyId:applicationKey`):
+
+- Store the **applicationKey secret** in Key Vault as `argus-b2-cors-app-key` (via `populate-keyvault.sh`).
+- Set the **keyId** (non-secret) as the GitHub repo variable `B2_CORS_KEY_ID` (via `setup-github-cicd.sh`, or
+  `gh variable set B2_CORS_KEY_ID --body <keyId>`).
+
+Until `B2_CORS_KEY_ID` is set, `deploy.sh` **skips** CORS convergence with a log line (opt-in, non-breaking) —
+apply manually in the meantime via the break-glass path below.
+
+## Applying the rule manually (break-glass)
+
+For a one-off apply outside a deploy — **run from your workstation**, not the VM (the box has no `b2` CLI;
+that's why on-deploy convergence uses curl). Authorize the B2 CLI with the bucket-scoped key (never the master
+key), then push the rule. CLI syntax differs by major version:
 
 ```bash
 # B2 CLI v4+
