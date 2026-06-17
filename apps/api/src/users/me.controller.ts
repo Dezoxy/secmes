@@ -109,6 +109,9 @@ export class MeController {
     if (!auth.tenantId) return;
     const user = await this.users.getByAuth(auth as VerifiedAuth);
     if (!user) return;
+    // Breakglass admin is identified solely by displayName sentinel; silently no-op
+    // profile edits so the name stays immutable without revealing account status.
+    if (user.displayName === 'breakglass-admin') return;
     await this.users.updateProfile({ tenantId: auth.tenantId, userId: user.id }, dto);
     // Audit which fields were changed — never log the values themselves.
     const fieldsUpdated = [

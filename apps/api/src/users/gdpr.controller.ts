@@ -38,6 +38,7 @@ class ExportProfileDto {
   @ApiProperty() argusId!: string;
   @ApiProperty({ nullable: true, type: 'string', format: 'email' }) email!: string | null;
   @ApiProperty({ type: String, nullable: true }) displayName!: string | null;
+  @ApiProperty({ type: String, nullable: true }) avatarSeed!: string | null;
   @ApiProperty() role!: string;
   @ApiProperty() status!: string;
   @ApiProperty({ format: 'date-time' }) createdAt!: string;
@@ -96,10 +97,17 @@ class ExportAuditEventDto {
   @ApiProperty({
     type: 'object',
     nullable: true,
-    additionalProperties: { type: 'string' },
+    additionalProperties: {
+      oneOf: [
+        { type: 'string' },
+        { type: 'number' },
+        { type: 'boolean' },
+        { type: 'array', items: { type: 'string' } },
+      ],
+    },
     description: 'non-sensitive metadata IDs only — never content or keys',
   })
-  metadata!: Record<string, string | number | boolean> | null;
+  metadata!: Record<string, string | number | boolean | string[]> | null;
 }
 
 class ExportInviteDto {
