@@ -56,13 +56,19 @@ async function authedHeaders(extra?: HeadersInit): Promise<Headers> {
   return headers;
 }
 
-/** fetch() against the API with the Bearer token attached. */
+/** fetch() against the API with the Bearer token attached.
+ * credentials:'include' is required for HttpOnly cookie operations (refresh, Set-Cookie on login)
+ * when VITE_API_URL points to a different origin. */
 export async function apiFetch(
   path: string,
   init: RequestInit = {},
   fetcher: Fetcher = fetch,
 ): Promise<Response> {
-  return fetcher(`${API_BASE}${path}`, { ...init, headers: await authedHeaders(init.headers) });
+  return fetcher(`${API_BASE}${path}`, {
+    credentials: 'include',
+    ...init,
+    headers: await authedHeaders(init.headers),
+  });
 }
 
 export async function requestJson<TResponse, TBody = undefined>(

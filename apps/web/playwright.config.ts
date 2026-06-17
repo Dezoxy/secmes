@@ -19,6 +19,7 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     env: {
+      VITE_DEMO_MODE: '1',
       VITE_OIDC_ISSUER: '',
       VITE_OIDC_CLIENT_ID: '',
       VITE_OIDC_REDIRECT_URI: '',

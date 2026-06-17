@@ -16,7 +16,7 @@ import { Button, LoadingState } from '../features/ui';
  *   - Authenticated + bound  → show "already in a workspace"
  */
 export default function InviteRoute() {
-  const { demoMode, ready, authenticated, profile, login } = useAuth();
+  const { demoMode, ready, authenticated, profile } = useAuth();
   const navigate = useNavigate();
   const handled = useRef(false);
 
@@ -31,10 +31,12 @@ export default function InviteRoute() {
     }
 
     if (!authenticated) {
-      // Not authenticated: park the token then trigger passkey login.
+      // Not authenticated: park the token and send to the landing page where the user can
+      // sign in (existing passkey) or create a new account via RegisterScreen.
+      // Calling login() directly breaks new users who don't have a passkey credential yet.
       handled.current = true;
       if (token) storePendingInviteToken(token);
-      void login();
+      void navigate('/', { replace: true });
       return;
     }
 
@@ -47,7 +49,7 @@ export default function InviteRoute() {
     handled.current = true;
     if (token) storePendingInviteToken(token);
     void navigate('/chat', { replace: true });
-  }, [ready, demoMode, authenticated, profile, token, login, navigate]);
+  }, [ready, demoMode, authenticated, profile, token, navigate]);
 
   if (!ready) {
     return (
