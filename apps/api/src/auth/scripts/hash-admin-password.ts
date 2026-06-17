@@ -24,8 +24,9 @@ async function main(): Promise<void> {
   }
   if (password.length < 12) {
     process.stderr.write(
-      `warning: password is only ${password.length} characters — use at least 12 for a secure breakglass credential\n`,
+      `error: password must be at least 12 characters (got ${password.length}) — breakglass hash not generated\n`,
     );
+    process.exit(1);
   }
 
   const salt = randomBytes(16);

@@ -232,9 +232,23 @@ export class BreakglassService implements OnModuleInit {
       throw new ServiceUnavailableException('breakglass not provisioned');
     }
 
-    // Read credential row + sub in one query.
-    const row = await withTenant(DEFAULT_TENANT_ID, async (tx) => {
-      return tx
+    // SELECT FOR UPDATE serializes concurrent login attempts on the same credential row so that
+    // the lockout check, the KDF, and the counter update are fully atomic. Without this, a burst
+    // of concurrent wrong-password requests can all read a not-yet-locked row, all run the 64 MiB
+    // KDF, and then all atomically increment — letting the burst exceed MAX_ATTEMPTS before
+    // locked_until is ever set (the atomic SQL increment was correct but not sufficient).
+    // FOR UPDATE means only one request holds the row lock at a time; others block at the SELECT
+    // until the preceding request commits (after its KDF + counter update). The KDF runs inside
+    // the transaction — holding the DB connection for ~1–3 s per attempt — which is acceptable
+    // for an emergency endpoint that is rate-limited and expected to be used rarely.
+    type LoginResult =
+      | { outcome: 'not_found' }
+      | { outcome: 'locked' }
+      | { outcome: 'failed' }
+      | { outcome: 'ok'; userId: string; sub: string };
+
+    const result = (await withTenant(DEFAULT_TENANT_ID, async (tx) => {
+      const [row] = await tx
         .select({
           id: schema.adminCredentials.id,
           userId: schema.adminCredentials.userId,
@@ -248,55 +262,61 @@ export class BreakglassService implements OnModuleInit {
         .from(schema.adminCredentials)
         .innerJoin(schema.users, eq(schema.adminCredentials.userId, schema.users.id))
         .where(eq(schema.adminCredentials.username, username))
-        .limit(1)
-        .then((r) => r[0] ?? null);
-    });
+        .for('update', { of: schema.adminCredentials })
+        .limit(1);
 
-    // Lockout check BEFORE KDF — prevents a locked account from being a free Argon2id-DoS
-    // amplifier (breakglass-admin.md §lockout-policy). Returns 423 so the operator knows
-    // the account is locked (not that their credentials are wrong).
-    if (row?.lockedUntil && row.lockedUntil > new Date()) {
-      await this.audit.record(DEFAULT_TENANT_ID, {
-        eventType: 'breakglass.locked',
-        actorSub: null,
-        ip: requestContext.ip || null,
-        userAgent: requestContext.userAgent || null,
-      });
-      throw new HttpException('Account locked', HttpStatus.TOO_MANY_REQUESTS);
-    }
+      if (!row) return { outcome: 'not_found' as const };
 
-    // Always run Argon2id — dummy values when username not found (timing parity).
-    // Re-validate params on every login (defense-in-depth: catches a manual DB edit below the floor).
-    const params = (row?.kdfParams as KdfParams | undefined) ?? PARAMS;
-    if (row) assertParams(params);
-    const saltBytes = row ? Buffer.from(row.salt, 'base64') : this.dummySalt;
-    const storedBytes = row ? Buffer.from(row.passwordHash, 'base64') : this.dummyHash;
-    const candidateBytes = Buffer.from(
-      await argon2idAsync(Buffer.from(password, 'utf8'), saltBytes, { ...params, dkLen: HASH_LEN }),
-    );
-
-    const match = timingSafeEqual(candidateBytes, storedBytes);
-
-    if (!row || !match) {
-      if (row) {
-        // Atomic increment+lockout — avoids a race where concurrent wrong-password
-        // requests each read the same stale count and write it back, allowing more
-        // than MAX_ATTEMPTS before the lockout fires (CWE-362).
-        // Also resets an expired lockout window: if locked_until IS NOT NULL but has
-        // passed, treat this as the first failure of a fresh window (count → 1, no new
-        // lockout), preventing a single bad attempt from extending the window indefinitely.
-        await withTenant(DEFAULT_TENANT_ID, async (tx) => {
-          await tx
-            .update(schema.adminCredentials)
-            .set({
-              failedAttempts: sql`CASE WHEN ${schema.adminCredentials.lockedUntil} IS NOT NULL AND ${schema.adminCredentials.lockedUntil} <= now() THEN 1 ELSE ${schema.adminCredentials.failedAttempts} + 1 END`,
-              lockedUntil: sql`CASE WHEN ${schema.adminCredentials.lockedUntil} IS NOT NULL AND ${schema.adminCredentials.lockedUntil} <= now() THEN NULL WHEN ${schema.adminCredentials.failedAttempts} + 1 >= ${MAX_ATTEMPTS} THEN now() + interval '1 millisecond' * ${LOCKOUT_DURATION_MS} ELSE NULL END`,
-              updatedAt: new Date(),
-            })
-            .where(eq(schema.adminCredentials.id, row.id));
-        });
+      // Lockout check BEFORE KDF — prevents a locked account from being a free Argon2id-DoS
+      // amplifier (breakglass-admin.md §lockout-policy). Returns 423 so the operator knows
+      // the account is locked (not that their credentials are wrong).
+      if (row.lockedUntil && row.lockedUntil > new Date()) {
+        return { outcome: 'locked' as const };
       }
-      // Always audit login failure — even for an unknown username (actorSub=null, IP+UA only).
+
+      // Run KDF while holding the row lock (via FOR UPDATE above). Re-validate params on every
+      // login as defence-in-depth — catches a manual DB edit below the floor.
+      const params = row.kdfParams as KdfParams;
+      assertParams(params);
+      const saltBytes = Buffer.from(row.salt, 'base64');
+      const storedBytes = Buffer.from(row.passwordHash, 'base64');
+      const candidateBytes = Buffer.from(
+        await argon2idAsync(Buffer.from(password, 'utf8'), saltBytes, {
+          ...params,
+          dkLen: HASH_LEN,
+        }),
+      );
+      const match = timingSafeEqual(candidateBytes, storedBytes);
+
+      if (!match) {
+        // Atomic increment+lockout — also resets an expired lockout window so a single bad
+        // attempt after the window expires doesn't re-extend it indefinitely.
+        await tx
+          .update(schema.adminCredentials)
+          .set({
+            failedAttempts: sql`CASE WHEN ${schema.adminCredentials.lockedUntil} IS NOT NULL AND ${schema.adminCredentials.lockedUntil} <= now() THEN 1 ELSE ${schema.adminCredentials.failedAttempts} + 1 END`,
+            lockedUntil: sql`CASE WHEN ${schema.adminCredentials.lockedUntil} IS NOT NULL AND ${schema.adminCredentials.lockedUntil} <= now() THEN NULL WHEN ${schema.adminCredentials.failedAttempts} + 1 >= ${MAX_ATTEMPTS} THEN now() + interval '1 millisecond' * ${LOCKOUT_DURATION_MS} ELSE NULL END`,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.adminCredentials.id, row.id));
+        return { outcome: 'failed' as const };
+      }
+
+      // Success — reset lockout state inside the same tx.
+      await tx
+        .update(schema.adminCredentials)
+        .set({ failedAttempts: 0, lockedUntil: null, updatedAt: new Date() })
+        .where(eq(schema.adminCredentials.id, row.id));
+
+      return { outcome: 'ok' as const, userId: row.userId, sub: row.sub };
+    })) as LoginResult;
+
+    // 'not_found': run dummy KDF for timing parity, then reject — identical response as wrong password.
+    if (result.outcome === 'not_found') {
+      await argon2idAsync(Buffer.from(password, 'utf8'), this.dummySalt, {
+        ...PARAMS,
+        dkLen: HASH_LEN,
+      });
       await this.audit.record(DEFAULT_TENANT_ID, {
         eventType: 'breakglass.login_failed',
         actorSub: null,
@@ -306,24 +326,38 @@ export class BreakglassService implements OnModuleInit {
       throw new UnauthorizedException('invalid credentials');
     }
 
-    // Success — reset lockout state.
-    await withTenant(DEFAULT_TENANT_ID, async (tx) => {
-      await tx
-        .update(schema.adminCredentials)
-        .set({ failedAttempts: 0, lockedUntil: null, updatedAt: new Date() })
-        .where(eq(schema.adminCredentials.id, row.id));
-    });
+    if (result.outcome === 'locked') {
+      await this.audit.record(DEFAULT_TENANT_ID, {
+        eventType: 'breakglass.locked',
+        actorSub: null,
+        ip: requestContext.ip || null,
+        userAgent: requestContext.userAgent || null,
+      });
+      throw new HttpException('Account locked', HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    if (result.outcome === 'failed') {
+      await this.audit.record(DEFAULT_TENANT_ID, {
+        eventType: 'breakglass.login_failed',
+        actorSub: null,
+        ip: requestContext.ip || null,
+        userAgent: requestContext.userAgent || null,
+      });
+      throw new UnauthorizedException('invalid credentials');
+    }
+
+    // outcome === 'ok'
     await this.audit.record(DEFAULT_TENANT_ID, {
       eventType: 'breakglass.login_succeeded',
-      actorSub: row.sub,
+      actorSub: result.sub,
       ip: requestContext.ip || null,
       userAgent: requestContext.userAgent || null,
     });
 
     return this.sessions.mintSession({
       tenantId: DEFAULT_TENANT_ID,
-      userId: row.userId,
-      sub: row.sub,
+      userId: result.userId,
+      sub: result.sub,
     });
   }
 
@@ -333,8 +367,17 @@ export class BreakglassService implements OnModuleInit {
     newPassword: string,
     requestContext: { ip: string; userAgent: string },
   ): Promise<void> {
-    const row = await withTenant(DEFAULT_TENANT_ID, async (tx) => {
-      return tx
+    // FOR UPDATE serializes concurrent rotate attempts (same race as login — an attacker with a
+    // stolen bearer token could burst concurrent guesses at currentPassword). Both KDF calls
+    // (verify current + hash new) run inside the transaction so the lock is held end-to-end.
+    type RotateResult =
+      | { outcome: 'not_found' }
+      | { outcome: 'locked' }
+      | { outcome: 'failed'; sub: string }
+      | { outcome: 'ok'; sub: string };
+
+    const result = (await withTenant(DEFAULT_TENANT_ID, async (tx) => {
+      const [row] = await tx
         .select({
           id: schema.adminCredentials.id,
           passwordHash: schema.adminCredentials.passwordHash,
@@ -347,34 +390,29 @@ export class BreakglassService implements OnModuleInit {
         .from(schema.adminCredentials)
         .innerJoin(schema.users, eq(schema.adminCredentials.userId, schema.users.id))
         .where(eq(schema.adminCredentials.userId, userId))
-        .limit(1)
-        .then((r) => r[0] ?? null);
-    });
+        .for('update', { of: schema.adminCredentials })
+        .limit(1);
 
-    if (!row) {
-      throw new ServiceUnavailableException('breakglass not provisioned');
-    }
+      if (!row) return { outcome: 'not_found' as const };
 
-    // Lockout check before KDF.
-    if (row.lockedUntil && row.lockedUntil > new Date()) {
-      throw new HttpException('Account locked', HttpStatus.TOO_MANY_REQUESTS);
-    }
+      if (row.lockedUntil && row.lockedUntil > new Date()) {
+        return { outcome: 'locked' as const };
+      }
 
-    // Verify current password through the shared lockout counter
-    // (rotate must not be an unthrottled oracle — breakglass-admin.md §rotate-re-auth-gate).
-    const params = row.kdfParams as KdfParams;
-    assertParams(params);
-    const saltBytes = Buffer.from(row.salt, 'base64');
-    const candidateBytes = Buffer.from(
-      await argon2idAsync(Buffer.from(currentPassword, 'utf8'), saltBytes, {
-        ...params,
-        dkLen: HASH_LEN,
-      }),
-    );
-    const match = timingSafeEqual(candidateBytes, Buffer.from(row.passwordHash, 'base64'));
+      // Verify current password through the shared lockout counter
+      // (rotate must not be an unthrottled oracle — breakglass-admin.md §rotate-re-auth-gate).
+      const params = row.kdfParams as KdfParams;
+      assertParams(params);
+      const saltBytes = Buffer.from(row.salt, 'base64');
+      const candidateBytes = Buffer.from(
+        await argon2idAsync(Buffer.from(currentPassword, 'utf8'), saltBytes, {
+          ...params,
+          dkLen: HASH_LEN,
+        }),
+      );
+      const match = timingSafeEqual(candidateBytes, Buffer.from(row.passwordHash, 'base64'));
 
-    if (!match) {
-      await withTenant(DEFAULT_TENANT_ID, async (tx) => {
+      if (!match) {
         await tx
           .update(schema.adminCredentials)
           .set({
@@ -383,26 +421,18 @@ export class BreakglassService implements OnModuleInit {
             updatedAt: new Date(),
           })
           .where(eq(schema.adminCredentials.id, row.id));
-      });
-      await this.audit.record(DEFAULT_TENANT_ID, {
-        eventType: 'breakglass.rotate_failed',
-        actorSub: row.sub,
-        ip: requestContext.ip || null,
-        userAgent: requestContext.userAgent || null,
-      });
-      throw new UnauthorizedException('invalid current password');
-    }
+        return { outcome: 'failed' as const, sub: row.sub };
+      }
 
-    // Hash the new password with fresh salt.
-    const newSalt = randomBytes(16);
-    const newHash = Buffer.from(
-      await argon2idAsync(Buffer.from(newPassword, 'utf8'), newSalt, {
-        ...PARAMS,
-        dkLen: HASH_LEN,
-      }),
-    );
+      // Hash the new password with fresh salt inside the same tx.
+      const newSalt = randomBytes(16);
+      const newHash = Buffer.from(
+        await argon2idAsync(Buffer.from(newPassword, 'utf8'), newSalt, {
+          ...PARAMS,
+          dkLen: HASH_LEN,
+        }),
+      );
 
-    await withTenant(DEFAULT_TENANT_ID, async (tx) => {
       await tx
         .update(schema.adminCredentials)
         .set({
@@ -414,15 +444,35 @@ export class BreakglassService implements OnModuleInit {
           updatedAt: new Date(),
         })
         .where(eq(schema.adminCredentials.id, row.id));
-    });
 
-    // Revoke all active sessions for the breakglass user so a compromised-then-rotated
-    // credential cannot be kept alive via still-valid refresh tokens.
+      return { outcome: 'ok' as const, sub: row.sub };
+    })) as RotateResult;
+
+    if (result.outcome === 'not_found') {
+      throw new ServiceUnavailableException('breakglass not provisioned');
+    }
+
+    if (result.outcome === 'locked') {
+      throw new HttpException('Account locked', HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    if (result.outcome === 'failed') {
+      await this.audit.record(DEFAULT_TENANT_ID, {
+        eventType: 'breakglass.rotate_failed',
+        actorSub: result.sub,
+        ip: requestContext.ip || null,
+        userAgent: requestContext.userAgent || null,
+      });
+      throw new UnauthorizedException('invalid current password');
+    }
+
+    // outcome === 'ok'
+    // Revoke all active sessions so a compromised-then-rotated credential cannot be kept alive.
     await this.sessions.revokeSession(DEFAULT_TENANT_ID, { userId });
 
     await this.audit.record(DEFAULT_TENANT_ID, {
       eventType: 'breakglass.rotated',
-      actorSub: row.sub,
+      actorSub: result.sub,
       ip: requestContext.ip || null,
       userAgent: requestContext.userAgent || null,
     });

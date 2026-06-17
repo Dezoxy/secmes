@@ -160,10 +160,17 @@ mechanism into attacker persistence. The re-auth gate costs one extra Argon2id v
 
 ---
 
-## Atomic lockout counter
+## Serialized lockout counter
 
-The `failed_attempts` increment in both `login()` and `rotate()` is performed by a single atomic
-SQL `UPDATE`:
+Two layers of protection prevent concurrent requests from bypassing the lockout:
+
+**Layer 1 — `SELECT FOR UPDATE`**: The credential row is locked with `FOR UPDATE` at the start of
+the login and rotate transactions. A second concurrent request blocks at the `SELECT` until the
+first commits (after its KDF + counter update). This prevents a burst of concurrent requests from
+all reading a not-yet-locked row and then all proceeding to the KDF — which would allow more than
+`MAX_ATTEMPTS` guesses before `locked_until` is set (even with an atomic UPDATE).
+
+**Layer 2 — Atomic `UPDATE`**: The `failed_attempts` increment is a single atomic SQL expression:
 
 ```sql
 SET failed_attempts = failed_attempts + 1,
@@ -171,9 +178,14 @@ SET failed_attempts = failed_attempts + 1,
 ```
 
 A read-then-write pattern (`newCount = row.failedAttempts + 1; UPDATE SET failed_attempts = $newCount`)
-would be vulnerable to concurrent wrong-password requests racing — each reads the same stale count
-and writes it back, allowing more than 5 attempts before the lockout fires (CWE-362). The atomic
-SQL eliminates this race without any application-level locking.
+would be vulnerable to concurrent requests each reading the same stale count and writing it back,
+allowing more than 5 attempts before the lockout fires (CWE-362). The atomic expression is the
+correct form. The `FOR UPDATE` at Layer 1 makes a sequential ordering guarantee, while Layer 2
+ensures the counter arithmetic is also correct in the DB even if two transactions somehow
+interleave (defence-in-depth).
+
+The KDF runs inside the transaction (holding the DB connection for ~1–3 s per attempt), which is
+acceptable because the endpoint is rate-limited and expected to be used rarely.
 
 ---
 
