@@ -150,7 +150,13 @@ export const ConversationMemberSchema = z.object({
 export type ConversationMember = z.infer<typeof ConversationMemberSchema>;
 
 export const UpdateProfileSchema = z.object({
-  displayName: z.string().trim().min(1).max(64).optional(),
+  displayName: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .refine((v) => v !== 'breakglass-admin', { message: 'reserved display name' })
+    .optional(),
   avatarSeed: z.string().min(1).max(64).optional(),
 });
 export type UpdateProfile = z.infer<typeof UpdateProfileSchema>;

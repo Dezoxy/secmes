@@ -90,6 +90,7 @@ export class MeController {
       displayName: user.displayName,
       avatarSeed: user.avatarSeed,
       role: user.role,
+      plan: user.plan,
     });
   }
 
