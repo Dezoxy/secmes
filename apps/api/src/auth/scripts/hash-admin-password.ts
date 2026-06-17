@@ -1,7 +1,9 @@
 // Operator tool: generate the ADMIN_BOOTSTRAP_HASH_FILE JSON from a password read on stdin.
 // Uses the exact same @noble/hashes code path as BreakglassService so the encoding always matches.
-// Usage: echo -n "MyStrongPass!" | pnpm --filter @argus/api generate-admin-hash > /tmp/admin_hash.json
-//        export ADMIN_BOOTSTRAP_HASH_FILE=/tmp/admin_hash.json
+// Usage (safe — password never appears in argv or shell history):
+//   read -rs BGPASS && printf '%s' "$BGPASS" | pnpm --filter @argus/api generate-admin-hash > /tmp/admin_hash.json
+//   export ADMIN_BOOTSTRAP_HASH_FILE=/tmp/admin_hash.json
+// WARNING: do NOT use  echo -n "password" |  — that exposes the password in process listings and shell history.
 // @noble/hashes is a pre-cleared invariant #4 exception; see docs/threat-models/breakglass-admin.md §invariant-4.
 import { randomBytes } from 'node:crypto';
 

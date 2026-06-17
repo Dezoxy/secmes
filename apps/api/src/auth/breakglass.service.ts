@@ -29,7 +29,11 @@ const MAX_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15-minute flat window
 const PARAMS = { m: 65536, t: 3, p: 1 }; // matches DEFAULT_ARGON2 in packages/crypto/src/key-backup.ts
 const HASH_LEN = 32;
+const SALT_LEN = 16;
 const MIN_PARAMS = { m: 8192, t: 2, p: 1 }; // matches MIN_ARGON2 in packages/crypto/src/key-backup.ts
+// Upper ceiling: 1 GiB / 200 iters / 16 threads — prevents a malformed Key Vault value from
+// causing an OOM or runaway CPU burn on the login path.
+const MAX_PARAMS = { m: 1048576, t: 200, p: 16 };
 
 interface KdfParams {
   m: number;
@@ -48,6 +52,9 @@ function assertParams(p: KdfParams): void {
   }
   if (p.m < MIN_PARAMS.m || p.t < MIN_PARAMS.t || p.p < MIN_PARAMS.p) {
     throw new Error('kdf_params below minimum security floor');
+  }
+  if (p.m > MAX_PARAMS.m || p.t > MAX_PARAMS.t || p.p > MAX_PARAMS.p) {
+    throw new Error('kdf_params above maximum ceiling');
   }
 }
 
@@ -77,6 +84,17 @@ function parseBootstrapFile(content: string): BootstrapHash {
   }
   const params: KdfParams = { m: p['m'], t: p['t'], p: p['p'] };
   assertParams(params);
+  // Validate decoded byte lengths to catch base64 truncation / wrong encoding
+  // before the value reaches the login path (where a wrong length would cause
+  // timingSafeEqual to throw rather than returning false).
+  const hashBytes = Buffer.from(p['hash'], 'base64');
+  const saltBytes = Buffer.from(p['salt'], 'base64');
+  if (hashBytes.length !== HASH_LEN) {
+    throw new Error(`hash must decode to ${HASH_LEN} bytes (got ${hashBytes.length})`);
+  }
+  if (saltBytes.length !== SALT_LEN) {
+    throw new Error(`salt must decode to ${SALT_LEN} bytes (got ${saltBytes.length})`);
+  }
   return { hash: p['hash'], salt: p['salt'], ...params };
 }
 

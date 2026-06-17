@@ -274,16 +274,20 @@ boundary.
 {"hash":"<base64>","salt":"<base64>","m":65536,"t":3,"p":1}
 ```
 
-- `hash`: standard base64 of the 32-byte raw `argon2idAsync` output
-- `salt`: standard base64 of the 16-byte CSPRNG salt
-- `m`, `t`, `p`: Argon2id parameters (validated against `MIN_PARAMS = { m: 8192, t: 2, p: 1 }`)
+- `hash`: standard base64 of the 32-byte raw `argon2idAsync` output (exactly 32 decoded bytes — validated at bootstrap)
+- `salt`: standard base64 of the 16-byte CSPRNG salt (exactly 16 decoded bytes — validated at bootstrap)
+- `m`, `t`, `p`: Argon2id parameters (validated against floor `MIN_PARAMS = { m: 8192, t: 2, p: 1 }` and ceiling `MAX_PARAMS = { m: 1048576, t: 200, p: 16 }`)
 
 Generate with the bundled helper (uses the same `@noble` code path as the verifier — do NOT
 use the system `argon2` CLI, which may use a different base64 encoding):
 
 ```bash
-echo -n "MyStr0ngPassphrase!" | pnpm --filter @argus/api generate-admin-hash
+# Safe: read -rs never puts the password in argv, process listings, or shell history.
+read -rs BGPASS && printf '%s' "$BGPASS" | pnpm --filter @argus/api generate-admin-hash
 ```
+
+**Do NOT use `echo -n "password" |`** — that exposes the password in process listings and persists
+in shell history files. Use `read -rs` or pipe from a file descriptor instead.
 
 Pipe the output into the Key Vault secret:
 ```bash
@@ -291,7 +295,7 @@ Pipe the output into the Key Vault secret:
 infra/aws/scripts/populate-keyvault.sh  # or set argus-admin-bootstrap-hash manually
 
 # Azure Key Vault:
-echo -n "MyStr0ngPassphrase!" | pnpm --filter @argus/api generate-admin-hash | \
+read -rs BGPASS && printf '%s' "$BGPASS" | pnpm --filter @argus/api generate-admin-hash | \
   az keyvault secret set \
     --vault-name "<your-vault-name>" \
     --name argus-admin-bootstrap-hash \
