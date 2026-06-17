@@ -465,13 +465,20 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     const svc2 = new MessagingService(bus, noopPush);
     const conv = await newConversation();
     await svc2.deliverWelcome(aliceAuth, conv, wel());
-    expect(spy).toHaveBeenCalledTimes(1);
-    // The recipient is matched by their VERIFIED external subject on the gateway; the event must carry
-    // ids/metadata only — the sealed welcome/ratchetTree never cross the bus.
+    // The nudge fans out to BOTH of the recipient's subs — the Zitadel external sub and the argus sub
+    // (argusid:<argus_id>, added in migration 0030) — so a socket authenticated under either token
+    // family is reached. Each event must carry ids/metadata only — the sealed welcome/ratchetTree
+    // never cross the bus.
+    expect(spy).toHaveBeenCalledTimes(2);
     expect(spy.mock.calls[0]?.[0]).toEqual({
       tenantId: tenantA,
       conversationId: conv,
       recipientSub: 'm-dave',
+    });
+    expect(spy.mock.calls[1]?.[0]).toEqual({
+      tenantId: tenantA,
+      conversationId: conv,
+      recipientSub: expect.stringMatching(/^argusid:argus-/),
     });
   });
 
