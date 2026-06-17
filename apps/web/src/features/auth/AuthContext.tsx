@@ -97,10 +97,12 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
   }, []); // boot effect: runs once on mount
 
   // Refresh timer: keep access token alive while the tab is open.
+  // Keyed on `authenticated` so unbound users (authenticated but no profile) still get refreshes
+  // during the onboarding flow before they create/join a workspace.
   useEffect(() => {
     if (demoMode) return;
     const timer = setInterval(() => {
-      if (!profile) return;
+      if (!authenticated) return;
       refreshSession()
         .then(async ({ accessToken: token }) => {
           setToken(token);
@@ -110,7 +112,7 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
         .catch(() => clearSession());
     }, REFRESH_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [profile, clearSession]);
+  }, [authenticated, clearSession]);
 
   const login = useCallback(async (): Promise<void> => {
     const opts = await getAuthenticateOptions();
