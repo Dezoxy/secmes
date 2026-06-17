@@ -12,11 +12,13 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:migrate": "tsx src/db/migrate.ts",
-    "db:seed:dev": "tsx src/db/seed.dev.ts"
+    "db:seed:dev": "tsx src/db/seed.dev.ts",
+    "generate-admin-hash": "tsx src/auth/scripts/hash-admin-password.ts"
   },
   "dependencies": {
     "@argus/contracts": "workspace:*",
     "@argus/crypto": "workspace:*",
+    "@noble/hashes": "^2.2.0",
     "@aws-sdk/client-s3": "^3.1068.0",
     "@aws-sdk/s3-request-presigner": "^3.1068.0",
     "@nestjs/common": "^11.1.26",

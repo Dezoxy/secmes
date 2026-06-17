@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { and, count, eq } from 'drizzle-orm';
+import { and, count, eq, isNull, ne, or } from 'drizzle-orm';
 import type { TenantPlan } from '@argus/contracts';
 
 import { AuditService } from '../audit/audit.service.js';
@@ -101,7 +101,13 @@ export class PlansService {
       const [row] = await tx
         .select({ count: count() })
         .from(schema.users)
-        .where(and(eq(schema.users.tenantId, tenantId), eq(schema.users.status, 'active')));
+        .where(
+          and(
+            eq(schema.users.tenantId, tenantId),
+            eq(schema.users.status, 'active'),
+            or(isNull(schema.users.displayName), ne(schema.users.displayName, 'breakglass-admin')),
+          ),
+        );
       return row?.count ?? 0;
     });
   }

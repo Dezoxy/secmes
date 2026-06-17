@@ -87,4 +87,7 @@ export const SENSITIVE_LIMITS = {
   /** Passkey authentication (options + verify) — @Public(), IP-keyed. Discoverable login has no
    *  enumeration oracle (empty allowCredentials); cap is a DB-load guard only. */
   passkeyAuthenticate: 30,
+  /** Breakglass admin login — @Public(), IP-keyed. Lockout (N=5/15 min) is the real security
+   *  control; this cap is a heavy-path DoS guard (64 MiB Argon2id per attempt). */
+  breakglassLogin: 10,
 } as const;

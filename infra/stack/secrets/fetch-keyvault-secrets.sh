@@ -89,6 +89,11 @@ OPTIONAL_SECRETS=(
   # G8 Operator: API key for /operator/* plan-management endpoints. Seeded EMPTY until provisioned.
   # OperatorGuard returns 401 when the file is empty.
   "argus-operator-api-key=operator_api_key"
+  # Phase 3 Breakglass admin: Argon2id hash (JSON) for the emergency admin login. Seeded EMPTY until
+  # the operator provisions it (`pnpm --filter @argus/api generate-admin-hash > /tmp/hash.json`, then
+  # store the contents in Key Vault as argus-admin-bootstrap-hash). Absent = 503 on
+  # /auth/breakglass/login only; the rest of the API is unaffected. See docs/threat-models/breakglass-admin.md.
+  "argus-admin-bootstrap-hash=admin_bootstrap_hash"
 )
 
 log() { printf 'argus-secrets: %s\n' "$*" >&2; } # names/status only — NEVER a secret value
@@ -231,17 +236,29 @@ EOF
     log "delivered ${kv_name} -> ${file}"
     ;;
   404)
-    if [ -s "$dest" ]; then
+    was_populated=false
+    [ -s "$dest" ] && was_populated=true
+
+    if [ "$was_populated" = true ] && [ "$kv_name" != "argus-admin-bootstrap-hash" ]; then
       # Already provisioned, but KV now 404s (accidental secret deletion / name mismatch during a restore).
       # KEEP the existing valid token rather than silently degrading login; surface it loudly so the operator
       # restores the Key Vault secret. (Deleting the KV copy doesn't invalidate the token — it lives in
       # Zitadel's DB — so the on-box file is still usable.)
+      # Exception: breakglass hash is always seeded empty on 404 (see below).
       log "WARN ${kv_name} now 404s but ${file} is already populated — KEEPING the existing value; restore the Key Vault secret"
     else
-      : >"$tmp" # genuinely not provisioned yet → seed EMPTY so the mount resolves (consumer degraded)
+      # Not yet provisioned (never set), OR the breakglass hash was explicitly deleted from Key Vault.
+      # For the breakglass hash, a 404 means the operator wants breakglass login disabled — we must
+      # seed EMPTY even if a stale file exists, so ADMIN_BOOTSTRAP_HASH_FILE resolves to an empty
+      # file and BreakglassService returns 503. Preserving the stale file would defeat that intent.
+      : >"$tmp"
       chmod 0444 "$tmp"
       mv -f "$tmp" "$dest"
-      log "optional ${kv_name} not provisioned (404) — seeded EMPTY ${file} (consumer degraded until set)"
+      if [ "$kv_name" = "argus-admin-bootstrap-hash" ] && [ "$was_populated" = true ]; then
+        log "WARN ${kv_name} deleted from Key Vault — seeded EMPTY ${file} (breakglass login disabled; restore KV secret to re-enable)"
+      else
+        log "optional ${kv_name} not provisioned (404) — seeded EMPTY ${file} (consumer degraded until set)"
+      fi
     fi
     ;;
   *)

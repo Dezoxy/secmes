@@ -8,6 +8,8 @@ import { DEFAULT_THROTTLE } from '../rate-limit/rate-limit.constants.js';
 import { UserThrottlerGuard } from '../rate-limit/user-throttler.guard.js';
 import { OIDC_CONFIG, OIDC_JWKS, loadOidcConfig, type OidcConfig } from './auth.config.js';
 import { AuthService } from './auth.service.js';
+import { BreakglassController } from './breakglass.controller.js';
+import { BreakglassService } from './breakglass.service.js';
 import { JwtAuthGuard } from './jwt-auth.guard.js';
 import {
   SESSION_KEY_PAIR,
@@ -23,7 +25,7 @@ import { WebAuthnService } from './webauthn.service.js';
 
 @Module({
   imports: [ThrottlerModule.forRoot(DEFAULT_THROTTLE), AuditModule],
-  controllers: [SessionTokenController, WebAuthnController],
+  controllers: [SessionTokenController, WebAuthnController, BreakglassController],
   providers: [
     { provide: OIDC_CONFIG, useFactory: loadOidcConfig },
     {
@@ -74,11 +76,12 @@ import { WebAuthnService } from './webauthn.service.js';
     AuthService,
     SessionTokenService,
     WebAuthnService,
+    BreakglassService,
     // Order matters: JwtAuthGuard runs FIRST (sets req.auth from the verified token), then the throttle
     // guard keys the limit on that verified user. Both are global (APP_GUARD).
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: UserThrottlerGuard },
   ],
-  exports: [AuthService, SessionTokenService, WebAuthnService],
+  exports: [AuthService, SessionTokenService, WebAuthnService, BreakglassService],
 })
 export class AuthModule {}

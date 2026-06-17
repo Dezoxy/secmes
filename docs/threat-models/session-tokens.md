@@ -36,10 +36,21 @@ following reasons:
    It does not match `jose`, `SignJWT`, `generateKeyPair`, or `EdDSA` — the rule was written to
    catch raw primitive use, not audited-library use.
 
-**The boundary constraint**: `jose` + Ed25519 session signing/verification is permitted exclusively
-inside `apps/api/src/auth/`. It must not appear in shared utilities, `packages/crypto`, or any
-other module. Call-site comments in `session-key.config.ts` and `session-token.service.ts` point
-here.
+**The boundary constraint** covers two pre-cleared exceptions, both confined to
+`apps/api/src/auth/`:
+
+1. **`jose` + Ed25519** — session signing/verification (`session-key.config.ts`,
+   `session-token.service.ts`). Rationale: server-auth infrastructure, not E2EE key material; the
+   Semgrep rule does not match `jose`/`SignJWT`/`generateKeyPair`.
+
+2. **`@noble/hashes` Argon2id** — breakglass password verification (`breakglass.service.ts`).
+   Same rationale: the password KDF authenticates the operator to the server; it never touches E2EE
+   message keys or content. `packages/crypto` has no KDF for server passwords. The Semgrep rule does
+   not match `argon2idAsync`. See `docs/threat-models/breakglass-admin.md §invariant-4` for the full
+   analysis.
+
+Neither exception may appear in shared utilities, `packages/crypto`, or any other module.
+Call-site comments in the affected files point here.
 
 ---
 

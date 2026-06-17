@@ -68,6 +68,24 @@ export class SessionTokenService {
     return { accessToken, refreshToken, sessionId: session.id, expiresAt };
   }
 
+  /** Pre-generate a refresh-token pair. Pure crypto — no DB. Used by the breakglass login path
+   * so the session row can be inserted inside the credential transaction, preventing a concurrent
+   * rotate() from revoking active sessions before this login's session row is created. */
+  generateRefreshToken(): { refreshToken: string; refreshTokenHash: string; expiresAt: Date } {
+    const refreshToken = randomBytes(32).toString('hex');
+    return {
+      refreshToken,
+      refreshTokenHash: sha256hex(refreshToken),
+      expiresAt: new Date(Date.now() + REFRESH_TTL_MS),
+    };
+  }
+
+  /** Sign an access JWT for a session row already inserted in the DB. Used by the breakglass
+   * login path after its credential transaction commits. */
+  async signSession(sub: string, sessionId: string, userId: string): Promise<string> {
+    return this.mintAccessToken(sub, sessionId, userId);
+  }
+
   /**
    * Rotate a refresh token (single-use). Implements reuse-detection: presenting a revoked token
    * is treated as theft and triggers full-family revocation.
