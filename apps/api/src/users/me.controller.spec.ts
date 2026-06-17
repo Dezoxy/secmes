@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { getDb } from '../db/index.js';
+import { AuditService } from '../audit/audit.service.js';
 import { MeController } from './me.controller.js';
 import { UserService } from './user.service.js';
 
@@ -13,7 +14,7 @@ describe.skipIf(!DB_URL)('MeController.me', () => {
   let sql: ReturnType<typeof getDb>['sql'];
   let tenantA: string;
   let tenantB: string;
-  const controller = new MeController(new UserService());
+  const controller = new MeController(new UserService(), new AuditService());
 
   beforeAll(async () => {
     sql = getDb().sql;

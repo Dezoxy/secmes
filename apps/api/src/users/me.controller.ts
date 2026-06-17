@@ -14,6 +14,7 @@ import { type Me, type UpdateProfile, MeSchema, UpdateProfileSchema } from '@arg
 import { AllowUnbound } from '../auth/allow-unbound.decorator.js';
 import type { MaybeUnboundAuth, VerifiedAuth } from '../auth/auth.service.js';
 import { CurrentAuth } from '../auth/current-auth.decorator.js';
+import { AuditService } from '../audit/audit.service.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { perMinute, SENSITIVE_LIMITS } from '../rate-limit/rate-limit.constants.js';
 import { Throttle } from '@nestjs/throttler';
@@ -40,7 +41,10 @@ class UpdateProfileBody {
 @ApiBearerAuth()
 @Controller()
 export class MeController {
-  constructor(private readonly users: UserService) {}
+  constructor(
+    private readonly users: UserService,
+    private readonly audit: AuditService,
+  ) {}
 
   /** The authenticated user. Returns `{ bound: false }` for unbound users (no tenant yet). */
   @Get('me')
@@ -105,5 +109,17 @@ export class MeController {
     const user = await this.users.getByAuth(auth as VerifiedAuth);
     if (!user) return;
     await this.users.updateProfile({ tenantId: auth.tenantId, userId: user.id }, dto);
+    // Audit which fields were changed — never log the values themselves.
+    const fieldsUpdated = [
+      ...(dto.displayName !== undefined ? (['displayName'] as const) : []),
+      ...(dto.avatarSeed !== undefined ? (['avatarSeed'] as const) : []),
+    ];
+    if (fieldsUpdated.length > 0) {
+      await this.audit.record(auth.tenantId, {
+        eventType: 'users.profile_updated',
+        actorSub: (auth as VerifiedAuth).sub,
+        metadata: { fieldsUpdated },
+      });
+    }
   }
 }
