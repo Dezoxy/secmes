@@ -2427,7 +2427,7 @@
             }
           },
           "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
+            "description": "caller does not hold a breakglass (Argus-minted) session",
             "content": {
               "application/json": {
                 "schema": {

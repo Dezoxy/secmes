@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   HttpCode,
   HttpStatus,
   Ip,
@@ -12,6 +13,7 @@ import {
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiForbiddenResponse,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
@@ -132,6 +134,7 @@ export class BreakglassController {
   @ApiBody({ type: BreakglassRotateBodyDto })
   @ApiNoContentResponse({ description: 'password rotated' })
   @ApiUnauthorizedResponse({ description: 'invalid current password or locked' })
+  @ApiForbiddenResponse({ description: 'caller does not hold a breakglass (Argus-minted) session' })
   @HttpCode(HttpStatus.NO_CONTENT)
   async rotate(
     @Body(new ZodValidationPipe(BreakglassRotateRequestSchema)) body: BreakglassRotateRequest,
@@ -139,7 +142,12 @@ export class BreakglassController {
     @Req() req: Request,
     @Ip() ip: string,
   ): Promise<void> {
-    await this.breakglass.rotate(auth.userId!, body.currentPassword, body.newPassword, {
+    // Zitadel/OIDC admin tokens may not carry an Argus userId — only a breakglass
+    // session (minted by this service) holds the userId that matches admin_credentials.
+    if (!auth.userId) {
+      throw new ForbiddenException('rotate requires a breakglass session');
+    }
+    await this.breakglass.rotate(auth.userId, body.currentPassword, body.newPassword, {
       ip,
       userAgent: String(req.headers['user-agent'] ?? ''),
     });

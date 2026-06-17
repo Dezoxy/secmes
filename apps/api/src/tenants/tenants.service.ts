@@ -386,6 +386,17 @@ export class TenantsService {
     newRole: 'admin' | 'member',
   ): Promise<void> {
     await withTenant(auth.tenantId, async (tx) => {
+      // The breakglass-admin user is the last-resort recovery path — it must not be
+      // demotable or revocable via regular member lifecycle actions.
+      const [tgt] = await tx
+        .select({ displayName: schema.users.displayName })
+        .from(schema.users)
+        .where(and(eq(schema.users.id, targetUserId), eq(schema.users.tenantId, auth.tenantId)))
+        .limit(1);
+      if (tgt?.displayName === 'breakglass-admin') {
+        throw new ForbiddenException('cannot modify the breakglass-admin account');
+      }
+
       // Prevent leaving the tenant with zero admins.
       if (newRole === 'member') {
         // Lock admin rows before counting to prevent concurrent demotions leaving zero admins.
@@ -425,7 +436,7 @@ export class TenantsService {
   async revokeMember(auth: VerifiedAuth, targetUserId: string): Promise<void> {
     await withTenant(auth.tenantId, async (tx) => {
       const [target] = await tx
-        .select({ role: schema.users.role })
+        .select({ role: schema.users.role, displayName: schema.users.displayName })
         .from(schema.users)
         .where(
           and(
@@ -436,6 +447,9 @@ export class TenantsService {
         )
         .limit(1);
       if (!target) throw new NotFoundException('user not found');
+      if (target.displayName === 'breakglass-admin') {
+        throw new ForbiddenException('cannot modify the breakglass-admin account');
+      }
 
       if (target.role === 'admin') {
         // Lock admin rows before counting to prevent concurrent revocations leaving zero admins.

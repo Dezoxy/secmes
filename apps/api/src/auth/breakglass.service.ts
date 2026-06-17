@@ -242,12 +242,15 @@ export class BreakglassService implements OnModuleInit {
         // Atomic increment+lockout — avoids a race where concurrent wrong-password
         // requests each read the same stale count and write it back, allowing more
         // than MAX_ATTEMPTS before the lockout fires (CWE-362).
+        // Also resets an expired lockout window: if locked_until IS NOT NULL but has
+        // passed, treat this as the first failure of a fresh window (count → 1, no new
+        // lockout), preventing a single bad attempt from extending the window indefinitely.
         await withTenant(DEFAULT_TENANT_ID, async (tx) => {
           await tx
             .update(schema.adminCredentials)
             .set({
-              failedAttempts: sql`${schema.adminCredentials.failedAttempts} + 1`,
-              lockedUntil: sql`CASE WHEN ${schema.adminCredentials.failedAttempts} + 1 >= ${MAX_ATTEMPTS} THEN now() + interval '1 millisecond' * ${LOCKOUT_DURATION_MS} ELSE NULL END`,
+              failedAttempts: sql`CASE WHEN ${schema.adminCredentials.lockedUntil} IS NOT NULL AND ${schema.adminCredentials.lockedUntil} <= now() THEN 1 ELSE ${schema.adminCredentials.failedAttempts} + 1 END`,
+              lockedUntil: sql`CASE WHEN ${schema.adminCredentials.lockedUntil} IS NOT NULL AND ${schema.adminCredentials.lockedUntil} <= now() THEN NULL WHEN ${schema.adminCredentials.failedAttempts} + 1 >= ${MAX_ATTEMPTS} THEN now() + interval '1 millisecond' * ${LOCKOUT_DURATION_MS} ELSE NULL END`,
               updatedAt: new Date(),
             })
             .where(eq(schema.adminCredentials.id, row.id));
@@ -335,8 +338,8 @@ export class BreakglassService implements OnModuleInit {
         await tx
           .update(schema.adminCredentials)
           .set({
-            failedAttempts: sql`${schema.adminCredentials.failedAttempts} + 1`,
-            lockedUntil: sql`CASE WHEN ${schema.adminCredentials.failedAttempts} + 1 >= ${MAX_ATTEMPTS} THEN now() + interval '1 millisecond' * ${LOCKOUT_DURATION_MS} ELSE NULL END`,
+            failedAttempts: sql`CASE WHEN ${schema.adminCredentials.lockedUntil} IS NOT NULL AND ${schema.adminCredentials.lockedUntil} <= now() THEN 1 ELSE ${schema.adminCredentials.failedAttempts} + 1 END`,
+            lockedUntil: sql`CASE WHEN ${schema.adminCredentials.lockedUntil} IS NOT NULL AND ${schema.adminCredentials.lockedUntil} <= now() THEN NULL WHEN ${schema.adminCredentials.failedAttempts} + 1 >= ${MAX_ATTEMPTS} THEN now() + interval '1 millisecond' * ${LOCKOUT_DURATION_MS} ELSE NULL END`,
             updatedAt: new Date(),
           })
           .where(eq(schema.adminCredentials.id, row.id));
