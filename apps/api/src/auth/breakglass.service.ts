@@ -15,7 +15,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { argon2idAsync } from '@noble/hashes/argon2.js';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 
 import { schema, withTenant } from '../db/index.js';
 import { generateArgusId, isArgusIdCollision } from '../users/argus-id.js';
@@ -445,6 +445,14 @@ export class BreakglassService implements OnModuleInit {
         })
         .where(eq(schema.adminCredentials.id, row.id));
 
+      // Revoke all active sessions atomically with the password change. Doing this outside the
+      // transaction would leave a crash-recovery window where the new password is committed but
+      // old refresh tokens still work — the exact scenario we're rotating to defend against.
+      await tx
+        .update(schema.authSessions)
+        .set({ revokedAt: new Date() })
+        .where(and(eq(schema.authSessions.userId, userId), isNull(schema.authSessions.revokedAt)));
+
       return { outcome: 'ok' as const, sub: row.sub };
     })) as RotateResult;
 
@@ -466,9 +474,7 @@ export class BreakglassService implements OnModuleInit {
       throw new UnauthorizedException('invalid current password');
     }
 
-    // outcome === 'ok'
-    // Revoke all active sessions so a compromised-then-rotated credential cannot be kept alive.
-    await this.sessions.revokeSession(DEFAULT_TENANT_ID, { userId });
+    // outcome === 'ok' — session revocation already committed inside the tx above.
 
     await this.audit.record(DEFAULT_TENANT_ID, {
       eventType: 'breakglass.rotated',

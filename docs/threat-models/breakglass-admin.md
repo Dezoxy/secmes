@@ -206,6 +206,11 @@ The caller's own session is also revoked — the caller must re-authenticate wit
 after rotation. This is by design; the cost of one extra login is acceptable for the assurance
 that no prior session can survive a rotation.
 
+**Atomicity**: The `admin_credentials` UPDATE (new hash) and the `auth_sessions` UPDATE
+(`revoked_at`) both execute inside the same `withTenant()` transaction. If the process crashes
+after the tx commits, both changes are durable; if it crashes before, neither is. A partial
+state (new password but live sessions) is impossible.
+
 **Access token invalidation**: Stateless JWTs have a 10-minute TTL and are not individually
 checked against `auth_sessions.revoked_at` in the normal auth path — revoking refresh tokens
 alone would leave an attacker with up to 10 minutes of admin access via an already-minted
