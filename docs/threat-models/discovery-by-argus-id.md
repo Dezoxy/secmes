@@ -20,7 +20,7 @@ This replaces `GET /users` (browsable tenant directory) which is removed in Phas
 |--------|--------|------------|
 | User enumeration via prefix/fuzzy search | Reveals membership of the user pool | Exact match only (`= argus_id`), no `LIKE`, no prefix, no fuzzy |
 | Enumeration via error oracle (valid-format vs. invalid-format) | Reduces brute-force search space | Any argus-id string (valid format or not) returns the same 404 body — no 400 for "bad format" |
-| Brute-force enumeration across the 16-char ID space | Information disclosure | Hard rate limit: 10 requests/min per IP via `SENSITIVE_LIMITS.lookupUser` |
+| Brute-force enumeration across the 16-char ID space | Information disclosure | Hard rate limit: 10 req/min per verified user (tenant+sub) via `SENSITIVE_LIMITS.lookupUser` |
 | Unauthenticated bulk scraping | Mass data harvest | Endpoint requires a valid bearer token — `@Public()` NOT set |
 | Email or PII leakage in response | Privacy violation | Response is `{ userId, argusId, displayName, avatarSeed }` only — no email, no role, no tenant metadata beyond what's derivable from an argus-id |
 | Cross-tenant lookup | Unauthorised data access | Query runs under `withTenant(auth.tenantId)` — RLS enforces tenant scope; in the single-tenant design, all users share DEFAULT_TENANT_ID |

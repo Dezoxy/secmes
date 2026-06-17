@@ -14,6 +14,7 @@ import { z } from 'zod';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { CurrentAuth } from '../auth/current-auth.decorator.js';
+import { AuditService } from '../audit/audit.service.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { perMinute, SENSITIVE_LIMITS } from '../rate-limit/rate-limit.constants.js';
 import { UserDirectoryQuerySchema, type UserDirectoryQuery } from './user.schemas.js';
@@ -53,7 +54,10 @@ type LookupQuery = z.infer<typeof LookupQuerySchema>;
 @ApiBearerAuth()
 @Controller('users')
 export class UsersController {
-  constructor(private readonly users: UserService) {}
+  constructor(
+    private readonly users: UserService,
+    private readonly audit: AuditService,
+  ) {}
 
   /** Directory of users in the caller's tenant (metadata only; RLS-scoped). */
   @Get()
@@ -88,6 +92,12 @@ export class UsersController {
     @Query(new ZodValidationPipe(LookupQuerySchema)) query: LookupQuery,
   ): Promise<UserLookupResultDto> {
     const result = await this.users.lookupByArgusId(auth.tenantId, query.argusId);
+    // Audit every lookup (found and not-found) — targetArgusId is pseudonymous, not PII.
+    await this.audit.record(auth.tenantId, {
+      eventType: 'users.lookup',
+      actorSub: auth.sub,
+      metadata: { targetArgusId: query.argusId, found: result !== null },
+    });
     if (!result) throw new NotFoundException();
     return result;
   }

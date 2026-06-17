@@ -162,7 +162,13 @@ export class UserService {
           avatarSeed: schema.users.avatarSeed,
         })
         .from(schema.users)
-        .where(and(eq(schema.users.argusId, argusId), eq(schema.users.status, 'active')))
+        .where(
+          and(
+            eq(schema.users.tenantId, tenantId),
+            eq(schema.users.argusId, argusId),
+            eq(schema.users.status, 'active'),
+          ),
+        )
         .limit(1),
     );
     return row ?? null;
@@ -178,9 +184,9 @@ export class UserService {
     dto: UpdateProfile,
   ): Promise<void> {
     if (!dto.displayName && !dto.avatarSeed) return;
-    const set: Record<string, unknown> = {};
-    if (dto.displayName !== undefined) set['display_name'] = dto.displayName;
-    if (dto.avatarSeed !== undefined) set['avatar_seed'] = dto.avatarSeed;
+    const set: Partial<typeof schema.users.$inferInsert> = {};
+    if (dto.displayName !== undefined) set.displayName = dto.displayName;
+    if (dto.avatarSeed !== undefined) set.avatarSeed = dto.avatarSeed;
     const result = await withTenant(auth.tenantId, async (tx) =>
       tx
         .update(schema.users)

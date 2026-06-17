@@ -817,6 +817,16 @@
       "put": {
         "operationId": "updateMe",
         "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProfileBody"
+              }
+            }
+          }
+        },
         "responses": {
           "204": {
             "description": "profile updated"
@@ -8890,6 +8900,25 @@
         "required": [
           "events"
         ],
+        "additionalProperties": false
+      },
+      "UpdateProfileBody": {
+        "type": "object",
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "description": "new display name (1–64 chars, trimmed)",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "avatarSeed": {
+            "type": "string",
+            "description": "aesthetic seed token for deterministic avatar generation (≤64 chars)",
+            "maxLength": 64,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          }
+        },
         "additionalProperties": false
       },
       "UserSummaryDto": {

@@ -1,20 +1,40 @@
 import { Body, Controller, Get, HttpCode, Put } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiProperty,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import { type Me, MeSchema, UpdateProfileSchema } from '@argus/contracts';
+import { type Me, type UpdateProfile, MeSchema, UpdateProfileSchema } from '@argus/contracts';
 
 import { AllowUnbound } from '../auth/allow-unbound.decorator.js';
 import type { MaybeUnboundAuth, VerifiedAuth } from '../auth/auth.service.js';
 import { CurrentAuth } from '../auth/current-auth.decorator.js';
+import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { perMinute, SENSITIVE_LIMITS } from '../rate-limit/rate-limit.constants.js';
 import { Throttle } from '@nestjs/throttler';
 import { UserService } from './user.service.js';
+
+class UpdateProfileBody {
+  @ApiProperty({
+    required: false,
+    description: 'new display name (1–64 chars, trimmed)',
+    minLength: 1,
+    maxLength: 64,
+  })
+  displayName?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'aesthetic seed token for deterministic avatar generation (≤64 chars)',
+    maxLength: 64,
+  })
+  avatarSeed?: string;
+}
 
 @ApiTags('users')
 @ApiBearerAuth()
@@ -74,11 +94,14 @@ export class MeController {
   @HttpCode(204)
   @Throttle(perMinute(SENSITIVE_LIMITS.updateProfile))
   @ApiOperation({ summary: 'Update own display name / avatar seed', operationId: 'updateMe' })
+  @ApiBody({ type: UpdateProfileBody })
   @ApiNoContentResponse({ description: 'profile updated' })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
-  async updateMe(@CurrentAuth() auth: MaybeUnboundAuth, @Body() body: unknown): Promise<void> {
+  async updateMe(
+    @CurrentAuth() auth: MaybeUnboundAuth,
+    @Body(new ZodValidationPipe(UpdateProfileSchema)) dto: UpdateProfile,
+  ): Promise<void> {
     if (!auth.tenantId) return;
-    const dto = UpdateProfileSchema.parse(body);
     const user = await this.users.getByAuth(auth as VerifiedAuth);
     if (!user) return;
     await this.users.updateProfile({ tenantId: auth.tenantId, userId: user.id }, dto);
