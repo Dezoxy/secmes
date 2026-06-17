@@ -93,13 +93,18 @@ jobs:
           done
           echo "::error::API did not become healthy in time"; exit 1
 
+      # Best-effort: the freemium DAST backend is a shared, rate-limited free tier, and the action crashes
+      # ungracefully when it gets a limit/error reply (build_scan_kdb on a non-dict response). Don't hard-fail
+      # the nightly on that — the scan runs and emits a report when quota is available (uploaded below).
       - name: 42Crunch freemium DAST conformance scan
+        id: dast-scan
+        continue-on-error: true
         uses: 42Crunch/api-security-scan-action-freemium@82a6d09a7f4565a5964b386c3399b85ac2fb5a17 # v1.4
         with:
           target-url: http://localhost:3000
           api-definition: apps/api/openapi.json
-          # SARIF/Code-Scanning upload is OFF: the freemium action's SARIF KDB conversion is unreliable
-          # (crashes in build_scan_kdb). Capture the scan report as a build artifact for review instead.
+          # SARIF/Code-Scanning upload is OFF: the freemium SARIF KDB conversion is unreliable. Capture the
+          # scan report as a build artifact for review instead.
           upload-to-code-scanning: false
           scan-report: scan-report.json
           log-level: info
