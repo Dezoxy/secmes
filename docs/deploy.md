@@ -105,6 +105,41 @@ hostnames are configured in the Cloudflare Zero Trust dashboard, not in this rep
   **gated by Cloudflare Access** + Grafana's own login; Prometheus + Alertmanager stay internal-only)
 - other admin subdomains (e.g. ops) → their service, **gated by Cloudflare Access** (identity at the edge)
 
+### Admin (breakglass) access — Cloudflare Access on `/admin` + the admin API
+
+The breakglass admin login is **not** on the public landing page. It lives at `https://4rgus.com/admin`, and
+the admin/breakglass API (`/api/auth/breakglass/*`, `/api/admin/*`) is reachable **only** through Cloudflare
+Access. Two layers enforce this (see [`docs/threat-models/admin-access-gating.md`](threat-models/admin-access-gating.md)):
+
+1. **Edge (Caddy):** `infra/stack/caddy/Caddyfile` returns **404** for those paths unless the request carries
+   the `Cf-Access-Jwt-Assertion` header that cloudflared injects after a request passes Access (and strips if a
+   client supplies it). No Terraform/code change beyond the Caddyfile.
+2. **App (defense in depth):** the API verifies that JWT's signature (`CfAccessGuard`) **when** the two
+   non-secret env vars below are set; unset = no-op (dev / before the Access app exists).
+
+**Create the Access application (Zero Trust dashboard — same place as grafana/glitchtip):**
+
+1. Access → Applications → **Add an application** → **Self-hosted**.
+2. **Application domain:** add `4rgus.com` with **path** `/admin`, and add the same app's additional paths
+   `/api/auth/breakglass` and `/api/admin` (the page **and** the XHRs it makes must both be behind Access).
+3. **Session duration:** short (e.g. **1 hour**) — breakglass is rare.
+4. **Policy:** Action **Allow** → Include → **Emails** → the operator's email only (everyone else is implicitly
+   denied); optionally require the IdP's MFA.
+5. Copy the application's **Audience (AUD) tag** and set the API env (non-secret, like the RP ID):
+   - `CF_ACCESS_TEAM_DOMAIN` = your team (e.g. `acme.cloudflareaccess.com`)
+   - `CF_ACCESS_AUD` = the AUD tag
+
+No new tunnel hostname is needed (`4rgus.com → caddy:8080` already exists), and **no secret** is introduced.
+Recovery-of-last-resort if Access is unavailable stays the **direct-DB owner runbook** in
+[`breakglass-admin.md`](threat-models/breakglass-admin.md) — there is deliberately no "skip Access" bypass.
+
+> **Load-bearing defaults / arming.** Keep the Access app's default behaviour of **stripping client-supplied
+> `Cf-Access-*` headers** — the Caddy 404 gate trusts that cloudflared only ever forwards a header it injected.
+> Until you set `CF_ACCESS_TEAM_DOMAIN` + `CF_ACCESS_AUD`, the API logs a one-line **WARN at boot**
+> (`Cloudflare Access verification DISABLED …`) and the admin/breakglass API is protected by the **edge gate
+> only** (sufficient for the single-VM topology, since nothing but cloudflared reaches Caddy). Setting both
+> vars flips the boot log to `ENABLED` — grep the API logs after arming to confirm.
+
 ## Secrets (Key Vault → credential files — Slice 3)
 
 No secret values live in the repo. `argus-secrets.service` fetches them from Azure Key Vault via the VM's

@@ -3,7 +3,6 @@ import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-r
 import { Fingerprint, RefreshCw } from 'lucide-react';
 import { useAuth } from './features/auth/AuthContext';
 import { RegisterScreen } from './features/auth/RegisterScreen';
-import { BreakglassLogin } from './features/auth/BreakglassLogin';
 import { prefersReducedMotion } from './lib/pref';
 import { ArgusAppIcon } from './features/brand/ArgusAppIcon';
 import { usePwaUpdate } from './features/pwa/PwaUpdateContext';
@@ -15,6 +14,9 @@ const SettingsRoute = lazy(() => import('./routes/SettingsRoute'));
 const StorageRoute = lazy(() => import('./routes/StorageRoute'));
 const TransparencyRoute = lazy(() => import('./routes/TransparencyRoute'));
 const V2SketchRoute = lazy(() => import('./routes/V2SketchRoute'));
+// Admin (breakglass) login lives on its own path, gated by Cloudflare Access in production (Caddy 404s it
+// without the Access header). Lazy so the breakglass code stays out of the public landing chunk.
+const AdminLoginRoute = lazy(() => import('./routes/AdminLoginRoute'));
 
 const slides = [
   { image: '/images/login-slide-1.png', title: 'Connect Instantly,', subtitle: 'Message Securely' },
@@ -22,7 +24,7 @@ const slides = [
   { image: '/images/login-slide-3.png', title: 'Your Conversations,', subtitle: 'Your Control' },
 ];
 
-type Panel = null | 'register' | 'breakglass';
+type Panel = null | 'register';
 
 function LandingRoute() {
   const { ready, profile, demoMode, login } = useAuth();
@@ -76,12 +78,6 @@ function LandingRoute() {
               {panel === 'register' && (
                 <RegisterScreen
                   onRegistered={() => navigate('/chat')}
-                  onBack={() => setPanel(null)}
-                />
-              )}
-              {panel === 'breakglass' && (
-                <BreakglassLogin
-                  onLoggedIn={() => navigate('/chat')}
                   onBack={() => setPanel(null)}
                 />
               )}
@@ -225,13 +221,6 @@ function LandingRoute() {
                   >
                     Security &amp; transparency ↗
                   </Link>
-                  <button
-                    type="button"
-                    onClick={() => setPanel('breakglass')}
-                    className="text-xs text-white/20 transition-colors hover:text-white/50"
-                  >
-                    Admin access
-                  </button>
                 </div>
               </div>
             </>
@@ -283,6 +272,7 @@ export default function App() {
           <Route path="/devices" element={<DevicesRoute />} />
           <Route path="/storage" element={<StorageRoute />} />
           <Route path="/transparency" element={<TransparencyRoute />} />
+          <Route path="/admin" element={<AdminLoginRoute />} />
           <Route path="/v2" element={<V2SketchRoute />} />
           <Route path="/v2/:sketchId" element={<V2SketchRoute />} />
         </Routes>
