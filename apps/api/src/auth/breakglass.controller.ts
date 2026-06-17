@@ -35,6 +35,7 @@ import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { PublicRateLimit } from '../rate-limit/public-rate-limit.decorator.js';
 import { SENSITIVE_LIMITS, perMinute } from '../rate-limit/rate-limit.constants.js';
 import { AdminGuard } from './admin.guard.js';
+import { CfAccessGuard } from './cf-access.guard.js';
 import { AllowUnbound } from './allow-unbound.decorator.js';
 import { CurrentAuth } from './current-auth.decorator.js';
 import type { VerifiedAuth } from './auth.service.js';
@@ -68,6 +69,10 @@ class AccessTokenResponseDto {
 }
 
 @ApiTags('auth')
+// CfAccessGuard (env-gated Cloudflare-Access JWT) fronts BOTH login and rotate. In production the edge
+// (Caddy) already 404s these paths without the Access header; this is the in-app signature check. No-op when
+// CF_ACCESS_* env is unset (dev / un-armed deploy), so @Public() login still works locally.
+@UseGuards(CfAccessGuard)
 @Controller('auth/breakglass')
 export class BreakglassController {
   constructor(private readonly breakglass: BreakglassService) {}

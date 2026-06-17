@@ -150,6 +150,13 @@ services:
       # EMPTY until the operator provisions it in Key Vault (argus-admin-bootstrap-hash). Absent or empty
       # = 503 on /auth/breakglass/login only; the rest of the API is unaffected.
       ADMIN_BOOTSTRAP_HASH_FILE: /run/secrets/admin_bootstrap_hash
+      # Cloudflare Access for the admin/breakglass surface — NON-SECRET config (the team domain + the
+      # Access app's AUD tag are public, like FRONTEND_ORIGIN). When BOTH are set, the API verifies the
+      # Cf-Access-Jwt-Assertion signature on /auth/breakglass/* and /admin/* (defense in depth behind the
+      # Caddy edge gate). Unset/empty = no-op (dev / before the Access app is created). See .env.prod.example
+      # + docs/deploy.md + docs/threat-models/admin-access-gating.md.
+      CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN:-}
+      CF_ACCESS_AUD: ${CF_ACCESS_AUD:-}
     secrets:
       - database_url
       - s3_secret_access_key
