@@ -74,23 +74,12 @@ class RegisterVerifyBodyDto {
         },
       },
       authenticatorAttachment: { type: 'string' },
+      // PRF output is intentionally NOT accepted here: it is the client's keystore-unlock secret and the
+      // server is crypto-blind. The client strips it before POST; the service strips it defensively too.
       clientExtensionResults: {
         type: 'object',
         properties: {
           credProps: { type: 'object', properties: { rk: { type: 'boolean' } } },
-          prf: {
-            type: 'object',
-            properties: {
-              enabled: { type: 'boolean' },
-              results: {
-                type: 'object',
-                properties: {
-                  first: { type: 'string' },
-                  second: { type: 'string' },
-                },
-              },
-            },
-          },
         },
       },
       type: { type: 'string', enum: ['public-key'] },
@@ -124,22 +113,11 @@ class AuthenticateVerifyBodyDto {
         },
       },
       authenticatorAttachment: { type: 'string' },
+      // PRF output is intentionally NOT accepted here: it is the client's keystore-unlock secret and the
+      // server is crypto-blind. The client strips it before POST; the service strips it defensively too.
       clientExtensionResults: {
         type: 'object',
-        properties: {
-          prf: {
-            type: 'object',
-            properties: {
-              results: {
-                type: 'object',
-                properties: {
-                  first: { type: 'string' },
-                  second: { type: 'string' },
-                },
-              },
-            },
-          },
-        },
+        properties: {},
       },
       type: { type: 'string', enum: ['public-key'] },
     },

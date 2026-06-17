@@ -52,9 +52,8 @@ export interface JoinDeps {
   deviceId: string;
   /** The sealed keystore — persists each joined group's state (5A) before its Welcome/private are released. */
   keystore: DeviceKeystore;
-  /** The session passphrase — reseals the pruned pool. In memory only. */
-  passphrase: string;
-  /** The per-unlock session key — seals each joined group's persisted state (cheap AES-GCM). Memory only. */
+  /** The per-unlock PRF unlock key — seals each joined group's persisted state AND reseals the pruned pool
+   * (cheap AES-GCM). Memory only. */
   sessionKey: CryptoKey;
   /** Surface a newly joined conversation to the UI. */
   onJoined: (joined: JoinedConversation) => void;
@@ -90,7 +89,7 @@ export interface JoinDeps {
  * owning tab — never consumed without a durable save.
  */
 export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
-  const { device, pool, deviceId, keystore, passphrase, sessionKey, onJoined, onSpent } = deps;
+  const { device, pool, deviceId, keystore, sessionKey, onJoined, onSpent } = deps;
   const engine = await getEngine();
   const signKey = deviceSignatureSeed(device); // ts-mls' 48-byte PKCS8 key → the bare 32-byte Ed25519 seed
   const workingPool = [...pool]; // shrinks as members are spent — never reuse a one-time private in a drain
@@ -162,7 +161,7 @@ export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
         try {
           await keystore.removePoolMember(
             device,
-            passphrase,
+            sessionKey,
             serializeKeyPackage(joined.member.publicPackage),
           );
         } catch (pruneErr) {

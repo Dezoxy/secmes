@@ -29,11 +29,10 @@ const MAX_BACKFILL_PAGES = 50; // safety cap on the page loop
 export interface MessagingDeps {
   keystore: DeviceKeystore;
   device: DeviceKeys;
-  /** The session passphrase — reseals the KeyPackage pool on join-time prunes. In memory only. */
-  passphrase: string;
   /**
-   * The per-unlock session key — seals the advanced group state on every send/receive (cheap AES-GCM; a
-   * per-message Argon2id pass here was the live-loop's seconds-long delivery latency). Memory only.
+   * The per-unlock PRF unlock key — seals the advanced group state on every send/receive AND reseals the
+   * KeyPackage pool on join-time prunes (cheap AES-GCM; the same non-extractable key that seals the device
+   * at rest). Memory only.
    */
   sessionKey: CryptoKey;
 }

@@ -4,6 +4,12 @@ import type { PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/bro
 import { ArrowLeft, KeyRound } from 'lucide-react';
 import { redeemCode, getRegisterOptions, verifyRegistration, fetchMe } from '../../lib/api';
 import { setToken } from '../../lib/auth';
+import {
+  deriveUnlockKeyViaAssertion,
+  stashUnlockKey,
+  unlockKeyFromResponse,
+  withPrfSalt,
+} from '../../lib/prf';
 import { useAuth, type MeBound } from './AuthContext';
 
 interface RegisterScreenProps {
@@ -29,13 +35,22 @@ export function RegisterScreen({ onRegistered, onBack }: RegisterScreenProps) {
       setStep('ceremony');
       const { ceremonyId } = await redeemCode(code.trim());
       const options = await getRegisterOptions(ceremonyId);
+      // Inject the PRF salt so create() yields the keystore unlock secret (lib/prf.ts).
       const regResponse = await startRegistration({
-        optionsJSON: options as unknown as PublicKeyCredentialCreationOptionsJSON,
+        optionsJSON: withPrfSalt(options as unknown as PublicKeyCredentialCreationOptionsJSON),
       });
+      // Derive the unlock key from PRF AND strip the secret from `regResponse` BEFORE the verify POST — the
+      // server is crypto-blind and must never receive it.
+      const unlockKeyFromCreate = await unlockKeyFromResponse(regResponse);
       const { accessToken: token } = await verifyRegistration(ceremonyId, regResponse);
       setToken(token); // must be set before fetchMe so the bearer header is present
       const me = await fetchMe();
       if (!me.bound) throw new Error('Registration succeeded but account is not yet bound.');
+      // Most browsers return PRF from create() directly; if this one returned enabled-only, fall back to one
+      // assertion (the credential now exists). Stash for the device gate (first-run create seals under it).
+      // null → no PRF; the gate shows the fresh-start message.
+      const unlockKey = unlockKeyFromCreate ?? (await deriveUnlockKeyViaAssertion());
+      if (unlockKey) stashUnlockKey(unlockKey);
       notifyAuth(token, me);
       setStep('done');
       onRegistered(me);

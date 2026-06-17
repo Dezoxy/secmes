@@ -46,15 +46,15 @@ async function publishInBatches(
 export async function provisionDevice(
   keystore: DeviceKeystore,
   device: DeviceKeys,
-  passphrase: string,
+  unlockKey: CryptoKey,
 ): Promise<{ pool: DeviceKeys[]; result: PublishResult }> {
   const signaturePublicKey = deviceSignaturePublicKeyB64(device);
-  let pool = await keystore.ensurePool(device, passphrase, POOL_TARGET);
+  let pool = await keystore.ensurePool(device, unlockKey, POOL_TARGET);
   let result = await publishInBatches(signaturePublicKey, pool);
 
   for (let round = 0; round < MAX_REPLENISH_ROUNDS && result.available < POOL_TARGET; round += 1) {
     const before = pool.length;
-    pool = await keystore.ensurePool(device, passphrase, before + (POOL_TARGET - result.available));
+    pool = await keystore.ensurePool(device, unlockKey, before + (POOL_TARGET - result.available));
     const fresh = pool.slice(before);
     if (fresh.length === 0) break;
     result = await publishInBatches(signaturePublicKey, fresh);

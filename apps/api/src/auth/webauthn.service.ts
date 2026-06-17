@@ -50,6 +50,18 @@ function expectedChallengeFromHex(hex: string): string {
   return isoBase64URL.fromBuffer(Buffer.from(hex, 'hex'));
 }
 
+/**
+ * Crypto-blind guard: drop the WebAuthn PRF output from a verify request IN PLACE before it reaches the
+ * @simplewebauthn verifier or any logging. `clientExtensionResults.prf.results.first` is the CLIENT's
+ * keystore-unlock secret (the key behind all at-rest MLS sealing). The client already strips it before POST;
+ * this is defense in depth so a misbehaving client can't push the secret into server memory. Signature
+ * verification does not use PRF, so removing it is safe.
+ */
+function stripPrfOutput(response: { clientExtensionResults?: unknown }): void {
+  const ext = response.clientExtensionResults as { prf?: unknown } | undefined;
+  if (ext && 'prf' in ext) delete ext.prf;
+}
+
 @Injectable()
 export class WebAuthnService {
   private readonly logger = new Logger(WebAuthnService.name);
@@ -185,6 +197,7 @@ export class WebAuthnService {
     ceremonyId: string,
     response: RegistrationResponseJSON,
   ): Promise<MintedSession> {
+    stripPrfOutput(response); // crypto-blind: never read/retain the client's PRF keystore-unlock secret
     // Step A — delete challenge (webauthn_challenges has no RLS; withRouting is correct).
     // First committer wins; a replay finds no row.
     const [challenge] = await withRouting((tx) =>
@@ -348,6 +361,7 @@ export class WebAuthnService {
     response: AuthenticationResponseJSON,
     requestContext: { ip: string; userAgent: string } = { ip: '', userAgent: '' },
   ): Promise<MintedSession> {
+    stripPrfOutput(response); // crypto-blind: never read/retain the client's PRF keystore-unlock secret
     // Delete challenge first (outside withTenant so we can pass it into the tenant tx).
     const [challenge] = await withRouting((tx) =>
       tx

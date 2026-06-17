@@ -255,7 +255,7 @@ export const v2RouteSketches: V2RouteSketch[] = [
 
 export const v2SettingsRows = [
   { label: 'Profile', value: 'Display name, avatar, account identifier', icon: Settings },
-  { label: 'Security & recovery', value: 'Passkey, recovery file, safety checks', icon: Shield },
+  { label: 'Security', value: 'Passkey unlock, safety checks', icon: Shield },
   { label: 'Notifications', value: 'Quiet hours and push behavior', icon: Bell },
   { label: 'Data & storage', value: 'Encrypted local cache controls', icon: Database },
 ];

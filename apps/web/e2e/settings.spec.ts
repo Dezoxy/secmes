@@ -18,10 +18,10 @@ test('mobile settings opens sections from the menu', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Profile' })).toBeHidden();
 
-  await page.getByRole('button', { name: 'Security & Recovery' }).click();
-  const securityRegion = page.getByRole('region', { name: 'Security & Recovery settings' });
-  await expect(page.getByRole('heading', { name: 'Security & Recovery' })).toBeVisible();
-  await expect(page.getByText('Passkey-only login')).toBeVisible();
+  await page.getByRole('button', { name: 'Security', exact: true }).click();
+  const securityRegion = page.getByRole('region', { name: 'Security settings' });
+  await expect(page.getByRole('heading', { name: 'Security', exact: true })).toBeVisible();
+  await expect(page.getByText('Passkey only')).toBeVisible();
 
   await page.getByRole('button', { name: 'Back to settings menu' }).click();
   await expect(securityRegion).toHaveClass(/argus-pane-back-exit/);
@@ -68,58 +68,18 @@ test('privacy switches persist across section changes', async ({ page }) => {
   await expect(reopened.getByRole('switch', { name: 'Read receipts' })).not.toBeChecked();
 });
 
-test('security recovery keeps the recovery-file import path available', async ({ page }) => {
+test('security section shows passkey-only unlock (no recovery surface)', async ({ page }) => {
   await page.goto('/chat');
   await page.getByRole('button', { name: 'Open settings' }).click();
 
   const dialog = page.getByRole('dialog', { name: 'Settings' });
-  await dialog.getByRole('button', { name: 'Security & Recovery' }).click();
-  await dialog.getByRole('button', { name: 'Restore on this device' }).click();
+  await dialog.getByRole('button', { name: 'Security', exact: true }).click();
 
-  await expect(dialog.getByText('past message history is not recovered')).toBeVisible();
-  // Demo mode has no signed-in profile, so the server-fetch path is hidden and the file picker
-  // (the always-available fallback) is shown.
-  await expect(dialog.getByText('Or choose your recovery file')).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Replace this device' })).toBeVisible();
-});
-
-test('security recovery reminder is local and dismissible', async ({ page }) => {
-  await page.goto('/chat');
-  await page.getByRole('button', { name: 'Open settings' }).click();
-
-  const dialog = page.getByRole('dialog', { name: 'Settings' });
-  await dialog.getByRole('button', { name: 'Security & Recovery' }).click();
-
-  const reminder = dialog.getByText('Set up recovery before you rely on this device');
-  await expect(reminder).toBeVisible();
-
-  await dialog.getByRole('button', { name: 'Dismiss reminder' }).click();
-  await expect(reminder).toBeHidden();
-
-  await dialog.getByRole('button', { name: 'Privacy' }).click();
-  await dialog.getByRole('button', { name: 'Security & Recovery' }).click();
-  await expect(reminder).toBeHidden();
-});
-
-test('security recovery shows passphrase strength while creating backup', async ({ page }) => {
-  await page.goto('/chat');
-  await page.getByRole('button', { name: 'Open settings' }).click();
-
-  const dialog = page.getByRole('dialog', { name: 'Settings' });
-  await dialog.getByRole('button', { name: 'Security & Recovery' }).click();
-
-  const strength = dialog.getByRole('meter', { name: 'Recovery passphrase strength' });
-  await expect(strength).toHaveAttribute('aria-valuenow', '0');
-
-  const passphrase = dialog.getByLabel('Recovery passphrase', { exact: true });
-
-  await passphrase.fill('short');
-  await expect(strength).toHaveAttribute('aria-valuenow', '1');
-  await expect(dialog.getByText('Weak', { exact: true })).toBeVisible();
-
-  await passphrase.fill('longer-Passphrase-42!');
-  await expect(strength).toHaveAttribute('aria-valuenow', '4');
-  await expect(dialog.getByText('Strong', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('Passkey only')).toBeVisible();
+  await expect(dialog.getByText('Your passkey (no password)')).toBeVisible();
+  // The recovery-file / passphrase surface is gone — no restore controls.
+  await expect(dialog.getByRole('button', { name: 'Restore on this device' })).toHaveCount(0);
+  await expect(dialog.getByText('Recovery passphrase')).toHaveCount(0);
 });
 
 test('settings sections preserve defaults after component split', async ({ page }) => {

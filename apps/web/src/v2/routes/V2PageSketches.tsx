@@ -285,14 +285,14 @@ export function V2SettingsSketch() {
 }
 
 export function V2SecuritySketch() {
-  const [activePanel, setActivePanel] = useState<'recovery' | 'verification'>('recovery');
+  const [activePanel, setActivePanel] = useState<'unlock' | 'verification'>('unlock');
   const securityPanels = {
-    recovery: {
-      title: 'Restore on this device',
-      body: 'Recovery stays local-first: decrypt the backup in-browser and never send the passphrase to the server.',
+    unlock: {
+      title: 'Unlocked by your passkey',
+      body: 'The keystore is sealed under a per-passkey PRF key — no passphrase, nothing to back up. A lost passkey means a fresh start with a new registration code from the admin.',
       icon: FileKey,
       tone: 'text-teal-200',
-      facts: ['Local decrypt only', 'Recovery file available', 'No plaintext leaves the browser'],
+      facts: ['Passkey PRF unlock', 'No recovery file', 'No plaintext leaves the browser'],
     },
     verification: {
       title: 'Safety numbers',
@@ -305,11 +305,11 @@ export function V2SecuritySketch() {
   const panel = securityPanels[activePanel];
   const PanelIcon = panel.icon;
   const securityModes: Array<{
-    id: 'recovery' | 'verification';
+    id: 'unlock' | 'verification';
     label: string;
     icon: LucideIcon;
   }> = [
-    { id: 'recovery', label: 'Recovery', icon: FileKey },
+    { id: 'unlock', label: 'Unlock', icon: FileKey },
     { id: 'verification', label: 'Verification', icon: Shield },
   ];
 
@@ -317,15 +317,15 @@ export function V2SecuritySketch() {
     <V2SketchShell
       active="security"
       title="Security"
-      subtitle="Recovery, verification, and device trust for the existing /security route."
+      subtitle="Passkey unlock, verification, and device trust for the existing /security route."
       aside={
         <V2AsidePanel title="Security states">
           <V2FactRow
             label="Passkey login"
-            value="Authentication remains delegated to Zitadel."
+            value="Discoverable passkey, no password."
             tone="verified"
           />
-          <V2FactRow label="Recovery file" value="Available for this browser." />
+          <V2FactRow label="Device unlock" value="Passkey PRF — no recovery file." />
         </V2AsidePanel>
       }
     >

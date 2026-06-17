@@ -2,8 +2,8 @@ import {
   MlsEngine,
   deserializeInvite,
   deviceSignaturePublicKeyB64,
+  importUnlockKey,
   serializeKeyPackage,
-  type Argon2Params,
   type DeviceKeys,
 } from '@argus/crypto';
 import { IDBFactory } from 'fake-indexeddb';
@@ -35,20 +35,21 @@ const claimAll = vi.mocked(claimAllKeyPackages);
 const create = vi.mocked(createConversation);
 const deliver = vi.mocked(deliverWelcome);
 const post = vi.mocked(postCommit);
-const FAST: Argon2Params = { m: 8192, t: 2, p: 1 };
 
 describe('ConversationManager', () => {
   let engine: MlsEngine;
   let me: DeviceKeys;
   let peer: DeviceKeys;
   let keystore: DeviceKeystore;
+  let key: CryptoKey;
 
   beforeEach(async () => {
     globalThis.indexedDB = new IDBFactory(); // fresh sealed group-state store per test
     engine = await MlsEngine.create();
     me = await engine.generateDeviceKeys('me');
     peer = await engine.generateDeviceKeys('peer');
-    keystore = await DeviceKeystore.open(engine, FAST);
+    keystore = await DeviceKeystore.open(engine);
+    key = await importUnlockKey(new Uint8Array(32).fill(1));
     claim.mockReset();
     claimAll.mockReset();
     create.mockReset();
@@ -68,12 +69,7 @@ describe('ConversationManager', () => {
   });
 
   it('prepare() claims + derives the safety number but creates NOTHING server-side (the #20 gate)', async () => {
-    const mgr = new ConversationManager(
-      me,
-      'me-user',
-      keystore,
-      await keystore.deriveSessionKey('pw'),
-    );
+    const mgr = new ConversationManager(me, 'me-user', keystore, key);
     const pending = await mgr.prepare('peer-user');
 
     expect(claim).toHaveBeenCalledWith('peer-user');
@@ -89,12 +85,7 @@ describe('ConversationManager', () => {
   });
 
   it('confirm() creates the conversation and delivers a Welcome the peer can actually join', async () => {
-    const mgr = new ConversationManager(
-      me,
-      'me-user',
-      keystore,
-      await keystore.deriveSessionKey('pw'),
-    );
+    const mgr = new ConversationManager(me, 'me-user', keystore, key);
     const pending = await mgr.prepare('peer-user');
     const session = await mgr.confirm(pending);
 
@@ -126,12 +117,7 @@ describe('ConversationManager', () => {
       persistedDuringDeliver = await keystore.hasConversationState(me, 'conv-1');
       return { welcomeId: 'welcome-1' };
     });
-    const mgr = new ConversationManager(
-      me,
-      'me-user',
-      keystore,
-      await keystore.deriveSessionKey('pw'),
-    );
+    const mgr = new ConversationManager(me, 'me-user', keystore, key);
     await mgr.confirm(await mgr.prepare('peer-user'));
 
     expect(persistedDuringDeliver).toBe(false);
@@ -145,10 +131,8 @@ describe('ConversationManager', () => {
       peer,
       deserializeInvite({ welcome: body.welcome, ratchetTree: body.ratchetTree }),
     );
-    const reopened = await DeviceKeystore.open(engine, FAST);
-    const restored = (
-      await reopened.loadConversations(me, 'pw', await reopened.deriveSessionKey('pw'))
-    ).get('conv-1');
+    const reopened = await DeviceKeystore.open(engine);
+    const restored = (await reopened.loadConversations(me, key)).get('conv-1');
     if (!restored) throw new Error('expected the started conversation to be persisted');
     expect(await peerConversation.decrypt(await restored.encrypt('after reload'))).toBe(
       'after reload',
@@ -157,20 +141,13 @@ describe('ConversationManager', () => {
 
   it('confirm() persists NOTHING when Welcome delivery fails (no rehydrated phantom conversation)', async () => {
     deliver.mockRejectedValue(new Error('delivery 500'));
-    const mgr = new ConversationManager(
-      me,
-      'me-user',
-      keystore,
-      await keystore.deriveSessionKey('pw'),
-    );
+    const mgr = new ConversationManager(me, 'me-user', keystore, key);
 
     await expect(mgr.confirm(await mgr.prepare('peer-user'))).rejects.toThrow();
 
     // No durable state → the next unlock won't rehydrate a phantom "New contact" whose peer was never added.
     expect(await keystore.hasConversationState(me, 'conv-1')).toBe(false);
-    expect(
-      (await keystore.loadConversations(me, 'pw', await keystore.deriveSessionKey('pw'))).size,
-    ).toBe(0);
+    expect((await keystore.loadConversations(me, key)).size).toBe(0);
   });
 
   describe('B2 multi-device self-add', () => {
@@ -205,7 +182,7 @@ describe('ConversationManager', () => {
         me,
         'me-user',
         keystore,
-        await keystore.deriveSessionKey('pw'),
+        key,
         'my-server-id', // selfDeviceId — causes claimAllKeyPackages to run
       );
       const session = await mgr.confirm(await mgr.prepare('peer-user'));
@@ -234,13 +211,7 @@ describe('ConversationManager', () => {
     });
 
     it('confirm() peer can join from the multi-device Welcome', async () => {
-      const mgr = new ConversationManager(
-        me,
-        'me-user',
-        keystore,
-        await keystore.deriveSessionKey('pw'),
-        'my-server-id',
-      );
+      const mgr = new ConversationManager(me, 'me-user', keystore, key, 'my-server-id');
       await mgr.confirm(await mgr.prepare('peer-user'));
 
       const body = post.mock.calls[0]![1];
@@ -262,7 +233,7 @@ describe('ConversationManager', () => {
         me,
         'me-user',
         keystore,
-        await keystore.deriveSessionKey('pw'),
+        key,
         // selfDeviceId omitted → single-device path
       );
       await mgr.confirm(await mgr.prepare('peer-user'));
@@ -301,13 +272,7 @@ describe('ConversationManager', () => {
         return [];
       });
 
-      const mgr = new ConversationManager(
-        me,
-        'me-user',
-        keystore,
-        await keystore.deriveSessionKey('pw'),
-        'my-server-id',
-      );
+      const mgr = new ConversationManager(me, 'me-user', keystore, key, 'my-server-id');
       const pending = await mgr.prepare('peer-user');
 
       // prepare() must compute per-device safety numbers for peer secondary devices.

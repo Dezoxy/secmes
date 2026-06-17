@@ -1,4 +1,4 @@
-import { MlsEngine, type Argon2Params, type Conversation, type DeviceKeys } from '@argus/crypto';
+import { MlsEngine, importUnlockKey, type Conversation, type DeviceKeys } from '@argus/crypto';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -17,7 +17,6 @@ import {
 
 const send = vi.mocked(sendMessage);
 const fetch = vi.mocked(fetchMessages);
-const FAST: Argon2Params = { m: 8192, t: 2, p: 1 };
 
 /** A real 1:1: returns the self (alice) + peer (bob) conversations over a shared group. */
 async function pair(
@@ -53,12 +52,12 @@ describe('sendLiveMessage', () => {
   it('encrypts, persists the advanced state, then POSTs decryptable ciphertext', async () => {
     const engine = await MlsEngine.create();
     const { alice, aliceConv, bobConv } = await pair(engine);
-    const ks = await DeviceKeystore.open(engine, FAST);
+    const ks = await DeviceKeystore.open(engine);
+    const key = await importUnlockKey(new Uint8Array(32).fill(1));
     const deps: MessagingDeps = {
       keystore: ks,
       device: alice,
-      passphrase: 'pw',
-      sessionKey: await ks.deriveSessionKey('pw'),
+      sessionKey: key,
     };
     send.mockResolvedValue({ messageId: 'm1', createdAt: 't', deduplicated: false });
 
@@ -77,9 +76,7 @@ describe('sendLiveMessage', () => {
       attachments: [],
     });
     // The advanced ratchet was persisted: a reload continues the SAME ratchet (peer decrypts its next msg).
-    const reloaded = (await ks.loadConversations(alice, 'pw', await ks.deriveSessionKey('pw'))).get(
-      'c1',
-    );
+    const reloaded = (await ks.loadConversations(alice, key)).get('c1');
     expect(reloaded).toBeDefined();
     expect(await bobConv.decrypt(await reloaded!.encrypt('again'))).toBe('again');
   });
@@ -87,12 +84,12 @@ describe('sendLiveMessage', () => {
   it('always wraps in the envelope — refs ride E2E, and envelope-shaped user text stays unambiguous', async () => {
     const engine = await MlsEngine.create();
     const { alice, aliceConv, bobConv } = await pair(engine);
-    const ks = await DeviceKeystore.open(engine, FAST);
+    const ks = await DeviceKeystore.open(engine);
+    const key = await importUnlockKey(new Uint8Array(32).fill(1));
     const deps: MessagingDeps = {
       keystore: ks,
       device: alice,
-      passphrase: 'pw',
-      sessionKey: await ks.deriveSessionKey('pw'),
+      sessionKey: key,
     };
     send.mockResolvedValue({ messageId: 'm1', createdAt: 't', deduplicated: false });
 
@@ -134,20 +131,18 @@ describe('sendLiveMessage', () => {
   it('persists the advanced state BEFORE the POST (a failed POST still leaves it saved)', async () => {
     const engine = await MlsEngine.create();
     const { alice, aliceConv } = await pair(engine);
-    const ks = await DeviceKeystore.open(engine, FAST);
+    const ks = await DeviceKeystore.open(engine);
+    const key = await importUnlockKey(new Uint8Array(32).fill(1));
     const deps: MessagingDeps = {
       keystore: ks,
       device: alice,
-      passphrase: 'pw',
-      sessionKey: await ks.deriveSessionKey('pw'),
+      sessionKey: key,
     };
     send.mockRejectedValue(new Error('network'));
 
     await expect(sendLiveMessage(deps, 'c1', aliceConv, 'hi')).rejects.toThrow('network');
     // persist precedes send, so the state is saved even though the POST failed (no re-encrypt → nonce reuse).
-    expect(
-      (await ks.loadConversations(alice, 'pw', await ks.deriveSessionKey('pw'))).has('c1'),
-    ).toBe(true);
+    expect((await ks.loadConversations(alice, key)).has('c1')).toBe(true);
   });
 
   it('aborts the POST when persistence conflicts (a stale cross-tab instance)', async () => {
@@ -162,7 +157,7 @@ describe('sendLiveMessage', () => {
       'encrypt',
       'decrypt',
     ]);
-    const deps: MessagingDeps = { keystore: ks, device: alice, passphrase: 'pw', sessionKey };
+    const deps: MessagingDeps = { keystore: ks, device: alice, sessionKey };
 
     await expect(sendLiveMessage(deps, 'c1', aliceConv, 'hi')).rejects.toBeInstanceOf(
       GroupStateConflict,
@@ -181,12 +176,12 @@ describe('backfillConversation', () => {
   it('decrypts peer messages in order, skips own, persists, and advances the cursor', async () => {
     const engine = await MlsEngine.create();
     const { alice, aliceConv, bobConv } = await pair(engine);
-    const ks = await DeviceKeystore.open(engine, FAST);
+    const ks = await DeviceKeystore.open(engine);
+    const key = await importUnlockKey(new Uint8Array(32).fill(1));
     const deps: MessagingDeps = {
       keystore: ks,
       device: alice,
-      passphrase: 'pw',
-      sessionKey: await ks.deriveSessionKey('pw'),
+      sessionKey: key,
     };
 
     const b1 = toBase64(await bobConv.encrypt('hi from bob'));
@@ -207,21 +202,19 @@ describe('backfillConversation', () => {
     expect(result.messages.map((m) => m.serverId)).toEqual(['m1', 'm3']);
     expect(result.cursor).toBe('m3'); // advanced past the skipped own message too
     // The advanced receive state was persisted (a reload still decrypts bob's NEXT message).
-    const reloaded = (await ks.loadConversations(alice, 'pw', await ks.deriveSessionKey('pw'))).get(
-      'c1',
-    );
+    const reloaded = (await ks.loadConversations(alice, key)).get('c1');
     expect(await reloaded!.decrypt(await bobConv.encrypt('third'))).toBe('third');
   });
 
   it('resumes from the `after` cursor and skips an undecryptable message without failing the batch', async () => {
     const engine = await MlsEngine.create();
     const { alice, aliceConv, bobConv } = await pair(engine);
-    const ks = await DeviceKeystore.open(engine, FAST);
+    const ks = await DeviceKeystore.open(engine);
+    const key = await importUnlockKey(new Uint8Array(32).fill(1));
     const deps: MessagingDeps = {
       keystore: ks,
       device: alice,
-      passphrase: 'pw',
-      sessionKey: await ks.deriveSessionKey('pw'),
+      sessionKey: key,
     };
 
     const good = toBase64(await bobConv.encrypt('decryptable'));
@@ -242,13 +235,13 @@ describe('backfillConversation', () => {
     const engine = await MlsEngine.create();
     const { alice, aliceConv } = await pair(engine);
     const own = toBase64(await aliceConv.encrypt('mine'));
-    const ks = await DeviceKeystore.open(engine, FAST);
+    const ks = await DeviceKeystore.open(engine);
+    const key = await importUnlockKey(new Uint8Array(32).fill(1));
     const saveSpy = vi.spyOn(ks, 'saveConversationState');
     const deps: MessagingDeps = {
       keystore: ks,
       device: alice,
-      passphrase: 'pw',
-      sessionKey: await ks.deriveSessionKey('pw'),
+      sessionKey: key,
     };
     fetch.mockResolvedValueOnce({
       messages: [fetched('m1', 'alice-user', own)],
@@ -273,12 +266,12 @@ describe('receiveLiveMessage', () => {
   it('decrypts a peer push, persists, and returns it', async () => {
     const engine = await MlsEngine.create();
     const { alice, aliceConv, bobConv } = await pair(engine);
-    const ks = await DeviceKeystore.open(engine, FAST);
+    const ks = await DeviceKeystore.open(engine);
+    const key = await importUnlockKey(new Uint8Array(32).fill(1));
     const deps: MessagingDeps = {
       keystore: ks,
       device: alice,
-      passphrase: 'pw',
-      sessionKey: await ks.deriveSessionKey('pw'),
+      sessionKey: key,
     };
 
     const ct = toBase64(await bobConv.encrypt('live!'));
@@ -293,9 +286,7 @@ describe('receiveLiveMessage', () => {
     expect(got?.text).toBe('live!');
     expect(got?.serverId).toBe('m1');
     // Persisted: a reload continues the SAME ratchet (decrypts bob's next message).
-    const reloaded = (await ks.loadConversations(alice, 'pw', await ks.deriveSessionKey('pw'))).get(
-      'c1',
-    );
+    const reloaded = (await ks.loadConversations(alice, key)).get('c1');
     expect(await reloaded!.decrypt(await bobConv.encrypt('next'))).toBe('next');
   });
 
@@ -303,13 +294,13 @@ describe('receiveLiveMessage', () => {
     const engine = await MlsEngine.create();
     const { alice, aliceConv } = await pair(engine);
     const own = toBase64(await aliceConv.encrypt('mine'));
-    const ks = await DeviceKeystore.open(engine, FAST);
+    const ks = await DeviceKeystore.open(engine);
+    const key = await importUnlockKey(new Uint8Array(32).fill(1));
     const saveSpy = vi.spyOn(ks, 'saveConversationState');
     const deps: MessagingDeps = {
       keystore: ks,
       device: alice,
-      passphrase: 'pw',
-      sessionKey: await ks.deriveSessionKey('pw'),
+      sessionKey: key,
     };
 
     const got = await receiveLiveMessage(
@@ -327,13 +318,13 @@ describe('receiveLiveMessage', () => {
   it('returns null for an undecryptable push without persisting (no throw)', async () => {
     const engine = await MlsEngine.create();
     const { alice, aliceConv } = await pair(engine);
-    const ks = await DeviceKeystore.open(engine, FAST);
+    const ks = await DeviceKeystore.open(engine);
+    const key = await importUnlockKey(new Uint8Array(32).fill(1));
     const saveSpy = vi.spyOn(ks, 'saveConversationState');
     const deps: MessagingDeps = {
       keystore: ks,
       device: alice,
-      passphrase: 'pw',
-      sessionKey: await ks.deriveSessionKey('pw'),
+      sessionKey: key,
     };
 
     const got = await receiveLiveMessage(
