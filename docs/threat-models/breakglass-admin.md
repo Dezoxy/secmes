@@ -206,6 +206,15 @@ The caller's own session is also revoked — the caller must re-authenticate wit
 after rotation. This is by design; the cost of one extra login is acceptable for the assurance
 that no prior session can survive a rotation.
 
+**Access token invalidation**: Stateless JWTs have a 10-minute TTL and are not individually
+checked against `auth_sessions.revoked_at` in the normal auth path — revoking refresh tokens
+alone would leave an attacker with up to 10 minutes of admin access via an already-minted
+access token. `AdminGuard` closes this window: for Argus-minted tokens (those with a `sid`
+claim), the guard does a point lookup on `auth_sessions WHERE id = $sid` and rejects immediately
+if `revoked_at IS NOT NULL`. This check applies only to admin endpoints and adds one DB query
+per admin request (the guard already performs a role-check query, so the overhead is marginal).
+Regular user endpoints are not affected.
+
 ---
 
 ## `rotate()` credential lookup scope
