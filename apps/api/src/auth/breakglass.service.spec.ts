@@ -1,5 +1,7 @@
-import { writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { argon2idAsync } from '@noble/hashes/argon2.js';
@@ -24,8 +26,10 @@ const DB_URL = process.env['DATABASE_URL'];
 // The floor check (m≥8192, t≥2, p≥1) still validates.
 const TEST_PARAMS = { m: 8192, t: 2, p: 1 };
 const TEST_PASS = 'TestBreakglass12!';
-const TEST_HASH_FILE = '/tmp/argus-test-admin-hash.json';
 const CTX = { ip: '127.0.0.1', userAgent: 'vitest' };
+
+let TEST_HASH_DIR: string;
+let TEST_HASH_FILE: string;
 
 async function makeHashFile(password: string): Promise<void> {
   const salt = randomBytes(16);
@@ -67,6 +71,10 @@ describe.skipIf(!DB_URL)('BreakglassService (DB integration)', () => {
     await sql`delete from auth_sessions where tenant_id = ${DEFAULT_TENANT_ID}`;
     await sql`delete from user_tenant_index where tenant_id = ${DEFAULT_TENANT_ID}`;
 
+    // Unique temp dir per test run — avoids TOCTOU / symlink issues with a fixed /tmp path (CWE-377).
+    TEST_HASH_DIR = mkdtempSync(join(tmpdir(), 'argus-test-'));
+    TEST_HASH_FILE = join(TEST_HASH_DIR, 'admin-hash.json');
+
     // Write hash file and provision the service.
     await makeHashFile(TEST_PASS);
     process.env['ADMIN_BOOTSTRAP_HASH_FILE'] = TEST_HASH_FILE;
@@ -89,6 +97,9 @@ describe.skipIf(!DB_URL)('BreakglassService (DB integration)', () => {
       await sql.end({ timeout: 5 });
     }
     delete process.env['ADMIN_BOOTSTRAP_HASH_FILE'];
+    if (TEST_HASH_DIR) {
+      rmSync(TEST_HASH_DIR, { recursive: true, force: true });
+    }
   });
 
   it('bootstrap is idempotent — second onModuleInit does not throw', async () => {
