@@ -170,6 +170,36 @@ describe.skipIf(!DB_URL)('BreakglassService (DB integration)', () => {
     await svc.rotate(user_id, newPass, TEST_PASS, CTX);
   });
 
+  it('rotate: revokes all active sessions for the user', async () => {
+    await sql`update admin_credentials set failed_attempts = 0, locked_until = null where tenant_id = ${DEFAULT_TENANT_ID}`;
+    const [credR] = await sql<{ user_id: string }[]>`
+      select user_id from admin_credentials where tenant_id = ${DEFAULT_TENANT_ID}
+    `;
+    const user_id = credR!.user_id;
+
+    // Create an active session by logging in.
+    await svc.login('admin', TEST_PASS, CTX);
+    const [before] = await sql<{ cnt: string }[]>`
+      select count(*) as cnt from auth_sessions
+      where user_id = ${user_id} and revoked_at is null
+    `;
+    expect(Number(before!.cnt)).toBeGreaterThan(0);
+
+    // Rotate the password — must revoke all active sessions.
+    const newPass = 'RotatedForRevoke456!';
+    await svc.rotate(user_id, TEST_PASS, newPass, CTX);
+
+    const [after] = await sql<{ cnt: string }[]>`
+      select count(*) as cnt from auth_sessions
+      where user_id = ${user_id} and revoked_at is null
+    `;
+    expect(Number(after!.cnt)).toBe(0);
+
+    // Rotate back so subsequent tests still work.
+    await sql`update admin_credentials set failed_attempts = 0, locked_until = null where tenant_id = ${DEFAULT_TENANT_ID}`;
+    await svc.rotate(user_id, newPass, TEST_PASS, CTX);
+  });
+
   it('rotate: wrong current password increments the shared lockout counter', async () => {
     await sql`update admin_credentials set failed_attempts = 0, locked_until = null where tenant_id = ${DEFAULT_TENANT_ID}`;
     const [cred2] = await sql<{ user_id: string }[]>`

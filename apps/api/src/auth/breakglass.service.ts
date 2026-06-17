@@ -132,6 +132,22 @@ export class BreakglassService implements OnModuleInit {
   }
 
   private async bootstrapAdmin(hash: BootstrapHash): Promise<void> {
+    // Pre-flight: if the credential row already exists, we're done. Without this check the insert
+    // loop would try to insert a users row first; that hits users_tenant_display_name_idx (unique
+    // on display_name per tenant) with 23505 before ever reaching the admin_credentials guard,
+    // leaving provisioned=false even though the credential is present and valid.
+    const existing = await withTenant(DEFAULT_TENANT_ID, async (tx) => {
+      return tx
+        .select({ id: schema.adminCredentials.id })
+        .from(schema.adminCredentials)
+        .limit(1)
+        .then((r) => r[0] ?? null);
+    });
+    if (existing) {
+      this.logger.log('breakglass: admin credentials already bootstrapped (idempotent)');
+      return;
+    }
+
     // Retry loop handles the extremely rare case where generateArgusId() collides with an
     // existing argus_id — matches the collision-detection pattern in webauthn.service.ts.
     for (let attempt = 0; attempt < 10; attempt++) {
@@ -142,10 +158,16 @@ export class BreakglassService implements OnModuleInit {
         return;
       } catch (err) {
         if (isArgusIdCollision(err)) continue;
-        // 23505 on admin_credentials_tenant_username_idx = already bootstrapped on a prior boot.
+        // Two pods racing: one wins the users insert, the other hits 23505 on either the
+        // users_tenant_display_name_idx or admin_credentials_tenant_username_idx — both are
+        // idempotent signals that the credential now exists.
         const e = err as { code?: string; constraint_name?: string; constraint?: string };
         const constraint = String(e.constraint_name ?? e.constraint ?? '');
-        if (e.code === '23505' && constraint.includes('admin_credentials')) {
+        if (
+          e.code === '23505' &&
+          (constraint.includes('admin_credentials') ||
+            constraint === 'users_tenant_display_name_idx')
+        ) {
           this.logger.log('breakglass: admin credentials already bootstrapped (idempotent)');
           return;
         }
@@ -375,6 +397,10 @@ export class BreakglassService implements OnModuleInit {
         })
         .where(eq(schema.adminCredentials.id, row.id));
     });
+
+    // Revoke all active sessions for the breakglass user so a compromised-then-rotated
+    // credential cannot be kept alive via still-valid refresh tokens.
+    await this.sessions.revokeSession(DEFAULT_TENANT_ID, { userId });
 
     await this.audit.record(DEFAULT_TENANT_ID, {
       eventType: 'breakglass.rotated',

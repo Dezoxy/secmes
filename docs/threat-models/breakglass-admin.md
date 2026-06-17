@@ -20,6 +20,8 @@ machinery. The credential is seeded from `ADMIN_BOOTSTRAP_HASH_FILE` (Key Vault 
 | Lockout-DoS via rotate | `rotate` checks `locked_until` before KDF — same as login |
 | Bootstrap bricks the API | `ADMIN_BOOTSTRAP_HASH_FILE` is OPTIONAL; absent = 503, not boot failure |
 | Attacker rotates the key via stolen session | `rotate` requires `currentPassword` (re-auth gate) |
+| Stolen session survives after password rotation | `rotate` revokes all active sessions for the breakglass user |
+| API restart with existing credential → 503 | Pre-flight SELECT in `bootstrapAdmin()` detects existing credential before attempting insert |
 | Lockout during an incident locks out the operator | Non-breakglass SQL unlock runbook (see below) |
 | Session is content-capable | Server is crypto-blind (invariant #1); admin sessions see only metadata |
 
@@ -175,6 +177,25 @@ SQL eliminates this race without any application-level locking.
 
 ---
 
+## Session revocation on rotate
+
+`POST /auth/breakglass/rotate` stores the new password hash and then calls
+`SessionTokenService.revokeSession(DEFAULT_TENANT_ID, { userId })`, which sets `revoked_at`
+on **all active `auth_sessions` rows for the breakglass user** in a single UPDATE.
+
+**Why**: The threat scenario for rotation is credential compromise. If an attacker obtained
+the old password and logged in before rotation, they hold a valid refresh token that would
+otherwise remain alive for the full 30-day session lifetime. Revoking all sessions at rotation
+time closes that window: the attacker's refresh token is invalidated, and their next refresh
+attempt returns 401. The legitimate operator must log in again with the new password, which
+is the expected and correct outcome of a post-compromise credential rotation.
+
+The caller's own session is also revoked — the caller must re-authenticate with the new password
+after rotation. This is by design; the cost of one extra login is acceptable for the assurance
+that no prior session can survive a rotation.
+
+---
+
 ## `rotate()` credential lookup scope
 
 `rotate()` queries `admin_credentials WHERE user_id = $userId`, where `userId` comes from the
@@ -202,11 +223,17 @@ transaction:
 A crash before the tx commits leaves nothing; the next boot re-attempts cleanly. A crash after
 commit but before `onModuleInit` returns sets `this.provisioned = false` — a harmless no-op
 because the data is already in the DB and the next boot will detect the existing credential row
-via the `23505` on `admin_credentials_tenant_username_idx` and skip silently.
+via the pre-flight SELECT and return early.
 
-The `admin_credentials_tenant_username_idx` unique index acts as the bootstrap singleton guard:
-a second bootstrap attempt in the same tenant hits 23505 on that index and is treated as
-"already bootstrapped, no-op."
+**Idempotency guard order matters**: the `users` insert executes before the `admin_credentials`
+insert within the tx. On restart with existing data, the `users_tenant_display_name_idx` unique
+index (enforcing one display name per tenant) would fire first with a `23505` before the
+`admin_credentials_tenant_username_idx` guard is reached — leaving `provisioned=false` even
+though the credential is present. The fix is a pre-flight `SELECT FROM admin_credentials`
+before the insert loop; if the credential row exists, `onModuleInit` logs and exits immediately.
+The `23505` catches in the insert loop remain as a race-condition guard for two pods starting
+simultaneously: whichever pod loses the insert race is caught by either the `users` or
+`admin_credentials` constraint, both treated as idempotent.
 
 ---
 
