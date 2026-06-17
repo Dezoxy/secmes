@@ -22,8 +22,9 @@ import { generateArgusId, isArgusIdCollision } from '../users/argus-id.js';
 import { AuditService } from '../audit/audit.service.js';
 import { type MintedSession, SessionTokenService } from './session-token.service.js';
 
-// Fixed single-tenant UUID — matches DEFAULT_TENANT_ID in webauthn.service.ts.
-export const DEFAULT_TENANT_ID = '00000000-0000-0000-0000-000000000001';
+// Fixed single-tenant UUID — matches DEFAULT_TENANT_ID in webauthn.service.ts. Must be a valid
+// RFC-4122 UUID (version + variant nibbles) so it passes the contracts' strict z.string().uuid().
+export const DEFAULT_TENANT_ID = '00000000-0000-4000-8000-000000000001';
 
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15-minute flat window

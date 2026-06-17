@@ -31,9 +31,10 @@ import type { MintedSession } from './session-token.service.js';
 import { SessionTokenService } from './session-token.service.js';
 import { AuditService } from '../audit/audit.service.js';
 
-// Fixed single-tenant UUID — all Phase 2 passkey users live here.
+// Fixed single-tenant UUID — all Phase 2 passkey users live here. Must be a valid RFC-4122 UUID
+// (version + variant nibbles) so it passes the contracts' strict z.string().uuid() on /me etc.
 // See docs/threat-models/registration-and-tenancy.md §T6.
-export const DEFAULT_TENANT_ID = '00000000-0000-0000-0000-000000000001';
+export const DEFAULT_TENANT_ID = '00000000-0000-4000-8000-000000000001';
 
 const MAX_ATTEMPTS = 5;
 
