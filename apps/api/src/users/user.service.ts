@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { and, count, eq, ne, sql } from 'drizzle-orm';
+import { and, count, eq, isNull, ne, or, sql } from 'drizzle-orm';
 import type { TenantPlan } from '@argus/contracts';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
@@ -158,7 +158,10 @@ export class UserService {
         .select(DIRECTORY_SELECTION)
         .from(schema.users)
         .where(
-          and(eq(schema.users.status, 'active'), ne(schema.users.displayName, 'breakglass-admin')),
+          and(
+            eq(schema.users.status, 'active'),
+            or(isNull(schema.users.displayName), ne(schema.users.displayName, 'breakglass-admin')),
+          ),
         ) // don't surface deactivated/suspended/system members
         .orderBy(schema.users.email)
         .limit(limit),
@@ -202,7 +205,10 @@ export class UserService {
         .select({ count: count() })
         .from(schema.users)
         .where(
-          and(eq(schema.users.status, 'active'), ne(schema.users.displayName, 'breakglass-admin')),
+          and(
+            eq(schema.users.status, 'active'),
+            or(isNull(schema.users.displayName), ne(schema.users.displayName, 'breakglass-admin')),
+          ),
         );
       return [plan, cnt] as const;
     });

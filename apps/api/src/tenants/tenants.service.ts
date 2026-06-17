@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { and, count, eq, isNull, ne } from 'drizzle-orm';
+import { and, count, eq, isNull, ne, or } from 'drizzle-orm';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 
@@ -378,7 +378,7 @@ export class TenantsService {
           and(
             eq(schema.users.tenantId, auth.tenantId),
             eq(schema.users.status, 'active'),
-            ne(schema.users.displayName, 'breakglass-admin'),
+            or(isNull(schema.users.displayName), ne(schema.users.displayName, 'breakglass-admin')),
           ),
         )
         .orderBy(schema.users.createdAt),

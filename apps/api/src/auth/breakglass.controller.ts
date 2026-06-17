@@ -139,6 +139,7 @@ export class BreakglassController {
   async rotate(
     @Body(new ZodValidationPipe(BreakglassRotateRequestSchema)) body: BreakglassRotateRequest,
     @CurrentAuth() auth: VerifiedAuth,
+    @Res({ passthrough: true }) res: Response,
     @Req() req: Request,
     @Ip() ip: string,
   ): Promise<void> {
@@ -150,6 +151,15 @@ export class BreakglassController {
     await this.breakglass.rotate(auth.userId, body.currentPassword, body.newPassword, {
       ip,
       userAgent: String(req.headers['user-agent'] ?? ''),
+    });
+    // Clear the refresh cookie — rotate() revokes all sessions, so this token is already
+    // dead. Without clearing, the next refresh call would trigger reuse-detection and
+    // revoke the new session the operator just minted after re-authenticating.
+    res.clearCookie(COOKIE_NAME, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'strict',
+      path: REFRESH_COOKIE_PATH,
     });
   }
 }
