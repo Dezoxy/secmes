@@ -40,16 +40,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "caller is not an admin",
             "content": {
@@ -153,16 +143,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -303,16 +283,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "caller is not an admin",
             "content": {
@@ -433,16 +403,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -531,16 +491,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -659,16 +609,6 @@
           },
           "401": {
             "description": "invalid or expired invite code",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -953,16 +893,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -1076,16 +1006,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -1181,16 +1101,6 @@
           },
           "401": {
             "description": "Missing or invalid bearer token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1312,16 +1222,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -1427,16 +1327,6 @@
           },
           "401": {
             "description": "invalid credentials",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1561,16 +1451,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "caller does not hold a breakglass (Argus-minted) session",
             "content": {
@@ -1681,16 +1561,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1818,16 +1688,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1967,16 +1827,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -2083,16 +1933,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2212,16 +2052,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -2333,16 +2163,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -2443,16 +2263,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2642,16 +2452,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -2752,16 +2552,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2873,16 +2663,6 @@
           },
           "401": {
             "description": "Missing or invalid bearer token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3009,16 +2789,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -3119,16 +2889,6 @@
           },
           "401": {
             "description": "Missing or invalid bearer token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3254,16 +3014,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -3375,16 +3125,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3541,16 +3281,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -3660,16 +3390,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3788,16 +3508,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -3895,16 +3605,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4022,16 +3722,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4161,16 +3851,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4320,16 +4000,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -4452,16 +4122,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4626,16 +4286,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -4791,16 +4441,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -4932,16 +4572,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -5064,16 +4694,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -5187,16 +4807,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5334,16 +4944,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -5473,16 +5073,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5633,16 +5223,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -5778,16 +5358,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -5905,16 +5475,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -6024,16 +5584,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6162,16 +5712,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "Authenticated, but not permitted to perform this action.",
             "content": {
@@ -6275,16 +5815,6 @@
           },
           "401": {
             "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6400,16 +5930,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "caller is not an admin",
             "content": {
@@ -6511,16 +6031,6 @@
           },
           "401": {
             "description": "Missing or invalid bearer token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6640,16 +6150,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "caller is not an admin",
             "content": {
@@ -6753,16 +6253,6 @@
           },
           "401": {
             "description": "Missing or invalid bearer token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6882,16 +6372,6 @@
               }
             }
           },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
           "403": {
             "description": "cannot remove the last admin",
             "content": {
@@ -6995,16 +6475,6 @@
           },
           "401": {
             "description": "Missing or invalid bearer token.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
             "content": {
               "application/json": {
                 "schema": {

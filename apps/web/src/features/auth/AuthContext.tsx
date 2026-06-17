@@ -37,7 +37,7 @@ interface AuthState {
   login: () => Promise<void>;
   /** Revoke the current session. */
   logout: () => Promise<void>;
-  /** Re-fetch /me — call after createTenant or acceptInvite. */
+  /** Re-fetch /me — call after a profile change (e.g. display name / avatar update). */
   refreshProfile: () => Promise<void>;
   /**
    * Apply a token+profile obtained outside the normal login flow (registration, breakglass).
