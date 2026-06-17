@@ -137,6 +137,12 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
   }, [applySession]);
 
   const logout = useCallback(async (): Promise<void> => {
+    // Pre-refresh so the logout bearer is valid even after sleep/throttle.
+    // If the refresh cookie is already dead the catch is a no-op — the session
+    // is already gone server-side, so clearing local state is still correct.
+    await refreshSession()
+      .then(({ accessToken: t }) => setToken(t))
+      .catch(() => {});
     await logoutSession().catch(() => {});
     clearSession();
   }, [clearSession]);
