@@ -487,8 +487,9 @@ fi
 #         re-declared the rule yet silently failed to apply it would leave browser attachment upload broken with
 #         no signal but a user report. CORS is a B2 NATIVE-API setting (the S3-compatible API the stack uses
 #         elsewhere can't set it), so we call the native API with curl (the box has no `b2` CLI). The credential
-#         is a DEDICATED, bucket-RESTRICTED, CORS-only B2 app key (caps listBuckets,readBucketCors,
-#         writeBucketCors) fetched from Key Vault as a deploy-TRANSIENT secret — never persisted to
+#         is a DEDICATED, bucket-RESTRICTED, CORS-only B2 app key (caps listBuckets,writeBuckets — B2 has no
+#         granular CORS capability, so the bucket restriction is the control) fetched from Key Vault as a
+#         deploy-TRANSIENT secret — never persisted to
 #         /run/argus/secrets, never in env, never logged. The native API authenticates with keyId:applicationKey;
 #         the keyId (B2_CORS_KEY_ID) is NON-secret env (like S3_ACCESS_KEY_ID), the key is the KV secret.
 #         Idempotent: read current, write only on drift, re-verify. Activated only when B2_CORS_KEY_ID is set
@@ -497,6 +498,11 @@ fi
 B2_CORS_KEY_ID="${B2_CORS_KEY_ID:-}"
 ATTACHMENT_BUCKET="attachment-r8xq4m7z2p9n6k3v"
 B2_AUTH_URL="https://api.backblazeb2.com/b2api/v3/b2_authorize_account"
+# B2 canonicalizes CORS header NAMES to lowercase on storage (e.g. "ETag" -> "etag"). Lowercase the header
+# arrays on BOTH sides before comparing so a casing-only difference isn't mistaken for drift — otherwise the
+# post-write re-verify (live "etag" vs source "ETag") would FATAL on every deploy. sort_by(.corsRuleName) makes
+# the compare rule-order-independent too; `jq -S` already sorts object keys.
+B2_CORS_NORM='sort_by(.corsRuleName) | map(.allowedHeaders = ((.allowedHeaders // []) | map(ascii_downcase)) | .exposeHeaders = ((.exposeHeaders // []) | map(ascii_downcase)))'
 
 # Single B2 native-API call. $1 = url ; $2 = Authorization header VALUE (secret; passed as a function arg, not
 # argv of an exec'd process — same as kv_get — and fed to curl via --config stdin) ; $3 = optional JSON body
@@ -520,7 +526,7 @@ converge_attachment_cors() {
     log "FATAL: missing CORS source of truth ($cors_file)"
     return 1
   }
-  desired="$(jq -Sc '.' "$cors_file")" || {
+  desired="$(jq -Sc "$B2_CORS_NORM" "$cors_file")" || {
     log "FATAL: CORS source of truth is not valid JSON"
     return 1
   }
@@ -580,7 +586,7 @@ converge_attachment_cors() {
     log "FATAL: B2 list_buckets failed"
     return 1
   }
-  current="$(printf '%s' "$cur_resp" | jq -Sc '.buckets[0].corsRules // []')"
+  current="$(printf '%s' "$cur_resp" | jq -Sc "(.buckets[0].corsRules // []) | $B2_CORS_NORM")"
   cur_resp=""
   if [ "$current" = "$desired" ]; then
     authtok=""
@@ -599,7 +605,7 @@ converge_attachment_cors() {
     return 1
   }
   authtok=""
-  updated="$(printf '%s' "$upd_resp" | jq -Sc '.corsRules // []')"
+  updated="$(printf '%s' "$upd_resp" | jq -Sc "(.corsRules // []) | $B2_CORS_NORM")"
   upd_resp=""
   [ "$updated" = "$desired" ] || {
     log "FATAL: attachment CORS did not converge after update"

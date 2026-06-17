@@ -47,8 +47,9 @@ like the existing `S3_ACCESS_KEY_ID`; the **applicationKey** is the new Key Vaul
   response. **Note:** SSM/run-command stdout is surfaced into the CI log *outside* the on-box
   log scrubber, so the "no secret in stdout" discipline in `deploy.sh` is the actual control.
 - **Elevation of privilege:** the key is **bucket-restricted** to the attachment bucket and
-  carries **only** `listBuckets, readBucketCors, writeBucketCors` — no file capabilities and no
-  reach to any other bucket. `deploy.sh` additionally asserts at runtime that the authorized
+  carries **only** `listBuckets, writeBuckets` (B2 has no granular CORS capability — `writeBuckets`
+  is the coarsest needed, so the **bucket restriction** is the control) — no file capabilities and
+  no reach to any other bucket. `deploy.sh` additionally asserts at runtime that the authorized
   bucket name equals the attachment bucket and fails closed otherwise, so a mis-scoped key (e.g.
   account-wide, or pointed at the db-backup bucket) can never be used to write CORS anywhere.
 
