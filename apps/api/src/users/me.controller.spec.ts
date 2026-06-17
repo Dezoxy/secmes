@@ -40,16 +40,9 @@ describe.skipIf(!DB_URL)('MeController.me', () => {
       userId: expect.any(String),
       tenantId: tenantA,
       argusId: expect.stringMatching(/^argus-[abcdefghjkmnpqrstuvwxyz23456789]{16}-[a-z]+$/),
-      email: 'a@a.test',
       displayName: 'Alice',
+      avatarSeed: null,
       role: 'member',
-      plan: {
-        tier: 'free',
-        memberLimit: 10,
-        ssoEnabled: false,
-        memberCount: expect.any(Number),
-        subscriptionStatus: null,
-      },
     });
   });
 

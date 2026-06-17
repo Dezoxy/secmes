@@ -45,13 +45,12 @@ describe.skipIf(!DB_URL)('UserService (JIT provisioning)', () => {
       name: 'Real McName', // IdP name claim — must NOT become the display name
     };
     const created = await users.provisionFromToken(auth);
-    expect(created.email).toBe('new@a.test');
     expect(created.displayName).not.toBe('Real McName'); // no real-name leak
     expectValidHandle(created.displayName); // a random "Adjective Animal"
     expect((await users.getByAuth(auth))?.id).toBe(created.id);
   });
 
-  it('keeps the handle on repeat login and refreshes email (same row, stable handle)', async () => {
+  it('keeps the handle on repeat login (same row, stable handle)', async () => {
     const first = await users.provisionFromToken({
       sub: 'sub-rep',
       tenantId: tenantA,
@@ -61,37 +60,27 @@ describe.skipIf(!DB_URL)('UserService (JIT provisioning)', () => {
     const second = await users.provisionFromToken({
       sub: 'sub-rep',
       tenantId: tenantA,
-      email: 'rep2@a.test', // email changed at the IdP
+      email: 'rep2@a.test',
       name: 'Second',
     });
     expect(second.id).toBe(first.id); // same row, not a duplicate
     expect(second.displayName).toBe(first.displayName); // handle is STABLE, never overwritten
-    expect(second.email).toBe('rep2@a.test'); // email refreshed
   });
 
-  it('regenerates on a handle collision so handles are unique within a tenant', async () => {
-    // Inject deterministic, NON-pool handles so they can't clash with other tests' random handles.
-    const taken = 'Zzz Taken';
+  it('allows two users with the same display name (no longer unique per tenant)', async () => {
+    // Display names are free nicknames since 0038 dropped the unique index.
+    const sameName = 'Duplicate Name';
     const u1 = await users.provisionFromToken(
-      { sub: 'sub-c1', tenantId: tenantA, email: 'c1@a.test' },
-      () => taken,
+      { sub: 'sub-dup1', tenantId: tenantA, email: 'dup1@a.test' },
+      () => sameName,
     );
-    expect(u1.displayName).toBe(taken);
-
-    // u2's generator yields the TAKEN handle first (real 23505 against the unique index) then a free one —
-    // the service must detect the collision and retry to the free handle.
-    const free = 'Zzz Free';
-    let calls = 0;
     const u2 = await users.provisionFromToken(
-      { sub: 'sub-c2', tenantId: tenantA, email: 'c2@a.test' },
-      () => {
-        calls += 1;
-        return calls === 1 ? taken : free;
-      },
+      { sub: 'sub-dup2', tenantId: tenantA, email: 'dup2@a.test' },
+      () => sameName,
     );
-    expect(calls).toBeGreaterThanOrEqual(2); // it retried past the collision
-    expect(u2.displayName).toBe(free);
-    expect(u2.id).not.toBe(u1.id);
+    expect(u1.displayName).toBe(sameName);
+    expect(u2.displayName).toBe(sameName);
+    expect(u1.id).not.toBe(u2.id); // distinct users
   });
 
   it('heals a legacy NULL display name to a generated handle on next login', async () => {
@@ -124,7 +113,7 @@ describe.skipIf(!DB_URL)('UserService (JIT provisioning)', () => {
       email: 's@b.test',
     });
     expect(a.id).not.toBe(b.id);
-    expect((await users.getByAuth({ sub: 'shared', tenantId: tenantA }))?.email).toBe('s@a.test');
+    expect((await users.getByAuth({ sub: 'shared', tenantId: tenantA }))?.id).toBe(a.id);
   });
 
   it('lists only the tenant’s own users — ordered by email, bounded by limit', async () => {

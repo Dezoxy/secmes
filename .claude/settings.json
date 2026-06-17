@@ -39,6 +39,7 @@
       "Bash(gh run *)",
       "Bash(gh api *)",
       "Bash(.claude/hooks/review-status.sh *)",
+      "Bash(/Users/horvathtoom/src/secmes/.claude/hooks/review-status.sh *)",
 
       "Bash(docker compose *)",
 
@@ -61,6 +62,8 @@
 
       "Bash($HOME/.42crunch/bin/42c-ast *)",
       "Bash(/Users/horvathtoom/.42crunch/bin/42c-ast *)",
+      "Bash(~/.42crunch/bin/42c-ast *)",
+      "Bash(TRIAL_TOKEN=*)",
 
       "Bash(find *)",
       "Bash(ls *)",
@@ -75,11 +78,17 @@
       "Bash(sort *)",
       "Bash(cut *)",
       "Bash(uniq *)",
+      "Bash(diff *)",
+      "Bash(jq *)",
+      "Bash(which *)",
       "Bash(test *)",
       "Bash(mkdir *)",
       "Bash(rm -f *)",
       "Bash(curl *)",
       "Bash(python3 *)",
+      "Bash(npx prettier *)",
+      "Bash(prettier *)",
+      "Bash(sleep *)",
       "Bash(until *)",
       "Bash(wait)",
       "Bash(set +e)",

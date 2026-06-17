@@ -47,6 +47,7 @@ export const users = pgTable('users', {
   argusId: text('argus_id').notNull(),
   email: text('email'),
   displayName: text('display_name'),
+  avatarSeed: text('avatar_seed'),
   status: text('status').notNull().default('active'),
   role: text('role').notNull().default('member'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

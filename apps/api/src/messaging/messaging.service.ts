@@ -1139,4 +1139,39 @@ export class MessagingService {
       }));
     });
   }
+
+  /** List identity metadata for all members of a conversation.
+   * AUTHZ: caller must be a member (requireMembership throws 404 for non-members). */
+  async getConversationMembers(
+    auth: VerifiedAuth,
+    conversationId: string,
+  ): Promise<
+    Array<{
+      userId: string;
+      argusId: string;
+      displayName: string | null;
+      avatarSeed: string | null;
+    }>
+  > {
+    return withTenant(auth.tenantId, async (tx) => {
+      const callerId = await requireUser(tx, auth);
+      await requireMembership(tx, conversationId, callerId);
+      return tx
+        .select({
+          userId: schema.users.id,
+          argusId: schema.users.argusId,
+          displayName: schema.users.displayName,
+          avatarSeed: schema.users.avatarSeed,
+        })
+        .from(schema.conversationMembers)
+        .innerJoin(
+          schema.users,
+          and(
+            eq(schema.conversationMembers.userId, schema.users.id),
+            eq(schema.conversationMembers.tenantId, schema.users.tenantId),
+          ),
+        )
+        .where(eq(schema.conversationMembers.conversationId, conversationId));
+    });
+  }
 }
