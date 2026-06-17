@@ -259,7 +259,14 @@ export class TenantsService {
               .select({ count: count() })
               .from(schema.users)
               .where(
-                and(eq(schema.users.tenantId, invite.tenantId), eq(schema.users.status, 'active')),
+                and(
+                  eq(schema.users.tenantId, invite.tenantId),
+                  eq(schema.users.status, 'active'),
+                  or(
+                    isNull(schema.users.displayName),
+                    ne(schema.users.displayName, 'breakglass-admin'),
+                  ),
+                ),
               );
             if ((countRow?.count ?? 0) >= tenantRow.memberLimit) {
               throw new PaymentRequiredException(

@@ -22,7 +22,7 @@ import type {
   RegistrationResponseJSON,
 } from '@simplewebauthn/server';
 import { isoBase64URL, isoUint8Array } from '@simplewebauthn/server/helpers';
-import { and, count, eq, gt, isNull, lt, sql } from 'drizzle-orm';
+import { and, count, eq, gt, isNull, lt, ne, or, sql } from 'drizzle-orm';
 
 import { schema, withRouting, withTenant, withTenantAndInvite } from '../db/index.js';
 import { PaymentRequiredException } from '../common/http-exceptions.js';
@@ -269,6 +269,10 @@ export class WebAuthnService {
                   and(
                     eq(schema.users.tenantId, DEFAULT_TENANT_ID),
                     eq(schema.users.status, 'active'),
+                    or(
+                      isNull(schema.users.displayName),
+                      ne(schema.users.displayName, 'breakglass-admin'),
+                    ),
                   ),
                 );
               if ((countRow?.count ?? 0) >= tenantRow.memberLimit) {

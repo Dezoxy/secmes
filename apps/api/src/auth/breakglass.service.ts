@@ -241,11 +241,24 @@ export class BreakglassService implements OnModuleInit {
     // until the preceding request commits (after its KDF + counter update). The KDF runs inside
     // the transaction — holding the DB connection for ~1–3 s per attempt — which is acceptable
     // for an emergency endpoint that is rate-limited and expected to be used rarely.
+    // Pre-generate the refresh token pair before the credential tx. This way the auth_sessions
+    // INSERT can happen inside the same tx as the lockout-reset, closing the race where a
+    // concurrent rotate() revokes active sessions AFTER this login passes the KDF but BEFORE
+    // mintSession() creates the new session row (which would otherwise escape revocation).
+    const { refreshToken, refreshTokenHash, expiresAt } = this.sessions.generateRefreshToken();
+
     type LoginResult =
       | { outcome: 'not_found' }
       | { outcome: 'locked' }
       | { outcome: 'failed' }
-      | { outcome: 'ok'; userId: string; sub: string };
+      | {
+          outcome: 'ok';
+          userId: string;
+          sub: string;
+          sessionId: string;
+          refreshToken: string;
+          expiresAt: Date;
+        };
 
     const result = (await withTenant(DEFAULT_TENANT_ID, async (tx) => {
       const [row] = await tx
@@ -308,7 +321,33 @@ export class BreakglassService implements OnModuleInit {
         .set({ failedAttempts: 0, lockedUntil: null, updatedAt: new Date() })
         .where(eq(schema.adminCredentials.id, row.id));
 
-      return { outcome: 'ok' as const, userId: row.userId, sub: row.sub };
+      // Insert the session row inside the credential tx so a concurrent rotate() cannot revoke
+      // it before we return — the rotate() FOR UPDATE on admin_credentials blocks until this tx
+      // commits (including the auth_sessions INSERT below). See breakglass-admin.md §session-revocation-on-rotate.
+      await tx
+        .insert(schema.userTenantIndex)
+        .values({ sub: row.sub, tenantId: DEFAULT_TENANT_ID })
+        .onConflictDoNothing();
+      const [sessionRow] = await tx
+        .insert(schema.authSessions)
+        .values({
+          tenantId: DEFAULT_TENANT_ID,
+          userId: row.userId,
+          sub: row.sub,
+          refreshTokenHash,
+          expiresAt,
+        })
+        .returning({ id: schema.authSessions.id });
+      if (!sessionRow) throw new Error('failed to create session row');
+
+      return {
+        outcome: 'ok' as const,
+        userId: row.userId,
+        sub: row.sub,
+        sessionId: sessionRow.id,
+        refreshToken,
+        expiresAt,
+      };
     })) as LoginResult;
 
     // 'not_found': run dummy KDF for timing parity, then reject — identical response as wrong password.
@@ -354,11 +393,17 @@ export class BreakglassService implements OnModuleInit {
       userAgent: requestContext.userAgent || null,
     });
 
-    return this.sessions.mintSession({
-      tenantId: DEFAULT_TENANT_ID,
-      userId: result.userId,
-      sub: result.sub,
-    });
+    const accessToken = await this.sessions.signSession(
+      result.sub,
+      result.sessionId,
+      result.userId,
+    );
+    return {
+      accessToken,
+      refreshToken: result.refreshToken,
+      sessionId: result.sessionId,
+      expiresAt: result.expiresAt,
+    };
   }
 
   async rotate(
