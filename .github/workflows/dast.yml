@@ -1,6 +1,7 @@
 name: dast
-# Dynamic scans against the deployed staging API. Verify action versions + config before first run.
-# Vars: STAGING_URL. Secrets: X42C_API_TOKEN. Requires a reachable staging deployment.
+# Dynamic (DAST) scans. The OWASP ZAP baseline runs against the deployed staging API (vars.STAGING_URL).
+# The 42Crunch conformance scan is SELF-HOSTED: it boots the API + Postgres + Redis in the runner and
+# scans localhost via 42Crunch's free (freemium) DAST endpoint — no staging deployment or paid token needed.
 on:
   schedule:
     - cron: '0 2 * * *' # nightly
@@ -19,8 +20,44 @@ jobs:
         with:
           target: ${{ vars.STAGING_URL }}
 
+  # Self-hosted conformance/DAST scan: boot the API + Postgres + Redis here and scan localhost with
+  # 42Crunch's freemium DAST action (free stateless endpoint — no paid token). The API is crypto-blind
+  # and boots fine without OIDC/S3 (protected routes 401, attachment routes 503), which is fine for
+  # surface/conformance scanning. Nightly cadence keeps within the freemium usage limits.
   api-conformance-scan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write # upload scan findings to Code Scanning Alerts
+    services:
+      postgres:
+        image: postgres:16-alpine
+        # CI-throwaway DB: trust auth → no password literal. `argus` is the service superuser; app code
+        # drops to the non-bypass `argus_app` role per transaction.
+        env:
+          POSTGRES_USER: argus
+          POSTGRES_DB: argus
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U argus -d argus"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgres://argus@localhost:5432/argus
+      REDIS_URL: redis://localhost:6379
+      PORT: '3000'
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
@@ -29,11 +66,33 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+
+      - name: Build API + workspace deps
+        run: pnpm --filter @argus/api... build
+
+      - name: Apply DB migrations
+        run: pnpm --filter @argus/api db:migrate
+
       - name: Generate OpenAPI spec
         run: pnpm --filter @argus/api openapi
-      - name: 42Crunch Conformance Scan
-        uses: 42Crunch/api-security-scan-action@v1
+
+      - name: Start the API and wait for /healthz
+        working-directory: apps/api
+        run: |
+          set -euo pipefail
+          node dist/main.js &
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:3000/healthz >/dev/null 2>&1; then
+              echo "API is healthy"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::API did not become healthy in time"; exit 1
+
+      - name: 42Crunch freemium DAST conformance scan
+        uses: 42Crunch/api-security-scan-action-freemium@82a6d09a7f4565a5964b386c3399b85ac2fb5a17 # v1.4
         with:
-          api-token: ${{ secrets.X42C_API_TOKEN }}
-          target-url: ${{ vars.STAGING_URL }}
+          target-url: http://localhost:3000
+          api-definition: apps/api/openapi.json
+          upload-to-code-scanning: true
           log-level: info
