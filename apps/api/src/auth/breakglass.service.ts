@@ -335,6 +335,12 @@ export class BreakglassService implements OnModuleInit {
           .set({ failedAttempts: newCount, lockedUntil, updatedAt: new Date() })
           .where(eq(schema.adminCredentials.id, row.id));
       });
+      await this.audit.record(DEFAULT_TENANT_ID, {
+        eventType: 'breakglass.rotate_failed',
+        actorSub: row.sub,
+        ip: requestContext.ip || null,
+        userAgent: requestContext.userAgent || null,
+      });
       throw new UnauthorizedException('invalid current password');
     }
 

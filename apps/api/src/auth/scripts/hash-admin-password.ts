@@ -20,6 +20,11 @@ async function main(): Promise<void> {
     process.stderr.write('error: password must not be empty\n');
     process.exit(1);
   }
+  if (password.length < 12) {
+    process.stderr.write(
+      `warning: password is only ${password.length} characters — use at least 12 for a secure breakglass credential\n`,
+    );
+  }
 
   const salt = randomBytes(16);
   const hash = Buffer.from(
