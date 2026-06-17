@@ -71,6 +71,7 @@ locals {
   placeholder_secrets = {
     "argus-s3-secret-access-key" = "REPLACE-with-real-B2-secret-access-key"
     "argus-b2-app-key"           = "REPLACE-with-real-B2-backup-app-key"
+    "argus-b2-cors-app-key"      = "REPLACE-with-real-B2-CORS-app-key"
     "argus-tunnel-token"         = "REPLACE-with-real-cloudflare-tunnel-token"
     "argus-ghcr-token"           = "REPLACE-with-real-ghcr-read-packages-token"
     # Phase 1 session tokens: generate with `openssl genpkey -algorithm Ed25519` and store the PKCS8 PEM here.

@@ -481,6 +481,140 @@ if [ "$SKIP_GLITCHTIP" != 1 ]; then
   wait_running glitchtip-worker
 fi
 
+# --- 6c. Converge the attachment bucket's CORS to the checked-in source of truth
+#         (infra/b2/attachment-bucket-cors.json). Runs AFTER the stack is healthy so a B2 control-plane hiccup
+#         can't block an otherwise-good rollout — but FAILS the deploy if it can't converge: a deploy that
+#         re-declared the rule yet silently failed to apply it would leave browser attachment upload broken with
+#         no signal but a user report. CORS is a B2 NATIVE-API setting (the S3-compatible API the stack uses
+#         elsewhere can't set it), so we call the native API with curl (the box has no `b2` CLI). The credential
+#         is a DEDICATED, bucket-RESTRICTED, CORS-only B2 app key (caps listBuckets,readBucketCors,
+#         writeBucketCors) fetched from Key Vault as a deploy-TRANSIENT secret — never persisted to
+#         /run/argus/secrets, never in env, never logged. The native API authenticates with keyId:applicationKey;
+#         the keyId (B2_CORS_KEY_ID) is NON-secret env (like S3_ACCESS_KEY_ID), the key is the KV secret.
+#         Idempotent: read current, write only on drift, re-verify. Activated only when B2_CORS_KEY_ID is set
+#         (unset ⇒ feature not provisioned yet ⇒ skip with a log, mirroring the SKIP_* knobs — NOT a silent
+#         apply failure). See docs/threat-models/b2-cors-convergence.md. ---
+B2_CORS_KEY_ID="${B2_CORS_KEY_ID:-}"
+ATTACHMENT_BUCKET="attachment-r8xq4m7z2p9n6k3v"
+B2_AUTH_URL="https://api.backblazeb2.com/b2api/v3/b2_authorize_account"
+
+# Single B2 native-API call. $1 = url ; $2 = Authorization header VALUE (secret; passed as a function arg, not
+# argv of an exec'd process — same as kv_get — and fed to curl via --config stdin) ; $3 = optional JSON body
+# (non-secret: account/bucket ids + the public CORS rule).
+b2_api() {
+  if [ -n "${3:-}" ]; then
+    curl -fsS --max-time 15 --retry 3 --retry-connrefused --retry-delay 2 \
+      -H 'Content-Type: application/json' --data "$3" --config - "$1" <<EOF
+header = "Authorization: ${2}"
+EOF
+  else
+    curl -fsS --max-time 15 --retry 3 --retry-connrefused --retry-delay 2 --config - "$1" <<EOF
+header = "Authorization: ${2}"
+EOF
+  fi
+}
+
+converge_attachment_cors() {
+  local cors_file="$REPO_ROOT/infra/b2/attachment-bucket-cors.json" desired
+  [ -s "$cors_file" ] || {
+    log "FATAL: missing CORS source of truth ($cors_file)"
+    return 1
+  }
+  desired="$(jq -Sc '.' "$cors_file")" || {
+    log "FATAL: CORS source of truth is not valid JSON"
+    return 1
+  }
+
+  # Fetch the bucket-restricted CORS app key (deploy-transient; re-mint a fresh MI token — _tok was dropped
+  # after migrate). The key is folded straight into the Basic credential and blanked; never logged.
+  local tok key basic
+  tok="$(mi_token)"
+  [ -n "$tok" ] || {
+    log "FATAL: no Managed Identity token for CORS convergence"
+    return 1
+  }
+  key="$(kv_get argus-b2-cors-app-key "$tok")"
+  tok=""
+  [ -n "$key" ] || {
+    log "FATAL: empty B2 CORS app key from Key Vault (argus-b2-cors-app-key)"
+    return 1
+  }
+  # base64 wraps long input at 76 cols → strip newlines so the Authorization header value stays one line.
+  basic="$(printf '%s:%s' "$B2_CORS_KEY_ID" "$key" | base64 | tr -d '\n')"
+  key=""
+
+  # b2_authorize_account — Basic keyId:key. Capture only the non-secret routing fields + the (secret) auth
+  # token; never log the response.
+  local auth api_url authtok account_id bucket_id bucket_name
+  auth="$(b2_api "$B2_AUTH_URL" "Basic ${basic}")" || {
+    basic=""
+    log "FATAL: B2 authorize_account failed"
+    return 1
+  }
+  basic=""
+  api_url="$(printf '%s' "$auth" | jq -r '.apiInfo.storageApi.apiUrl // .apiUrl // empty')"
+  authtok="$(printf '%s' "$auth" | jq -r '.authorizationToken // empty')"
+  account_id="$(printf '%s' "$auth" | jq -r '.accountId // empty')"
+  bucket_id="$(printf '%s' "$auth" | jq -r '.apiInfo.storageApi.bucketId // .allowed.bucketId // empty')"
+  bucket_name="$(printf '%s' "$auth" | jq -r '.apiInfo.storageApi.bucketName // .allowed.bucketName // empty')"
+  auth=""
+  { [ -n "$api_url" ] && [ -n "$authtok" ] && [ -n "$account_id" ]; } || {
+    authtok=""
+    log "FATAL: B2 authorize_account returned an incomplete response"
+    return 1
+  }
+  # The key MUST be restricted to the attachment bucket. A missing bucketId (account-wide key) or a mismatch
+  # (key scoped to a DIFFERENT bucket, e.g. the db-backup bucket) is a least-privilege violation — fail closed
+  # rather than risk writing CORS to the wrong bucket.
+  { [ "$bucket_name" = "$ATTACHMENT_BUCKET" ] && [ -n "$bucket_id" ]; } || {
+    authtok=""
+    log "FATAL: B2 CORS key is not restricted to ${ATTACHMENT_BUCKET} (refusing to proceed)"
+    return 1
+  }
+
+  # Read current CORS (a bucket-restricted list returns just this bucket); compare normalized.
+  local cur_resp current ids_body
+  ids_body="$(jq -nc --arg a "$account_id" --arg b "$bucket_id" '{accountId:$a,bucketId:$b}')"
+  cur_resp="$(b2_api "${api_url}/b2api/v3/b2_list_buckets" "$authtok" "$ids_body")" || {
+    authtok=""
+    log "FATAL: B2 list_buckets failed"
+    return 1
+  }
+  current="$(printf '%s' "$cur_resp" | jq -Sc '.buckets[0].corsRules // []')"
+  cur_resp=""
+  if [ "$current" = "$desired" ]; then
+    authtok=""
+    log "attachment CORS already converged"
+    return 0
+  fi
+
+  # Drift — reapply, then re-verify from the update response.
+  log "attachment CORS drift detected — reapplying from infra/b2/attachment-bucket-cors.json"
+  local upd_body upd_resp updated
+  upd_body="$(jq -nc --arg a "$account_id" --arg b "$bucket_id" --slurpfile r "$cors_file" \
+    '{accountId:$a,bucketId:$b,corsRules:$r[0]}')"
+  upd_resp="$(b2_api "${api_url}/b2api/v3/b2_update_bucket" "$authtok" "$upd_body")" || {
+    authtok=""
+    log "FATAL: B2 update_bucket failed"
+    return 1
+  }
+  authtok=""
+  updated="$(printf '%s' "$upd_resp" | jq -Sc '.corsRules // []')"
+  upd_resp=""
+  [ "$updated" = "$desired" ] || {
+    log "FATAL: attachment CORS did not converge after update"
+    return 1
+  }
+  log "attachment CORS reapplied + verified"
+}
+
+if [ -n "$B2_CORS_KEY_ID" ]; then
+  log "converging attachment-bucket CORS"
+  converge_attachment_cors || exit 1
+else
+  log "B2_CORS_KEY_ID not set — skipping attachment-bucket CORS convergence (provision the key to enable)"
+fi
+
 # --- 7. Tidy up: drop dangling images (the GHCR login is cleared by the EXIT trap). ---
 docker image prune -f >/dev/null 2>&1 || true
 log "deploy complete + healthy (${IMAGE_TAG})"

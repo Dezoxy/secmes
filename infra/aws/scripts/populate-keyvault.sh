@@ -24,7 +24,7 @@
 # (so not in `ps`/`/proc/<pid>/cmdline`) — and are never logged (names + status only).
 #
 # Usage:
-#   export ARGUS_S3_SECRET_ACCESS_KEY=... ARGUS_B2_APP_KEY=... ARGUS_TUNNEL_TOKEN=... ARGUS_GHCR_TOKEN=...
+#   export ARGUS_S3_SECRET_ACCESS_KEY=... ARGUS_B2_APP_KEY=... ARGUS_B2_CORS_APP_KEY=... ARGUS_TUNNEL_TOKEN=... ARGUS_GHCR_TOKEN=...
 #   ./populate-keyvault.sh [--vault <name>] [--rotate]
 #   # vault name: --vault  >  $ARGUS_KEY_VAULT  >  `terraform -chdir=../terraform output -raw key_vault_name`
 set -euo pipefail
@@ -189,6 +189,7 @@ put_external() { # $1 = kv name ; $2 = env var name ; $3 = human prompt
 }
 put_external argus-s3-secret-access-key ARGUS_S3_SECRET_ACCESS_KEY "B2 attachments-bucket secret access key"
 put_external argus-b2-app-key ARGUS_B2_APP_KEY "B2 db-backups app key"
+put_external argus-b2-cors-app-key ARGUS_B2_CORS_APP_KEY "B2 attachment-bucket CORS app key (writeBucketCors, bucket-restricted)"
 put_external argus-tunnel-token ARGUS_TUNNEL_TOKEN "Cloudflare Tunnel token"
 put_external argus-ghcr-token ARGUS_GHCR_TOKEN "GitHub read:packages token (GHCR pull)"
 

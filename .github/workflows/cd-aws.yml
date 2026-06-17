@@ -130,12 +130,15 @@ jobs:
           S3_REGION: ${{ vars.S3_REGION }}
           S3_BUCKET: ${{ vars.S3_BUCKET }}
           S3_ACCESS_KEY_ID: ${{ vars.S3_ACCESS_KEY_ID }}
+          # Non-secret keyId for the bucket-restricted B2 CORS app key (the SECRET half is argus-b2-cors-app-key
+          # in Key Vault). Empty until provisioned → deploy.sh skips CORS convergence (opt-in).
+          B2_CORS_KEY_ID: ${{ vars.B2_CORS_KEY_ID }}
         run: |
           set -euo pipefail
           # Bundle what deploy.sh reads from the unpacked tree: compose + the secret-fetch unit + deploy.sh, PLUS
           # the observability config tree + the glitchtip entrypoint (deploy.sh step 1 cp's both even when the
-          # GlitchTip tier is skipped at runtime).
-          tar czf deploy-bundle.tgz compose.prod.yaml infra/stack/secrets infra/stack/deploy infra/stack/observability infra/stack/glitchtip
+          # GlitchTip tier is skipped at runtime) + the B2 CORS source-of-truth (deploy.sh step 6c reads it).
+          tar czf deploy-bundle.tgz compose.prod.yaml infra/stack/secrets infra/stack/deploy infra/stack/observability infra/stack/glitchtip infra/b2
           B64="$(base64 -w0 deploy-bundle.tgz)"
           GHCR_REGISTRY="ghcr.io/$(echo "$GHCR_OWNER" | tr '[:upper:]' '[:lower:]')"
           # single-quoted echos write LITERAL shell to runcmd.sh ($WORK expands on the box, not in the runner).
@@ -151,8 +154,8 @@ jobs:
             echo 'export ARGUS_TOKEN_SOURCE=arc ARGUS_SKIP_GLITCHTIP=1 ARGUS_COSIGN_WORKFLOW=.github/workflows/cd-aws.yml'
             printf 'export ARGUS_KEY_VAULT=%q IMAGE_TAG=%q GHCR_REGISTRY=%q GHCR_USER=%q GH_REPO=%q\n' \
               "$KEY_VAULT" "$IMAGE_TAG" "$GHCR_REGISTRY" "$GHCR_USER" "$GH_REPO"
-            printf 'export S3_ENDPOINT=%q S3_REGION=%q S3_BUCKET=%q S3_ACCESS_KEY_ID=%q\n' \
-              "$S3_ENDPOINT" "$S3_REGION" "$S3_BUCKET" "$S3_ACCESS_KEY_ID"
+            printf 'export S3_ENDPOINT=%q S3_REGION=%q S3_BUCKET=%q S3_ACCESS_KEY_ID=%q B2_CORS_KEY_ID=%q\n' \
+              "$S3_ENDPOINT" "$S3_REGION" "$S3_BUCKET" "$S3_ACCESS_KEY_ID" "$B2_CORS_KEY_ID"
             echo 'bash "$WORK/infra/stack/deploy/deploy.sh"'
             echo 'rm -rf "$WORK"'
           } >runcmd.sh
