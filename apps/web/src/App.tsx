@@ -8,7 +8,6 @@ import { prefersReducedMotion } from './lib/pref';
 import { ArgusAppIcon } from './features/brand/ArgusAppIcon';
 import { usePwaUpdate } from './features/pwa/PwaUpdateContext';
 import ChatRoute from './routes/ChatRoute';
-import InviteRoute from './routes/InviteRoute';
 
 const DevicesRoute = lazy(() => import('./routes/DevicesRoute'));
 const SecurityRoute = lazy(() => import('./routes/SecurityRoute'));
@@ -283,7 +282,6 @@ export default function App() {
           <Route path="/security" element={<SecurityRoute />} />
           <Route path="/devices" element={<DevicesRoute />} />
           <Route path="/storage" element={<StorageRoute />} />
-          <Route path="/invite" element={<InviteRoute />} />
           <Route path="/transparency" element={<TransparencyRoute />} />
           <Route path="/v2" element={<V2SketchRoute />} />
           <Route path="/v2/:sketchId" element={<V2SketchRoute />} />

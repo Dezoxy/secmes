@@ -67,18 +67,11 @@ SECRETS=(
 # OPTIONAL secrets — may be ABSENT on a first boot (provisioned later). Unlike the mandatory set, an absent
 # value is NOT fatal: we seed an EMPTY 0444 file so the compose secret mount still resolves, and the consumer
 # runs degraded until the value is provisioned (e.g. the GlitchTip DSN, only created after the GlitchTip UI is
-# up; the Stripe / operator / breakglass credentials, provisioned during arming).
+# up; the breakglass admin hash, provisioned during arming).
 OPTIONAL_SECRETS=(
   # GlitchTip project DSN — a write-only ingest key the operator creates in the GlitchTip UI after
   # the first deploy (arming). Seeded EMPTY until provisioned; the api is a complete no-op without it.
   "argus-sentry-dsn=sentry_dsn"
-  # G8 Billing: Stripe API key + webhook signing secret. Seeded EMPTY until the operator stores them
-  # in Key Vault. BillingService starts in no-op mode (logs a warning) when the key file is empty.
-  "argus-stripe-secret-key=stripe_secret_key"
-  "argus-stripe-webhook-secret=stripe_webhook_secret"
-  # G8 Operator: API key for /operator/* plan-management endpoints. Seeded EMPTY until provisioned.
-  # OperatorGuard returns 401 when the file is empty.
-  "argus-operator-api-key=operator_api_key"
   # Phase 3 Breakglass admin: Argon2id hash (JSON) for the emergency admin login. Seeded EMPTY until
   # the operator provisions it (`pnpm --filter @argus/api generate-admin-hash > /tmp/hash.json`, then
   # store the contents in Key Vault as argus-admin-bootstrap-hash). Absent = 503 on

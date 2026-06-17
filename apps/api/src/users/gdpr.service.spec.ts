@@ -151,7 +151,6 @@ describe.skipIf(!DB_URL)('GdprService', () => {
       expect(exp.profile).not.toBeNull();
       expect(exp.profile!.id).toBe(aliceId);
       expect(exp.profile!.tenantId).toBe(tenantA);
-      expect(exp.profile!.email).toBe('alice@a.test');
       expect(exp.profile!.displayName).toBe('Alice');
 
       // Devices

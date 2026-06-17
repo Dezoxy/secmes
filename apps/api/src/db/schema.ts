@@ -23,21 +23,14 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({
 // layer does not express row-level security).
 
 // Tenant ROOT: its own id IS the tenant, so it has no tenant_id column (see migration).
-// Plan and billing columns added in migration 0022. tenants has FORCE RLS (tenants_self_isolation
-// policy, keyed on app.tenant_id) — all queries must run inside withTenant(tenantId).
+// tenants has FORCE RLS (tenants_self_isolation policy, keyed on app.tenant_id) — all queries must
+// run inside withTenant(tenantId). The plan/billing columns (migration 0022: plan_tier, member_limit,
+// sso_enabled, plan_set_at, stripe_*, subscription_status) are INERT after Phase 6 — left in the DB
+// for a later dedicated drop migration, intentionally not typed here so no code can read them.
 export const tenants = pgTable('tenants', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  // Plan gating (G8)
-  planTier: text('plan_tier').notNull().default('free'),
-  memberLimit: integer('member_limit').default(10),
-  ssoEnabled: boolean('sso_enabled').notNull().default(false),
-  planSetAt: timestamp('plan_set_at', { withTimezone: true }).notNull().defaultNow(),
-  // Stripe subscription (G8)
-  stripeCustomerId: text('stripe_customer_id'),
-  stripeSubscriptionId: text('stripe_subscription_id'),
-  subscriptionStatus: text('subscription_status'),
 });
 
 export const users = pgTable('users', {
@@ -185,13 +178,9 @@ export const userTenantIndex = pgTable('user_tenant_index', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-// Stripe webhook idempotency log. Global (no tenant_id, NO RLS) — like user_tenant_index, this is
-// operational data, not tenant-scoped: only Stripe event ids/types/timestamps, no content, no PII. See 0029.
-export const stripeEvents = pgTable('stripe_events', {
-  eventId: text('event_id').primaryKey(),
-  type: text('type').notNull(),
-  receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
-});
+// NOTE: the `stripe_events` table (migration 0029) is INERT after Phase 6 — billing was removed — and is
+// intentionally left in the DB (untyped here) for a later dedicated drop migration, like the inert plan/
+// stripe columns on `tenants`.
 
 // G1: admin-issued invite tokens (hash-at-rest). Tenant-scoped + FORCE RLS. See 0018.
 export const tenantInvites = pgTable('tenant_invites', {
@@ -207,22 +196,6 @@ export const tenantInvites = pgTable('tenant_invites', {
   acceptedAt: timestamp('accepted_at', { withTimezone: true }),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
-
-// G2: per-tenant OIDC SSO config (one per tenant, lazy). client_secret is NOT stored here —
-// it lives in Zitadel only. All SSO endpoints are admin-only. See 0019 + per-tenant-sso.md.
-export const tenantSsoConfigs = pgTable('tenant_sso_configs', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  tenantId: uuid('tenant_id').notNull(),
-  zitadelOrgId: text('zitadel_org_id').notNull(),
-  zitadelIdpId: text('zitadel_idp_id').notNull(),
-  providerType: text('provider_type').notNull(),
-  providerName: text('provider_name').notNull(),
-  issuerUrl: text('issuer_url').notNull(),
-  clientId: text('client_id').notNull(),
-  loginUrl: text('login_url').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
 // B1: MLS group-commit fan-out. `commit` is opaque mls_private_message base64; server stores +

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Check, Copy, Mail, Trash2, Users } from 'lucide-react';
 import {
-  createCheckoutSession,
   createInvite,
   listInvites,
   listMembers,
@@ -10,13 +9,11 @@ import {
   setMemberRole,
   type InviteSummary,
   type MemberSummary,
-  type TenantPlan,
 } from '../../lib/api';
 import { Button, StateBlock } from '../ui';
 
 interface TeamSettingsProps {
   currentUserId: string;
-  plan?: TenantPlan | null;
 }
 
 function MemberRow({
@@ -46,10 +43,9 @@ function MemberRow({
     <div className="flex items-center gap-3 rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3">
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-white">
-          {member.displayName ?? member.email}
+          {member.displayName ?? 'Member'}
           {isSelf && <span className="ml-2 text-xs text-white/40">(you)</span>}
         </p>
-        {member.displayName && <p className="truncate text-xs text-white/50">{member.email}</p>}
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <button
@@ -94,7 +90,7 @@ function InviteRow({
     <div className="flex items-center gap-3 rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3">
       <Mail className="h-4 w-4 shrink-0 text-white/30" />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm text-white/80">{invite.inviteeEmail ?? 'Open invite'}</p>
+        <p className="truncate text-sm text-white/80">Registration code</p>
         <p className="text-xs text-white/40">
           {isExpired ? 'Expired' : `Expires ${expiresAt.toLocaleDateString()}`}
         </p>
@@ -111,121 +107,45 @@ function InviteRow({
   );
 }
 
-function CreateInviteForm({
-  onCreated,
-  atLimit,
-  plan,
-}: {
-  onCreated: (token: string) => void;
-  atLimit: boolean;
-  plan?: TenantPlan | null;
-}) {
-  const [email, setEmail] = useState('');
+function CreateInviteForm({ onCreated }: { onCreated: (token: string) => void }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState(false);
-  const [upgrading, setUpgrading] = useState(false);
 
-  const upgradeTier = plan?.tier === 'pro' ? 'enterprise' : 'pro';
-
-  const handleUpgrade = async () => {
-    setUpgrading(true);
-    try {
-      const url = await createCheckoutSession(
-        upgradeTier,
-        window.location.href,
-        window.location.href,
-      );
-      window.location.href = url;
-    } catch {
-      setError('Could not start checkout. Please try again.');
-      setUpgrading(false);
-    }
-  };
-
-  if (atLimit) {
-    return (
-      <div className="flex flex-col gap-2 rounded-xl border border-amber-400/20 bg-amber-400/[0.04] px-4 py-3">
-        <p className="text-xs text-amber-300">
-          Member limit reached
-          {plan?.memberLimit != null ? ` (${plan.memberLimit})` : ''} — upgrade to add more.
-        </p>
-        <Button
-          size="sm"
-          variant="subtle"
-          loading={upgrading}
-          loadingLabel="Opening Stripe…"
-          onClick={() => void handleUpgrade()}
-        >
-          {upgradeTier === 'enterprise' ? 'Upgrade to Enterprise' : 'Upgrade to Pro'}
-        </Button>
-        {error && <p className="text-xs text-rose-300">{error}</p>}
-      </div>
-    );
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCreate = async () => {
     setLoading(true);
     setError(null);
     try {
-      const result = await createInvite(email.trim() || undefined);
-      setEmail('');
-      setOpen(false);
+      const result = await createInvite();
       onCreated(result.token);
     } catch {
-      setError('Could not create invite. Please try again.');
+      setError('Could not create a registration code. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  if (!open) {
-    return (
-      <Button variant="subtle" size="sm" onClick={() => setOpen(true)}>
-        Create invite
-      </Button>
-    );
-  }
-
   return (
-    <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-2">
-      <input
-        type="email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        placeholder="invitee@example.com (optional)"
-        autoFocus
-        className="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-sm text-white placeholder-white/30 outline-none focus:border-purple-500/60 focus:ring-1 focus:ring-purple-500/30"
-      />
+    <div className="flex flex-col gap-2">
+      <Button
+        variant="subtle"
+        size="sm"
+        loading={loading}
+        loadingLabel="Creating…"
+        onClick={() => void handleCreate()}
+      >
+        Create registration code
+      </Button>
       {error && <p className="text-xs text-rose-300">{error}</p>}
-      <div className="flex gap-2">
-        <Button type="submit" size="sm" loading={loading} loadingLabel="Creating…">
-          Create
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            setOpen(false);
-            setError(null);
-          }}
-        >
-          Cancel
-        </Button>
-      </div>
-    </form>
+    </div>
   );
 }
 
-function CopyInviteLink({ token, onDismiss }: { token: string; onDismiss: () => void }) {
+function CopyInviteCode({ token, onDismiss }: { token: string; onDismiss: () => void }) {
   const [copied, setCopied] = useState(false);
-  const link = `${typeof window !== 'undefined' ? window.location.origin : ''}/invite#${token}`;
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(link);
+      await navigator.clipboard.writeText(token);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -235,12 +155,16 @@ function CopyInviteLink({ token, onDismiss }: { token: string; onDismiss: () => 
 
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-purple-400/20 bg-purple-500/[0.06] p-3">
-      <p className="text-xs font-medium text-purple-300">Invite link created</p>
-      <p className="break-all font-mono text-xs text-white/60">{link}</p>
+      <p className="text-xs font-medium text-purple-300">Registration code created</p>
+      <p className="break-all font-mono text-xs text-white/60">{token}</p>
+      <p className="text-xs text-white/40">
+        Share this one-time code with the new member. They enter it on the login screen (&ldquo;I
+        have a registration code&rdquo;) to set up their passkey.
+      </p>
       <div className="flex gap-2">
         <Button size="sm" variant="subtle" onClick={() => void handleCopy()}>
           {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-          {copied ? 'Copied!' : 'Copy link'}
+          {copied ? 'Copied!' : 'Copy code'}
         </Button>
         <Button size="sm" variant="ghost" onClick={onDismiss}>
           Dismiss
@@ -250,14 +174,12 @@ function CopyInviteLink({ token, onDismiss }: { token: string; onDismiss: () => 
   );
 }
 
-export function TeamSettings({ currentUserId, plan }: TeamSettingsProps) {
+export function TeamSettings({ currentUserId }: TeamSettingsProps) {
   const [members, setMembers] = useState<MemberSummary[] | null>(null);
   const [invites, setInvites] = useState<InviteSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingInviteToken, setPendingInviteToken] = useState<string | null>(null);
   const [confirmRevokeUserId, setConfirmRevokeUserId] = useState<string | null>(null);
-
-  const atLimit = plan != null && plan.memberLimit != null && plan.memberCount >= plan.memberLimit;
 
   const load = useCallback(async () => {
     try {
@@ -316,7 +238,7 @@ export function TeamSettings({ currentUserId, plan }: TeamSettingsProps) {
       )}
 
       {pendingInviteToken && (
-        <CopyInviteLink token={pendingInviteToken} onDismiss={() => setPendingInviteToken(null)} />
+        <CopyInviteCode token={pendingInviteToken} onDismiss={() => setPendingInviteToken(null)} />
       )}
 
       <div className="flex flex-col gap-2">
@@ -325,22 +247,9 @@ export function TeamSettings({ currentUserId, plan }: TeamSettingsProps) {
             <Users className="h-4 w-4 text-white/50" />
             <h4 className="text-sm font-medium text-white/70">
               Members
-              {plan != null && (
-                <span className="ml-2 text-white/40">
-                  {plan.memberCount}
-                  {plan.memberLimit != null ? `/${plan.memberLimit}` : ''}
-                </span>
-              )}
-              {plan == null && members && (
-                <span className="ml-2 text-white/40">({members.length})</span>
-              )}
+              {members && <span className="ml-2 text-white/40">({members.length})</span>}
             </h4>
           </div>
-          {plan != null && (
-            <span className="rounded-full border border-white/10 bg-white/[0.04] px-2 py-0.5 text-xs text-white/50 capitalize">
-              {plan.tier}
-            </span>
-          )}
         </div>
 
         {members === null && !error && <div className="text-sm text-white/40">Loading…</div>}
@@ -352,7 +261,7 @@ export function TeamSettings({ currentUserId, plan }: TeamSettingsProps) {
               className="flex items-center gap-3 rounded-xl border border-rose-400/20 bg-rose-500/[0.06] px-4 py-3"
             >
               <p className="flex-1 text-sm text-rose-200">
-                Remove <strong>{member.displayName ?? member.email}</strong>?
+                Remove <strong>{member.displayName ?? 'this member'}</strong>?
               </p>
               <Button
                 size="sm"
@@ -402,8 +311,6 @@ export function TeamSettings({ currentUserId, plan }: TeamSettingsProps) {
             setPendingInviteToken(token);
             void load();
           }}
-          atLimit={atLimit}
-          plan={plan}
         />
       </div>
     </div>

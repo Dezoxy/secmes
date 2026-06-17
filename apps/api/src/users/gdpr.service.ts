@@ -36,7 +36,6 @@ export class GdprService {
             id: schema.users.id,
             tenantId: schema.users.tenantId,
             argusId: schema.users.argusId,
-            email: schema.users.email,
             displayName: schema.users.displayName,
             avatarSeed: schema.users.avatarSeed,
             role: schema.users.role,
@@ -211,7 +210,6 @@ export class GdprService {
         return tx
           .select({
             id: schema.tenantInvites.id,
-            inviteeEmail: schema.tenantInvites.inviteeEmail,
             createdAt: schema.tenantInvites.createdAt,
             expiresAt: schema.tenantInvites.expiresAt,
             acceptedAt: schema.tenantInvites.acceptedAt,
@@ -244,7 +242,6 @@ export class GdprService {
         id: profile.id,
         tenantId: profile.tenantId,
         argusId: profile.argusId,
-        email: profile.email,
         displayName: profile.displayName ?? null,
         avatarSeed: profile.avatarSeed ?? null,
         role: profile.role,
@@ -293,7 +290,6 @@ export class GdprService {
       })),
       invitesCreated: invitesCreated.map((i) => ({
         id: i.id,
-        inviteeEmail: i.inviteeEmail ?? null,
         createdAt: i.createdAt.toISOString(),
         expiresAt: i.expiresAt.toISOString(),
         acceptedAt: i.acceptedAt?.toISOString() ?? null,

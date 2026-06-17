@@ -44,15 +44,8 @@ describe.skipIf(!DB_URL)('MeController.me', () => {
       displayName: 'Alice',
       avatarSeed: null,
       role: 'member',
-      // The tenant's billing plan rides along on /me (added with billing) — free-tier defaults for a
-      // brand-new single-member tenant. isBreakglass is undefined for normal users → omitted by toEqual.
-      plan: {
-        tier: 'free',
-        memberLimit: 10,
-        ssoEnabled: false,
-        memberCount: 1,
-        subscriptionStatus: null,
-      },
+      // Phase 6: /me no longer carries a billing plan or email. isBreakglass is undefined for normal
+      // users → omitted by toEqual.
     });
   });
 

@@ -36,7 +36,6 @@ class ExportProfileDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ format: 'uuid' }) tenantId!: string;
   @ApiProperty() argusId!: string;
-  @ApiProperty({ nullable: true, type: 'string', format: 'email' }) email!: string | null;
   @ApiProperty({ type: String, nullable: true }) displayName!: string | null;
   @ApiProperty({ type: String, nullable: true }) avatarSeed!: string | null;
   @ApiProperty() role!: string;
@@ -112,7 +111,6 @@ class ExportAuditEventDto {
 
 class ExportInviteDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
-  @ApiProperty({ type: String, format: 'email', nullable: true }) inviteeEmail!: string | null;
   @ApiProperty({ format: 'date-time' }) createdAt!: string;
   @ApiProperty({ format: 'date-time' }) expiresAt!: string;
   @ApiProperty({ type: String, format: 'date-time', nullable: true }) acceptedAt!: string | null;
@@ -130,7 +128,6 @@ class MeExportDto {
       id: { type: 'string', format: 'uuid' },
       tenantId: { type: 'string', format: 'uuid' },
       argusId: { type: 'string' },
-      email: { type: 'string', format: 'email', nullable: true },
       displayName: { type: 'string', nullable: true },
       avatarSeed: { type: 'string', nullable: true },
       role: { type: 'string' },
@@ -141,7 +138,6 @@ class MeExportDto {
       'id',
       'tenantId',
       'argusId',
-      'email',
       'displayName',
       'avatarSeed',
       'role',

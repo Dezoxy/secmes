@@ -48,31 +48,6 @@ const objectKey = z
   .max(512)
   .refine((s) => !s.includes('://'), 'must be an object key, not a URL');
 
-// Plan tier — returned in GET /me so the frontend can gate UI without a separate request.
-export const PlanTierSchema = z.enum(['free', 'pro', 'enterprise']);
-export type PlanTier = z.infer<typeof PlanTierSchema>;
-
-export const SubscriptionStatusSchema = z.enum([
-  'active',
-  'trialing',
-  'past_due',
-  'canceled',
-  'incomplete',
-  'incomplete_expired',
-  'unpaid',
-  'paused',
-]);
-export type SubscriptionStatus = z.infer<typeof SubscriptionStatusSchema>;
-
-export const TenantPlanSchema = z.object({
-  tier: PlanTierSchema,
-  memberLimit: z.number().int().nullable(),
-  ssoEnabled: z.boolean(),
-  memberCount: z.number().int(),
-  subscriptionStatus: SubscriptionStatusSchema.nullable(),
-});
-export type TenantPlan = z.infer<typeof TenantPlanSchema>;
-
 // GET /me — discriminated union: unbound users (no tenant yet) vs. bound users.
 export const MeUnboundSchema = z.object({ bound: z.literal(false) });
 export type MeUnbound = z.infer<typeof MeUnboundSchema>;
@@ -133,9 +108,6 @@ export const MeBoundSchema = z.object({
   role: z.enum(['admin', 'member']),
   /** True for the breakglass admin account — front-end gates profile editing on this. */
   isBreakglass: z.boolean().optional(),
-  // Kept optional for backward-compat during Phase 4 → Phase 6 transition; not returned by the API.
-  email: z.string().email().nullable().optional(),
-  plan: TenantPlanSchema.optional(),
 });
 export type MeBound = z.infer<typeof MeBoundSchema>;
 
@@ -497,44 +469,18 @@ export const CommitEventSchema = z.object({
 });
 export type CommitEvent = z.infer<typeof CommitEventSchema>;
 
-// ── G1: self-serve tenant onboarding ────────────────────────────────────────
-
-export const CreateTenantBodySchema = z
-  .object({
-    /** Tenant display name. Not secret and not indexed for search; metadata only. */
-    name: z.string().min(1).max(100).trim(),
-  })
-  .strict();
-export type CreateTenantBody = z.infer<typeof CreateTenantBodySchema>;
-
-export const CreateTenantResponseSchema = z.object({
-  tenantId: z.string().uuid(),
-  userId: z.string().uuid(),
-});
-export type CreateTenantResponse = z.infer<typeof CreateTenantResponseSchema>;
-
-export const CreateInviteBodySchema = z
-  .object({
-    /** Optional email hint — if set, only the matching Zitadel identity may accept. */
-    inviteeEmail: z.string().email().optional(),
-  })
-  .strict();
-export type CreateInviteBody = z.infer<typeof CreateInviteBodySchema>;
+// ── Admin-minted invite / registration codes ────────────────────────────────
 
 export const CreateInviteResponseSchema = z.object({
   inviteId: z.string().uuid(),
-  /** The one-time plaintext token. Return once; never stored. The recipient uses it in AcceptInviteBody. */
+  /** The one-time plaintext token. Returned once; never stored. Redeemed by the passkey registration flow. */
   token: z.string(),
   expiresAt: z.string().datetime(),
 });
 export type CreateInviteResponse = z.infer<typeof CreateInviteResponseSchema>;
 
-export const AcceptInviteBodySchema = z.object({ token: z.string().min(1).max(128) }).strict();
-export type AcceptInviteBody = z.infer<typeof AcceptInviteBodySchema>;
-
 export const InviteSummarySchema = z.object({
   id: z.string().uuid(),
-  inviteeEmail: z.string().email().nullable(),
   expiresAt: z.string().datetime(),
   acceptedAt: z.string().datetime().nullable(),
   revokedAt: z.string().datetime().nullable(),
@@ -544,7 +490,6 @@ export type InviteSummary = z.infer<typeof InviteSummarySchema>;
 
 export const MemberSummarySchema = z.object({
   userId: z.string().uuid(),
-  email: z.string().email().nullable(),
   displayName: z.string().nullable(),
   role: z.enum(['admin', 'member']),
 });
@@ -554,7 +499,6 @@ export const DeviceSummarySchema = z.object({
   deviceId: z.string().uuid(),
   userId: z.string().uuid(),
   displayName: z.string().max(128).nullable(),
-  email: z.string().email().nullable(),
   signaturePublicKeyPrefix: z.string().max(12),
   createdAt: z.string().datetime(),
 });
@@ -576,51 +520,6 @@ export const AdminAuditResponseSchema = z.object({
 });
 export type AdminAuditResponse = z.infer<typeof AdminAuditResponseSchema>;
 
-// ── G2: Per-tenant SSO ────────────────────────────────────────────────────────
-
-export const SsoProviderTypeSchema = z.enum(['oidc_generic', 'google', 'entra', 'okta']);
-export type SsoProviderType = z.infer<typeof SsoProviderTypeSchema>;
-
-export const CreateSsoConfigBodySchema = z
-  .object({
-    providerType: SsoProviderTypeSchema,
-    providerName: z.string().min(1).max(100).trim(),
-    issuerUrl: z.string().url().max(512),
-    clientId: z.string().min(1).max(256),
-    /** Request-only. Never stored in our DB; passed to Zitadel only. Never returned. */
-    clientSecret: z.string().min(1).max(1024),
-  })
-  .strict();
-export type CreateSsoConfigBody = z.infer<typeof CreateSsoConfigBodySchema>;
-
-export const UpdateSsoConfigBodySchema = z
-  .object({
-    providerName: z.string().min(1).max(100).trim().optional(),
-    issuerUrl: z.string().url().max(512).optional(),
-    clientId: z.string().min(1).max(256).optional(),
-  })
-  .strict()
-  .refine((b) => Object.keys(b).length > 0, 'At least one field is required');
-export type UpdateSsoConfigBody = z.infer<typeof UpdateSsoConfigBodySchema>;
-
-export const RotateSsoSecretBodySchema = z
-  .object({ clientSecret: z.string().min(1).max(1024) })
-  .strict();
-export type RotateSsoSecretBody = z.infer<typeof RotateSsoSecretBodySchema>;
-
-/** Response schema — NO clientSecret field. */
-export const SsoConfigSchema = z.object({
-  id: z.string().uuid(),
-  providerType: SsoProviderTypeSchema,
-  providerName: z.string().max(100),
-  issuerUrl: z.string().url().max(512),
-  clientId: z.string().max(256),
-  loginUrl: z.string().url().max(1024),
-  createdAt: z.string().datetime(),
-  updatedAt: z.string().datetime(),
-});
-export type SsoConfig = z.infer<typeof SsoConfigSchema>;
-
 // ── G6: GDPR — data export (Art. 20) ─────────────────────────────────────────
 // Server is crypto-blind: no ciphertext, content keys, or message plaintext appears here.
 // `messageSummary` describes counts and timestamps only. `endpointPrefix` is the first
@@ -636,7 +535,6 @@ export const MeExportSchema = z.object({
       id: z.string().uuid(),
       tenantId: z.string().uuid(),
       argusId: z.string(),
-      email: z.string().email().nullable(),
       displayName: z.string().nullable(),
       avatarSeed: z.string().nullable(),
       role: z.string().max(32),
@@ -702,7 +600,6 @@ export const MeExportSchema = z.object({
   invitesCreated: z.array(
     z.object({
       id: z.string().uuid(),
-      inviteeEmail: z.string().email().nullable(),
       createdAt: z.string().datetime(),
       expiresAt: z.string().datetime(),
       acceptedAt: z.string().datetime().nullable(),

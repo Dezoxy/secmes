@@ -56,7 +56,6 @@ export class AdminService {
           deviceId: schema.devices.id,
           userId: schema.devices.userId,
           displayName: schema.users.displayName,
-          email: schema.users.email,
           signaturePublicKeyPrefix: sql<string>`left(${schema.devices.signaturePublicKey}, 12)`,
           createdAt: schema.devices.createdAt,
         })
@@ -75,7 +74,6 @@ export class AdminService {
         deviceId: r.deviceId,
         userId: r.userId,
         displayName: r.displayName,
-        email: r.email,
         signaturePublicKeyPrefix: r.signaturePublicKeyPrefix,
         createdAt: r.createdAt.toISOString(),
       })),

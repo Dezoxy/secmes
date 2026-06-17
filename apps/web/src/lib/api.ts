@@ -2,7 +2,6 @@
 // Zod validation, and safe error classification live in `api-client.ts`.
 
 import {
-  AcceptInviteBodySchema,
   AccessTokenResponseSchema,
   BackupResponseSchema,
   BreakglassLoginRequestSchema,
@@ -15,10 +14,7 @@ import {
   ConversationReceiptsSchema,
   CreateConversationRequestSchema,
   CreateDownloadGrantRequestSchema,
-  CreateInviteBodySchema,
   CreateInviteResponseSchema,
-  CreateTenantBodySchema,
-  CreateTenantResponseSchema,
   CreateUploadGrantRequestSchema,
   CreatedConversationSchema,
   DeliverWelcomeRequestSchema,
@@ -26,7 +22,6 @@ import {
   DownloadGrantSchema,
   AdminAuditResponseSchema,
   AuthenticateOptionsResponseSchema,
-  CreateSsoConfigBodySchema,
   DeviceSummarySchema,
   EnrollmentApproveBodySchema,
   EnrollmentRegisterBodySchema,
@@ -48,12 +43,9 @@ import {
   RevokeKeyPackagesResponseSchema,
   SendConversationMessageRequestSchema,
   SentMessageSchema,
-  SsoConfigSchema,
   StoreBackupRequestSchema,
   SubscribePushRequestSchema,
-  TenantPlanSchema,
   UpdateProfileSchema,
-  UpdateSsoConfigBodySchema,
   InviteSummarySchema,
   UploadGrantSchema,
   UserLookupResultSchema,
@@ -68,18 +60,12 @@ import {
   type ConversationMember as ContractConversationMember,
   type ConversationReceipt as ContractConversationReceipt,
   type CreateInviteResponse as ContractCreateInviteResponse,
-  type CreateTenantResponse as ContractCreateTenantResponse,
   type CreatedConversation,
   type AdminAuditResponse as ContractAdminAuditResponse,
   type AuditEventSummary as ContractAuditEventSummary,
-  type CreateSsoConfigBody as ContractCreateSsoConfigBody,
   type DeviceSummary as ContractDeviceSummary,
   type FetchedCommit as ContractFetchedCommit,
-  type RotateSsoSecretBody as ContractRotateSsoSecretBody,
-  type SsoConfig as ContractSsoConfig,
-  type TenantPlan as ContractTenantPlan,
   type UpdateProfile as ContractUpdateProfile,
-  type UpdateSsoConfigBody as ContractUpdateSsoConfigBody,
   type InviteSummary as ContractInviteSummary,
   type MemberSummary as ContractMemberSummary,
   type ReceiptStatus,
@@ -108,8 +94,6 @@ export { apiFetch } from './api-client';
 export type Me = ContractMe;
 /** Narrowed /me response for a user already bound to a tenant. */
 export type MeBound = ContractMeBound;
-/** The tenant plan returned inside MeBound and from GET /billing/status. */
-export type TenantPlan = ContractTenantPlan;
 
 /** Fetch the caller's server profile (GET /me). Throws on non-OK. */
 export async function fetchMe(): Promise<Me> {
@@ -733,9 +717,8 @@ export async function deletePushSubscription(deviceId: string): Promise<void> {
   );
 }
 
-// ── G1: self-serve tenant onboarding ──────────────────────────────────────────
+// ── Tenant invites + members (admin) ─────────────────────────────────────────
 
-export type CreateTenantResponse = ContractCreateTenantResponse;
 export type CreateInviteResponse = ContractCreateInviteResponse;
 export type InviteSummary = ContractInviteSummary;
 export type MemberSummary = ContractMemberSummary;
@@ -745,32 +728,6 @@ export type MemberSummary = ContractMemberSummary;
 export type DeviceSummary = ContractDeviceSummary;
 export type AuditEventSummary = ContractAuditEventSummary;
 export type AdminAuditResponse = ContractAdminAuditResponse;
-
-/** Create a new tenant with the caller as the first admin (POST /tenants → 201). */
-export async function createTenant(name: string): Promise<CreateTenantResponse> {
-  return unwrapApiResult(
-    await requestJson({
-      path: '/tenants',
-      method: 'POST',
-      body: { name },
-      requestSchema: CreateTenantBodySchema,
-      responseSchema: CreateTenantResponseSchema,
-    }),
-  );
-}
-
-/** Accept an invite by its one-time plaintext token (POST /tenants/invites/accept → 201). */
-export async function acceptInvite(token: string): Promise<CreateTenantResponse> {
-  return unwrapApiResult(
-    await requestJson({
-      path: '/tenants/invites/accept',
-      method: 'POST',
-      body: { token },
-      requestSchema: AcceptInviteBodySchema,
-      responseSchema: CreateTenantResponseSchema,
-    }),
-  );
-}
 
 /** List active members of the caller's tenant (GET /tenants/members). */
 export async function listMembers(): Promise<MemberSummary[]> {
@@ -783,16 +740,14 @@ export async function listMembers(): Promise<MemberSummary[]> {
 }
 
 /**
- * Create an invite for this tenant (POST /tenants/invites → 201).
+ * Create a single-use invite/registration code for this tenant (POST /tenants/invites → 201).
  * Returns the plaintext token — shown once, never stored.
  */
-export async function createInvite(inviteeEmail?: string): Promise<CreateInviteResponse> {
+export async function createInvite(): Promise<CreateInviteResponse> {
   return unwrapApiResult(
     await requestJson({
       path: '/tenants/invites',
       method: 'POST',
-      body: inviteeEmail ? { inviteeEmail } : {},
-      requestSchema: CreateInviteBodySchema,
       responseSchema: CreateInviteResponseSchema,
     }),
   );
@@ -870,132 +825,6 @@ export async function listAdminAudit(cursor?: string, limit = 50): Promise<Admin
       method: 'GET',
       responseSchema: AdminAuditResponseSchema,
     }),
-  );
-}
-
-// ── G2: Per-tenant SSO ────────────────────────────────────────────────────────
-
-export type SsoConfig = ContractSsoConfig;
-export type CreateSsoConfigBody = ContractCreateSsoConfigBody;
-export type UpdateSsoConfigBody = ContractUpdateSsoConfigBody;
-export type RotateSsoSecretBody = ContractRotateSsoSecretBody;
-
-/** Get SSO config for this tenant (admin only). Returns null when not configured. */
-export async function getSsoConfig(): Promise<SsoConfig | null> {
-  return unwrapApiResult(
-    await requestJson({
-      path: '/admin/sso-config',
-      method: 'GET',
-      responseSchema: SsoConfigSchema.nullable(),
-    }),
-  );
-}
-
-/** Configure SSO for this tenant (admin only). Provisions a Zitadel org + IdP. */
-export async function createSsoConfig(body: CreateSsoConfigBody): Promise<SsoConfig> {
-  return unwrapApiResult(
-    await requestJson({
-      path: '/admin/sso-config',
-      method: 'POST',
-      body,
-      requestSchema: CreateSsoConfigBodySchema,
-      responseSchema: SsoConfigSchema,
-    }),
-  );
-}
-
-/** Update SSO provider metadata (admin only). Does not touch the client secret. */
-export async function updateSsoConfig(body: UpdateSsoConfigBody): Promise<SsoConfig> {
-  return unwrapApiResult(
-    await requestJson({
-      path: '/admin/sso-config',
-      method: 'PATCH',
-      body,
-      requestSchema: UpdateSsoConfigBodySchema,
-      responseSchema: SsoConfigSchema,
-    }),
-  );
-}
-
-/** Rotate the SSO client secret (admin only). New secret forwarded to Zitadel only. */
-export async function rotateSsoSecret(body: RotateSsoSecretBody): Promise<void> {
-  unwrapApiResult(
-    await requestStatus({
-      path: '/admin/sso-config/secret',
-      method: 'PATCH',
-      body,
-    }),
-  );
-}
-
-/** Remove SSO config and delete the Zitadel org (admin only). */
-export async function deleteSsoConfig(): Promise<void> {
-  unwrapApiResult(
-    await requestStatus({
-      path: '/admin/sso-config',
-      method: 'DELETE',
-    }),
-  );
-}
-
-// ── Billing ─────────────────────────────────────────────────────────────────
-
-const CheckoutUrlSchema = {
-  safeParse(data: unknown): { success: true; data: { url: string } } | { success: false } {
-    if (
-      typeof data === 'object' &&
-      data !== null &&
-      typeof (data as Record<string, unknown>).url === 'string'
-    ) {
-      return { success: true, data: data as { url: string } };
-    }
-    return { success: false };
-  },
-};
-
-const PortalUrlSchema = {
-  safeParse(data: unknown): { success: true; data: { url: string } } | { success: false } {
-    if (
-      typeof data === 'object' &&
-      data !== null &&
-      typeof (data as Record<string, unknown>).url === 'string'
-    ) {
-      return { success: true, data: data as { url: string } };
-    }
-    return { success: false };
-  },
-};
-
-/** Create a Stripe Checkout session; returns the hosted URL to redirect to (admin only). */
-export async function createCheckoutSession(
-  planTier: 'pro' | 'enterprise',
-  successUrl: string,
-  cancelUrl: string,
-): Promise<string> {
-  const result = await requestJson({
-    path: '/billing/checkout',
-    method: 'POST',
-    body: { planTier, successUrl, cancelUrl },
-    responseSchema: CheckoutUrlSchema,
-  });
-  return unwrapApiResult(result).url;
-}
-
-/** Create a Stripe Billing Portal session; returns the hosted URL to redirect to (admin only). */
-export async function createPortalSession(returnUrl: string): Promise<string> {
-  const result = await requestJson({
-    path: '/billing/portal',
-    method: 'POST',
-    body: { returnUrl },
-    responseSchema: PortalUrlSchema,
-  });
-  return unwrapApiResult(result).url;
-}
-
-/** Fetch the current billing/plan status (admin only). */
-export async function getBillingStatus(): Promise<TenantPlan> {
-  return unwrapApiResult(
-    await requestJson({ path: '/billing/status', responseSchema: TenantPlanSchema }),
   );
 }
 

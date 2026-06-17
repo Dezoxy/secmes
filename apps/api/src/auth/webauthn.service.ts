@@ -22,10 +22,9 @@ import type {
   RegistrationResponseJSON,
 } from '@simplewebauthn/server';
 import { isoBase64URL, isoUint8Array } from '@simplewebauthn/server/helpers';
-import { and, count, eq, gt, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import { and, eq, gt, isNull, lt, sql } from 'drizzle-orm';
 
 import { schema, withRouting, withTenant, withTenantAndInvite } from '../db/index.js';
-import { PaymentRequiredException } from '../common/http-exceptions.js';
 import { generateArgusId, isArgusIdCollision } from '../users/argus-id.js';
 import { generateHandle, isHandleCollision } from '../users/handle-words.js';
 import type { MintedSession } from './session-token.service.js';
@@ -91,7 +90,6 @@ export class WebAuthnService {
           expiresAt: schema.tenantInvites.expiresAt,
           acceptedAt: schema.tenantInvites.acceptedAt,
           revokedAt: schema.tenantInvites.revokedAt,
-          inviteeEmail: schema.tenantInvites.inviteeEmail,
         })
         .from(schema.tenantInvites)
         .where(eq(schema.tenantInvites.tokenHash, tokenHash))
@@ -100,10 +98,6 @@ export class WebAuthnService {
     });
 
     if (!invite) throw new UnauthorizedException(INVALID);
-    // Reject email-scoped invites: this path has no verified email, so a forwarded
-    // or leaked code would let the wrong person register. Email-scoped invites must
-    // go through the Zitadel OIDC flow where the email is verified by the IdP.
-    if (invite.inviteeEmail !== null) throw new UnauthorizedException(INVALID);
     // Any valid admin-issued invite is accepted here — the user always lands in
     // DEFAULT_TENANT_ID regardless of which tenant issued the invite.  The old
     // tenantId === DEFAULT_TENANT_ID guard prevented admins on non-default tenants
@@ -254,35 +248,8 @@ export class WebAuthnService {
             const { credential, aaguid, credentialBackedUp } = verification.registrationInfo;
             const sub = `argusid:${challenge.argusId}`;
 
-            // Race-safe member limit check: lock the tenant row so concurrent registrations
-            // cannot both pass and overshoot the limit (mirrors acceptInvite in tenants.service.ts).
-            const [tenantRow] = await tx
-              .select({ memberLimit: schema.tenants.memberLimit })
-              .from(schema.tenants)
-              .where(eq(schema.tenants.id, DEFAULT_TENANT_ID))
-              .for('update');
-            if (tenantRow?.memberLimit !== null && tenantRow?.memberLimit !== undefined) {
-              const [countRow] = await tx
-                .select({ count: count() })
-                .from(schema.users)
-                .where(
-                  and(
-                    eq(schema.users.tenantId, DEFAULT_TENANT_ID),
-                    eq(schema.users.status, 'active'),
-                    or(
-                      isNull(schema.users.displayName),
-                      ne(schema.users.displayName, 'breakglass-admin'),
-                    ),
-                  ),
-                );
-              if ((countRow?.count ?? 0) >= tenantRow.memberLimit) {
-                throw new PaymentRequiredException(
-                  'This workspace has reached its member limit. Ask the workspace admin to upgrade.',
-                );
-              }
-            }
-
-            // Insert user (email=NULL — Phase 2 passkey users are email-less).
+            // Insert user (email=NULL — passkey users are email-less). Membership is gated solely by
+            // the single-use, delete-on-use admin invite code consumed in this same transaction.
             const [user] = await tx
               .insert(schema.users)
               .values({

@@ -17,13 +17,6 @@ export interface VerifiedAuth {
    * user-resolution by PK.
    */
   userId?: string;
-  /**
-   * Vestigial IdP profile claims. Always `undefined` now that OIDC is gone (Phase 6) — `verify()`
-   * never populates them. The legacy `createTenant`/`acceptInvite` paths still reference them and are
-   * removed in Phase 6 PR2, at which point these fields go too. Do not start populating them.
-   */
-  email?: string;
-  name?: string;
 }
 
 /** What `verify()` returns before the guard narrows it. `tenantId: null` = unbound (no tenant yet). */
