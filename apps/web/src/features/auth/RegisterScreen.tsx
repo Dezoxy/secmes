@@ -4,7 +4,6 @@ import type { PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/bro
 import { ArrowLeft, KeyRound } from 'lucide-react';
 import { redeemCode, getRegisterOptions, verifyRegistration, fetchMe } from '../../lib/api';
 import { setToken } from '../../lib/auth';
-import { clearPendingInviteToken, readPendingInviteToken } from '../onboarding/JoinWorkspace';
 import { useAuth, type MeBound } from './AuthContext';
 
 interface RegisterScreenProps {
@@ -17,7 +16,7 @@ type Step = 'code' | 'ceremony' | 'done';
 export function RegisterScreen({ onRegistered, onBack }: RegisterScreenProps) {
   const { notifyAuth } = useAuth();
   const [step, setStep] = useState<Step>('code');
-  const [code, setCode] = useState(() => readPendingInviteToken());
+  const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -29,7 +28,6 @@ export function RegisterScreen({ onRegistered, onBack }: RegisterScreenProps) {
     try {
       setStep('ceremony');
       const { ceremonyId } = await redeemCode(code.trim());
-      clearPendingInviteToken();
       const options = await getRegisterOptions(ceremonyId);
       const regResponse = await startRegistration({
         optionsJSON: options as unknown as PublicKeyCredentialCreationOptionsJSON,
