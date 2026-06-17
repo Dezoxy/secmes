@@ -132,11 +132,22 @@ class MeExportDto {
       argusId: { type: 'string' },
       email: { type: 'string', format: 'email', nullable: true },
       displayName: { type: 'string', nullable: true },
+      avatarSeed: { type: 'string', nullable: true },
       role: { type: 'string' },
       status: { type: 'string' },
       createdAt: { type: 'string', format: 'date-time' },
     },
-    required: ['id', 'tenantId', 'argusId', 'email', 'displayName', 'role', 'status', 'createdAt'],
+    required: [
+      'id',
+      'tenantId',
+      'argusId',
+      'email',
+      'displayName',
+      'avatarSeed',
+      'role',
+      'status',
+      'createdAt',
+    ],
     additionalProperties: false,
   })
   profile!: ExportProfileDto | null;
