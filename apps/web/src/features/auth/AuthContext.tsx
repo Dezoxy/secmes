@@ -8,98 +8,140 @@ import {
   type ReactNode,
 } from 'react';
 import { Navigate } from 'react-router-dom';
-import type { User } from 'oidc-client-ts';
+import { startAuthentication } from '@simplewebauthn/browser';
+import type { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser';
+import { demoMode, setToken } from '../../lib/auth';
 import {
-  oidcConfigured,
-  userManager,
-  login as oidcLogin,
-  logout as oidcLogout,
-  profileScopeFromAuth,
-} from '../../lib/auth';
-import { establishSession, fetchMe, type MeBound } from '../../lib/api';
+  fetchMe,
+  getAuthenticateOptions,
+  verifyAuthentication,
+  refreshSession,
+  logoutSession,
+  type MeBound,
+} from '../../lib/api';
+
+export type { MeBound };
 
 interface AuthState {
-  /** Whether OIDC is configured (VITE_OIDC_*). When false the app runs in demo mode (no real auth). */
-  configured: boolean;
   /** Initial session restore finished — render gated routes only after this. */
   ready: boolean;
-  user: User | null;
-  /** Stable authenticated subject, used only for storage scoping and auth boundaries. */
-  subjectId: string | null;
-  /** Bound server profile from /me (null when unbound, loading, or API unreachable). */
+  /** True when a valid session exists (token obtained), even if not yet bound to a tenant. */
+  authenticated: boolean;
+  /** Bound server profile from /me (null when unauthenticated, unbound, or loading). */
   profile: MeBound | null;
+  /** Stable user id for storage scoping (= profile.userId when authenticated). */
+  subjectId: string | null;
+  /** True when app runs without real auth (seed-driven demo). */
+  demoMode: boolean;
+  /** Run the discoverable-passkey authentication ceremony. Throws on failure. */
   login: () => Promise<void>;
+  /** Revoke the current session. */
   logout: () => Promise<void>;
-  /** Re-fetch /me and update profile state — call after createTenant or acceptInvite. */
+  /** Re-fetch /me — call after createTenant or acceptInvite. */
   refreshProfile: () => Promise<void>;
+  /**
+   * Apply a token+profile obtained outside the normal login flow (registration, breakglass).
+   * Sets authenticated=true and calls navigator.storage.persist().
+   */
+  notifyAuth: (token: string, profile: MeBound | null) => void;
 }
 
 const AuthCtx = createContext<AuthState | null>(null);
 
+// Nine-minute interval: renew before the 10-minute JWT window closes.
+const REFRESH_INTERVAL_MS = 9 * 60 * 1000;
+
 export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
-  const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<MeBound | null>(null);
-  const [ready, setReady] = useState(!oidcConfigured);
-  const sessionEstablished = useRef(false);
+  const [authenticated, setAuthenticated] = useState(false);
+  const [ready, setReady] = useState(demoMode);
+  const storagePersisted = useRef(false);
 
-  useEffect(() => {
-    if (!oidcConfigured) return;
-    const um = userManager();
-    let active = true;
-    void um
-      .getUser()
-      .then((u) => active && setUser(u))
-      .finally(() => active && setReady(true));
-
-    const onLoaded = (u: User) => setUser(u);
-    const onGone = () => {
-      setUser(null);
-      setProfile(null);
-      sessionEstablished.current = false;
-    };
-    um.events.addUserLoaded(onLoaded);
-    um.events.addUserUnloaded(onGone);
-    um.events.addAccessTokenExpired(onGone);
-    return () => {
-      active = false;
-      um.events.removeUserLoaded(onLoaded);
-      um.events.removeUserUnloaded(onGone);
-      um.events.removeAccessTokenExpired(onGone);
-    };
+  const applySession = useCallback((token: string, me: MeBound | null) => {
+    setToken(token);
+    setAuthenticated(true);
+    setProfile(me);
+    if (me && !storagePersisted.current) {
+      storagePersisted.current = true;
+      void navigator.storage?.persist();
+    }
   }, []);
 
-  // On the first authenticated user (not on silent renews), record the login + fetch the profile.
-  // Best-effort: if the API is down, auth still succeeds and the app runs without a server profile.
+  const clearSession = useCallback(() => {
+    setToken(null);
+    setAuthenticated(false);
+    setProfile(null);
+  }, []);
+
+  // Boot: try to restore session from the argus_refresh cookie.
   useEffect(() => {
-    if (!user || sessionEstablished.current) return;
-    sessionEstablished.current = true;
-    void establishSession()
-      .then((me) => setProfile(me.bound ? me : null))
+    if (demoMode) return;
+    let active = true;
+    refreshSession()
+      .then(async ({ accessToken: token }) => {
+        if (!active) return;
+        setToken(token);
+        const me = await fetchMe();
+        if (!active) return;
+        applySession(token, me.bound ? me : null);
+      })
       .catch(() => {
-        /* API unreachable — keep the OIDC session, no server profile yet */
+        // No valid cookie — start unauthenticated.
+      })
+      .finally(() => {
+        if (active) setReady(true);
       });
-  }, [user]);
+    return () => {
+      active = false;
+    };
+  }, []); // boot effect: runs once on mount
+
+  // Refresh timer: keep access token alive while the tab is open.
+  useEffect(() => {
+    if (demoMode) return;
+    const timer = setInterval(() => {
+      if (!profile) return;
+      refreshSession()
+        .then(async ({ accessToken: token }) => {
+          setToken(token);
+          const me = await fetchMe();
+          setProfile(me.bound ? me : null);
+        })
+        .catch(() => clearSession());
+    }, REFRESH_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [profile, clearSession]);
+
+  const login = useCallback(async (): Promise<void> => {
+    const opts = await getAuthenticateOptions();
+    const response = await startAuthentication({
+      optionsJSON: opts.options as unknown as PublicKeyCredentialRequestOptionsJSON,
+    });
+    const { accessToken: token } = await verifyAuthentication(opts.ceremonyId, response);
+    const me = await fetchMe();
+    applySession(token, me.bound ? me : null);
+  }, [applySession]);
+
+  const logout = useCallback(async (): Promise<void> => {
+    await logoutSession().catch(() => {});
+    clearSession();
+  }, [clearSession]);
 
   const refreshProfile = useCallback(async (): Promise<void> => {
     const me = await fetchMe();
     setProfile(me.bound ? me : null);
   }, []);
 
-  // G2 SSO: read ?orgID from the URL and pass it to Zitadel so the org's IdP shows on the login page.
-  const login = useCallback(async (): Promise<void> => {
-    const orgID = new URLSearchParams(window.location.search).get('orgID') ?? undefined;
-    return oidcLogin(orgID ? { organizationId: orgID } : undefined);
-  }, []);
-
   const value: AuthState = {
-    configured: oidcConfigured,
     ready,
-    user,
-    subjectId: profileScopeFromAuth(user, profile?.userId),
+    authenticated,
     profile,
+    subjectId: profile?.userId ?? null,
+    demoMode,
     login,
-    logout: oidcLogout,
+    logout,
     refreshProfile,
+    notifyAuth: applySession,
   };
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
 }
@@ -110,9 +152,9 @@ export function useAuth(): AuthState {
   return ctx;
 }
 
-/** Gate a route: demo mode (OIDC unconfigured) passes through; otherwise require a signed-in user. */
+/** Gate a route: demo mode passes through; otherwise require a signed-in user. */
 export function RequireAuth({ children }: { children: ReactNode }): ReactNode {
-  const { configured, ready, user } = useAuth();
+  const { ready, demoMode: demo, profile } = useAuth();
   if (!ready) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#1a1a24] text-white/50">
@@ -120,6 +162,6 @@ export function RequireAuth({ children }: { children: ReactNode }): ReactNode {
       </div>
     );
   }
-  if (configured && !user) return <Navigate to="/" replace />;
+  if (!demo && !profile) return <Navigate to="/" replace />;
   return children;
 }

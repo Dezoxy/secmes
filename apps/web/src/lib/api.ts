@@ -3,49 +3,69 @@
 
 import {
   AcceptInviteBodySchema,
+  AccessTokenResponseSchema,
   BackupResponseSchema,
+  BreakglassLoginRequestSchema,
   ClaimedKeyPackageSchema,
   CommitBodySchema,
   CommitPageSchema,
   CommitResponseSchema,
+  ConversationListSchema,
+  ConversationMemberSchema,
   ConversationReceiptsSchema,
   CreateConversationRequestSchema,
+  CreateDownloadGrantRequestSchema,
   CreateInviteBodySchema,
   CreateInviteResponseSchema,
   CreateTenantBodySchema,
   CreateTenantResponseSchema,
-  CreatedConversationSchema,
-  CreateDownloadGrantRequestSchema,
   CreateUploadGrantRequestSchema,
+  CreatedConversationSchema,
   DeliverWelcomeRequestSchema,
   DeliveredWelcomeSchema,
   DownloadGrantSchema,
   AdminAuditResponseSchema,
+  AuthenticateOptionsResponseSchema,
   CreateSsoConfigBodySchema,
   DeviceSummarySchema,
-  SsoConfigSchema,
-  TenantPlanSchema,
-  UpdateSsoConfigBodySchema,
-  InviteSummarySchema,
+  EnrollmentApproveBodySchema,
+  EnrollmentRegisterBodySchema,
+  EnrollmentSchema,
   MeSchema,
   MemberSummarySchema,
   MessagePageSchema,
   PendingWelcomesSchema,
   PublishKeyPackagesRequestSchema,
   PublishKeyPackagesResponseSchema,
+  RedeemCodeRequestSchema,
+  RedeemCodeResponseSchema,
   RecordReceiptRequestSchema,
+  RegisterOptionsRequestSchema,
+  RegisterOptionsResponseSchema,
+  RegisterVerifyRequestSchema,
+  AuthenticateVerifyRequestSchema,
   RevokeKeyPackagesRequestSchema,
   RevokeKeyPackagesResponseSchema,
   SendConversationMessageRequestSchema,
   SentMessageSchema,
+  SsoConfigSchema,
   StoreBackupRequestSchema,
   SubscribePushRequestSchema,
+  TenantPlanSchema,
+  UpdateProfileSchema,
+  UpdateSsoConfigBodySchema,
+  InviteSummarySchema,
   UploadGrantSchema,
+  UserLookupResultSchema,
   WelcomeMaterialSchema,
+  WithdrawDeviceBodySchema,
+  type AccessTokenResponse,
+  type AuthenticateOptionsResponse,
   type ClaimedKeyPackage as ContractClaimedKeyPackage,
   type CommitBody as ContractCommitBody,
   type CommitPage as ContractCommitPage,
   type CommitResponse as ContractCommitResponse,
+  type ConversationMember as ContractConversationMember,
   type ConversationReceipt as ContractConversationReceipt,
   type CreateInviteResponse as ContractCreateInviteResponse,
   type CreateTenantResponse as ContractCreateTenantResponse,
@@ -58,6 +78,7 @@ import {
   type RotateSsoSecretBody as ContractRotateSsoSecretBody,
   type SsoConfig as ContractSsoConfig,
   type TenantPlan as ContractTenantPlan,
+  type UpdateProfile as ContractUpdateProfile,
   type UpdateSsoConfigBody as ContractUpdateSsoConfigBody,
   type InviteSummary as ContractInviteSummary,
   type MemberSummary as ContractMemberSummary,
@@ -74,14 +95,8 @@ import {
   type SentMessage as ContractSentMessage,
   type SubscribePushRequest,
   type UploadGrant as ContractUploadGrant,
-  type UserSummary as ContractUserSummary,
+  type UserLookupResult as ContractUserLookupResult,
   type WelcomeMaterial as ContractWelcomeMaterial,
-  UserDirectorySchema,
-  EnrollmentRegisterBodySchema,
-  EnrollmentApproveBodySchema,
-  EnrollmentSchema,
-  ConversationListSchema,
-  WithdrawDeviceBodySchema,
   type Enrollment as ContractEnrollment,
   type ConversationList as ContractConversationList,
 } from '@argus/contracts';
@@ -101,14 +116,160 @@ export async function fetchMe(): Promise<Me> {
   return unwrapApiResult(await requestJson({ path: '/me', responseSchema: MeSchema }));
 }
 
+// ── Passkey authentication (Phase 5 frontend wiring) ─────────────────────────
+
+/** Redeem an admin invite code (POST /auth/register/redeem → { ceremonyId }). */
+export async function redeemCode(code: string): Promise<{ ceremonyId: string }> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/auth/register/redeem',
+      method: 'POST',
+      body: { code },
+      requestSchema: RedeemCodeRequestSchema,
+      responseSchema: RedeemCodeResponseSchema,
+    }),
+  );
+}
+
+/** Get WebAuthn creation options for the given ceremony (POST /auth/webauthn/register/options). */
+export async function getRegisterOptions(
+  ceremonyId: string,
+): Promise<{ ceremonyId: string; options: Record<string, unknown> }> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/auth/webauthn/register/options',
+      method: 'POST',
+      body: { ceremonyId },
+      requestSchema: RegisterOptionsRequestSchema,
+      responseSchema: RegisterOptionsResponseSchema,
+    }),
+  );
+}
+
+/** Submit a WebAuthn attestation to complete registration (POST /auth/webauthn/register/verify). */
+export async function verifyRegistration(
+  ceremonyId: string,
+  registrationResponse: unknown,
+): Promise<AccessTokenResponse> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/auth/webauthn/register/verify',
+      method: 'POST',
+      body: { ceremonyId, registrationResponse },
+      requestSchema: RegisterVerifyRequestSchema,
+      responseSchema: AccessTokenResponseSchema,
+    }),
+  );
+}
+
+/** Get WebAuthn authentication options (POST /auth/webauthn/authenticate/options). */
+export async function getAuthenticateOptions(): Promise<AuthenticateOptionsResponse> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/auth/webauthn/authenticate/options',
+      method: 'POST',
+      responseSchema: AuthenticateOptionsResponseSchema,
+    }),
+  );
+}
+
+/** Submit a WebAuthn assertion to complete login (POST /auth/webauthn/authenticate/verify). */
+export async function verifyAuthentication(
+  ceremonyId: string,
+  authenticationResponse: unknown,
+): Promise<AccessTokenResponse> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/auth/webauthn/authenticate/verify',
+      method: 'POST',
+      body: { ceremonyId, authenticationResponse },
+      requestSchema: AuthenticateVerifyRequestSchema,
+      responseSchema: AccessTokenResponseSchema,
+    }),
+  );
+}
+
 /**
- * Record the login (POST /auth/session → JIT-provisions the user + audits `auth.login`), then fetch
- * the profile. Both run under the Bearer token, so the server derives identity + tenant from the
- * verified claims only. Returns the profile; throws on a non-OK response.
+ * Rotate the refresh cookie → new access token (POST /auth/session/refresh).
+ * Sends the `argus_refresh` HttpOnly cookie automatically; requires `X-Argus-Refresh: 1` as CSRF guard.
+ * No Bearer token needed — the cookie carries the credential.
  */
-export async function establishSession(): Promise<Me> {
-  unwrapApiResult(await requestStatus({ path: '/auth/session', method: 'POST' }));
-  return fetchMe();
+export async function refreshSession(): Promise<AccessTokenResponse> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/auth/session/refresh',
+      method: 'POST',
+      headers: { 'X-Argus-Refresh': '1' },
+      responseSchema: AccessTokenResponseSchema,
+    }),
+  );
+}
+
+/** Revoke the current session and clear the refresh cookie (POST /auth/session/logout). */
+export async function logoutSession(): Promise<void> {
+  unwrapApiResult(await requestStatus({ path: '/auth/session/logout', method: 'POST' }));
+}
+
+/** Authenticate as the breakglass admin (POST /auth/breakglass/login). */
+export async function breakglassLogin(
+  username: string,
+  password: string,
+): Promise<AccessTokenResponse> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/auth/breakglass/login',
+      method: 'POST',
+      body: { username, password },
+      requestSchema: BreakglassLoginRequestSchema,
+      responseSchema: AccessTokenResponseSchema,
+    }),
+  );
+}
+
+// ── User discovery (Phase 4 + 5) ─────────────────────────────────────────────
+
+/** A user found by exact argus-id lookup — metadata only. */
+export type UserLookupResult = ContractUserLookupResult;
+
+/** Exact-match lookup by argus-id (GET /users/lookup). Returns null when not found. */
+export async function lookupUserByArgusId(argusId: string): Promise<UserLookupResult | null> {
+  const result = await requestJson({
+    path: `/users/lookup?argusId=${encodeURIComponent(argusId)}`,
+    responseSchema: UserLookupResultSchema,
+  });
+  if (!result.ok && result.status === 404) return null;
+  return unwrapApiResult(result);
+}
+
+/** A member of a conversation — metadata only. */
+export type ConversationMember = ContractConversationMember;
+
+/** List the members of a conversation (GET /conversations/:id/members). */
+export async function getConversationMembers(
+  conversationId: string,
+): Promise<ConversationMember[]> {
+  return unwrapApiResult(
+    await requestJson({
+      path: `/conversations/${encodeURIComponent(conversationId)}/members`,
+      responseSchema: ConversationMemberSchema.array(),
+    }),
+  );
+}
+
+// ── Profile editing (Phase 4 + 5) ────────────────────────────────────────────
+
+/** Update the caller's display name and/or avatar seed (PUT /me → 204). */
+export type UpdateProfileBody = ContractUpdateProfile;
+
+export async function updateProfile(body: UpdateProfileBody): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: '/me',
+      method: 'PUT',
+      body,
+      requestSchema: UpdateProfileSchema,
+    }),
+  );
 }
 
 /** Result of publishing one-time KeyPackages to the directory. */
@@ -153,19 +314,6 @@ export async function revokeKeyPackages(signaturePublicKey: string): Promise<Rev
       body: { signaturePublicKey },
       requestSchema: RevokeKeyPackagesRequestSchema,
       responseSchema: RevokeKeyPackagesResponseSchema,
-    }),
-  );
-}
-
-/** A tenant member as the directory exposes it — metadata only (no keys, no content). */
-export type UserSummary = ContractUserSummary;
-
-/** List active members of the caller's tenant (RLS-scoped, metadata only) — the contact picker source. */
-export async function listUsers(limit = 50): Promise<UserSummary[]> {
-  return unwrapApiResult(
-    await requestJson({
-      path: `/users?limit=${encodeURIComponent(limit)}`,
-      responseSchema: UserDirectorySchema,
     }),
   );
 }

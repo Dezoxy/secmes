@@ -70,9 +70,9 @@ function OnboardingScreen() {
  * not yet bound to a tenant. Demo mode (OIDC unconfigured) passes through without the gate.
  */
 export function OnboardingGate({ children }: { children: ReactNode }): ReactNode {
-  const { configured, ready, user, profile } = useAuth();
+  const { ready, authenticated, profile } = useAuth();
 
-  if (configured && ready && user && !profile) {
+  if (ready && authenticated && !profile) {
     return <OnboardingScreen />;
   }
 

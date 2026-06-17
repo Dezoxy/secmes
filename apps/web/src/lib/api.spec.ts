@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock the auth module so these tests don't pull in oidc-client-ts and we can control the token.
 vi.mock('./auth', () => ({ accessToken: vi.fn() }));
 import { accessToken } from './auth';
 import {
@@ -9,17 +8,13 @@ import {
   consumeWelcome,
   createConversation,
   deliverWelcome,
-  establishSession,
   fetchWelcomeMaterial,
-  listUsers,
   listWelcomes,
   publishKeyPackages,
   revokeKeyPackages,
 } from './api';
 
 const token = vi.mocked(accessToken);
-const userId = '00000000-0000-4000-8000-000000000001';
-const tenantId = '00000000-0000-4000-8000-000000000002';
 const peerUserId = '00000000-0000-4000-8000-000000000003';
 const deviceId = '00000000-0000-4000-8000-000000000004';
 const peerDeviceId = '00000000-0000-4000-8000-000000000005';
@@ -51,43 +46,6 @@ describe('api client', () => {
     await apiFetch('/me');
     const init = fetchSpy.mock.calls[0]?.[1];
     expect(new Headers(init?.headers).has('Authorization')).toBe(false);
-  });
-
-  it('establishSession POSTs /auth/session then returns the /me profile', async () => {
-    token.mockResolvedValue('tok');
-    const me = {
-      bound: true,
-      userId,
-      tenantId,
-      argusId: 'argus-abcdefghjkmnpqrs-otter',
-      email: 'alice@example.com',
-      displayName: 'A',
-      avatarSeed: null,
-      role: 'member',
-      plan: {
-        tier: 'free',
-        memberLimit: 10,
-        ssoEnabled: false,
-        memberCount: 1,
-        subscriptionStatus: null,
-      },
-    };
-    const fetchSpy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify(me), { status: 200 }));
-    await expect(establishSession()).resolves.toEqual(me);
-    expect(fetchSpy.mock.calls[0]?.[0]).toBe('/api/auth/session');
-    expect(fetchSpy.mock.calls[0]?.[1]?.method).toBe('POST');
-    expect(fetchSpy.mock.calls[1]?.[0]).toBe('/api/me');
-  });
-
-  it('establishSession throws when /me is not ok', async () => {
-    token.mockResolvedValue('tok');
-    vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(new Response(null, { status: 204 }))
-      .mockResolvedValueOnce(new Response('nope', { status: 401 }));
-    await expect(establishSession()).rejects.toThrow('API request failed with status 401.');
   });
 
   it('publishKeyPackages POSTs the device public material to the directory', async () => {
@@ -133,27 +91,6 @@ describe('api client', () => {
     token.mockResolvedValue('tok');
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('nope', { status: 500 }));
     await expect(revokeKeyPackages('s')).rejects.toThrow('API request failed with status 500.');
-  });
-
-  it('listUsers GETs /users with the limit and returns the directory', async () => {
-    token.mockResolvedValue('tok');
-    const users = [{ id: 'u1', email: 'alice@example.com', displayName: 'A' }];
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify(users), { status: 200 }),
-    );
-    await expect(listUsers(25)).rejects.toThrow(
-      'API response did not match the expected contract.',
-    );
-  });
-
-  it('listUsers validates and returns the tenant directory', async () => {
-    token.mockResolvedValue('tok');
-    const users = [{ id: peerUserId, email: 'alice@example.com', displayName: 'A' }];
-    const fetchSpy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response(JSON.stringify(users), { status: 200 }));
-    await expect(listUsers(25)).resolves.toEqual(users);
-    expect(fetchSpy.mock.calls[0]?.[0]).toBe('/api/users?limit=25');
   });
 
   it('claimKeyPackage POSTs the claim and surfaces an empty pool (404) distinctly', async () => {

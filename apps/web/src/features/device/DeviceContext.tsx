@@ -86,7 +86,8 @@ interface DeviceState {
 const DeviceCtx = createContext<DeviceState | null>(null);
 
 export function DeviceProvider({ children }: { children: ReactNode }): ReactNode {
-  const { configured, profile } = useAuth();
+  const { demoMode, profile } = useAuth();
+  const configured = !demoMode;
   const [keystore, setKeystore] = useState<DeviceKeystore | null>(null);
   const [device, setDevice] = useState<DeviceKeys | null>(null);
   const [pool, setPool] = useState<DeviceKeys[] | null>(null);

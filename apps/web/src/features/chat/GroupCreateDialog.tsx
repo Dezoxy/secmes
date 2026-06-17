@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Search, UserPlus, Users, X } from 'lucide-react';
 import type { Conversation as MlsGroup } from '@argus/crypto';
-import { listUsers, type UserSummary } from '../../lib/api';
+import { lookupUserByArgusId, type UserLookupResult } from '../../lib/api';
 import {
   GroupConversationManager,
   type GroupConversationSession,
@@ -9,10 +9,10 @@ import {
 } from '../../lib/conversations';
 import type { MessagingDeps } from '../../lib/messaging';
 import { dicebearAvatar } from '../../lib/dicebear';
-import { contactDisplayName, contactSearchText } from './user-label';
+import { contactDisplayName } from './user-label';
 import { VerifySecurity } from './VerifySecurity';
-import { Avatar, Button, EmptyState, ErrorState, IconButton, LoadingState, Modal } from '../ui';
-import { createSafeUiError, toSafeUiError, type SafeUiError } from '../../lib/safe-ui-error';
+import { Avatar, Button, ErrorState, IconButton, LoadingState, Modal } from '../ui';
+import { toSafeUiError, type SafeUiError } from '../../lib/safe-ui-error';
 
 const MAX_GROUP_MEMBERS = 31; // 31 others + self = 32 total
 
@@ -24,7 +24,7 @@ type Phase =
       pending: PendingGroup;
       memberIndex: number;
       deviceIndex: number;
-      users: UserSummary[];
+      selected: UserLookupResult[];
     }
   | { tag: 'confirming' };
 
@@ -40,7 +40,7 @@ interface GroupCreateDialogProps {
   existingGroupName?: string;
   // Callbacks.
   onCreated?: (session: GroupConversationSession) => void;
-  onAdded?: (addedUsers: UserSummary[]) => void;
+  onAdded?: (addedUsers: UserLookupResult[]) => void;
   onClose: () => void;
 }
 
@@ -57,50 +57,50 @@ export function GroupCreateDialog({
   onAdded,
   onClose,
 }: GroupCreateDialogProps) {
-  const [allUsers, setAllUsers] = useState<UserSummary[] | null>(null);
-  const [loadError, setLoadError] = useState<SafeUiError | null>(null);
-  const [filter, setFilter] = useState('');
-  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [argusId, setArgusId] = useState('');
+  const [looking, setLooking] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<UserLookupResult[]>([]);
   const [groupName, setGroupName] = useState('');
   const [phase, setPhase] = useState<Phase>({ tag: 'picking' });
   const [actionError, setActionError] = useState<SafeUiError | null>(null);
 
-  useEffect(() => {
-    let active = true;
-    listUsers()
-      .then((list) => {
-        if (!active) return;
-        const excluded = new Set<string>(
-          [selfUserId, ...(existingMemberIds ?? [])].filter((id): id is string => id != null),
-        );
-        setAllUsers(list.filter((u) => !excluded.has(u.id)));
-      })
-      .catch(() => {
-        if (active) {
-          setLoadError(
-            createSafeUiError({
-              title: 'Contacts unavailable',
-              message: 'Contacts could not be loaded. Try again in a moment.',
-              kind: 'network',
-            }),
-          );
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [selfUserId, existingMemberIds]);
+  const excluded = new Set<string>(
+    [selfUserId, ...(existingMemberIds ?? [])].filter((id): id is string => id != null),
+  );
 
-  const toggleUser = (userId: string): void => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(userId)) {
-        next.delete(userId);
-      } else if (next.size < MAX_GROUP_MEMBERS) {
-        next.add(userId);
-      }
-      return next;
-    });
+  const handleLookup = (): void => {
+    const id = argusId.trim();
+    if (!id || looking) return;
+    setLookupError(null);
+    setLooking(true);
+    lookupUserByArgusId(id)
+      .then((result) => {
+        if (!result) {
+          setLookupError('No user found with that argus-id.');
+          return;
+        }
+        if (excluded.has(result.userId)) {
+          setLookupError('That user is already a member.');
+          return;
+        }
+        if (selected.some((u) => u.userId === result.userId)) {
+          setLookupError('Already added.');
+          return;
+        }
+        if (selected.length >= MAX_GROUP_MEMBERS) {
+          setLookupError(`Maximum ${MAX_GROUP_MEMBERS} members reached.`);
+          return;
+        }
+        setSelected((prev) => [...prev, result]);
+        setArgusId('');
+      })
+      .catch(() => setLookupError('Lookup failed. Check the id and try again.'))
+      .finally(() => setLooking(false));
+  };
+
+  const removeSelected = (userId: string): void => {
+    setSelected((prev) => prev.filter((u) => u.userId !== userId));
   };
 
   const handleConfirm = (pending: PendingGroup): void => {
@@ -126,10 +126,7 @@ export function GroupCreateDialog({
       manager
         .confirmAdd(conversationId!, existingConversation!, pending, deps)
         .then(() => {
-          const addedUsers = pending.members
-            .map((m) => allUsers?.find((u) => u.id === m.userId))
-            .filter((u): u is UserSummary => u != null);
-          onAdded?.(addedUsers);
+          onAdded?.(selected);
           onClose();
         })
         .catch((e: unknown) => {
@@ -145,21 +142,18 @@ export function GroupCreateDialog({
   };
 
   const handleContinue = (): void => {
-    if (selected.size === 0) return;
+    if (selected.length === 0) return;
     if (mode === 'create' && !groupName.trim()) return;
     setActionError(null);
     setPhase({ tag: 'preparing' });
     const name = mode === 'create' ? groupName.trim() : (existingGroupName ?? '');
     manager
-      .prepare([...selected], name)
+      .prepare(
+        selected.map((u) => u.userId),
+        name,
+      )
       .then((pending) => {
-        setPhase({
-          tag: 'verifying',
-          pending,
-          memberIndex: 0,
-          deviceIndex: 0,
-          users: allUsers ?? [],
-        });
+        setPhase({ tag: 'verifying', pending, memberIndex: 0, deviceIndex: 0, selected });
       })
       .catch((e: unknown) => {
         setActionError(
@@ -173,11 +167,10 @@ export function GroupCreateDialog({
   };
 
   // Verifying phase: render VerifySecurity for each (member, device) pair sequentially.
-  // Multi-device members get one screen per device — a swapped key on ANY device is a MITM.
   if (phase.tag === 'verifying') {
-    const { pending, memberIndex, deviceIndex, users } = phase;
+    const { pending, memberIndex, deviceIndex, selected: sel } = phase;
     const member = pending.members[memberIndex]!;
-    const user = users.find((u) => u.id === member.userId);
+    const user = sel.find((u) => u.userId === member.userId);
     const name = user ? contactDisplayName(user) : member.userId;
     const totalMembers = pending.members.length;
     const totalDevices = member.allDevices.length;
@@ -202,7 +195,7 @@ export function GroupCreateDialog({
               pending,
               memberIndex,
               deviceIndex: deviceIndex + 1,
-              users,
+              selected: sel,
             });
           } else if (!isLastMember) {
             setPhase({
@@ -210,7 +203,7 @@ export function GroupCreateDialog({
               pending,
               memberIndex: memberIndex + 1,
               deviceIndex: 0,
-              users,
+              selected: sel,
             });
           } else {
             handleConfirm(pending);
@@ -224,11 +217,8 @@ export function GroupCreateDialog({
     );
   }
 
-  const shown = (allUsers ?? []).filter((u) =>
-    contactSearchText(u).includes(filter.trim().toLowerCase()),
-  );
   const busy = phase.tag === 'preparing' || phase.tag === 'confirming';
-  const canContinue = selected.size > 0 && (mode === 'add' || groupName.trim().length > 0);
+  const canContinue = selected.length > 0 && (mode === 'add' || groupName.trim().length > 0);
   const title = mode === 'create' ? 'New group' : 'Add members';
 
   return (
@@ -266,19 +256,38 @@ export function GroupCreateDialog({
         </div>
       )}
 
-      <div className="relative mb-3">
-        <Search
-          aria-hidden="true"
-          className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30"
-        />
-        <input
-          type="text"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="Search people…"
-          className="w-full rounded-xl border border-white/5 bg-[#1a1a26] py-2.5 pl-10 pr-4 text-sm text-white placeholder-white/30 outline-none transition-colors focus:border-purple-500/50"
-        />
+      <div className="mb-3 flex gap-2">
+        <div className="relative flex-1">
+          <Search
+            aria-hidden="true"
+            className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30"
+          />
+          <input
+            type="text"
+            value={argusId}
+            onChange={(e) => {
+              setArgusId(e.target.value);
+              setLookupError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleLookup();
+            }}
+            placeholder="Add by argus-id…"
+            disabled={busy}
+            className="w-full rounded-xl border border-white/5 bg-[#1a1a26] py-2.5 pl-10 pr-4 text-sm text-white placeholder-white/30 outline-none transition-colors focus:border-purple-500/50 disabled:opacity-50"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={handleLookup}
+          disabled={busy || looking || !argusId.trim()}
+          className="shrink-0 rounded-xl border border-white/10 px-4 text-sm text-white/60 transition-colors hover:border-purple-500/30 hover:text-white/90 disabled:opacity-50"
+        >
+          {looking ? '…' : 'Add'}
+        </button>
       </div>
+
+      {lookupError && <p className="mb-2 text-xs text-red-400">{lookupError}</p>}
 
       {busy && (
         <LoadingState
@@ -293,73 +302,43 @@ export function GroupCreateDialog({
       )}
       {actionError && <ErrorState error={actionError} compact className="mb-3" />}
 
-      <div className="mb-4 max-h-64 space-y-1 overflow-y-auto">
-        {allUsers === null && !loadError && (
-          <LoadingState title="Loading contacts" compact className="mx-1 my-2" />
-        )}
-        {loadError && <ErrorState error={loadError} compact className="mx-1 my-2" />}
-        {allUsers !== null && !loadError && shown.length === 0 && (
-          <EmptyState
-            title={allUsers.length === 0 ? 'No contacts available' : 'No matches'}
-            compact
-          >
-            {allUsers.length === 0
-              ? 'No other members are available to add.'
-              : 'Try another search term.'}
-          </EmptyState>
-        )}
-        {shown.map((u) => {
-          const label = contactDisplayName(u);
-          const isSelected = selected.has(u.id);
-          const atMax = selected.size >= MAX_GROUP_MEMBERS && !isSelected;
-          return (
-            <button
-              key={u.id}
-              type="button"
-              disabled={busy || atMax}
-              onClick={() => toggleUser(u.id)}
-              className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-colors disabled:opacity-50 ${
-                isSelected
-                  ? 'border-purple-500/40 bg-purple-500/10'
-                  : 'border-transparent hover:bg-[#1a1a26]'
-              }`}
-            >
-              <Avatar
-                src={dicebearAvatar(u.id)}
-                name={label}
-                size="md"
-                shape="circle"
-                className="shrink-0 ring-2 ring-white/5"
-              />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-white/90">{label}</p>
-                <p className="truncate text-xs text-white/60">Pseudonymous member</p>
-              </div>
+      {selected.length > 0 && (
+        <div className="mb-4 max-h-48 space-y-1 overflow-y-auto">
+          {selected.map((u) => {
+            const label = contactDisplayName(u);
+            return (
               <div
-                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
-                  isSelected ? 'border-purple-400 bg-purple-500' : 'border-white/20'
-                }`}
+                key={u.userId}
+                className="flex items-center gap-3 rounded-xl border border-white/5 bg-[#1a1a26] p-3"
               >
-                {isSelected && (
-                  <svg viewBox="0 0 10 8" fill="none" className="h-2.5 w-2.5">
-                    <path
-                      d="M1 4l3 3L9 1"
-                      stroke="white"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                )}
+                <Avatar
+                  src={dicebearAvatar(u.userId)}
+                  name={label}
+                  size="md"
+                  shape="circle"
+                  className="shrink-0 ring-2 ring-white/5"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-white/90">{label}</p>
+                  <p className="truncate text-xs text-white/40 font-mono">{u.argusId}</p>
+                </div>
+                <IconButton
+                  onClick={() => removeSelected(u.userId)}
+                  size="sm"
+                  aria-label={`Remove ${label}`}
+                  disabled={busy}
+                >
+                  <X className="h-4 w-4" />
+                </IconButton>
               </div>
-            </button>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-white/40">
-          {selected.size}/{MAX_GROUP_MEMBERS} selected
+          {selected.length}/{MAX_GROUP_MEMBERS} added
         </p>
         <Button
           onClick={handleContinue}

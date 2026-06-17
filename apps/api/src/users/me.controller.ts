@@ -69,6 +69,7 @@ export class MeController {
             displayName: { type: 'string', nullable: true },
             avatarSeed: { type: 'string', nullable: true },
             role: { type: 'string', enum: ['admin', 'member'] },
+            isBreakglass: { type: 'boolean' },
           },
           required: ['bound', 'userId', 'tenantId', 'argusId', 'displayName', 'avatarSeed', 'role'],
         },
@@ -90,6 +91,7 @@ export class MeController {
       displayName: user.displayName,
       avatarSeed: user.avatarSeed,
       role: user.role,
+      isBreakglass: user.displayName === 'breakglass-admin' || undefined,
       plan: user.plan,
     });
   }

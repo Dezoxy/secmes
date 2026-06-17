@@ -94,6 +94,12 @@ export const RegisterOptionsRequestSchema = z.object({
 });
 export type RegisterOptionsRequest = z.infer<typeof RegisterOptionsRequestSchema>;
 
+export const RegisterOptionsResponseSchema = z.object({
+  ceremonyId: z.string().uuid(),
+  options: z.record(z.string(), z.unknown()),
+});
+export type RegisterOptionsResponse = z.infer<typeof RegisterOptionsResponseSchema>;
+
 export const RegisterVerifyRequestSchema = z.object({
   ceremonyId: z.string().uuid(),
   registrationResponse: z.record(z.string(), z.unknown()),
@@ -127,6 +133,8 @@ export const MeBoundSchema = z.object({
   displayName: z.string().nullable(),
   avatarSeed: z.string().nullable(),
   role: z.enum(['admin', 'member']),
+  /** True for the breakglass admin account — front-end gates profile editing on this. */
+  isBreakglass: z.boolean().optional(),
   // Kept optional for backward-compat during Phase 4 → Phase 6 transition; not returned by the API.
   email: z.string().email().nullable().optional(),
   plan: TenantPlanSchema.optional(),
@@ -186,16 +194,6 @@ export const RevokeKeyPackagesResponseSchema = z.object({
   revoked: z.number().int().nonnegative(),
 });
 export type RevokeKeyPackagesResponse = z.infer<typeof RevokeKeyPackagesResponseSchema>;
-
-export const UserSummarySchema = z.object({
-  id: z.string().uuid(),
-  email: z.string().email().nullable(),
-  displayName: z.string().nullable(),
-});
-export type UserSummary = z.infer<typeof UserSummarySchema>;
-
-export const UserDirectorySchema = z.array(UserSummarySchema);
-export type UserDirectory = z.infer<typeof UserDirectorySchema>;
 
 export const ClaimedKeyPackageSchema = z.object({
   deviceId: z.string().uuid(),
