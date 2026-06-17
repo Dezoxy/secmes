@@ -3,23 +3,33 @@ import { contactDisplayName, contactSearchText } from './user-label';
 
 describe('contact labels', () => {
   it('uses an explicit display name when present', () => {
-    const user = { id: 'user-1', displayName: 'Shadow Operator', email: 'shadow@example.test' };
+    const user = {
+      userId: 'user-1',
+      argusId: 'argus-abc123-shadow',
+      displayName: 'Shadow Operator',
+    };
 
     expect(contactDisplayName(user)).toBe('Shadow Operator');
-    expect(contactSearchText(user)).toBe('shadow operator user-1');
+    expect(contactSearchText(user)).toBe('shadow operator argus-abc123-shadow');
   });
 
-  it('does not infer visible identity or search text from email', () => {
-    const user = { id: 'user-2', displayName: '', email: 'alice@example.test' };
+  it('falls back to Anonymous contact when displayName is blank', () => {
+    const user = { userId: 'user-2', argusId: 'argus-abc123-blank', displayName: '' };
 
     expect(contactDisplayName(user)).toBe('Anonymous contact');
-    expect(contactSearchText(user)).toBe('user-2');
+    expect(contactSearchText(user)).toBe('argus-abc123-blank');
   });
 
   it('handles nullable backend display names', () => {
-    const user = { id: 'user-3', displayName: null, email: 'null-name@example.test' };
+    const user = { userId: 'user-3', argusId: 'argus-abc123-null', displayName: null };
 
     expect(contactDisplayName(user)).toBe('Anonymous contact');
-    expect(contactSearchText(user)).toBe('user-3');
+    expect(contactSearchText(user)).toBe('argus-abc123-null');
+  });
+
+  it('falls back to userId in search text when argusId is absent', () => {
+    const user = { userId: 'user-4', displayName: null };
+
+    expect(contactSearchText(user)).toBe('user-4');
   });
 });

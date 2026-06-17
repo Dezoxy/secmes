@@ -115,24 +115,4 @@ describe.skipIf(!DB_URL)('UserService (JIT provisioning)', () => {
     expect(a.id).not.toBe(b.id);
     expect((await users.getByAuth({ sub: 'shared', tenantId: tenantA }))?.id).toBe(a.id);
   });
-
-  it('lists only the tenant’s own users — ordered by email, bounded by limit', async () => {
-    const all = await users.list(tenantA, 100);
-    const emails = all.map((u) => u.email);
-    expect(emails.length).toBeGreaterThanOrEqual(3); // provisioned above in tenant A
-    expect([...emails].sort()).toEqual(emails); // already sorted ascending
-    expect(emails).not.toContain('s@b.test'); // tenant B's user never leaks
-    expect((await users.list(tenantA, 2)).length).toBe(2); // limit caps the result
-  });
-
-  it('excludes non-active users from the directory', async () => {
-    const u = await users.provisionFromToken({
-      sub: 'sub-suspended',
-      tenantId: tenantA,
-      email: 'zzz-suspended@a.test',
-    });
-    await sql`update users set status = 'suspended' where id = ${u.id}`; // owner conn, bypasses RLS
-    const emails = (await users.list(tenantA, 100)).map((r) => r.email);
-    expect(emails).not.toContain('zzz-suspended@a.test');
-  });
 });

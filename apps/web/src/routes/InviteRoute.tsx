@@ -10,12 +10,13 @@ import { Button, LoadingState } from '../features/ui';
  *
  * The token is in the URL fragment so it is never sent to any server in an HTTP log.
  * Behaviour:
- *   - Authenticated + unbound  → store token, navigate to /chat (OnboardingGate shows JoinWorkspace)
- *   - Authenticated + bound    → show "already in a workspace"
- *   - Not authenticated        → store token, call login()
+ *   - Demo mode              → skip to /chat
+ *   - Not authenticated      → store token, call login()
+ *   - Authenticated + unbound → store token, navigate to /chat (OnboardingGate shows JoinWorkspace)
+ *   - Authenticated + bound  → show "already in a workspace"
  */
 export default function InviteRoute() {
-  const { configured, ready, user, profile, login } = useAuth();
+  const { demoMode, ready, authenticated, profile } = useAuth();
   const navigate = useNavigate();
   const handled = useRef(false);
 
@@ -23,17 +24,19 @@ export default function InviteRoute() {
 
   useEffect(() => {
     if (!ready || handled.current) return;
-    if (!configured) {
+    if (demoMode) {
       handled.current = true;
       void navigate('/chat', { replace: true });
       return;
     }
 
-    if (!user) {
-      // Not authenticated: park the token then trigger OIDC.
+    if (!authenticated) {
+      // Not authenticated: park the token and send to the landing page where the user can
+      // sign in (existing passkey) or create a new account via RegisterScreen.
+      // Calling login() directly breaks new users who don't have a passkey credential yet.
       handled.current = true;
       if (token) storePendingInviteToken(token);
-      void login();
+      void navigate('/', { replace: true });
       return;
     }
 
@@ -46,7 +49,7 @@ export default function InviteRoute() {
     handled.current = true;
     if (token) storePendingInviteToken(token);
     void navigate('/chat', { replace: true });
-  }, [ready, configured, user, profile, token, login, navigate]);
+  }, [ready, demoMode, authenticated, profile, token, navigate]);
 
   if (!ready) {
     return (

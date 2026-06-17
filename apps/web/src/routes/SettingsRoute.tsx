@@ -1,5 +1,5 @@
 import { Settings } from 'lucide-react';
-import { EmptyState } from '../features/ui';
+import { ProfileEdit } from '../features/settings/ProfileEdit';
 import { RoutePageShell } from './RoutePageShell';
 
 export default function SettingsRoute() {
@@ -7,13 +7,12 @@ export default function SettingsRoute() {
     <RoutePageShell
       eyebrow="Settings"
       title="Account settings"
-      description="A route-owned settings surface for profile, security, privacy, notifications, appearance, storage, and devices."
+      description="Manage your profile and account preferences."
       icon={Settings}
     >
-      <EmptyState icon={Settings} title="Settings sections">
-        The editable settings modal now uses split section components. The route shell can reuse
-        them once profile and device state move out of the chat surface.
-      </EmptyState>
+      <div className="mx-auto max-w-lg space-y-4">
+        <ProfileEdit />
+      </div>
     </RoutePageShell>
   );
 }

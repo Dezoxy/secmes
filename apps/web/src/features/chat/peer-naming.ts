@@ -1,10 +1,10 @@
-// Resolve a live conversation's peer to a real directory identity (#44b handle) — replacing the neutral
-// "New contact" placeholder that joins/rehydrates start with. Naming is BEST-EFFORT and local: a failed
-// directory lookup just leaves the placeholder (it self-heals on the next trigger). The peer's user id is
-// always server-verified upstream (a welcome's senderUserId or a fetched message's senderUserId) — never
+// Resolve a live conversation's peer to a real identity — replacing the neutral "New contact"
+// placeholder that joins/rehydrates start with. Naming is BEST-EFFORT and local: a failed lookup
+// just leaves the placeholder (self-heals on the next trigger). The peer's user id is always
+// server-verified upstream (a welcome's senderUserId or a fetched message's senderUserId) — never
 // client-supplied text.
 
-import { listUsers, type UserSummary } from '../../lib/api';
+import { getConversationMembers, type ConversationMember } from '../../lib/api';
 import {
   browserLocalStorage,
   readVersionedRecord,
@@ -12,7 +12,6 @@ import {
   writeVersionedRecord,
   type BrowserStorage,
 } from '../../lib/persistence';
-import { contactDisplayName } from './user-label';
 import { dicebearAvatar } from '../../lib/dicebear';
 import type { Conversation, User } from './seed';
 
@@ -68,41 +67,46 @@ export function loadPersistedPeerMapping(
   return result.status === 'ok' ? result.value.peerId : null;
 }
 
-// One directory fetch per session, shared across naming triggers; refreshed once on a miss (a peer who
-// provisioned AFTER the cache filled — e.g. their very first login created the conversation).
-let directoryCache: Promise<UserSummary[]> | null = null;
+// Per-conversation members cache: avoids re-fetching for every naming trigger in the same session.
+const membersCache = new Map<string, Promise<ConversationMember[]>>();
 
-async function directory(refresh = false): Promise<UserSummary[]> {
-  if (refresh || !directoryCache) {
-    directoryCache = listUsers(100).catch((err: unknown) => {
-      directoryCache = null; // don't cache a failure
+async function conversationMembers(
+  conversationId: string,
+  refresh = false,
+): Promise<ConversationMember[]> {
+  if (refresh || !membersCache.has(conversationId)) {
+    const p = getConversationMembers(conversationId).catch((err: unknown) => {
+      membersCache.delete(conversationId);
       throw err;
     });
+    membersCache.set(conversationId, p);
   }
-  return directoryCache;
+  return membersCache.get(conversationId)!;
 }
 
-/** Test seam: drop the session directory cache. */
+/** Test seam: drop the per-conversation members cache. */
 export function resetPeerDirectoryCache(): void {
-  directoryCache = null;
+  membersCache.clear();
 }
 
 /**
- * Resolve a peer user id to a UI identity via the tenant directory. Returns null when unknown (not in this
- * tenant, not yet provisioned, or the lookup failed) — callers keep the placeholder.
+ * Resolve a peer user id to a UI identity via the conversation member list. Returns null when
+ * unknown (not a member, not yet provisioned, or the lookup failed) — callers keep the placeholder.
  */
-export async function resolvePeerUser(userId: string): Promise<User | null> {
+export async function resolvePeerUser(
+  userId: string,
+  conversationId: string,
+): Promise<User | null> {
   try {
-    let users = await directory();
-    let found = users.find((u) => u.id === userId);
+    let members = await conversationMembers(conversationId);
+    let found = members.find((m) => m.userId === userId);
     if (!found) {
-      users = await directory(true);
-      found = users.find((u) => u.id === userId);
+      members = await conversationMembers(conversationId, true);
+      found = members.find((m) => m.userId === userId);
     }
     if (!found) return null;
-    const name = contactDisplayName(found);
-    // No isOnline: presence is UNKNOWN for live peers (there is no presence system) — never claim Offline.
-    return { id: found.id, name, avatar: dicebearAvatar(found.id) };
+    const name = found.displayName?.trim() || 'Anonymous';
+    return { id: found.userId, name, avatar: dicebearAvatar(found.userId) };
   } catch {
     return null;
   }

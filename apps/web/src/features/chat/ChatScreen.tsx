@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { MessageCircle, X } from 'lucide-react';
-import type { UserSummary } from '../../lib/api';
+import type { UserLookupResult } from '../../lib/api';
 import {
   ConversationManager,
   GroupConversationManager,
@@ -296,12 +296,12 @@ export default function ChatScreen() {
 
   // Add a freshly-started LIVE conversation to the list: its safety number is the REAL one from the
   // session (not a loopback), and the user just confirmed it out-of-band, so it lands pre-verified.
-  const handleStarted = (session: ConversationSession, peer: UserSummary): void => {
+  const handleStarted = (session: ConversationSession, peer: UserLookupResult): void => {
     const name = contactDisplayName(peer);
     const peerUser: User = {
-      id: peer.id,
+      id: peer.userId,
       name,
-      avatar: dicebearAvatar(peer.id),
+      avatar: dicebearAvatar(peer.userId),
       // No isOnline: presence is unknown for live peers — never claim Offline (see seed.ts User).
     };
     addLive(session.conversationId, session.conversation); // retain its MLS group for live send/fetch
@@ -319,7 +319,7 @@ export default function ChatScreen() {
             ...prev,
           ],
     );
-    persistPeerMapping(session.conversationId, peer.id);
+    persistPeerMapping(session.conversationId, peer.userId);
     setNumbersByConv((prev) => ({ ...prev, [session.conversationId]: session.safetyNumber }));
     setVerifiedByConv((prev) => ({ ...prev, [session.conversationId]: session.safetyNumber }));
     setSelectedId(session.conversationId);
@@ -585,11 +585,11 @@ export default function ChatScreen() {
                   if (c.id !== selectedId) return c;
                   const existingIds = new Set(c.participants.map((p) => p.id));
                   const fresh = addedUsers
-                    .filter((u) => !existingIds.has(u.id))
+                    .filter((u) => !existingIds.has(u.userId))
                     .map((u) => ({
-                      id: u.id,
+                      id: u.userId,
                       name: contactDisplayName(u),
-                      avatar: dicebearAvatar(u.id),
+                      avatar: dicebearAvatar(u.userId),
                     }));
                   return fresh.length === 0
                     ? c

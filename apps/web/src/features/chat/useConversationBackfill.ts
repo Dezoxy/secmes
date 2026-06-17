@@ -174,7 +174,7 @@ export function useConversationBackfill({
       const peerSender = incoming.find((m) => m.kind !== 'group-meta')?.senderUserId;
       if (peerSender && !peerNamingTried.current.has(conversationId)) {
         peerNamingTried.current.add(conversationId);
-        void resolvePeerUser(peerSender).then((peer) => {
+        void resolvePeerUser(peerSender, conversationId).then((peer) => {
           if (peer) setConversations((prev) => withPeerNamed(prev, conversationId, peer));
         });
       }
@@ -298,7 +298,7 @@ export function useConversationHistoryRehydration({
           ].slice(0, 3);
           void (async () => {
             for (const senderId of senderIds) {
-              const peer = await resolvePeerUser(senderId);
+              const peer = await resolvePeerUser(senderId, conversationId);
               if (peer) {
                 setConversations((prev) => withPeerNamed(prev, conversationId, peer));
                 return;

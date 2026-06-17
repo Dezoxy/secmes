@@ -1,103 +1,17 @@
-// SPA OIDC login via oidc-client-ts — Authorization Code + PKCE, public client (no secret).
-//
-// Token handling per docs/threat-models/auth-tenant-context.md §8: the access token is a JWT held
-// in MEMORY ONLY. The user/token store is an in-memory Storage shim (never localStorage/
-// sessionStorage), so an XSS can't lift the token from persistent storage. While the tab is open,
-// `automaticSilentRenew` refreshes it via the offline_access refresh token (no iframe). A full page
-// reload intentionally drops the session (memory-only) — the user logs in again. The transient PKCE
-// verifier + state DO use sessionStorage, but only for the redirect round-trip (oidc-client-ts clears
-// them on callback). No password ever reaches our server; the server stays crypto-blind.
+// Access token held in module-level memory ONLY — never localStorage/sessionStorage.
+// api-client.ts reads this; AuthContext writes it after each passkey ceremony or session refresh.
 
-import { UserManager, WebStorageStateStore, type User } from 'oidc-client-ts';
+let _token: string | null = null;
 
-const ISSUER = import.meta.env.VITE_OIDC_ISSUER as string | undefined;
-const CLIENT_ID = import.meta.env.VITE_OIDC_CLIENT_ID as string | undefined;
-
-/** True when the SPA has OIDC configured (VITE_OIDC_* present). Without it the app runs in demo mode. */
-export const oidcConfigured = Boolean(ISSUER && CLIENT_ID);
-
-/** Redirect URI — computed lazily (uses `window`), so importing this module is safe outside a browser. */
-function redirectUri(): string {
-  return (
-    (import.meta.env.VITE_OIDC_REDIRECT_URI as string | undefined) ??
-    `${window.location.origin}/auth/callback`
-  );
+export function setToken(t: string | null): void {
+  _token = t;
 }
 
-/** A Storage-compatible in-memory store so oidc-client-ts keeps the user/token in memory only. */
-export function createMemoryStorage(): Storage {
-  const map = new Map<string, string>();
-  return {
-    get length() {
-      return map.size;
-    },
-    clear: () => map.clear(),
-    getItem: (k) => map.get(k) ?? null,
-    key: (i) => Array.from(map.keys())[i] ?? null,
-    removeItem: (k) => void map.delete(k),
-    setItem: (k, v) => void map.set(k, v),
-  };
-}
-
-/** Stable authenticated subject for storage scoping. Never use email/name as identity fallback. */
-export function subjectFromUser(
-  user: { profile?: { sub?: unknown; [claim: string]: unknown } } | null,
-): string | null {
-  const subject = user?.profile?.sub;
-  return typeof subject === 'string' && subject.length > 0 ? subject : null;
-}
-
-export function profileScopeFromAuth(
-  user: { profile?: { sub?: unknown; [claim: string]: unknown } } | null,
-  backendUserId: string | null | undefined,
-): string | null {
-  return subjectFromUser(user) ?? backendUserId ?? null;
-}
-
-let manager: UserManager | null = null;
-export function userManager(): UserManager {
-  if (!oidcConfigured)
-    throw new Error('OIDC is not configured (set VITE_OIDC_ISSUER + VITE_OIDC_CLIENT_ID)');
-  manager ??= new UserManager({
-    authority: ISSUER as string,
-    client_id: CLIENT_ID as string,
-    redirect_uri: redirectUri(),
-    post_logout_redirect_uri: window.location.origin,
-    response_type: 'code', // PKCE is automatic for the code flow
-    scope: 'openid profile email offline_access',
-    automaticSilentRenew: true,
-    // Token in memory only (§8). PKCE verifier/state are transient and may live in sessionStorage.
-    userStore: new WebStorageStateStore({ store: createMemoryStorage() }),
-    stateStore: new WebStorageStateStore({ store: window.sessionStorage }),
-    monitorSession: false,
-  });
-  return manager;
-}
-
-/** Begin the OIDC redirect to Zitadel's hosted login.
- * Pass `organizationId` to scope the login to a specific Zitadel org (G2 SSO login URL). */
-export async function login(opts?: { organizationId?: string }): Promise<void> {
-  const extra = opts?.organizationId ? { organization_id: opts.organizationId } : undefined;
-  await userManager().signinRedirect({ prompt: 'login', extraQueryParams: extra });
-}
-
-/** Complete the redirect on the callback route: exchange the code for tokens (PKCE). */
-export async function completeLogin(): Promise<User | undefined> {
-  return userManager().signinCallback();
-}
-
-/** Clear the local session and hit Zitadel's end-session endpoint. */
-export async function logout(): Promise<void> {
-  await userManager().signoutRedirect();
-}
-
-/** The current in-memory user (null if not signed in or OIDC unconfigured). */
-export async function getUser(): Promise<User | null> {
-  if (!oidcConfigured) return null;
-  return userManager().getUser();
-}
-
-/** The current access token for attaching to API calls, or null. */
+/** The current in-memory access token (or null). Kept async so api-client.ts needs no changes. */
 export async function accessToken(): Promise<string | null> {
-  return (await getUser())?.access_token ?? null;
+  return _token;
 }
+
+/** True when the app runs without real auth. Set VITE_DEMO_MODE=1 to enable. */
+export const demoMode: boolean =
+  import.meta.env.VITE_DEMO_MODE === '1' || import.meta.env.VITE_DEMO_MODE === 'true';

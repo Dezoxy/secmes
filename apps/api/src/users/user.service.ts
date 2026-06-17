@@ -16,13 +16,6 @@ export interface UserRecord {
   plan?: TenantPlan;
 }
 
-export interface DirectoryRecord {
-  id: string;
-  email: string | null;
-  displayName: string | null;
-  role: string;
-}
-
 // Full identity projection for /me (getByAuth + provisionFromToken). email is included
 // so provisionFromToken can write it; it is NOT in UserRecord (not exposed to controllers).
 const ME_SELECTION = {
@@ -31,15 +24,6 @@ const ME_SELECTION = {
   email: schema.users.email,
   displayName: schema.users.displayName,
   avatarSeed: schema.users.avatarSeed,
-  role: schema.users.role,
-} as const;
-
-// Directory projection — argusId intentionally excluded; used by list() → GET /users.
-// argusId is a user's persistent pseudonymous identity and must not be exposed to all tenant members.
-const DIRECTORY_SELECTION = {
-  id: schema.users.id,
-  email: schema.users.email,
-  displayName: schema.users.displayName,
   role: schema.users.role,
 } as const;
 
@@ -102,23 +86,6 @@ export class UserService {
       }
     }
     throw new Error('could not allocate a unique argus-id after 3 attempts');
-  }
-
-  /** List ACTIVE users in a tenant (the directory), capped by `limit`. RLS scopes it to the tenant. */
-  async list(tenantId: string, limit: number): Promise<DirectoryRecord[]> {
-    return withTenant(tenantId, async (tx) =>
-      tx
-        .select(DIRECTORY_SELECTION)
-        .from(schema.users)
-        .where(
-          and(
-            eq(schema.users.status, 'active'),
-            or(isNull(schema.users.displayName), ne(schema.users.displayName, 'breakglass-admin')),
-          ),
-        )
-        .orderBy(schema.users.email)
-        .limit(limit),
-    );
   }
 
   /** Read the user for a verified identity within their tenant. Undefined if not yet provisioned. */

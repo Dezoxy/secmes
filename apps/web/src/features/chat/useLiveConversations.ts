@@ -233,7 +233,7 @@ export function useLiveConversations({
         setConversations((prev) => prependConversationIfMissing(prev, shell));
         // Name the new conversation after the (verified) member who added us — best-effort, async; the
         // placeholder stays if the directory lookup misses.
-        void resolvePeerUser(senderUserId).then((peer) => {
+        void resolvePeerUser(senderUserId, conversationId).then((peer) => {
           if (peer) setConversations((prev) => withPeerNamed(prev, conversationId, peer));
         });
       },

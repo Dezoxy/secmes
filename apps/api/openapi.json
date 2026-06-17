@@ -696,6 +696,9 @@
                             "admin",
                             "member"
                           ]
+                        },
+                        "isBreakglass": {
+                          "type": "boolean"
                         }
                       },
                       "required": [
@@ -1049,140 +1052,6 @@
           }
         ],
         "summary": "Delete account (GDPR Art. 17 — right to erasure)",
-        "tags": [
-          "users"
-        ]
-      }
-    },
-    "/users": {
-      "get": {
-        "operationId": "listUsers",
-        "parameters": [
-          {
-            "name": "limit",
-            "required": false,
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100,
-              "default": 50,
-              "format": "int64"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/UserSummaryDto"
-                  },
-                  "maxItems": 1000
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "402": {
-            "description": "Plan upgrade required — current plan does not include this feature.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "List users in the caller's tenant",
         "tags": [
           "users"
         ]
@@ -8919,34 +8788,6 @@
             "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
           }
         },
-        "additionalProperties": false
-      },
-      "UserSummaryDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-            "maxLength": 65536
-          },
-          "email": {
-            "type": "string",
-            "nullable": true,
-            "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
-            "maxLength": 65536
-          },
-          "displayName": {
-            "type": "string",
-            "nullable": true,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-            "maxLength": 65536
-          }
-        },
-        "required": [
-          "id",
-          "email",
-          "displayName"
-        ],
         "additionalProperties": false
       },
       "UserLookupResultDto": {

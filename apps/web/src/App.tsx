@@ -2,10 +2,11 @@ import { Suspense, lazy, useState, useEffect, useCallback } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Fingerprint, RefreshCw } from 'lucide-react';
 import { useAuth } from './features/auth/AuthContext';
+import { RegisterScreen } from './features/auth/RegisterScreen';
+import { BreakglassLogin } from './features/auth/BreakglassLogin';
 import { prefersReducedMotion } from './lib/pref';
 import { ArgusAppIcon } from './features/brand/ArgusAppIcon';
 import { usePwaUpdate } from './features/pwa/PwaUpdateContext';
-import AuthCallbackRoute from './routes/AuthCallbackRoute';
 import ChatRoute from './routes/ChatRoute';
 import InviteRoute from './routes/InviteRoute';
 
@@ -16,25 +17,21 @@ const StorageRoute = lazy(() => import('./routes/StorageRoute'));
 const TransparencyRoute = lazy(() => import('./routes/TransparencyRoute'));
 const V2SketchRoute = lazy(() => import('./routes/V2SketchRoute'));
 
-/**
- * Landing / sign-in screen. Argus exposes one primary passkey entry point and delegates login,
- * registration, and recovery choices to Zitadel. No password ever reaches our server, which stays
- * crypto-blind. When OIDC isn't configured (VITE_OIDC_* unset), actions drop into the seed-driven
- * demo at /chat.
- *
- * Carousel slides are LOCAL bundled assets (public/images) — no external image requests.
- */
 const slides = [
   { image: '/images/login-slide-1.png', title: 'Connect Instantly,', subtitle: 'Message Securely' },
   { image: '/images/login-slide-2.png', title: 'Private by Design,', subtitle: 'Built for Trust' },
   { image: '/images/login-slide-3.png', title: 'Your Conversations,', subtitle: 'Your Control' },
 ];
 
+type Panel = null | 'register' | 'breakglass';
+
 function LandingRoute() {
-  const { configured, ready, user, login } = useAuth();
+  const { ready, profile, demoMode, login } = useAuth();
   const navigate = useNavigate();
   const [mounted, setMounted] = useState(false);
   const [activeSlide, setActiveSlide] = useState(0);
+  const [panel, setPanel] = useState<Panel>(null);
+  const [loginError, setLoginError] = useState<string | null>(null);
   const currentSlide = slides[activeSlide] ?? slides[0]!;
 
   useEffect(() => {
@@ -51,14 +48,17 @@ function LandingRoute() {
 
   const goToSlide = useCallback((index: number) => setActiveSlide(index), []);
 
-  // Start OIDC login, or (demo mode, no OIDC) jump straight to the seed-driven chat.
   const handleLogin = () => {
-    if (configured) void login();
-    else navigate('/chat');
+    if (demoMode) {
+      navigate('/chat');
+      return;
+    }
+    setLoginError(null);
+    void login().catch(() => setLoginError('Passkey sign-in failed. Try again.'));
   };
 
   // Already signed in → skip the landing.
-  if (ready && configured && user) return <Navigate to="/chat" replace />;
+  if (ready && profile) return <Navigate to="/chat" replace />;
 
   return (
     <main
@@ -72,129 +72,171 @@ function LandingRoute() {
         }`}
       >
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-[#0f0f16] p-5 sm:p-6">
-          <div
-            className={`mb-5 flex items-center justify-center text-center transition-all duration-500 delay-200 ${
-              mounted ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'
-            }`}
-          >
-            <div
-              role="group"
-              aria-label="Argus brand"
-              className="flex items-center justify-center gap-3 text-3xl font-bold tracking-[0.12em] text-white"
-            >
-              <ArgusAppIcon className="h-12 w-12 rounded-2xl shadow-lg shadow-purple-500/25" />
-              <span className="bg-gradient-to-r from-purple-300 to-purple-600 bg-clip-text text-transparent">
-                ARGUS
-              </span>
-            </div>
-          </div>
-
-          <div
-            className={`relative aspect-[3/2] shrink-0 overflow-hidden rounded-2xl transition-all duration-700 delay-300 ${
-              mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
-            }`}
-          >
-            {slides.map((slide, index) => (
-              <div
-                key={index}
-                className={`absolute inset-0 transition-all duration-700 ease-in-out ${
-                  index === activeSlide ? 'opacity-100 scale-100' : 'opacity-0 scale-105'
-                }`}
-              >
-                <img
-                  src={slide.image}
-                  alt={`${slide.title} ${slide.subtitle}`}
-                  className="absolute inset-0 h-full w-full object-cover"
-                  loading={index === 0 ? 'eager' : 'lazy'}
+          {panel !== null ? (
+            <div className="flex flex-1 flex-col justify-center">
+              {panel === 'register' && (
+                <RegisterScreen
+                  onRegistered={() => navigate('/chat')}
+                  onBack={() => setPanel(null)}
                 />
-              </div>
-            ))}
-
-            <div className="absolute inset-0 bg-gradient-to-t from-[#0f0f16] via-[#0f0f16]/20 to-transparent" />
-
-            <div
-              className={`absolute bottom-6 left-0 right-0 text-center px-4 transition-all duration-500 delay-500 ${
-                mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
-              }`}
-            >
-              <h2 className="text-xl font-semibold leading-tight tracking-tight text-white">
-                {currentSlide.title}
-                <br />
-                {currentSlide.subtitle}
-              </h2>
+              )}
+              {panel === 'breakglass' && (
+                <BreakglassLogin
+                  onLoggedIn={() => navigate('/chat')}
+                  onBack={() => setPanel(null)}
+                />
+              )}
             </div>
-          </div>
-
-          <div
-            className={`flex items-center justify-center gap-1.5 mt-4 transition-all duration-500 delay-[600ms] ${
-              mounted ? 'opacity-100' : 'opacity-0'
-            }`}
-          >
-            {slides.map((_, index) => (
-              <button
-                key={index}
-                onClick={() => goToSlide(index)}
-                className={`h-0.5 rounded-full transition-all duration-300 ${
-                  index === activeSlide ? 'w-6 bg-white' : 'w-3 bg-white/20 hover:bg-white/40'
+          ) : (
+            <>
+              <div
+                className={`mb-5 flex items-center justify-center text-center transition-all duration-500 delay-200 ${
+                  mounted ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'
                 }`}
-                aria-label={`Go to slide ${index + 1}`}
-              />
-            ))}
-          </div>
-
-          <div className="flex flex-1 flex-col justify-center py-6 text-center">
-            <h1
-              className={`mb-3 text-3xl font-bold tracking-tight text-white transition-all duration-500 delay-300 ${
-                mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
-              }`}
-            >
-              Welcome to Argus
-            </h1>
-            <p
-              className={`mx-auto mb-8 max-w-[18rem] text-base leading-relaxed text-white/60 transition-all duration-500 delay-[350ms] ${
-                mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
-              }`}
-            >
-              Use your device passkey to open secure messaging
-            </p>
-
-            <div
-              className={`transition-all duration-500 delay-[400ms] ${
-                mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
-              }`}
-            >
-              <button
-                onClick={handleLogin}
-                className="w-full flex items-center justify-center gap-3 bg-purple-500 hover:bg-purple-400 text-white font-medium py-3 rounded-xl transition-all duration-300 text-sm shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 hover:-translate-y-0.5 active:translate-y-0 active:shadow-purple-500/20"
               >
-                <Fingerprint className="w-5 h-5" />
-                Continue with passkey
-              </button>
-            </div>
+                <div
+                  role="group"
+                  aria-label="Argus brand"
+                  className="flex items-center justify-center gap-3 text-3xl font-bold tracking-[0.12em] text-white"
+                >
+                  <ArgusAppIcon className="h-12 w-12 rounded-2xl shadow-lg shadow-purple-500/25" />
+                  <span className="bg-gradient-to-r from-purple-300 to-purple-600 bg-clip-text text-transparent">
+                    ARGUS
+                  </span>
+                </div>
+              </div>
 
-            <div
-              className={`mt-8 flex flex-col items-center gap-2 text-center transition-all duration-500 delay-[600ms] ${
-                mounted ? 'opacity-100' : 'opacity-0'
-              }`}
-            >
-              <p className="text-xs text-white/60">
-                By continuing, you agree to our{' '}
-                <span aria-disabled="true" className="text-purple-400 underline underline-offset-2">
-                  Terms of Service
-                </span>{' '}
-                and{' '}
-                <span aria-disabled="true" className="text-purple-400 underline underline-offset-2">
-                  Privacy Policy
-                </span>
-              </p>
-              <Link
-                to="/transparency"
-                className="text-xs text-white/40 transition-colors hover:text-white/70"
+              <div
+                className={`relative aspect-[3/2] shrink-0 overflow-hidden rounded-2xl transition-all duration-700 delay-300 ${
+                  mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
+                }`}
               >
-                Security &amp; transparency ↗
-              </Link>
-            </div>
-          </div>
+                {slides.map((slide, index) => (
+                  <div
+                    key={index}
+                    className={`absolute inset-0 transition-all duration-700 ease-in-out ${
+                      index === activeSlide ? 'opacity-100 scale-100' : 'opacity-0 scale-105'
+                    }`}
+                  >
+                    <img
+                      src={slide.image}
+                      alt={`${slide.title} ${slide.subtitle}`}
+                      className="absolute inset-0 h-full w-full object-cover"
+                      loading={index === 0 ? 'eager' : 'lazy'}
+                    />
+                  </div>
+                ))}
+
+                <div className="absolute inset-0 bg-gradient-to-t from-[#0f0f16] via-[#0f0f16]/20 to-transparent" />
+
+                <div
+                  className={`absolute bottom-6 left-0 right-0 text-center px-4 transition-all duration-500 delay-500 ${
+                    mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
+                  }`}
+                >
+                  <h2 className="text-xl font-semibold leading-tight tracking-tight text-white">
+                    {currentSlide.title}
+                    <br />
+                    {currentSlide.subtitle}
+                  </h2>
+                </div>
+              </div>
+
+              <div
+                className={`flex items-center justify-center gap-1.5 mt-4 transition-all duration-500 delay-[600ms] ${
+                  mounted ? 'opacity-100' : 'opacity-0'
+                }`}
+              >
+                {slides.map((_, index) => (
+                  <button
+                    key={index}
+                    onClick={() => goToSlide(index)}
+                    className={`h-0.5 rounded-full transition-all duration-300 ${
+                      index === activeSlide ? 'w-6 bg-white' : 'w-3 bg-white/20 hover:bg-white/40'
+                    }`}
+                    aria-label={`Go to slide ${index + 1}`}
+                  />
+                ))}
+              </div>
+
+              <div className="flex flex-1 flex-col justify-center py-6 text-center">
+                <h1
+                  className={`mb-3 text-3xl font-bold tracking-tight text-white transition-all duration-500 delay-300 ${
+                    mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
+                  }`}
+                >
+                  Welcome to Argus
+                </h1>
+                <p
+                  className={`mx-auto mb-8 max-w-[18rem] text-base leading-relaxed text-white/60 transition-all duration-500 delay-[350ms] ${
+                    mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
+                  }`}
+                >
+                  Use your device passkey to open secure messaging
+                </p>
+
+                <div
+                  className={`transition-all duration-500 delay-[400ms] ${
+                    mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
+                  }`}
+                >
+                  <button
+                    onClick={handleLogin}
+                    className="w-full flex items-center justify-center gap-3 bg-purple-500 hover:bg-purple-400 text-white font-medium py-3 rounded-xl transition-all duration-300 text-sm shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 hover:-translate-y-0.5 active:translate-y-0 active:shadow-purple-500/20"
+                  >
+                    <Fingerprint className="w-5 h-5" />
+                    Continue with passkey
+                  </button>
+
+                  {loginError && <p className="mt-2 text-xs text-red-400">{loginError}</p>}
+
+                  <button
+                    type="button"
+                    onClick={() => setPanel('register')}
+                    className="mt-3 w-full rounded-xl border border-white/5 py-2.5 text-sm text-white/50 transition-colors hover:border-purple-500/30 hover:text-white/80"
+                  >
+                    I have an invite code →
+                  </button>
+                </div>
+
+                <div
+                  className={`mt-8 flex flex-col items-center gap-2 text-center transition-all duration-500 delay-[600ms] ${
+                    mounted ? 'opacity-100' : 'opacity-0'
+                  }`}
+                >
+                  <p className="text-xs text-white/60">
+                    By continuing, you agree to our{' '}
+                    <span
+                      aria-disabled="true"
+                      className="text-purple-400 underline underline-offset-2"
+                    >
+                      Terms of Service
+                    </span>{' '}
+                    and{' '}
+                    <span
+                      aria-disabled="true"
+                      className="text-purple-400 underline underline-offset-2"
+                    >
+                      Privacy Policy
+                    </span>
+                  </p>
+                  <Link
+                    to="/transparency"
+                    className="text-xs text-white/40 transition-colors hover:text-white/70"
+                  >
+                    Security &amp; transparency ↗
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => setPanel('breakglass')}
+                    className="text-xs text-white/20 transition-colors hover:text-white/50"
+                  >
+                    Admin access
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </section>
     </main>
@@ -242,7 +284,6 @@ export default function App() {
           <Route path="/devices" element={<DevicesRoute />} />
           <Route path="/storage" element={<StorageRoute />} />
           <Route path="/invite" element={<InviteRoute />} />
-          <Route path="/auth/callback" element={<AuthCallbackRoute />} />
           <Route path="/transparency" element={<TransparencyRoute />} />
           <Route path="/v2" element={<V2SketchRoute />} />
           <Route path="/v2/:sketchId" element={<V2SketchRoute />} />
