@@ -424,6 +424,10 @@ export class TenantsService {
               eq(schema.users.tenantId, auth.tenantId),
               eq(schema.users.role, 'admin'),
               eq(schema.users.status, 'active'),
+              or(
+                isNull(schema.users.displayName),
+                ne(schema.users.displayName, 'breakglass-admin'),
+              ),
             ),
           );
         // Only one admin and it's the target → demoting would leave zero admins.
@@ -477,6 +481,10 @@ export class TenantsService {
               eq(schema.users.tenantId, auth.tenantId),
               eq(schema.users.role, 'admin'),
               eq(schema.users.status, 'active'),
+              or(
+                isNull(schema.users.displayName),
+                ne(schema.users.displayName, 'breakglass-admin'),
+              ),
             ),
           );
         if (admins.length <= 1) throw new ForbiddenException('cannot remove the last admin');
