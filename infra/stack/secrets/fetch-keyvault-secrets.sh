@@ -41,11 +41,8 @@ VAULT_URL="https://${ARGUS_KEY_VAULT}.vault.azure.net"
 
 # Key Vault secret name -> local credential filename (in $SECRETS_DIR). KV names are kebab-case (Key Vault
 # disallows underscores); local filenames match what each consumer expects:
-#   compose Docker secrets: postgres_password, database_url, s3_secret_access_key, zitadel_masterkey,
-#                           zitadel_db_password
-#   cloudflared + zitadel runtime values (stack launcher reads them): tunnel_token, zitadel_db_password (also
-#                           a compose secret — postgres reads the file, Zitadel reads the value as env),
-#                           zitadel_admin_password (first-init bootstrap only)
+#   compose Docker secrets: postgres_password, database_url, s3_secret_access_key, redis_password
+#   cloudflared runtime value (stack launcher reads it): tunnel_token
 #   backup/cleanup LoadCredential sources: backup-db-password, cleanup-db-password, b2-app-key
 SECRETS=(
   "argus-postgres-owner-password=postgres_password"
@@ -53,9 +50,6 @@ SECRETS=(
   "argus-s3-secret-access-key=s3_secret_access_key"
   "argus-redis-password=redis_password"
   "argus-tunnel-token=tunnel_token"
-  "argus-zitadel-masterkey=zitadel_masterkey"
-  "argus-zitadel-db-password=zitadel_db_password"
-  "argus-zitadel-admin-password=zitadel_admin_password"
   "argus-grafana-admin-password=grafana_admin_password"
   "argus-backup-db-password=backup-db-password"
   "argus-cleanup-db-password=cleanup-db-password"
@@ -72,16 +66,12 @@ SECRETS=(
 
 # OPTIONAL secrets — may be ABSENT on a first boot (provisioned later). Unlike the mandatory set, an absent
 # value is NOT fatal: we seed an EMPTY 0444 file so the compose secret mount still resolves, and the consumer
-# runs degraded until the value is provisioned. Used for the Zitadel Login V2 service-user PAT, which Zitadel
-# only mints AFTER first init — the operator stores it in Key Vault during arming (see vm-zitadel.md).
+# runs degraded until the value is provisioned (e.g. the GlitchTip DSN, only created after the GlitchTip UI is
+# up; the Stripe / operator / breakglass credentials, provisioned during arming).
 OPTIONAL_SECRETS=(
-  "argus-zitadel-login-pat=zitadel_login_pat"
   # GlitchTip project DSN — a write-only ingest key the operator creates in the GlitchTip UI after
   # the first deploy (arming). Seeded EMPTY until provisioned; the api is a complete no-op without it.
   "argus-sentry-dsn=sentry_dsn"
-  # G2 SSO: Zitadel Management API PAT for org+IdP provisioning. Seeded EMPTY until the operator runs
-  # provision.sh and stores the admin PAT in Key Vault. SSO endpoints return 503 when empty.
-  "argus-zitadel-management-pat=zitadel_management_pat"
   # G8 Billing: Stripe API key + webhook signing secret. Seeded EMPTY until the operator stores them
   # in Key Vault. BillingService starts in no-op mode (logs a warning) when the key file is empty.
   "argus-stripe-secret-key=stripe_secret_key"
@@ -241,9 +231,9 @@ EOF
 
     if [ "$was_populated" = true ] && [ "$kv_name" != "argus-admin-bootstrap-hash" ]; then
       # Already provisioned, but KV now 404s (accidental secret deletion / name mismatch during a restore).
-      # KEEP the existing valid token rather than silently degrading login; surface it loudly so the operator
-      # restores the Key Vault secret. (Deleting the KV copy doesn't invalidate the token — it lives in
-      # Zitadel's DB — so the on-box file is still usable.)
+      # KEEP the existing value rather than silently degrading the consumer; surface it loudly so the operator
+      # restores the Key Vault secret. (For tokens whose authority lives elsewhere, deleting the KV copy
+      # doesn't invalidate the on-box file — so it's still usable.)
       # Exception: breakglass hash is always seeded empty on 404 (see below).
       log "WARN ${kv_name} now 404s but ${file} is already populated — KEEPING the existing value; restore the Key Vault secret"
     else

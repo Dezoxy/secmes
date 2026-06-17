@@ -22,7 +22,7 @@ jobs:
 
   # Self-hosted conformance/DAST scan: boot the API + Postgres + Redis here and scan localhost with
   # 42Crunch's freemium DAST action (free stateless endpoint — no paid token). The API is crypto-blind
-  # and boots fine without OIDC/S3 (protected routes 401, attachment routes 503), which is fine for
+  # and boots fine without S3 (protected routes 401, attachment routes 503), which is fine for
   # surface/conformance scanning. Nightly cadence keeps within the freemium usage limits.
   api-conformance-scan:
     runs-on: ubuntu-latest

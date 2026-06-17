@@ -1,75 +1,48 @@
-# Local auth (Zitadel OIDC)
+# Local auth (passkey)
 
-How to run real OIDC login against a local **Zitadel** in the Docker stack. In production Zitadel runs in
-the same Docker Compose stack on the VM (roadmap checkpoint 9); this local stack is the dev stand-in.
-The local stack uses Zitadel v4's split shape:
-`zitadel` is the OIDC/API/JWKS server, and `zitadel-login` is the hosted Login V2 web UI.
-Security rationale + threat model:
-`docs/threat-models/auth-tenant-context.md` (§8 SPA flow, §9 this bootstrap). **Local creds here are
-throwaways — never real secrets.**
+argus login is **passkey-only** — the API mints and verifies its own EdDSA session tokens; there is no
+external IdP. (Zitadel/OIDC was decommissioned in Phase 6 — see
+`docs/threat-models/phase-6-decommission.md`.) This doc covers running auth locally.
 
-## One-time setup
-
-Zitadel routes instances by the `Host` header, so the issuer URL must resolve to the same place from
-both the browser and the in-compose API. We use `http://zitadel:8080` everywhere; add the hosts entry
-so your browser can resolve it:
+## Bring up the stack
 
 ```sh
-echo '127.0.0.1 zitadel' | sudo tee -a /etc/hosts
-```
-
-## Bring it up
-
-```sh
-make up                                        # postgres, redis, minio, zitadel + provision OIDC
+make up                                        # postgres, redis, minio
 make migrate && make seed                      # apply the argus schema + seed the dev tenant
-make api-dev                                   # API on :3000 (host; reads the generated OIDC env)
+make api-dev                                   # API on :3000 (host; ephemeral dev session key)
 pnpm --filter @argus/web dev                   # http://localhost:5173  (separate terminal)
 ```
 
-`make up` provisions Zitadel idempotently (project, SPA app, tenant-claim Action, and Login V2 base
-URI) and writes the generated OIDC config to `.env.local` (API) and `apps/web/.env.local` (SPA) —
-both gitignored. The Login UI reads a dedicated local `IAM_LOGIN_CLIENT` PAT generated during first
-instance init. Re-run `make auth-provision` alone to re-sync after editing the provisioner.
+No `/etc/hosts` entry and no IdP provisioning are needed anymore.
 
-> The API runs on the **host** (`make api-dev`), not the compose image: the self-contained API
-> Dockerfile currently can't build (it `npm install`s without a lockfile, so drizzle-orm drifts to a
-> version with non-compiling types). `make api-dev` builds from the pnpm workspace instead. The
-> `/etc/hosts` line above is what lets the host API reach Zitadel's JWKS at `http://zitadel:8080`.
+## Session signing key (dev)
 
-## Log in
+`make api-dev` leaves `SESSION_SIGNING_KEY_FILE` unset, so the API generates an **ephemeral Ed25519
+keypair** at startup (see `apps/api/src/auth/session-key.config.ts`). Sessions therefore reset whenever you
+restart the API — fine for development. In production the key is delivered from Key Vault
+(`argus-session-signing-key`).
 
-| | |
-|---|---|
-| URL | http://localhost:5173 |
-| User | `admin@argus-local.zitadel` |
-| Password | `Password1!` |
-| Zitadel console | http://zitadel:8080/ui/console |
-| Zitadel Login V2 | http://zitadel:3001/ui/v2/login |
+## Two ways to log in locally
 
-## How it works
+1. **Demo mode (no real WebAuthn ceremony)** — the Playwright E2E suite runs this way
+   (`apps/web/playwright.config.ts` sets `VITE_DEMO_MODE=1`). To use it by hand, start the web dev server
+   with `VITE_DEMO_MODE=1 pnpm --filter @argus/web dev`. The client skips the passkey ceremony and the
+   protected API still requires a valid session token — good for UI work, not for exercising the real
+   WebAuthn path.
 
-- The SPA runs Authorization Code + PKCE against Zitadel (public client, no secret). The browser is
-  redirected through `zitadel-login` for credential entry, while tokens still come from the Zitadel
-  OIDC endpoints on `http://zitadel:8080`. The API validates
-  the **JWT access token** offline against Zitadel's JWKS (`iss=http://zitadel:8080`, `aud=<project id>`).
-- argus is multi-tenant and the API requires the tenant claim to be a **UUID** (`tenants.id`). Zitadel
-  org ids are numeric, so a Zitadel **Action** (`infra/local/zitadel/provision.sh`) asserts a flat
-  `tenant_id` claim (+ `email`/`name`) onto the access token at "Pre Access Token Creation". The value
-  matches `DEV_TENANT_ID` seeded by `db:seed:dev`. On first login the API JIT-provisions the user into
-  that tenant. (Real multi-org→tenant mapping is Phase 7 / G1.)
+2. **Real passkey against a seeded invite code** — register the way a real user does:
+   - Create an invite code (admin-minted). With no admin UI session yet, insert one directly against the
+     dev DB, or use the breakglass admin login (`docs/threat-models/breakglass-admin.md`) once its hash is
+     provisioned, then mint a code via the admin panel.
+   - On `http://localhost:5173`, choose "I have a registration code", enter it, and create a passkey
+     (your browser/OS authenticator; `WEBAUTHN_RP_ID=localhost` works for `localhost` origins).
+   - Reload stays logged in via the HttpOnly refresh cookie.
 
 ## Reset / troubleshooting
 
-- **`make reset`** wipes all volumes (incl. Zitadel) and the generated `.env.local` files. Next `make up`
-  re-initialises and re-provisions from scratch.
-- **`zitadel-login` waits forever for `/bootstrap/login-client.pat`** → this stack was created before
-  the Login V2 client PAT existed; run `make reset && make up` to regenerate local-only Zitadel state.
-- **Login can't reach `zitadel:8080` or `zitadel:3001`** → the `/etc/hosts` line is missing, or
-  `zitadel-login` is not running (`make ps`).
-- **Login redirects to `/ui/v2/login` on port 8080 and returns 404** → rerun `make auth-provision`;
-  it sets the Login V2 base URI to the separate `zitadel-login` container.
-- **API returns 401 on every route** → `.env.local` wasn't generated; run `make auth-provision`, then
-  restart the API (`make api-dev`) so it re-reads the OIDC env.
-- The bootstrap PAT + machine key live only in the `zitadel-bootstrap` volume; they never leave the
-  local stack and are not committed.
+- **`make reset`** wipes all data volumes and any local override `.env.local` files.
+- **API returns 401 on every route** → the access token expired or the API restarted (ephemeral dev key);
+  log in again. There is no OIDC env to configure.
+- **Passkey registration fails in the browser** → the WebAuthn RP ID must match the page origin. Locally
+  that is `localhost` (the `make api-dev` default); a non-localhost dev host needs `WEBAUTHN_RP_ID` set to
+  match.

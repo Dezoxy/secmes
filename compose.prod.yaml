@@ -21,15 +21,8 @@ name: argus-prod
 # shell / no --token-file), injected from the deploy environment — never a committed env file. Slice 3
 # populates all of these from Key Vault via the VM's Managed Identity (systemd); see docs/roadmap.md Phase 0
 # #8, docs/deploy.md, and .env.prod.example.
-# Self-hosted Zitadel (roadmap checkpoint 9, Phase 1) lives in this stack: zitadel + its own Postgres
-# (zitadel-db) + the Login V2 UI (zitadel-login), reachable at https://auth.4rgus.com (public OIDC issuer —
-# end users authenticate against it; Caddy host-splits that domain to Zitadel, the rest to the app). TLS
-# terminates at Cloudflare; Zitadel runs ExternalSecure=true + --tlsMode external behind it. Its masterkey and
-# DB password come from Key Vault (masterkey as a Docker secret FILE via --masterkeyFile; the DB password as a
-# file for postgres + a runtime value for Zitadel, the same TUNNEL_TOKEN-style exception). The bootstrap admin
-# password is a first-init-only runtime value (change-required). See docs/threat-models/vm-zitadel.md +
-# docs/deploy.md "Zitadel bootstrap". Provisioning (project/app/tenant-claim Action) + the multi-tenant
-# org->tenant_id mapping are the deferred G1 follow-on; #9 stands up the instance + DB + reachable console.
+# AUTH: login is passkey-only — the API mints/verifies its own EdDSA session tokens (no external IdP).
+# Zitadel/OIDC was decommissioned in Phase 6 (docs/threat-models/phase-6-decommission.md).
 
 services:
   postgres:
@@ -123,8 +116,6 @@ services:
       S3_BUCKET: ${S3_BUCKET:-argus-attachments}
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-} # non-secret B2 key id — set per .env.prod.example
       S3_FORCE_PATH_STYLE: 'false' # B2 uses virtual-host style
-      OIDC_ISSUER: ${OIDC_ISSUER:-}
-      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
       # Phase 2 WebAuthn: required for passkey registration and login to work in production.
       # FRONTEND_ORIGIN also drives the CORS policy in main.ts. Both default to the public
       # hostname; override via .env.prod if the deployment uses a different domain.
@@ -150,8 +141,6 @@ services:
       DATABASE_URL_FILE: /run/secrets/database_url
       S3_SECRET_ACCESS_KEY_FILE: /run/secrets/s3_secret_access_key
       REDIS_URL_FILE: /run/secrets/redis_url
-      # G2 SSO: Management PAT for Zitadel org+IdP provisioning. OPTIONAL — endpoints return 503 when absent.
-      ZITADEL_MANAGEMENT_PAT_FILE: /run/secrets/zitadel_management_pat
       # G8 Billing: non-secret Stripe config (price IDs ride in every Checkout URL anyway).
       APP_BASE_URL: ${APP_BASE_URL:-https://4rgus.com}
       STRIPE_PRO_PRICE_ID: ${STRIPE_PRO_PRICE_ID:-}
@@ -165,9 +154,9 @@ services:
       # OPTIONAL — endpoints return 401 until provisioned.
       OPERATOR_API_KEY_FILE: /run/secrets/operator_api_key
       # Phase 1 session tokens: path to the Ed25519 PKCS8 PEM signing key (see session-key.config.ts).
-      # OPTIONAL on first boot — seeded EMPTY until provisioned; the api throws at startup under NODE_ENV=production
-      # with an empty file (invariant: SESSION_SIGNING_KEY_FILE MUST be set in production). Provision the key in
-      # Key Vault (argus-session-signing-key) before the first production deploy.
+      # MANDATORY — argus-session-signing-key is in the fetch script's required set, so the secret fetch FAILS
+      # CLOSED if it's absent (the API never even boots to hit the empty-file guard). Provision the key in Key
+      # Vault before the first production deploy (passkey sessions are unsigned/unbootable without it).
       SESSION_SIGNING_KEY_FILE: /run/secrets/session_signing_key
       # Phase 3 Breakglass admin: JSON Argon2id hash for the emergency admin password. OPTIONAL — seeded
       # EMPTY until the operator provisions it in Key Vault (argus-admin-bootstrap-hash). Absent or empty
@@ -178,7 +167,6 @@ services:
       - s3_secret_access_key
       - redis_url
       - sentry_dsn
-      - zitadel_management_pat
       - stripe_secret_key
       - stripe_webhook_secret
       - operator_api_key
@@ -215,12 +203,6 @@ services:
     build:
       context: .
       dockerfile: infra/stack/caddy/Dockerfile
-      # OIDC is baked into the PWA at build time (Vite VITE_*). Empty until Zitadel-on-VM (roadmap #9);
-      # CD passes the real values so the shipped client does real auth, not demo mode.
-      args:
-        VITE_OIDC_ISSUER: ${VITE_OIDC_ISSUER:-}
-        VITE_OIDC_CLIENT_ID: ${VITE_OIDC_CLIENT_ID:-}
-        VITE_OIDC_REDIRECT_URI: ${VITE_OIDC_REDIRECT_URI:-}
     restart: unless-stopped
     # No published ports — cloudflared reaches caddy:8080 on the internal network.
     # Redirect Caddy's storage/autosave to the writable /tmp tmpfs so the read-only root FS doesn't break
@@ -274,189 +256,6 @@ services:
         limits:
           memory: 128m
           cpus: '0.25'
-
-  # --- Self-hosted identity provider (roadmap #9) -------------------------------------------------------
-  # Dedicated Postgres for Zitadel — its OWN cluster + volume, isolated from the argus app DB (separate
-  # container, separate credentials, no shared role). No published port: reachable only by `zitadel` on the
-  # internal network. Owner password from a mounted credential file, never inline/env (invariant #5).
-  zitadel-db:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: zitadel
-      POSTGRES_DB: zitadel
-      POSTGRES_PASSWORD_FILE: /run/secrets/zitadel_db_password
-    secrets:
-      - zitadel_db_password
-    volumes:
-      - zitadel-pgdata:/var/lib/postgresql/data
-    security_opt:
-      - no-new-privileges:true
-    # Same cap set as the app postgres: a bare cap_drop:[ALL] breaks initdb (it needs to chown the data dir
-    # and drop to the postgres user). Read-only root FS is impractical for Postgres (socket + temp writes).
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - SETUID
-      - SETGID
-      - DAC_OVERRIDE
-      - FOWNER
-    healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U zitadel -d zitadel']
-      interval: 10s
-      timeout: 3s
-      retries: 12
-    deploy:
-      resources:
-        limits:
-          memory: 768m
-          cpus: '1.0'
-
-  # Zitadel identity server — OIDC/OAuth/JWKS + the admin console. Public issuer at https://auth.4rgus.com
-  # (Caddy host-splits that domain here). TLS terminates at Cloudflare, so it serves plain HTTP internally with
-  # --tlsMode external + ExternalSecure=true (emits https:// issuer URLs). FirstInstance config is env-only (no
-  # committed steps file): it creates the org, the Login V2 service-user machine account, and a bootstrap
-  # human admin whose password is a FIRST-INIT-ONLY runtime value (change-required), ignored on later boots.
-  # The login service-user PAT is NOT persisted to a volume (invariant #2) — it's delivered from Key Vault as
-  # a credential file (see zitadel-login). FirstInstance writes its first-boot PAT to the container-local
-  # tmpfs (/tmp) only, for the operator to read once during arming and store in Key Vault.
-  zitadel:
-    image: ghcr.io/zitadel/zitadel:v4.15.0
-    restart: unless-stopped
-    command:
-      [
-        'start-from-init',
-        '--masterkeyFile',
-        '/run/secrets/zitadel_masterkey',
-        '--tlsMode',
-        'external',
-      ]
-    environment:
-      ZITADEL_PORT: '8080'
-      ZITADEL_EXTERNALDOMAIN: auth.4rgus.com
-      ZITADEL_EXTERNALPORT: '443'
-      ZITADEL_EXTERNALSECURE: 'true'
-      ZITADEL_DATABASE_POSTGRES_HOST: zitadel-db
-      ZITADEL_DATABASE_POSTGRES_PORT: '5432'
-      ZITADEL_DATABASE_POSTGRES_DATABASE: zitadel
-      ZITADEL_DATABASE_POSTGRES_USER_USERNAME: zitadel_user
-      # The DB password has no Zitadel `_FILE` env form, so it's a runtime value from the Key Vault file (the
-      # same accepted exception as cloudflared's TUNNEL_TOKEN — never a committed/on-disk env file). The
-      # MOST sensitive secret, the masterkey, IS a file (--masterkeyFile above). See vm-zitadel.md §4.
-      ZITADEL_DATABASE_POSTGRES_USER_PASSWORD: ${ZITADEL_DB_PASSWORD:-}
-      ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
-      ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: zitadel
-      ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: ${ZITADEL_DB_PASSWORD:-}
-      ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
-      # Wire Login V2 at FIRST BOOT (the DEFAULTINSTANCE_* keys only apply during init) so the fresh instance's
-      # console + auth use the /ui/v2/login app immediately — without this the instance comes up with no working
-      # login URL and you can't even reach the console to provision it (chicken-and-egg). The OIDC/SAML default
-      # URLs are runtime config (every boot). Values mirror Zitadel's canonical v4.15 Compose for an external
-      # https domain. These replace the post-boot `loginV2.baseUri` API call the local provisioner makes.
-      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: 'true'
-      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_BASEURI: https://auth.4rgus.com/ui/v2/login/
-      ZITADEL_OIDC_DEFAULTLOGINURLV2: https://auth.4rgus.com/ui/v2/login/login?authRequest=
-      ZITADEL_OIDC_DEFAULTLOGOUTURLV2: https://auth.4rgus.com/ui/v2/login/logout?post_logout_redirect=
-      ZITADEL_SAML_DEFAULTLOGINURLV2: https://auth.4rgus.com/ui/v2/login/login?samlRequest=
-      # FirstInstance (env-only) — runs once on the very first init, skipped on every later boot.
-      ZITADEL_FIRSTINSTANCE_ORG_NAME: argus
-      # First-boot PAT lands in the container-local tmpfs (NOT a shared/persisted volume). The operator copies
-      # it out once during arming (host-side `docker cp`, since this image has no shell — see docs/deploy.md)
-      # and stores it in Key Vault as argus-zitadel-login-pat; thereafter it's delivered as a credential file.
-      ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH: /tmp/login-client.pat
-      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAME: login-client
-      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_NAME: Login Client
-      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE: '2099-12-31T23:59:59Z'
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: admin
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_FIRSTNAME: Argus
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_LASTNAME: Admin
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_EMAIL_ADDRESS: admin@4rgus.com
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_EMAIL_VERIFIED: 'true'
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: 'true'
-      # First-init only — bootstrap admin password from Key Vault (deploy.sh exports it on `up`). Change it +
-      # enable MFA immediately after first login; ignored once the instance exists. See docs/deploy.md.
-      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: ${ZITADEL_ADMIN_PASSWORD:-}
-    secrets:
-      - zitadel_masterkey
-    depends_on:
-      zitadel-db:
-        condition: service_healthy
-    read_only: true # stateless (state lives in zitadel-db); only the /tmp tmpfs is writable
-    tmpfs:
-      - /tmp
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    # The Zitadel binary ships its own readiness probe (`zitadel ready` — verifies the instance + endpoints,
-    # not just "process up"), so the deploy can gate on real readiness even though the image has no /bin/sh.
-    # Values mirror the canonical v4.15 Compose. start_period covers the cold first-init schema migration.
-    healthcheck:
-      test: ['CMD', '/app/zitadel', 'ready']
-      interval: 10s
-      timeout: 30s
-      retries: 12
-      start_period: 20s
-    deploy:
-      resources:
-        limits:
-          memory: 768m
-          cpus: '1.0'
-
-  # Zitadel v4 hosted Login V2 UI — a separate app from the identity server. The main `zitadel` container
-  # serves OIDC/API/JWKS/console; this renders the browser login screens at /ui/v2/login (Caddy routes that
-  # path here). It authenticates to the Zitadel API with the Login V2 service-user PAT, delivered from Key
-  # Vault as a credential file (see ZITADEL_SERVICE_USER_TOKEN_FILE below). The instance's Login V2 base URI is
-  # wired at first boot by the zitadel service's ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_BASEURI env (above).
-  # NEXT_PUBLIC_BASE_PATH tells the Next.js app it's mounted under /ui/v2/login (Caddy forwards that prefix
-  # unchanged) — without it the prefixed routes/assets 404 even though the container stays up. CUSTOM_REQUEST_HEADERS
-  # makes its server-side calls to the Zitadel API carry the real external Host + scheme behind the TLS-terminating
-  # proxy. Both mirror Zitadel's canonical v4.15 Compose example (zitadel/zitadel deploy/compose).
-  zitadel-login:
-    image: ghcr.io/zitadel/zitadel-login:v4.15.0
-    restart: unless-stopped
-    environment:
-      ZITADEL_API_URL: http://zitadel:8080
-      NEXT_PUBLIC_BASE_PATH: /ui/v2/login
-      CUSTOM_REQUEST_HEADERS: Host:auth.4rgus.com,X-Forwarded-Proto:https
-      # The Login V2 service-user PAT is a Key-Vault-delivered credential FILE (Docker secret on /run tmpfs),
-      # never a persisted volume (invariant #2). First boot: the file is empty until the operator seeds the
-      # PAT into Key Vault during arming (see docs/deploy.md) — login is degraded until then, which folds into
-      # the same provisioning step. On every later boot argus-secrets.service re-delivers it (reboot-safe).
-      ZITADEL_SERVICE_USER_TOKEN_FILE: /run/secrets/zitadel_login_pat
-    secrets:
-      - zitadel_login_pat
-    depends_on:
-      # Wait for the API to be READY (not just started) so the login app can reach it on first boot.
-      zitadel:
-        condition: service_healthy
-    read_only: true
-    tmpfs:
-      - /tmp
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    # The login image bundles a Node readiness script + a shell; probe its own /ui/v2/login/healthy endpoint
-    # (under the configured base path). Mirrors the canonical v4.15 Compose healthcheck.
-    healthcheck:
-      test:
-        [
-          'CMD',
-          '/bin/sh',
-          '-c',
-          'node /app/healthcheck.mjs http://localhost:3000/ui/v2/login/healthy',
-        ]
-      interval: 10s
-      timeout: 30s
-      retries: 12
-      start_period: 20s
-    deploy:
-      resources:
-        limits:
-          memory: 256m
-          cpus: '0.5'
 
   # --- Observability (roadmap #47, Slice B) -------------------------------------------------------------
   # Prometheus scrapes the API's content-blind metrics (api:9090) over the internal network; Grafana
@@ -603,7 +402,7 @@ services:
 
   # ─── GlitchTip — self-hosted error tracking (#48 Slice B) ────────────────────────────────────────────────
   # Sentry-API-compatible, EU data residency, no new sub-processor. Three components:
-  #   glitchtip-db   — dedicated Postgres (same isolation pattern as zitadel-db)
+  #   glitchtip-db   — dedicated Postgres (same isolation pattern as the app postgres: own cluster + volume)
   #   glitchtip      — Django web + gunicorn (runs migrate on startup, then serves the API + UI on :8000)
   #   glitchtip-worker — Celery worker + beat (async event ingest, cleanup, notifications)
   # ONLY glitchtip is exposed at https://glitchtip.4rgus.com via Caddy (host-split), gated by Cloudflare
@@ -625,7 +424,7 @@ services:
       - glitchtip-db-data:/var/lib/postgresql/data
     security_opt:
       - no-new-privileges:true
-    # initdb needs CHOWN/SETUID/SETGID/DAC_OVERRIDE/FOWNER to set up the data dir — same cap set as zitadel-db.
+    # initdb needs CHOWN/SETUID/SETGID/DAC_OVERRIDE/FOWNER to set up the data dir — same cap set as the app postgres.
     cap_drop:
       - ALL
     cap_add:
@@ -765,24 +564,6 @@ secrets:
     # redis://:<pw>@redis:6379 GENERATED by deploy.sh from the Key Vault redis_password; the api reads it via
     # REDIS_URL_FILE (ioredis). A FILE, not REDIS_URL env, so the password never lands in container config.
     file: ${ARGUS_SECRETS_DIR:-./secrets}/redis_url
-  zitadel_masterkey:
-    # 32-byte Zitadel masterkey (encrypts the keys Zitadel stores in its DB). Generate ONCE, never rotate
-    # casually — loss makes the instance unrecoverable. Zitadel reads it via --masterkeyFile.
-    file: ${ARGUS_SECRETS_DIR:-./secrets}/zitadel_masterkey
-  zitadel_db_password:
-    # zitadel-db owner password (postgres reads it via POSTGRES_PASSWORD_FILE; Zitadel reads the same value
-    # as a runtime env, ${ZITADEL_DB_PASSWORD}, since it has no `_FILE` env form).
-    file: ${ARGUS_SECRETS_DIR:-./secrets}/zitadel_db_password
-  zitadel_login_pat:
-    # Login V2 service-user PAT — zitadel-login reads it via ZITADEL_SERVICE_USER_TOKEN_FILE. Delivered from
-    # Key Vault (argus-zitadel-login-pat); the fetch script seeds an EMPTY file on first boot (before it's
-    # provisioned) so the mount always resolves — login is degraded until the operator stores the real PAT.
-    file: ${ARGUS_SECRETS_DIR:-./secrets}/zitadel_login_pat
-  zitadel_management_pat:
-    # G2 SSO: Zitadel Management API PAT for org+IdP provisioning. OPTIONAL — api reads it via
-    # ZITADEL_MANAGEMENT_PAT_FILE; SSO endpoints return 503 when absent, everything else is unaffected.
-    # Seeded EMPTY on first boot (fetch script). Provision from Key Vault (argus-zitadel-management-pat).
-    file: ${ARGUS_SECRETS_DIR:-./secrets}/zitadel_management_pat
   grafana_admin_password:
     # Grafana admin password — Grafana reads it via GF_SECURITY_ADMIN_PASSWORD__FILE (native `__FILE` support).
     # Delivered from Key Vault (argus-grafana-admin-password); set it before the first deploy.
@@ -817,9 +598,9 @@ secrets:
     # EMPTY until provisioned (argus-operator-api-key). Endpoints return 401 when empty.
     file: ${ARGUS_SECRETS_DIR:-./secrets}/operator_api_key
   session_signing_key:
-    # Phase 1 session tokens: Ed25519 PKCS8 PEM private key for signing argus-minted JWTs. OPTIONAL on first
-    # boot — seeded EMPTY until the operator provisions argus-session-signing-key in Key Vault. The API throws
-    # at startup under NODE_ENV=production when the file is empty or missing (see session-key.config.ts).
+    # Phase 1 session tokens: Ed25519 PKCS8 PEM private key for signing argus-minted (passkey) session JWTs.
+    # MANDATORY — in the fetch script's required set, so a missing argus-session-signing-key fails the fetch
+    # closed (the stack won't start). Provision it in Key Vault before the first deploy.
     # Generate once: openssl genpkey -algorithm ed25519 | openssl pkcs8 -topk8 -nocrypt -outform PEM
     file: ${ARGUS_SECRETS_DIR:-./secrets}/session_signing_key
   admin_bootstrap_hash:
@@ -831,8 +612,6 @@ secrets:
 
 volumes:
   pgdata:
-  # Zitadel's own Postgres data — separate cluster from the argus app DB (pgdata).
-  zitadel-pgdata:
   # Observability state (roadmap #47): Prometheus TSDB, Grafana DB, Alertmanager silences/notification state.
   prometheus-data:
   grafana-data:

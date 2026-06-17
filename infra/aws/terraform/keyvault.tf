@@ -47,8 +47,8 @@ resource "azurerm_role_assignment" "admin_kv_secrets_officer" {
 
 # ============================================================================================================
 # Dummy secret seed. Proves the Arc -> Key Vault -> credential-file path end to end. Values are FORMAT-VALID
-# but NOT real: passwords are URL-safe randoms, the Zitadel masterkey is exactly 32 bytes, DSNs are derived
-# from the generated owner password. The genuinely-external credentials (GHCR pull token, B2 secret key,
+# but NOT real: passwords are URL-safe randoms and DSNs are derived from the generated owner password. The
+# genuinely-external credentials (GHCR pull token, B2 secret key,
 # Cloudflare tunnel token) are seeded as obvious PLACEHOLDERS — replace them with real values (or rotate the
 # whole vault) before expecting the full stack to reach healthy. See the README. NEVER point this at prod.
 # ============================================================================================================
@@ -59,13 +59,11 @@ locals {
   generated_secret_lengths = {
     "argus-postgres-owner-password" = 32
     "argus-redis-password"          = 32
-    "argus-zitadel-db-password"     = 32
     "argus-grafana-admin-password"  = 24
     "argus-backup-db-password"      = 32
     "argus-cleanup-db-password"     = 32
     "argus-glitchtip-db-password"   = 32
     "argus-glitchtip-secret-key"    = 50
-    "argus-zitadel-masterkey"       = 32 # Zitadel requires EXACTLY 32 bytes
   }
   # External credentials and non-generatable keys — a dummy here is non-functional; replace with real values
   # before expecting the full stack to reach healthy. See the README and populate-keyvault.sh for how to
@@ -88,17 +86,6 @@ resource "random_password" "gen" {
   override_special = ""
 }
 
-# Zitadel's bootstrap admin password must satisfy the default complexity policy (upper+lower+digit+symbol).
-resource "random_password" "zitadel_admin" {
-  count            = var.seed_dummy_secrets ? 1 : 0
-  length           = 24
-  min_upper        = 2
-  min_lower        = 2
-  min_numeric      = 2
-  min_special      = 2
-  override_special = "._-~" # symbols only (this one isn't used in a URL)
-}
-
 locals {
   # Owner DSN (migrations) + app DSN. The app role/password reconciliation is app-bootstrapping out of scope
   # for the infra experiment — the fetch delivers the file regardless; api DB connectivity may need manual role
@@ -106,7 +93,6 @@ locals {
   derived_secrets = var.seed_dummy_secrets ? {
     "argus-migration-database-url" = "postgres://argus:${random_password.gen["argus-postgres-owner-password"].result}@postgres:5432/argus"
     "argus-database-url"           = "postgres://argus_app:${random_password.gen["argus-redis-password"].result}@postgres:5432/argus"
-    "argus-zitadel-admin-password" = one(random_password.zitadel_admin[*].result)
   } : {}
 
   seeded_secrets = merge(

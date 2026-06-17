@@ -1,19 +1,18 @@
 #!/usr/bin/env bash
 # argus — populate the (REAL) Azure Key Vault an AWS deploy reads via Arc. Sets the MANDATORY runtime secret
-# set the stack needs to reach healthy: generates the generatable values (passwords + the Zitadel masterkey),
-# derives the two DSNs, and takes the four EXTERNAL credentials from the environment.
+# set the stack needs to reach healthy: generates the generatable values (passwords + the Ed25519 session
+# signing key), derives the two DSNs, and takes the four EXTERNAL credentials from the environment.
 #
 # Idempotent + safe to re-run: by default it SKIPS any secret that already exists (never clobbers a live
 # value). Pass --rotate to overwrite existing values (rotation — expect a redeploy to pick them up). NOT every
-# secret is rotatable: the SET-ONCE group (postgres/zitadel-db/glitchtip-db POSTGRES_PASSWORD, grafana admin,
-# zitadel masterkey + bootstrap admin) is consumed only at a component's FIRST init and is NOT reconciled on
-# redeploy — overwriting it breaks the component's auth or silently has no effect, so --rotate SKIPS it.
-# Rotating one of those is a per-component DR step. Rotatable: the argus_app/cleanup/backup DB logins (deploy.sh
-# re-applies them) + redis (requirepass re-read from its config file each boot).
+# secret is rotatable: the SET-ONCE group (postgres/glitchtip-db POSTGRES_PASSWORD, grafana admin) is consumed
+# only at a component's FIRST init and is NOT reconciled on redeploy — overwriting it breaks the component's
+# auth or silently has no effect, so --rotate SKIPS it. Rotating one of those is a per-component DR step.
+# Rotatable: the session signing key + the argus_app/cleanup/backup DB logins (deploy.sh re-applies them) +
+# redis (requirepass re-read from its config file each boot).
 #
 # NOT set here (provision during "arming" after the first deploy — fetch-keyvault-secrets.sh seeds them empty
-# until then): stripe-secret-key, stripe-webhook-secret, operator-api-key, sentry-dsn,
-# zitadel-management-pat, zitadel-login-pat.
+# until then): stripe-secret-key, stripe-webhook-secret, operator-api-key, sentry-dsn.
 #
 # This script only POPULATES the vault. The generated passwords are APPLIED to the Postgres roles by deploy.sh
 # ON THE BOX (the only host with DB access): the argus_app/argus_cleanup/argus_backup role logins (see #203 /
@@ -119,7 +118,7 @@ put() { # $1 = name ; $2 = value
 }
 
 # Set-once wrapper: NEVER overwritten, even with --rotate. For values whose blind rotation is destructive (see
-# the header note — Zitadel masterkey, Postgres owner password). Rotating them is a separate DR flow.
+# the header note — Postgres owner password). Rotating them is a separate DR flow.
 put_once() { # $1 = name ; $2 = value
   if secret_exists "$1"; then
     log "exists, NOT rotating $1 (set-once — rotating it is a separate DR procedure)"
@@ -135,7 +134,7 @@ log "target vault: $KV  (rotate=$ROTATE)"
 if [ "$ROTATE" -eq 1 ]; then
   log "WARNING: --rotate overwrites Key Vault values but does NOT change them on the RUNNING stack."
   log "  Redeploy after this so deploy.sh re-applies the argus_app/argus_cleanup/argus_backup role logins."
-  log "  Set-once secrets (postgres/zitadel-db/glitchtip-db owners, grafana admin, zitadel masterkey + admin)"
+  log "  Set-once secrets (postgres/glitchtip-db owners, grafana admin)"
   log "  are NOT rotated here — rotating one is a per-component DR step (re-encrypt / ALTER ROLE / reset)."
 fi
 
@@ -149,13 +148,8 @@ put argus-cleanup-db-password "$(gen_alnum 32)" # argus_cleanup login — deploy
 put argus-glitchtip-secret-key "$(gen_alnum 50)" # Django SECRET_KEY — env each boot (only logs sessions out)
 # Set-once (consumed at a component's first init, NOT reconciled — rotating is a per-component DR step):
 put_once argus-postgres-owner-password "$(gen_alnum 32)" # postgres POSTGRES_PASSWORD — rotating breaks migration auth
-put_once argus-zitadel-db-password "$(gen_alnum 32)"     # zitadel-db POSTGRES_PASSWORD — rotating breaks Zitadel↔DB auth
 put_once argus-glitchtip-db-password "$(gen_alnum 32)"   # glitchtip-db POSTGRES_PASSWORD — rotating breaks GlitchTip↔DB auth
 put_once argus-grafana-admin-password "$(gen_alnum 24)"  # GF admin set at first init; rotating has no effect on the live UI
-put_once argus-zitadel-masterkey "$(gen_alnum 32)"       # EXACTLY 32 bytes; rotating bricks Zitadel decryption of stored data
-# Zitadel bootstrap admin — FirstInstance reads it at first init only (ignored after); change + enable MFA on
-# first login. Complexity (upper+lower+digit+symbol) via fixed-class chars appended to an alphanumeric base.
-put_once argus-zitadel-admin-password "$(gen_alnum 20)Aa9."
 
 # --- Derived DSNs. Build from the CURRENT password values so they always match the role passwords deploy.sh
 #     sets. database_url uses a DEDICATED argus_app password (NOT the redis pw — closes audit infra-4). ---
@@ -198,4 +192,4 @@ put_external argus-b2-app-key ARGUS_B2_APP_KEY "B2 db-backups app key"
 put_external argus-tunnel-token ARGUS_TUNNEL_TOKEN "Cloudflare Tunnel token"
 put_external argus-ghcr-token ARGUS_GHCR_TOKEN "GitHub read:packages token (GHCR pull)"
 
-log "done. Mandatory secrets present. Arming secrets (stripe/operator/sentry/zitadel-*-pat) are set later."
+log "done. Mandatory secrets present. Arming secrets (stripe/operator/sentry) are set later."

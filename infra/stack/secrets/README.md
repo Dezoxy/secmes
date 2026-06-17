@@ -30,10 +30,7 @@ consumers `Requires=` this unit, so they don't start on a missing secret).
 | `argus-s3-secret-access-key`    | `s3_secret_access_key`             | `api` (`S3_SECRET_ACCESS_KEY_FILE`) — B2 attachments|
 | `argus-redis-password`          | `redis_password`                   | `redis` (`requirepass` via the deploy-generated `redis.conf`; healthcheck reads this file) + `api` (`REDIS_URL_FILE`, deploy-generated `redis_url`) — never in env; must be URL-safe (e.g. `openssl rand -hex 32`) |
 | `argus-tunnel-token`            | `tunnel_token`                     | `cloudflared` (`TUNNEL_TOKEN`, runtime value)       |
-| `argus-zitadel-masterkey`       | `zitadel_masterkey`                | `zitadel` (`--masterkeyFile`) — 32-byte instance masterkey |
-| `argus-zitadel-db-password`     | `zitadel_db_password`              | `zitadel-db` (`POSTGRES_PASSWORD_FILE`) + `zitadel` (`ZITADEL_DB_PASSWORD` runtime value — same file) |
-| `argus-zitadel-admin-password`  | `zitadel_admin_password`           | `zitadel` (`ZITADEL_ADMIN_PASSWORD` runtime value) — **first-init bootstrap only**, change-required |
-| `argus-zitadel-login-pat`       | `zitadel_login_pat`                | `zitadel-login` (`ZITADEL_SERVICE_USER_TOKEN_FILE`) — **OPTIONAL**: minted after first init, stored during arming; the fetch seeds an empty file until then |
+| `argus-session-signing-key`     | `session_signing_key`              | `api` (`SESSION_SIGNING_KEY_FILE`) — Ed25519 PEM signing passkey session JWTs (**mandatory**) |
 | `argus-grafana-admin-password`  | `grafana_admin_password`           | `grafana` (`GF_SECURITY_ADMIN_PASSWORD__FILE`) — observability dashboards admin login |
 | `argus-backup-db-password`      | `backup-db-password`               | `argus-db-backup` (`LoadCredential`) — `argus_backup` role |
 | `argus-cleanup-db-password`     | `cleanup-db-password`              | `argus-attachment-cleanup` (`LoadCredential`) — `argus_cleanup` role |
@@ -43,17 +40,9 @@ consumers `Requires=` this unit, so they don't start on a missing secret).
 > never the `argus` owner — least privilege so RLS/grants bind even off the `SET LOCAL ROLE` path. The owner
 > password (`argus-postgres-owner-password`) is for init + migrations only.
 >
-> `argus-zitadel-masterkey` is the **32-byte** Zitadel instance masterkey — generate it ONCE
-> (`openssl rand -base64 32 | head -c 32`), and **never rotate it casually**: it encrypts the keys Zitadel
-> stores in its DB, so loss makes the instance's encrypted data unrecoverable (rely on Key Vault soft-delete
-> + purge-protection). `argus-zitadel-admin-password` seeds the bootstrap admin on the **very first** init
-> only (change it + enable MFA immediately after first login); it is ignored on every later boot.
->
-> `argus-zitadel-login-pat` is **optional / set during arming** — Zitadel only mints the Login V2 service PAT
-> after first init, so you can't pre-seed it. The fetch script writes an **empty** file until you provision it
-> (login UI is degraded, the rest of the stack is fine); copy the value FirstInstance writes out **host-side**
-> (`docker cp "$(docker compose -f /opt/argus/compose.prod.yaml ps -q zitadel):/tmp/login-client.pat" - | tar -xO`
-> — the minimal Zitadel image has no shell/`cat`) and store it in Key Vault. Full steps in `docs/deploy.md`.
+> `argus-session-signing-key` is the Ed25519 PKCS8 PEM key the API uses to sign passkey session JWTs. It is
+> **mandatory** — the fetch fails closed if it's absent, and the API will not boot without it. Generate it
+> ONCE: `openssl genpkey -algorithm ed25519 | openssl pkcs8 -topk8 -nocrypt -outform PEM`.
 
 ### Deploy-time secrets (fetched by `deploy.sh`, NOT delivered to the running stack)
 
@@ -79,10 +68,8 @@ az keyvault secret set --vault-name "$KV" --name argus-s3-secret-access-key   --
 # Redis AUTH — URL-safe (it rides in the deploy-generated redis_url `redis://:<pw>@redis:6379` + a redis.conf requirepass line).
 az keyvault secret set --vault-name "$KV" --name argus-redis-password        --value "$(openssl rand -hex 32)"
 az keyvault secret set --vault-name "$KV" --name argus-tunnel-token           --value '<cloudflare-tunnel-token>'
-# Self-hosted Zitadel (#9). Masterkey MUST be exactly 32 bytes; generate it once and never rotate casually.
-az keyvault secret set --vault-name "$KV" --name argus-zitadel-masterkey      --value "$(openssl rand -base64 32 | head -c 32)"
-az keyvault secret set --vault-name "$KV" --name argus-zitadel-db-password    --value '<zitadel-db-owner-pw>'
-az keyvault secret set --vault-name "$KV" --name argus-zitadel-admin-password --value '<bootstrap-admin-pw-change-on-first-login>'
+# Passkey session signing key (Ed25519 PKCS8 PEM) — MANDATORY; the API will not boot without it.
+az keyvault secret set --vault-name "$KV" --name argus-session-signing-key    --value "$(openssl genpkey -algorithm ed25519 | openssl pkcs8 -topk8 -nocrypt -outform PEM)"
 az keyvault secret set --vault-name "$KV" --name argus-grafana-admin-password --value '<grafana-admin-pw>'   # observability #47
 az keyvault secret set --vault-name "$KV" --name argus-backup-db-password     --value '<argus_backup-role-pw>'
 az keyvault secret set --vault-name "$KV" --name argus-cleanup-db-password    --value '<argus_cleanup-role-pw>'

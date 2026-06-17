@@ -72,10 +72,6 @@ jobs:
           tags: ${{ env.IMAGE }}
           cache-from: type=registry,ref=${{ env.CACHE }}
           cache-to: type=registry,ref=${{ env.CACHE }},mode=max
-          build-args: |
-            VITE_OIDC_ISSUER=${{ vars.VITE_OIDC_ISSUER }}
-            VITE_OIDC_CLIENT_ID=${{ vars.VITE_OIDC_CLIENT_ID }}
-            VITE_OIDC_REDIRECT_URI=${{ vars.VITE_OIDC_REDIRECT_URI }}
 
       - name: Trivy image scan (fail on HIGH/CRITICAL)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -134,8 +130,6 @@ jobs:
           S3_REGION: ${{ vars.S3_REGION }}
           S3_BUCKET: ${{ vars.S3_BUCKET }}
           S3_ACCESS_KEY_ID: ${{ vars.S3_ACCESS_KEY_ID }}
-          OIDC_ISSUER: ${{ vars.OIDC_ISSUER }}
-          OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
         run: |
           set -euo pipefail
           # Bundle what deploy.sh reads from the unpacked tree: compose + the secret-fetch unit + deploy.sh, PLUS
@@ -157,8 +151,8 @@ jobs:
             echo 'export ARGUS_TOKEN_SOURCE=arc ARGUS_SKIP_GLITCHTIP=1 ARGUS_COSIGN_WORKFLOW=.github/workflows/cd-aws.yml'
             printf 'export ARGUS_KEY_VAULT=%q IMAGE_TAG=%q GHCR_REGISTRY=%q GHCR_USER=%q GH_REPO=%q\n' \
               "$KEY_VAULT" "$IMAGE_TAG" "$GHCR_REGISTRY" "$GHCR_USER" "$GH_REPO"
-            printf 'export S3_ENDPOINT=%q S3_REGION=%q S3_BUCKET=%q S3_ACCESS_KEY_ID=%q OIDC_ISSUER=%q OIDC_AUDIENCE=%q\n' \
-              "$S3_ENDPOINT" "$S3_REGION" "$S3_BUCKET" "$S3_ACCESS_KEY_ID" "$OIDC_ISSUER" "$OIDC_AUDIENCE"
+            printf 'export S3_ENDPOINT=%q S3_REGION=%q S3_BUCKET=%q S3_ACCESS_KEY_ID=%q\n' \
+              "$S3_ENDPOINT" "$S3_REGION" "$S3_BUCKET" "$S3_ACCESS_KEY_ID"
             echo 'bash "$WORK/infra/stack/deploy/deploy.sh"'
             echo 'rm -rf "$WORK"'
           } >runcmd.sh
@@ -197,7 +191,7 @@ jobs:
             --query 'Command.CommandId' --output text)"
           echo "SSM command: $CMD_ID"
           # The built-in command-executed waiter tops out ~100s — far short of a cold deploy (image pulls +
-          # Zitadel first-init). Poll manually up to ~30 min for a terminal status.
+          # first-boot DB migrations). Poll manually up to ~30 min for a terminal status.
           STATUS=Pending
           for _ in $(seq 1 120); do
             STATUS="$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$IID" \

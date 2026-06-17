@@ -375,16 +375,14 @@ _cleanup_pw=""
 _backup_pw=""
 log "runtime role logins provisioned"
 
-# --- 6. Bring up the full stack. cloudflared's TUNNEL_TOKEN + Zitadel's DB/admin passwords are RUNTIME values
-#        read from the delivered Key Vault files (the accepted env exception — never a committed/on-disk env
-#        file; see vm-zitadel.md §4). ZITADEL_DB_PASSWORD also backs zitadel-db's POSTGRES_PASSWORD_FILE (same
-#        file, two consumers). ZITADEL_ADMIN_PASSWORD is read by FirstInstance on the FIRST init only — ignored
-#        on every later boot (the instance already exists). ---
-log "starting api + caddy + cloudflared + zitadel"
-# Guard: these runtime-value files must exist + be non-empty before we `cat` them into the `up` env — else
+# --- 6. Bring up the full stack. cloudflared's TUNNEL_TOKEN is a RUNTIME value read from the delivered Key
+#        Vault file (the accepted env exception — never a committed/on-disk env file; the cloudflared image
+#        has no --token-file form). ---
+log "starting api + caddy + cloudflared"
+# Guard: this runtime-value file must exist + be non-empty before we `cat` it into the `up` env — else
 # `set -e` aborts on a bare `cat: No such file` instead of a legible FATAL. fetch-keyvault-secrets.sh (same
 # bundled SHA) already fails closed first, so this is belt-and-suspenders for a stale/partial secret set.
-for _f in tunnel_token zitadel_db_password zitadel_admin_password; do
+for _f in tunnel_token; do
   [ -s "$SECRETS_DIR/$_f" ] || {
     log "FATAL: missing/empty runtime secret file: $_f"
     exit 1
@@ -396,14 +394,12 @@ done
 # (glitchtip + glitchtip-worker + glitchtip-db); the live default (empty list) brings up the whole stack. The
 # explicit list is experiment-only + must be kept in sync if the core/observability service set changes.
 if [ "$SKIP_GLITCHTIP" = 1 ]; then
-  STACK_SERVICES="postgres redis api caddy cloudflared zitadel-db zitadel zitadel-login prometheus alertmanager grafana loki alloy"
+  STACK_SERVICES="postgres redis api caddy cloudflared prometheus alertmanager grafana loki alloy"
 else
   STACK_SERVICES=""
 fi
 # shellcheck disable=SC2086 # intentional word-splitting: empty STACK_SERVICES = all services; else the explicit set
 TUNNEL_TOKEN="$(cat "$SECRETS_DIR/tunnel_token")" \
-  ZITADEL_DB_PASSWORD="$(cat "$SECRETS_DIR/zitadel_db_password")" \
-  ZITADEL_ADMIN_PASSWORD="$(cat "$SECRETS_DIR/zitadel_admin_password")" \
   docker compose -f "$COMPOSE" up -d $STACK_SERVICES
 # The api reads REDIS_URL_FILE ONCE at module construction and holds a persistent ioredis connection. On a
 # redis password ROTATION the `up -d` above won't recreate the api when the image/config is unchanged (a
@@ -461,25 +457,10 @@ wait_running() { # $1 = compose service without a healthcheck
     return 1
   }
 }
-log "waiting for the rollout to become healthy (api, caddy, zitadel-db, zitadel, zitadel-login, glitchtip) + the tunnel"
+log "waiting for the rollout to become healthy (api, caddy, glitchtip) + the tunnel"
 wait_healthy api
 wait_healthy caddy
 wait_running cloudflared
-# Zitadel exposes a real readiness probe (`zitadel ready`), so gate the DB + the API server on HEALTHY — not
-# just "didn't crash". zitadel gets a longer window (150×2s=300s) for the cold first-init schema migration +
-# FirstInstance seed; a bad masterkey/DB password or a stuck init fails the deploy loudly here.
-wait_healthy zitadel-db
-wait_healthy zitadel 150
-# zitadel-login readiness depends on its Key-Vault-delivered service PAT. Gate CONDITIONALLY: while the PAT
-# file is still empty (first boot, before arming-time provisioning) require only running+not-crash-looping so
-# the first deploy can succeed; ONCE the PAT is provisioned (file non-empty) require HEALTHY, so a
-# malformed/expired PAT or a broken Login V2 image is caught during the rollout instead of reported healthy.
-if [ -s "$SECRETS_DIR/zitadel_login_pat" ]; then
-  wait_healthy zitadel-login
-else
-  log "zitadel-login: service PAT not yet provisioned (empty) — gating on running only; seed it per docs/deploy.md"
-  wait_running zitadel-login
-fi
 # Observability (checkpoint 47): the Prometheus/Grafana/Alertmanager images have no shell for a CMD
 # healthcheck, so gate on running + not-crash-looping — catches a bad config mount / image without depending
 # on an in-container probe. (Their own /-/healthy + /api/health endpoints are visible once up.)
