@@ -38,6 +38,7 @@ export class GdprService {
             argusId: schema.users.argusId,
             email: schema.users.email,
             displayName: schema.users.displayName,
+            avatarSeed: schema.users.avatarSeed,
             role: schema.users.role,
             status: schema.users.status,
             createdAt: schema.users.createdAt,
@@ -245,6 +246,7 @@ export class GdprService {
         argusId: profile.argusId,
         email: profile.email,
         displayName: profile.displayName ?? null,
+        avatarSeed: profile.avatarSeed ?? null,
         role: profile.role,
         status: profile.status,
         createdAt: profile.createdAt.toISOString(),
@@ -286,7 +288,8 @@ export class GdprService {
         id: e.id,
         eventType: e.eventType,
         createdAt: e.createdAt.toISOString(),
-        metadata: (e.metadata as Record<string, string | number | boolean> | null) ?? null,
+        metadata:
+          (e.metadata as Record<string, string | number | boolean | string[]> | null) ?? null,
       })),
       invitesCreated: invitesCreated.map((i) => ({
         id: i.id,

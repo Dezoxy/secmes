@@ -124,12 +124,42 @@ export const MeBoundSchema = z.object({
   userId: z.string().uuid(),
   tenantId: z.string().uuid(),
   argusId: z.string(),
-  email: z.string().email().nullable(),
   displayName: z.string().nullable(),
+  avatarSeed: z.string().nullable(),
   role: z.enum(['admin', 'member']),
-  plan: TenantPlanSchema,
+  // Kept optional for backward-compat during Phase 4 → Phase 6 transition; not returned by the API.
+  email: z.string().email().nullable().optional(),
+  plan: TenantPlanSchema.optional(),
 });
 export type MeBound = z.infer<typeof MeBoundSchema>;
+
+export const UserLookupResultSchema = z.object({
+  userId: z.string().uuid(),
+  argusId: z.string(),
+  displayName: z.string().nullable(),
+  avatarSeed: z.string().nullable(),
+});
+export type UserLookupResult = z.infer<typeof UserLookupResultSchema>;
+
+export const ConversationMemberSchema = z.object({
+  userId: z.string().uuid(),
+  argusId: z.string(),
+  displayName: z.string().nullable(),
+  avatarSeed: z.string().nullable(),
+});
+export type ConversationMember = z.infer<typeof ConversationMemberSchema>;
+
+export const UpdateProfileSchema = z.object({
+  displayName: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .refine((v) => v !== 'breakglass-admin', { message: 'reserved display name' })
+    .optional(),
+  avatarSeed: z.string().min(1).max(64).optional(),
+});
+export type UpdateProfile = z.infer<typeof UpdateProfileSchema>;
 
 export const MeSchema = z.discriminatedUnion('bound', [MeUnboundSchema, MeBoundSchema]);
 export type Me = z.infer<typeof MeSchema>;
@@ -612,6 +642,7 @@ export const MeExportSchema = z.object({
       argusId: z.string(),
       email: z.string().email().nullable(),
       displayName: z.string().nullable(),
+      avatarSeed: z.string().nullable(),
       role: z.string().max(32),
       status: z.string().max(32),
       createdAt: z.string().datetime(),
@@ -667,7 +698,9 @@ export const MeExportSchema = z.object({
       id: z.string().uuid(),
       eventType: z.string().max(64),
       createdAt: z.string().datetime(),
-      metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).nullable(),
+      metadata: z
+        .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]))
+        .nullable(),
     }),
   ),
   invitesCreated: z.array(

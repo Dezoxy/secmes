@@ -356,4 +356,41 @@ export class MessagingController {
   ): Promise<MessagePageDto> {
     return this.messaging.listMessages(auth, conversationId, query);
   }
+
+  @Get(':conversationId/members')
+  @ApiOperation({
+    summary: 'List identity metadata for conversation members (member-only)',
+    operationId: 'listConversationMembers',
+  })
+  @ApiParam({ name: 'conversationId', format: 'uuid' })
+  @ApiOkResponse({
+    schema: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          userId: { type: 'string', format: 'uuid' },
+          argusId: { type: 'string' },
+          displayName: { type: 'string', nullable: true },
+          avatarSeed: { type: 'string', nullable: true },
+        },
+        required: ['userId', 'argusId', 'displayName', 'avatarSeed'],
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'conversation not found or caller is not a member' })
+  @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
+  async listConversationMembers(
+    @CurrentAuth() auth: VerifiedAuth,
+    @Param('conversationId', ParseUUIDPipe) conversationId: string,
+  ): Promise<
+    Array<{
+      userId: string;
+      argusId: string;
+      displayName: string | null;
+      avatarSeed: string | null;
+    }>
+  > {
+    return this.messaging.getConversationMembers(auth, conversationId);
+  }
 }

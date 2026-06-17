@@ -226,7 +226,7 @@ const SSO_PROVIDER_OPTIONS = [
   { value: 'okta', label: 'Okta' },
 ] as const;
 
-function SsoTab({ ssoEnabled = true }: { ssoEnabled?: boolean }) {
+function SsoTab({ ssoEnabled = false }: { ssoEnabled?: boolean }) {
   const [upgrading, setUpgrading] = useState(false);
   const [upgradeError, setUpgradeError] = useState<string | null>(null);
 

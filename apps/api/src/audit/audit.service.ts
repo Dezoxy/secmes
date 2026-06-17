@@ -1,6 +1,26 @@
 import { Injectable } from '@nestjs/common';
+import { z } from 'zod';
 
 import { schema, withTenant } from '../db/index.js';
+
+/**
+ * Metadata for the `users.lookup` audit event.
+ * Fields are pseudonymous identifiers + a boolean — no PII.
+ */
+export interface LookupUserMeta {
+  targetArgusId: string;
+  found: boolean;
+}
+
+/**
+ * Metadata for the `users.profile_updated` audit event.
+ * Only field NAMES are recorded — never the values.
+ */
+export interface ProfileUpdateMeta {
+  fieldsUpdated: ('displayName' | 'avatarSeed')[];
+}
+
+export type AuditMetadata = LookupUserMeta | ProfileUpdateMeta;
 
 export interface AuditEventInput {
   eventType: string;
@@ -8,17 +28,30 @@ export interface AuditEventInput {
   actorSub?: string | null;
   ip?: string | null;
   userAgent?: string | null;
+  /** Structured non-sensitive metadata validated against a strict schema before insert. */
+  metadata?: AuditMetadata;
 }
 
-// NOTE: the `metadata` jsonb column exists for future structured context, but the service does
-// NOT accept arbitrary metadata — that would put the "no secrets/content in the log" invariant on
-// a caller's discipline. When a concrete need arises, add it behind a STRICT @argus/contracts Zod
-// schema (closed object of known non-sensitive keys), validated here before insert.
+const LookupUserMetaSchema = z.object({
+  targetArgusId: z.string().max(128),
+  found: z.boolean(),
+});
+
+const ProfileUpdateMetaSchema = z.object({
+  fieldsUpdated: z.array(z.enum(['displayName', 'avatarSeed'])).max(2),
+});
+
+function validateMetadata(eventType: string, metadata: AuditMetadata): AuditMetadata {
+  if (eventType === 'users.lookup') return LookupUserMetaSchema.parse(metadata);
+  if (eventType === 'users.profile_updated') return ProfileUpdateMetaSchema.parse(metadata);
+  throw new Error(`No metadata schema registered for eventType "${eventType}"`);
+}
 
 @Injectable()
 export class AuditService {
   /** Append one audit row inside the verified tenant's RLS context. IDs + metadata only. */
   async record(tenantId: string, event: AuditEventInput): Promise<void> {
+    const metadata = event.metadata ? validateMetadata(event.eventType, event.metadata) : null;
     await withTenant(tenantId, async (tx) => {
       await tx.insert(schema.auditEvents).values({
         tenantId,
@@ -27,6 +60,7 @@ export class AuditService {
         ip: event.ip ?? null,
         // Bound the client-controlled user-agent so a hostile client can't bloat the row.
         userAgent: event.userAgent ? event.userAgent.slice(0, 512) : null,
+        metadata,
       });
     });
   }

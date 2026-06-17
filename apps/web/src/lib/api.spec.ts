@@ -62,6 +62,7 @@ describe('api client', () => {
       argusId: 'argus-abcdefghjkmnpqrs-otter',
       email: 'alice@example.com',
       displayName: 'A',
+      avatarSeed: null,
       role: 'member',
       plan: {
         tier: 'free',

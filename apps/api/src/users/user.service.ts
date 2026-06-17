@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { and, count, eq, isNull, ne, or, sql } from 'drizzle-orm';
-import type { TenantPlan } from '@argus/contracts';
+import type { TenantPlan, UpdateProfile, UserLookupResult } from '@argus/contracts';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
@@ -10,8 +10,8 @@ import { generateHandle } from './handle-words.js';
 export interface UserRecord {
   id: string;
   argusId: string;
-  email: string | null;
   displayName: string | null;
+  avatarSeed: string | null;
   role: string;
   plan?: TenantPlan;
 }
@@ -23,12 +23,14 @@ export interface DirectoryRecord {
   role: string;
 }
 
-// Full identity projection — argusId included; used only for /me (getByAuth + provisionFromToken).
+// Full identity projection for /me (getByAuth + provisionFromToken). email is included
+// so provisionFromToken can write it; it is NOT in UserRecord (not exposed to controllers).
 const ME_SELECTION = {
   id: schema.users.id,
   argusId: schema.users.argusId,
   email: schema.users.email,
   displayName: schema.users.displayName,
+  avatarSeed: schema.users.avatarSeed,
   role: schema.users.role,
 } as const;
 
@@ -41,60 +43,14 @@ const DIRECTORY_SELECTION = {
   role: schema.users.role,
 } as const;
 
-// With a 40k handle pool a fresh handle almost never collides, but the DB unique index is the source of truth —
-// on a 23505 against it we regenerate. The cap stops a pathological/near-full tenant from looping forever (it
-// errors loudly instead). See docs/threat-models/pseudonymous-identity.md §6.
-const MAX_HANDLE_ATTEMPTS = 8;
-
-// The unique index whose violation means "this generated handle is taken" (see 0016 migration). Matched
-// EXACTLY so only a collision on this specific index triggers a regenerate.
-const HANDLE_UNIQUE_INDEX = 'users_tenant_display_name_idx';
-
-/**
- * True iff `err` (or any error in its `.cause` chain — Drizzle may wrap the driver error) is a Postgres
- * unique-violation (23505) specifically against the `(tenant_id, display_name)` handle index. Any other 23505
- * (or error) is NOT a handle collision and must propagate, not trigger a retry.
- */
-function isHandleCollision(err: unknown): boolean {
-  let cur: unknown = err;
-  for (let depth = 0; cur != null && depth < 5; depth++) {
-    if (typeof cur !== 'object') break;
-    const o = cur as {
-      code?: unknown;
-      constraint_name?: unknown;
-      constraint?: unknown;
-      cause?: unknown;
-    };
-    if (o.code === '23505') {
-      const constraint =
-        (typeof o.constraint_name === 'string' && o.constraint_name) ||
-        (typeof o.constraint === 'string' && o.constraint) ||
-        '';
-      // Pin to the EXACT handle index — not a `display_name` substring — so a future *display_name* constraint
-      // can't silently widen which 23505s trigger a regenerate. (postgres.js sets `constraint_name` to the bare
-      // index name; see 0016_users_display_name_unique.sql.)
-      if (constraint === HANDLE_UNIQUE_INDEX) return true;
-    }
-    cur = o.cause;
-  }
-  return false;
-}
-
 @Injectable()
 export class UserService {
   /**
    * JIT-provision the user from VERIFIED token claims (idempotent upsert keyed on
-   * (tenant_id, external_identity_id)). Runs under the tenant's RLS context, so a token can only ever
-   * create/refresh a user in its own tenant. Requires a verified `email` claim.
+   * (tenant_id, external_identity_id)). Runs under the tenant's RLS context.
    *
-   * Identity is PSEUDONYMOUS (roadmap #44b): a NEW user is assigned a random "Adjective Animal" handle as their
-   * display name — the IdP `name` claim is intentionally NOT used (no real-name leak into the directory; see
-   * pseudonymous-identity.md). An EXISTING user keeps their handle (a legacy NULL handle — incl. every legacy
-   * name reset to NULL by migration 0016 — is healed to a generated one on next login); `email` is refreshed.
-   * Per-tenant uniqueness is DB-enforced (unique (tenant_id, display_name)) with regenerate-on-collision.
-   *
-   * `generate` is an injection seam so the collision-retry path is deterministically testable; production
-   * always uses the CSPRNG-backed default.
+   * Display names are free nicknames (unique index dropped in 0038) — no retry loop needed.
+   * A short retry loop is kept only for the (vanishingly rare) argus_id collision.
    */
   async provisionFromToken(
     auth: VerifiedAuth,
@@ -106,7 +62,7 @@ export class UserService {
       );
     }
     const email = auth.email;
-    for (let attempt = 0; attempt < MAX_HANDLE_ATTEMPTS; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       const displayName = generate();
       const argusId = generateArgusId();
       try {
@@ -122,11 +78,9 @@ export class UserService {
             })
             .onConflictDoUpdate({
               target: [schema.users.tenantId, schema.users.externalIdentityId],
-              // EXISTING user: refresh email; KEEP their handle if they have one (coalesce returns the existing
-              // value, the candidate is discarded so it never reaches the display_name index). A NULL
-              // display_name (every legacy name was reset to NULL by migration 0016) is HEALED to the candidate
-              // handle — which IS then checked against the unique index, so a collision still regenerates.
-              // argusId is intentionally excluded from SET — immutability is DB-enforced via trigger too.
+              // EXISTING user: refresh email; KEEP their display name if they have one (coalesce returns the
+              // existing value). A NULL display_name is healed to the candidate on next login.
+              // argusId is intentionally excluded from SET — immutability is DB-enforced via trigger.
               set: {
                 email,
                 displayName: sql`coalesce(${schema.users.displayName}, excluded.display_name)`,
@@ -134,21 +88,20 @@ export class UserService {
             })
             .returning(ME_SELECTION),
         );
-        // An upsert with RETURNING always yields exactly one row; guard satisfies the type + is defensive.
         if (!user) throw new Error('provisioning returned no row');
-        return user;
+        return {
+          id: user.id,
+          argusId: user.argusId,
+          displayName: user.displayName,
+          avatarSeed: user.avatarSeed,
+          role: user.role,
+        };
       } catch (err) {
-        // A NEW user's generated handle collided with another member's handle — regenerate and retry. Any
-        // other error (incl. a non-handle unique violation) propagates immediately.
-        if (isHandleCollision(err)) continue;
         if (isArgusIdCollision(err)) continue;
         throw err;
       }
     }
-    throw new Error(
-      `could not allocate a unique handle after ${MAX_HANDLE_ATTEMPTS} attempts ` +
-        '(tenant handle pool may be exhausted)',
-    );
+    throw new Error('could not allocate a unique argus-id after 3 attempts');
   }
 
   /** List ACTIVE users in a tenant (the directory), capped by `limit`. RLS scopes it to the tenant. */
@@ -162,7 +115,7 @@ export class UserService {
             eq(schema.users.status, 'active'),
             or(isNull(schema.users.displayName), ne(schema.users.displayName, 'breakglass-admin')),
           ),
-        ) // don't surface deactivated/suspended/system members
+        )
         .orderBy(schema.users.email)
         .limit(limit),
     );
@@ -188,8 +141,9 @@ export class UserService {
     );
     if (!user) return undefined;
 
-    // Fetch plan columns + active member count inside a single tenant-scoped transaction.
-    // tenants has FORCE RLS (tenants_self_isolation policy) so this must run inside withTenant.
+    // Fetch plan columns + active member count (excludes breakglass-admin) in a second
+    // tenant-scoped transaction. Needed by /me for billing-aware settings UI (removed in Phase 5
+    // once the frontend fetches /billing/status independently).
     const [tenantRow, countRow] = await withTenant(auth.tenantId, async (tx) => {
       const [plan] = await tx
         .select({
@@ -214,7 +168,11 @@ export class UserService {
     });
 
     return {
-      ...user,
+      id: user.id,
+      argusId: user.argusId,
+      displayName: user.displayName,
+      avatarSeed: user.avatarSeed,
+      role: user.role,
       plan: {
         tier: (tenantRow?.planTier ?? 'free') as TenantPlan['tier'],
         memberLimit: tenantRow?.memberLimit ?? null,
@@ -224,5 +182,54 @@ export class UserService {
           (tenantRow?.subscriptionStatus as TenantPlan['subscriptionStatus']) ?? null,
       },
     };
+  }
+
+  /**
+   * Exact-match lookup by argus-id. Returns null for both "not found" and "found but inactive"
+   * (uniform not-found — no oracle for inactive/suspended users; see discovery-by-argus-id.md).
+   */
+  async lookupByArgusId(tenantId: string, argusId: string): Promise<UserLookupResult | null> {
+    const [row] = await withTenant(tenantId, async (tx) =>
+      tx
+        .select({
+          userId: schema.users.id,
+          argusId: schema.users.argusId,
+          displayName: schema.users.displayName,
+          avatarSeed: schema.users.avatarSeed,
+        })
+        .from(schema.users)
+        .where(
+          and(
+            eq(schema.users.tenantId, tenantId),
+            eq(schema.users.argusId, argusId),
+            eq(schema.users.status, 'active'),
+          ),
+        )
+        .limit(1),
+    );
+    return row ?? null;
+  }
+
+  /**
+   * Update the caller's own display name and/or avatar seed. Only provided fields are updated.
+   * argusId is not in the schema — immutability is enforced by Zod (unknown fields stripped) and
+   * the `users_argus_id_immutable` DB trigger.
+   */
+  async updateProfile(
+    auth: { tenantId: string; userId: string },
+    dto: UpdateProfile,
+  ): Promise<void> {
+    if (!dto.displayName && !dto.avatarSeed) return;
+    const set: Partial<typeof schema.users.$inferInsert> = {};
+    if (dto.displayName !== undefined) set.displayName = dto.displayName;
+    if (dto.avatarSeed !== undefined) set.avatarSeed = dto.avatarSeed;
+    const result = await withTenant(auth.tenantId, async (tx) =>
+      tx
+        .update(schema.users)
+        .set(set)
+        .where(and(eq(schema.users.id, auth.userId), eq(schema.users.tenantId, auth.tenantId)))
+        .returning({ id: schema.users.id }),
+    );
+    if (result.length === 0) throw new NotFoundException('user not found');
   }
 }
