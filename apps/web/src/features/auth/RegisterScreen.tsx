@@ -3,6 +3,7 @@ import { startRegistration } from '@simplewebauthn/browser';
 import type { PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/browser';
 import { ArrowLeft, KeyRound } from 'lucide-react';
 import { redeemCode, getRegisterOptions, verifyRegistration, fetchMe } from '../../lib/api';
+import { setToken } from '../../lib/auth';
 import { useAuth, type MeBound } from './AuthContext';
 
 interface RegisterScreenProps {
@@ -32,6 +33,7 @@ export function RegisterScreen({ onRegistered, onBack }: RegisterScreenProps) {
         optionsJSON: options as unknown as PublicKeyCredentialCreationOptionsJSON,
       });
       const { accessToken: token } = await verifyRegistration(ceremonyId, regResponse);
+      setToken(token); // must be set before fetchMe so the bearer header is present
       const me = await fetchMe();
       if (!me.bound) throw new Error('Registration succeeded but account is not yet bound.');
       notifyAuth(token, me);

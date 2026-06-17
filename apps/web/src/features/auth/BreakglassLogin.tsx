@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ArrowLeft, ShieldAlert } from 'lucide-react';
 import { breakglassLogin, fetchMe } from '../../lib/api';
+import { setToken } from '../../lib/auth';
 import { useAuth, type MeBound } from './AuthContext';
 
 interface BreakglassLoginProps {
@@ -22,6 +23,7 @@ export function BreakglassLogin({ onLoggedIn, onBack }: BreakglassLoginProps) {
     setBusy(true);
     try {
       const { accessToken: token } = await breakglassLogin(username.trim(), password);
+      setToken(token); // must be set before fetchMe so the bearer header is present
       const me = await fetchMe();
       if (!me.bound) throw new Error('Login succeeded but profile is not bound.');
       notifyAuth(token, me);

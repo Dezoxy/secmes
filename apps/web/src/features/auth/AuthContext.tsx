@@ -118,6 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
       optionsJSON: opts.options as unknown as PublicKeyCredentialRequestOptionsJSON,
     });
     const { accessToken: token } = await verifyAuthentication(opts.ceremonyId, response);
+    setToken(token); // must be set before fetchMe so the bearer header is present
     const me = await fetchMe();
     applySession(token, me.bound ? me : null);
   }, [applySession]);
@@ -152,9 +153,10 @@ export function useAuth(): AuthState {
   return ctx;
 }
 
-/** Gate a route: demo mode passes through; otherwise require a signed-in user. */
+/** Gate a route: demo mode passes through; otherwise require an authenticated session.
+ * OnboardingGate (inside the chat route) handles the authenticated-but-unbound case. */
 export function RequireAuth({ children }: { children: ReactNode }): ReactNode {
-  const { ready, demoMode: demo, profile } = useAuth();
+  const { ready, demoMode: demo, authenticated } = useAuth();
   if (!ready) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#1a1a24] text-white/50">
@@ -162,6 +164,6 @@ export function RequireAuth({ children }: { children: ReactNode }): ReactNode {
       </div>
     );
   }
-  if (!demo && !profile) return <Navigate to="/" replace />;
+  if (!demo && !authenticated) return <Navigate to="/" replace />;
   return children;
 }

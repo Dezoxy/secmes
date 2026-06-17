@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { User } from 'lucide-react';
 import { updateProfile } from '../../lib/api';
 import { useAuth } from '../auth/AuthContext';
@@ -10,6 +10,15 @@ export function ProfileEdit() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const initRef = useRef(false);
+
+  // Populate the field once when the profile first becomes available after session restore.
+  useEffect(() => {
+    if (profile && !initRef.current) {
+      initRef.current = true;
+      setDisplayName(profile.displayName ?? '');
+    }
+  }, [profile]);
 
   if (!profile || profile.isBreakglass) return null;
 
