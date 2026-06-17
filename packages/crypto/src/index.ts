@@ -41,6 +41,7 @@ export {
   deriveSessionKey,
   sealWithKey,
   openWithKey,
+  importUnlockKey,
   encryptAttachment,
   decryptAttachment,
   DEFAULT_ARGON2,

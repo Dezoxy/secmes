@@ -94,21 +94,25 @@ not enforce this `userHandle` policy — the application must do it explicitly.
 
 ---
 
-## T6 — PRF extension (deferred to Phase 5)
+## T6 — PRF extension (NOW WIRED — keystore unlock)
 
-**Phase 2 scope:** the API requests `extensions: { prf: {} }` in both `generateRegistrationOptions()` and
-`generateAuthenticationOptions()`. This is a hint to PRF-capable authenticators to prepare the extension.
+**Status:** the PRF output now derives the keystore unlock key. Full design + threat analysis is in
+[`prf-keystore-unlock.md`](prf-keystore-unlock.md); this section is the auth-side summary.
 
-**Phase 2 does NOT derive keys from PRF output.** The PRF output (if any) is returned to the browser in the
-`WebAuthn` response; Phase 2's `webauthn.service.ts` ignores it entirely.
+**Server:** the API requests `extensions: { prf: {} }` in both `generateRegistrationOptions()` and
+`generateAuthenticationOptions()` (the enable signal — requesting PRF at registration is REQUIRED so the
+authenticator includes it in later assertions). The server still NEVER reads the PRF output; it stays
+crypto-blind.
 
-**Phase 5** will wire the PRF output in `apps/web/src/lib/keystore.ts` to derive the keystore-unlock key.
-The decision on PRF-fallback behavior (PRF-only authenticators vs. recovery-code escape hatch) is open item §7.1
-in `docs/private-messenger-redesign-plan.md` — confirm with the owner before Phase 5.
+**Client:** the salt is client-owned (a fixed, non-secret 32-byte constant in `apps/web/src/lib/prf.ts`),
+injected as raw bytes into `extensions.prf.eval.first` before each ceremony — @simplewebauthn v13 passes
+`extensions` through verbatim and does NOT base64url-decode the salt, so a server-sent salt string would
+silently break PRF. The PRF output (a native `ArrayBuffer`) is imported as a non-extractable AES-256-GCM
+`CryptoKey` and never logged or transmitted.
 
-**Security note:** requesting PRF at registration is REQUIRED (the extension must be present at registration for
-the authenticator to include it in future authentication assertions). Not requesting it now means PRF cannot be
-added in Phase 5 without re-registering all users.
+**Decision (owner, 2026-06-17): PRF-only — no recovery code.** A device with no PRF (or a wiped browser
+keystore) is a fresh start: the admin mints a new registration code. This removed the recovery-file /
+key-backup surface entirely (the redesign no-restore rule).
 
 ---
 

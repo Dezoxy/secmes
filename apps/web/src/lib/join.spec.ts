@@ -1,4 +1,4 @@
-import { MlsEngine, deserializeInvite, serializeInvite, type Argon2Params } from '@argus/crypto';
+import { MlsEngine, deserializeInvite, importUnlockKey, serializeInvite } from '@argus/crypto';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -16,15 +16,12 @@ const list = vi.mocked(listWelcomes);
 const fetchMaterial = vi.mocked(fetchWelcomeMaterial);
 const consume = vi.mocked(consumeWelcome);
 
-// Clears the key-backup Argon2 floor while keeping the seal/unseal fast in tests.
-const FAST: Argon2Params = { m: 8192, t: 2, p: 1 };
-
-/** The non-crypto deps every call needs: a fresh sealed keystore + the session passphrase/key. */
+/** The non-crypto deps every call needs: a fresh sealed keystore + the session unlock key. */
 async function persistenceDeps(
   engine: MlsEngine,
-): Promise<{ keystore: DeviceKeystore; passphrase: string; sessionKey: CryptoKey }> {
-  const keystore = await DeviceKeystore.open(engine, FAST);
-  return { keystore, passphrase: 'pw', sessionKey: await keystore.deriveSessionKey('pw') };
+): Promise<{ keystore: DeviceKeystore; sessionKey: CryptoKey }> {
+  const keystore = await DeviceKeystore.open(engine);
+  return { keystore, sessionKey: await importUnlockKey(new Uint8Array(32).fill(1)) };
 }
 
 describe('joinPendingConversations', () => {
@@ -42,7 +39,7 @@ describe('joinPendingConversations', () => {
     const bob = await engine.generateDeviceKeys('bob');
     const bobPool = [bob, await engine.mintKeyPackage(bob)];
     const target = bobPool[1]!; // the directory sealed the welcome to THIS pool member
-    const { keystore, passphrase, sessionKey } = await persistenceDeps(engine);
+    const { keystore, sessionKey } = await persistenceDeps(engine);
 
     const aliceConv = await engine.createConversation('grp', alice);
     const material = serializeInvite(await aliceConv.addMember(target.publicPackage));
@@ -58,7 +55,6 @@ describe('joinPendingConversations', () => {
       pool: bobPool,
       deviceId: 'dev',
       keystore,
-      passphrase,
       sessionKey,
       onJoined: (j) => joined.push(j),
     });
@@ -73,7 +69,7 @@ describe('joinPendingConversations', () => {
     expect(joined[0]!.conversationId).toBe('c1');
     expect(await joined[0]!.conversation.decrypt(await aliceConv.encrypt('hi'))).toBe('hi');
     // The group state is now PERSISTED (5A), so a reload recovers it without re-joining...
-    expect((await keystore.loadConversations(bob, passphrase, sessionKey)).has('c1')).toBe(true);
+    expect((await keystore.loadConversations(bob, sessionKey)).has('c1')).toBe(true);
     // ...and the Welcome is consumed (forward secrecy — the sealed join material is no longer needed).
     expect(consume).toHaveBeenCalledWith('w1', 'dev', expect.any(String));
     expect(consume).toHaveBeenCalledTimes(1);
@@ -85,7 +81,7 @@ describe('joinPendingConversations', () => {
     const bob = await engine.generateDeviceKeys('bob');
     const bobPool = [bob];
     const stranded = await engine.mintKeyPackage(bob); // a key NOT retained in bob's pool
-    const { keystore, passphrase, sessionKey } = await persistenceDeps(engine);
+    const { keystore, sessionKey } = await persistenceDeps(engine);
 
     const strandedMaterial = serializeInvite(
       await (await engine.createConversation('g1', alice)).addMember(stranded.publicPackage),
@@ -108,7 +104,6 @@ describe('joinPendingConversations', () => {
       pool: bobPool,
       deviceId: 'dev',
       keystore,
-      passphrase,
       sessionKey,
       onJoined: (j) => joined.push(j),
     });
@@ -125,7 +120,7 @@ describe('joinPendingConversations', () => {
     const engine = await MlsEngine.create();
     const alice = await engine.generateDeviceKeys('alice');
     const bob = await engine.generateDeviceKeys('bob');
-    const { keystore, passphrase, sessionKey } = await persistenceDeps(engine);
+    const { keystore, sessionKey } = await persistenceDeps(engine);
 
     const goodMaterial = serializeInvite(
       await (await engine.createConversation('g', alice)).addMember(bob.publicPackage),
@@ -144,7 +139,6 @@ describe('joinPendingConversations', () => {
       pool: [bob],
       deviceId: 'dev',
       keystore,
-      passphrase,
       sessionKey,
       onJoined: (j) => joined.push(j),
     });
@@ -160,7 +154,7 @@ describe('joinPendingConversations', () => {
     const alice = await engine.generateDeviceKeys('alice');
     const bob = await engine.generateDeviceKeys('bob');
     const pool = [bob, await engine.mintKeyPackage(bob), await engine.mintKeyPackage(bob)];
-    const { keystore, passphrase, sessionKey } = await persistenceDeps(engine);
+    const { keystore, sessionKey } = await persistenceDeps(engine);
     const seal = async (
       m: (typeof pool)[number],
       g: string,
@@ -190,7 +184,6 @@ describe('joinPendingConversations', () => {
       pool,
       deviceId: 'dev',
       keystore,
-      passphrase,
       sessionKey,
       onJoined: (j) => joined.push(j),
     });
@@ -207,7 +200,7 @@ describe('joinPendingConversations', () => {
     const bob = await engine.generateDeviceKeys('bob');
     const pool = [bob, await engine.mintKeyPackage(bob)];
     const target = pool[1]!;
-    const { keystore, passphrase, sessionKey } = await persistenceDeps(engine);
+    const { keystore, sessionKey } = await persistenceDeps(engine);
     // TWO welcomes both sealed to the SAME pool member (a deliver duplicate / replay / reused claim).
     const w1mat = serializeInvite(
       await (await engine.createConversation('g1', alice)).addMember(target.publicPackage),
@@ -230,7 +223,6 @@ describe('joinPendingConversations', () => {
       pool,
       deviceId: 'dev',
       keystore,
-      passphrase,
       sessionKey,
       onJoined: (j) => joined.push(j),
     });
@@ -257,7 +249,7 @@ describe('joinPendingConversations', () => {
       const at = sessionPool.indexOf(member);
       if (at !== -1) sessionPool.splice(at, 1);
     };
-    const { keystore, passphrase, sessionKey } = await persistenceDeps(engine);
+    const { keystore, sessionKey } = await persistenceDeps(engine);
 
     // Two welcomes BOTH sealed to kpA, delivered in SEPARATE drains (connect, then a replayed live nudge).
     const w1mat = serializeInvite(
@@ -279,7 +271,6 @@ describe('joinPendingConversations', () => {
       pool: sessionPool,
       deviceId: 'dev',
       keystore,
-      passphrase,
       sessionKey,
       onSpent,
       onJoined: (j) => joined.push(j),
@@ -297,7 +288,6 @@ describe('joinPendingConversations', () => {
       pool: sessionPool,
       deviceId: 'dev',
       keystore,
-      passphrase,
       sessionKey,
       onSpent,
       onJoined: (j) => joined.push(j),
@@ -323,7 +313,7 @@ describe('joinPendingConversations', () => {
       const at = sessionPool.indexOf(member);
       if (at !== -1) sessionPool.splice(at, 1);
     };
-    const { keystore, passphrase, sessionKey } = await persistenceDeps(engine);
+    const { keystore, sessionKey } = await persistenceDeps(engine);
     const material = serializeInvite(
       await (await engine.createConversation('g1', alice)).addMember(kpA.publicPackage),
     );
@@ -343,7 +333,6 @@ describe('joinPendingConversations', () => {
       pool: sessionPool,
       deviceId: 'dev',
       keystore,
-      passphrase,
       sessionKey,
       onSpent,
       onJoined: (j) => joined.push(j),
@@ -363,7 +352,6 @@ describe('joinPendingConversations', () => {
       pool: sessionPool,
       deviceId: 'dev',
       keystore,
-      passphrase,
       sessionKey,
       onSpent,
       onJoined: (j) => joined.push(j),
@@ -379,7 +367,7 @@ describe('joinPendingConversations', () => {
     const bob = await engine.generateDeviceKeys('bob');
     const bobPool = [bob, await engine.mintKeyPackage(bob)];
     const target = bobPool[1]!;
-    const { keystore, passphrase, sessionKey } = await persistenceDeps(engine);
+    const { keystore, sessionKey } = await persistenceDeps(engine);
 
     const aliceConv = await engine.createConversation('grp', alice);
     const material = serializeInvite(await aliceConv.addMember(target.publicPackage));
@@ -390,7 +378,7 @@ describe('joinPendingConversations', () => {
     const m1wire = await aliceConv.encrypt('m1');
     await pre.conversation.decrypt(m1wire); // advance bob's receive ratchet past alice's generation 0
     await keystore.saveConversationState(bob, 'c1', pre.conversation, sessionKey);
-    await keystore.loadConversations(bob, passphrase, sessionKey); // sets the CAS base to the persisted version
+    await keystore.loadConversations(bob, sessionKey); // sets the CAS base to the persisted version
 
     // The SAME Welcome is still pending (consume failed before); the drain replays it.
     list.mockResolvedValue([
@@ -404,7 +392,6 @@ describe('joinPendingConversations', () => {
       pool: bobPool,
       deviceId: 'dev',
       keystore,
-      passphrase,
       sessionKey,
       onJoined: (j) => joined.push(j),
     });
@@ -413,7 +400,7 @@ describe('joinPendingConversations', () => {
     expect(joined).toHaveLength(0);
     // ...the persisted state is still the ADVANCED one — it already consumed alice's generation 0, so
     // re-decrypting m1 throws (a rolled-back fresh-join state would instead decrypt it). The rollback proof.
-    const restored = (await keystore.loadConversations(bob, passphrase, sessionKey)).get('c1')!;
+    const restored = (await keystore.loadConversations(bob, sessionKey)).get('c1')!;
     await expect(restored.decrypt(m1wire)).rejects.toThrow();
     // ...and the redundant Welcome was cleared.
     expect(consume).toHaveBeenCalledWith('w1', 'dev', expect.any(String));
@@ -425,7 +412,7 @@ describe('joinPendingConversations', () => {
     const bob = await engine.generateDeviceKeys('bob');
     const stranded = await engine.mintKeyPackage(bob); // NOT retained in bob's pool
     const pool = [bob]; // only `bob` is joinable
-    const { keystore, passphrase, sessionKey } = await persistenceDeps(engine);
+    const { keystore, sessionKey } = await persistenceDeps(engine);
 
     const strandedMat = serializeInvite(
       await (await engine.createConversation('gs', alice)).addMember(stranded.publicPackage),
@@ -463,7 +450,6 @@ describe('joinPendingConversations', () => {
       pool,
       deviceId: 'dev',
       keystore,
-      passphrase,
       sessionKey,
       onJoined: (j) => joined.push(j),
     });

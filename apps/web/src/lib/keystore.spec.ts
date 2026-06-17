@@ -1,20 +1,15 @@
 import {
   MlsEngine,
   deviceIdentity,
+  importUnlockKey,
   serializeKeyPackage,
-  type Argon2Params,
   type DeviceKeys,
 } from '@argus/crypto';
 import { IDBFactory } from 'fake-indexeddb';
 import { openDB } from 'idb';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  DeviceExistsError,
-  DeviceKeystore,
-  GroupStateConflict,
-  type StoredMessage,
-} from './keystore';
+import { DeviceKeystore, GroupStateConflict, type StoredMessage } from './keystore';
 
 const msg = (
   id: string,
@@ -24,8 +19,10 @@ const msg = (
   status = 'read',
 ): StoredMessage => ({ id, senderId, content, timestamp: ts, status });
 
-// Clears the key-backup Argon2 floor while keeping the seal/unseal fast in tests.
-const FAST: Argon2Params = { m: 8192, t: 2, p: 1 };
+/** A deterministic unlock key (stands in for a passkey-PRF output). Distinct `fill` → distinct key. */
+function unlockKey(fill = 1): Promise<CryptoKey> {
+  return importUnlockKey(new Uint8Array(32).fill(fill));
+}
 
 /** Prove a DeviceKeys works for MLS by exchanging a message; returns the decrypted text. */
 async function worksForMls(engine: MlsEngine, keys: DeviceKeys): Promise<string> {
@@ -36,180 +33,92 @@ async function worksForMls(engine: MlsEngine, keys: DeviceKeys): Promise<string>
   return bobConv.decrypt(await conv.encrypt('msg'));
 }
 
-describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recovery (23)', () => {
+describe('DeviceKeystore — sealed at rest under the passkey-PRF unlock key', () => {
   beforeEach(() => {
     globalThis.indexedDB = new IDBFactory(); // fresh IndexedDB per test
   });
 
-  it('generates, seals, persists, and unseals a working device with the passphrase', async () => {
+  it('generates, seals, persists, and unseals a working device with the unlock key', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    await ks.getOrCreateDevice('alice', 'correct horse');
-    await ks.getOrCreateDevice('alice', 'correct horse'); // idempotent — same sealed device
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    await ks.getOrCreateDevice('alice', key);
+    await ks.getOrCreateDevice('alice', key); // idempotent — same sealed device
 
-    const reopened = await DeviceKeystore.open(engine, FAST);
-    const loaded = await reopened.loadDevice('alice', 'correct horse');
+    const reopened = await DeviceKeystore.open(engine);
+    const loaded = await reopened.loadDevice('alice', key);
     if (!loaded) throw new Error('expected a persisted device');
     expect(await worksForMls(engine, loaded)).toBe('msg');
   });
 
-  it('hasDevice reflects whether a sealed device is stored (no passphrase)', async () => {
+  it('hasDevice reflects whether a sealed device is stored (no unlock)', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
     expect(await ks.hasDevice()).toBe(false);
-    await ks.getOrCreateDevice('alice', 'pw');
+    await ks.getOrCreateDevice('alice', key);
     expect(await ks.hasDevice()).toBe(true);
     await ks.clearDevice();
     expect(await ks.hasDevice()).toBe(false);
   });
 
-  it('rejects a wrong passphrase (sealed at rest)', async () => {
+  it('rejects a wrong unlock key (sealed at rest)', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    await ks.getOrCreateDevice('alice', 'right-passphrase');
-    await expect(ks.loadDevice('alice', 'wrong-passphrase')).rejects.toThrow();
+    const ks = await DeviceKeystore.open(engine);
+    await ks.getOrCreateDevice('alice', await unlockKey(1));
+    await expect(ks.loadDevice('alice', await unlockKey(2))).rejects.toThrow();
   });
 
   it('rejects a different identity on the same profile', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    await ks.getOrCreateDevice('alice', 'pw');
-    await expect(ks.getOrCreateDevice('bob', 'pw')).rejects.toThrow();
-    await expect(ks.loadDevice('bob', 'pw')).rejects.toThrow();
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    await ks.getOrCreateDevice('alice', key);
+    await expect(ks.getOrCreateDevice('bob', key)).rejects.toThrow();
+    await expect(ks.loadDevice('bob', key)).rejects.toThrow();
   });
 
   it('is race-safe: concurrent first-runs converge on one device', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
     const [a, b] = await Promise.all([
-      ks.getOrCreateDevice('alice', 'pw'),
-      ks.getOrCreateDevice('alice', 'pw'),
+      ks.getOrCreateDevice('alice', key),
+      ks.getOrCreateDevice('alice', key),
     ]);
     expect(await worksForMls(engine, a)).toBe('msg');
     expect(await worksForMls(engine, b)).toBe('msg');
-    expect(await ks.loadDevice('alice', 'pw')).toBeDefined();
+    expect(await ks.loadDevice('alice', key)).toBeDefined();
   });
 
-  it('recovers on a fresh device from the identity-only artifact (checkpoint 23, FS-preserving)', async () => {
+  it('wipes every secret-bearing store on upgrade from a pre-PRF version (no stale unseal)', async () => {
     const engine = await MlsEngine.create();
-    // Device 1: create + export the identity-only artifact (this is what gets uploaded to the server).
-    const ks1 = await DeviceKeystore.open(engine, FAST);
-    await ks1.getOrCreateDevice('alice', 'my passphrase');
-    const blob = await ks1.exportRecoveryArtifact('alice', 'my passphrase');
-    if (!blob) throw new Error('expected a recovery artifact');
-
-    // Fresh browser (new IndexedDB): download the artifact, unlock with the passphrase on import.
-    globalThis.indexedDB = new IDBFactory();
-    const ks2 = await DeviceKeystore.open(engine, FAST);
-    const recovered = await ks2.importRecoveryArtifact('alice', blob, 'my passphrase');
-    expect(await worksForMls(engine, recovered)).toBe('msg'); // recovered identity can message
-    const reloaded = await ks2.loadDevice('alice', 'my passphrase');
-    if (!reloaded) throw new Error('recovery failed');
-    expect(await worksForMls(engine, reloaded)).toBe('msg'); // and the minted device persists
-  });
-
-  it('import rejects a malformed blob and refuses to clobber an existing device', async () => {
-    const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    await expect(ks.importRecoveryArtifact('alice', '{"not":"a backup"}', 'pw')).rejects.toThrow();
-
-    await ks.getOrCreateDevice('alice', 'pw');
-    const blob = await ks.exportRecoveryArtifact('alice', 'pw');
-    if (!blob) throw new Error('expected a backup');
-    // Typed sentinel (raised only AFTER the artifact is verified) so the recovery layer can match on it.
-    await expect(ks.importRecoveryArtifact('alice', blob, 'pw')).rejects.toBeInstanceOf(
-      DeviceExistsError,
-    );
-  });
-
-  it('a failed import leaves the profile importable (no stranded bad record)', async () => {
-    const engine = await MlsEngine.create();
-    const ks1 = await DeviceKeystore.open(engine, FAST);
-    await ks1.getOrCreateDevice('alice', 'right pw');
-    const blob = await ks1.exportRecoveryArtifact('alice', 'right pw');
-    if (!blob) throw new Error('expected a backup');
-
-    // Fresh device: a wrong passphrase must NOT persist the (unverified) blob...
-    globalThis.indexedDB = new IDBFactory();
-    const ks2 = await DeviceKeystore.open(engine, FAST);
-    await expect(ks2.importRecoveryArtifact('alice', blob, 'wrong pw')).rejects.toThrow();
-    expect(await ks2.loadDevice('alice', 'right pw')).toBeUndefined(); // nothing was written
-
-    // ...so the correct import still succeeds (profile not stranded behind the no-clobber guard).
-    const recovered = await ks2.importRecoveryArtifact('alice', blob, 'right pw');
-    expect(await worksForMls(engine, recovered)).toBe('msg');
-  });
-
-  it('import is race-safe: concurrent imports on a fresh profile pick one winner, no clobber', async () => {
-    const engine = await MlsEngine.create();
-    // Two distinct recovery artifacts (alice, bob), each minted on its own fresh profile.
-    const mintBlob = async (id: string): Promise<string> => {
-      globalThis.indexedDB = new IDBFactory();
-      const k = await DeviceKeystore.open(engine, FAST);
-      await k.getOrCreateDevice(id, 'pw');
-      const b = await k.exportRecoveryArtifact(id, 'pw');
-      if (!b) throw new Error('expected a backup');
-      return b;
-    };
-    const aliceBlob = await mintBlob('alice');
-    const bobBlob = await mintBlob('bob');
-
-    globalThis.indexedDB = new IDBFactory();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const results = await Promise.allSettled([
-      ks.importRecoveryArtifact('alice', aliceBlob, 'pw'),
-      ks.importRecoveryArtifact('bob', bobBlob, 'pw'),
-    ]);
-    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
-    expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
-    // Whichever import won, exactly that identity is stored and unseals to working keys.
-    const winner = results[0].status === 'fulfilled' ? 'alice' : 'bob';
-    const recovered = await ks.loadDevice(winner, 'pw');
-    if (!recovered) throw new Error('expected the winning device');
-    expect(await worksForMls(engine, recovered)).toBe('msg');
-  });
-
-  it('drops a legacy unsealed v1 record on upgrade (no stale unseal)', async () => {
-    const engine = await MlsEngine.create();
-    // Simulate the pre-seal v1 schema: same DB/store/key, an UNSEALED { identity, keys } record.
-    const legacyKeys = await engine.generateDeviceKeys('alice');
-    const v1 = await openDB('argus-keystore', 1, {
+    // Simulate a pre-PRF (v6) DB holding a device record sealed under the OLD scheme.
+    const v6 = await openDB('argus-keystore', 6, {
       upgrade(db) {
-        if (!db.objectStoreNames.contains('device')) db.createObjectStore('device');
+        for (const name of ['device', 'key-package-pool', 'group-state', 'message-log', 'meta']) {
+          if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
+        }
       },
     });
-    await v1.put('device', { identity: 'alice', keys: legacyKeys }, 'self');
-    v1.close();
+    await v6.put('device', { identity: 'alice', sealed: { v: 1, kdf: 'argon2id' } }, 'self');
+    v6.close();
 
-    // Opening at the sealed schema must clear the legacy record, not misread it as a sealed blob.
-    const ks = await DeviceKeystore.open(engine, FAST);
-    expect(await ks.loadDevice('alice', 'pw')).toBeUndefined(); // legacy gone, nothing to unseal
-    const fresh = await ks.getOrCreateDevice('alice', 'pw'); // a fresh sealed device works
+    // Opening at the PRF schema (v7) must wipe the old record, not misread it under the new key.
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    expect(await ks.loadDevice('alice', key)).toBeUndefined(); // old record gone
+    const fresh = await ks.getOrCreateDevice('alice', key); // a fresh PRF-sealed device works
     expect(await worksForMls(engine, fresh)).toBe('msg');
-  });
-
-  it('rejects a recovered blob whose embedded identity differs from the requested one', async () => {
-    const engine = await MlsEngine.create();
-    const ks1 = await DeviceKeystore.open(engine, FAST);
-    await ks1.getOrCreateDevice('alice', 'shared pw');
-    const blob = await ks1.exportRecoveryArtifact('alice', 'shared pw');
-    if (!blob) throw new Error('expected a backup');
-
-    // Fresh device: the server returns alice's artifact but the caller asks for bob (shared passphrase).
-    globalThis.indexedDB = new IDBFactory();
-    const ks2 = await DeviceKeystore.open(engine, FAST);
-    // Unseal succeeds (same passphrase) but the embedded identity is alice ≠ bob → import rejects
-    // before persisting, and nothing is stored under bob.
-    await expect(ks2.importRecoveryArtifact('bob', blob, 'shared pw')).rejects.toThrow();
-    expect(await ks2.loadDevice('bob', 'shared pw')).toBeUndefined();
   });
 
   it('ensurePool mints a one-time pool to target — distinct, usable, same identity', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    const device = await ks.getOrCreateDevice('alice', key);
 
-    const pool = await ks.ensurePool(device, 'pw', 3);
+    const pool = await ks.ensurePool(device, key, 3);
     expect(pool).toHaveLength(3);
     // each member shares the device's STABLE signature identity but is a DISTINCT one-time KeyPackage
     expect(pool.every((m) => deviceIdentity(m) === deviceIdentity(device))).toBe(true);
@@ -224,20 +133,21 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
 
   it('ensurePool is idempotent once full and persists across reopen', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const device = await ks.getOrCreateDevice('alice', 'pw');
-    const first = (await ks.ensurePool(device, 'pw', 3)).map((m) =>
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    const device = await ks.getOrCreateDevice('alice', key);
+    const first = (await ks.ensurePool(device, key, 3)).map((m) =>
       serializeKeyPackage(m.publicPackage),
     );
-    const again = (await ks.ensurePool(device, 'pw', 3)).map((m) =>
+    const again = (await ks.ensurePool(device, key, 3)).map((m) =>
       serializeKeyPackage(m.publicPackage),
     );
     expect(again).toEqual(first); // no re-mint when already at target
 
-    const reopened = await DeviceKeystore.open(engine, FAST);
-    const dev2 = await reopened.loadDevice('alice', 'pw');
+    const reopened = await DeviceKeystore.open(engine);
+    const dev2 = await reopened.loadDevice('alice', key);
     if (!dev2) throw new Error('expected a persisted device');
-    const persisted = (await reopened.ensurePool(dev2, 'pw', 3)).map((m) =>
+    const persisted = (await reopened.ensurePool(dev2, key, 3)).map((m) =>
       serializeKeyPackage(m.publicPackage),
     );
     expect([...persisted].sort()).toEqual([...first].sort()); // pool survived reopen
@@ -245,24 +155,25 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
 
   it('ensurePool is race-safe: concurrent provisions converge on one persisted pool', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    const device = await ks.getOrCreateDevice('alice', key);
 
     // Two tabs unlocking at once must NOT each publish a distinct pool (the losing one's privates would
     // be dropped while its packages stay claimable). The CAS makes both converge on the persisted pool.
     const [a, b] = await Promise.all([
-      ks.ensurePool(device, 'pw', 3),
-      ks.ensurePool(device, 'pw', 3),
+      ks.ensurePool(device, key, 3),
+      ks.ensurePool(device, key, 3),
     ]);
     const sa = a.map((m) => serializeKeyPackage(m.publicPackage)).sort();
     const sb = b.map((m) => serializeKeyPackage(m.publicPackage)).sort();
     expect(sa).toEqual(sb); // same pool returned to both callers
 
     // ...and it is exactly the pool actually persisted (a fresh reopen reads the same set).
-    const reopened = await DeviceKeystore.open(engine, FAST);
-    const dev2 = await reopened.loadDevice('alice', 'pw');
+    const reopened = await DeviceKeystore.open(engine);
+    const dev2 = await reopened.loadDevice('alice', key);
     if (!dev2) throw new Error('expected a persisted device');
-    const stored = (await reopened.ensurePool(dev2, 'pw', 3))
+    const stored = (await reopened.ensurePool(dev2, key, 3))
       .map((m) => serializeKeyPackage(m.publicPackage))
       .sort();
     expect(stored).toEqual(sa);
@@ -270,17 +181,18 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
 
   it('removePoolMember drops exactly the consumed member and persists the removal', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const device = await ks.getOrCreateDevice('alice', 'pw');
-    const pool = await ks.ensurePool(device, 'pw', 3);
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    const device = await ks.getOrCreateDevice('alice', key);
+    const pool = await ks.ensurePool(device, key, 3);
     const removed = serializeKeyPackage(pool[0]!.publicPackage);
 
-    await ks.removePoolMember(device, 'pw', removed);
+    await ks.removePoolMember(device, key, removed);
 
-    const reopened = await DeviceKeystore.open(engine, FAST);
-    const dev2 = await reopened.loadDevice('alice', 'pw');
+    const reopened = await DeviceKeystore.open(engine);
+    const dev2 = await reopened.loadDevice('alice', key);
     if (!dev2) throw new Error('expected a persisted device');
-    const left = (await reopened.ensurePool(dev2, 'pw', 1)).map((m) =>
+    const left = (await reopened.ensurePool(dev2, key, 1)).map((m) =>
       serializeKeyPackage(m.publicPackage),
     );
     expect(left).toHaveLength(2); // 3 − 1, and ensurePool(target 1) doesn't re-mint
@@ -289,17 +201,18 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
 
   it('removePoolMember is idempotent: removing an absent or already-removed member is a no-op', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const device = await ks.getOrCreateDevice('alice', 'pw');
-    const before = (await ks.ensurePool(device, 'pw', 2)).map((m) =>
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    const device = await ks.getOrCreateDevice('alice', key);
+    const before = (await ks.ensurePool(device, key, 2)).map((m) =>
       serializeKeyPackage(m.publicPackage),
     );
 
-    await ks.removePoolMember(device, 'pw', 'not-a-member-keypackage'); // absent → no-op
-    await ks.removePoolMember(device, 'pw', before[0]!); // remove once
-    await ks.removePoolMember(device, 'pw', before[0]!); // removing again → no-op
+    await ks.removePoolMember(device, key, 'not-a-member-keypackage'); // absent → no-op
+    await ks.removePoolMember(device, key, before[0]!); // remove once
+    await ks.removePoolMember(device, key, before[0]!); // removing again → no-op
 
-    const after = (await ks.ensurePool(device, 'pw', 1)).map((m) =>
+    const after = (await ks.ensurePool(device, key, 1)).map((m) =>
       serializeKeyPackage(m.publicPackage),
     );
     expect(after).toEqual([before[1]]); // exactly the one survivor
@@ -307,13 +220,14 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
 
   it('removePoolMember is final: a consumed private is never resurrected by a later replenish (FS)', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const device = await ks.getOrCreateDevice('alice', 'pw');
-    const removed = serializeKeyPackage((await ks.ensurePool(device, 'pw', 2))[0]!.publicPackage);
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    const device = await ks.getOrCreateDevice('alice', key);
+    const removed = serializeKeyPackage((await ks.ensurePool(device, key, 2))[0]!.publicPackage);
 
-    await ks.removePoolMember(device, 'pw', removed);
+    await ks.removePoolMember(device, key, removed);
     // Replenish back to target: the gap is filled by a FRESH mint, never the dropped member.
-    const refilled = (await ks.ensurePool(device, 'pw', 2)).map((m) =>
+    const refilled = (await ks.ensurePool(device, key, 2)).map((m) =>
       serializeKeyPackage(m.publicPackage),
     );
     expect(refilled).toHaveLength(2);
@@ -322,17 +236,18 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
 
   it('removePoolMember is race-safe against a concurrent replenish (the removed member stays gone)', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const device = await ks.getOrCreateDevice('alice', 'pw');
-    const removed = serializeKeyPackage((await ks.ensurePool(device, 'pw', 3))[0]!.publicPackage);
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    const device = await ks.getOrCreateDevice('alice', key);
+    const removed = serializeKeyPackage((await ks.ensurePool(device, key, 3))[0]!.publicPackage);
 
     // A prune racing a replenish must never let the consumed member survive (CAS + re-apply on lost race).
-    await Promise.all([ks.removePoolMember(device, 'pw', removed), ks.ensurePool(device, 'pw', 3)]);
+    await Promise.all([ks.removePoolMember(device, key, removed), ks.ensurePool(device, key, 3)]);
 
-    const reopened = await DeviceKeystore.open(engine, FAST);
-    const dev2 = await reopened.loadDevice('alice', 'pw');
+    const reopened = await DeviceKeystore.open(engine);
+    const dev2 = await reopened.loadDevice('alice', key);
     if (!dev2) throw new Error('expected a persisted device');
-    const final = (await reopened.ensurePool(dev2, 'pw', 1)).map((m) =>
+    const final = (await reopened.ensurePool(dev2, key, 1)).map((m) =>
       serializeKeyPackage(m.publicPackage),
     );
     expect(final).not.toContain(removed);
@@ -340,51 +255,38 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
 
   it('clearDevice also clears the KeyPackage pool (fresh mints afterwards)', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    const device = await ks.getOrCreateDevice('alice', key);
     const before = new Set(
-      (await ks.ensurePool(device, 'pw', 2)).map((m) => serializeKeyPackage(m.publicPackage)),
+      (await ks.ensurePool(device, key, 2)).map((m) => serializeKeyPackage(m.publicPackage)),
     );
 
     await ks.clearDevice();
 
-    const device2 = await ks.getOrCreateDevice('alice', 'pw');
-    const after = await ks.ensurePool(device2, 'pw', 2);
+    const device2 = await ks.getOrCreateDevice('alice', key);
+    const after = await ks.ensurePool(device2, key, 2);
     // none of the new members is an old one → the pool store was genuinely cleared + re-minted
     expect(after.every((m) => !before.has(serializeKeyPackage(m.publicPackage)))).toBe(true);
   });
 
-  it('clearDevice lets a profile recover from a stored device and re-import', async () => {
-    const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    await ks.getOrCreateDevice('alice', 'pw');
-    const blob = await ks.exportRecoveryArtifact('alice', 'pw');
-    if (!blob) throw new Error('expected a backup');
-
-    await expect(ks.importRecoveryArtifact('alice', blob, 'pw')).rejects.toThrow(); // guarded
-    await ks.clearDevice();
-    const recovered = await ks.importRecoveryArtifact('alice', blob, 'pw'); // now allowed
-    expect(await worksForMls(engine, recovered)).toBe('msg');
-  });
-
   it('saveConversationState + loadConversations round-trips a usable group across reopen', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    const device = await ks.getOrCreateDevice('alice', key);
     const peer = await engine.generateDeviceKeys('peer');
     const conv = await engine.createConversation('conv-1', device);
     const peerConv = await engine.joinConversation(peer, await conv.addMember(peer.publicPackage));
     expect(await peerConv.decrypt(await conv.encrypt('hello'))).toBe('hello'); // advance the ratchet
 
-    await ks.saveConversationState(device, 'conv-1', conv, await ks.deriveSessionKey('pw'));
+    await ks.saveConversationState(device, 'conv-1', conv, key);
 
     // Reopen the keystore (as on a reload), reload the device, rehydrate the conversations.
-    const reopened = await DeviceKeystore.open(engine, FAST);
-    const dev2 = await reopened.loadDevice('alice', 'pw');
+    const reopened = await DeviceKeystore.open(engine);
+    const dev2 = await reopened.loadDevice('alice', key);
     if (!dev2) throw new Error('expected a persisted device');
-    const restored = (
-      await reopened.loadConversations(dev2, 'pw', await reopened.deriveSessionKey('pw'))
-    ).get('conv-1');
+    const restored = (await reopened.loadConversations(dev2, key)).get('conv-1');
     if (!restored) throw new Error('expected a restored conversation');
     // The restored group continues the SAME ratchet (the peer decrypts its next message in order).
     expect(await peerConv.decrypt(await restored.encrypt('after reload'))).toBe('after reload');
@@ -392,21 +294,22 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
 
   it('saveConversationState is ordered with the ratchet under concurrency (no rollback)', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    const device = await ks.getOrCreateDevice('alice', key);
     const peer = await engine.generateDeviceKeys('peer');
     const conv = await engine.createConversation('conv-1', device);
     const peerConv = await engine.joinConversation(peer, await conv.addMember(peer.publicPackage));
 
     // Fire several ratchet-advancing encrypts, each followed by a save, WITHOUT awaiting between them — so
     // the saves race. persistVia runs seal+put INSIDE the op mutex, so each save's snapshot is taken in op
-    // order and the newest one is written last. If seal/put ran outside the mutex an older snapshot (a slow
-    // Argon2 seal) could land after a newer one and overwrite it — an MLS rollback.
+    // order and the newest one is written last. If seal/put ran outside the mutex an older snapshot could
+    // land after a newer one and overwrite it — an MLS rollback.
     const ciphertexts = await Promise.all(
       Array.from({ length: 5 }, (_, i) =>
         (async () => {
           const ct = await conv.encrypt(`m${i}`);
-          await ks.saveConversationState(device, 'conv-1', conv, await ks.deriveSessionKey('pw'));
+          await ks.saveConversationState(device, 'conv-1', conv, key);
           return ct;
         })(),
       ),
@@ -417,120 +320,111 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
 
     // Reload: the restored state must be the NEWEST, so its next send is a generation the peer has not seen.
     // A rolled-back save would replay an already-consumed generation and the peer's decrypt would throw.
-    const reopened = await DeviceKeystore.open(engine, FAST);
-    const dev2 = await reopened.loadDevice('alice', 'pw');
+    const reopened = await DeviceKeystore.open(engine);
+    const dev2 = await reopened.loadDevice('alice', key);
     if (!dev2) throw new Error('expected a persisted device');
-    const restored = (
-      await reopened.loadConversations(dev2, 'pw', await reopened.deriveSessionKey('pw'))
-    ).get('conv-1');
+    const restored = (await reopened.loadConversations(dev2, key)).get('conv-1');
     if (!restored) throw new Error('expected a restored conversation');
     expect(await peerConv.decrypt(await restored.encrypt('after'))).toBe('after');
   });
 
   it('saveConversationState rejects a stale cross-instance write (no durable rollback)', async () => {
     const engine = await MlsEngine.create();
-    const ksA = await DeviceKeystore.open(engine, FAST);
-    const device = await ksA.getOrCreateDevice('alice', 'pw');
+    const key = await unlockKey();
+    const ksA = await DeviceKeystore.open(engine);
+    const device = await ksA.getOrCreateDevice('alice', key);
     const peer = await engine.generateDeviceKeys('peer');
     const conv = await engine.createConversation('conv-1', device);
     const peerConv = await engine.joinConversation(peer, await conv.addMember(peer.publicPackage));
     expect(await peerConv.decrypt(await conv.encrypt('hello'))).toBe('hello');
-    await ksA.saveConversationState(device, 'conv-1', conv, await ksA.deriveSessionKey('pw')); // store version 0
+    await ksA.saveConversationState(device, 'conv-1', conv, key); // store version 0
 
     // A SECOND keystore over the same IndexedDB rehydrates its OWN instance (a second tab / double unlock):
     // independent op queue, so persistVia can't order it against instance A. It loads at version 0.
-    const ksB = await DeviceKeystore.open(engine, FAST);
-    const devB = await ksB.loadDevice('alice', 'pw');
+    const ksB = await DeviceKeystore.open(engine);
+    const devB = await ksB.loadDevice('alice', key);
     if (!devB) throw new Error('expected a persisted device');
-    const convB = (await ksB.loadConversations(devB, 'pw', await ksB.deriveSessionKey('pw'))).get(
-      'conv-1',
-    );
+    const convB = (await ksB.loadConversations(devB, key)).get('conv-1');
     if (!convB) throw new Error('expected a restored conversation');
 
     // Instance A advances + saves again → store version 1. B's CAS base (0) is now stale.
     await peerConv.decrypt(await conv.encrypt('from A'));
-    await ksA.saveConversationState(device, 'conv-1', conv, await ksA.deriveSessionKey('pw')); // store version 1
+    await ksA.saveConversationState(device, 'conv-1', conv, key); // store version 1
 
     // B advances its OWN (divergent) state and tries to save on the stale base → rejected, NOT applied.
     await convB.encrypt('from B');
-    await expect(
-      ksB.saveConversationState(devB, 'conv-1', convB, await ksB.deriveSessionKey('pw')),
-    ).rejects.toBeInstanceOf(GroupStateConflict);
+    await expect(ksB.saveConversationState(devB, 'conv-1', convB, key)).rejects.toBeInstanceOf(
+      GroupStateConflict,
+    );
 
     // The durable state is still A's newest (no rollback): a fresh reload continues A's ratchet — its next
-    // send is a generation the peer has not consumed. Had B's stale write landed, this would replay a used
-    // generation and the peer's decrypt would throw.
-    const ksC = await DeviceKeystore.open(engine, FAST);
-    const devC = await ksC.loadDevice('alice', 'pw');
+    // send is a generation the peer has not consumed.
+    const ksC = await DeviceKeystore.open(engine);
+    const devC = await ksC.loadDevice('alice', key);
     if (!devC) throw new Error('expected a persisted device');
-    const convC = (await ksC.loadConversations(devC, 'pw', await ksC.deriveSessionKey('pw'))).get(
-      'conv-1',
-    );
+    const convC = (await ksC.loadConversations(devC, key)).get('conv-1');
     if (!convC) throw new Error('expected a restored conversation');
     expect(await peerConv.decrypt(await convC.encrypt('after'))).toBe('after');
   });
 
   it('loadConversations skips a group bound to a different device signature key', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    const device = await ks.getOrCreateDevice('alice', key);
     const peer = await engine.generateDeviceKeys('peer');
     const conv = await engine.createConversation('conv-1', device);
     await engine.joinConversation(peer, await conv.addMember(peer.publicPackage));
-    await ks.saveConversationState(device, 'conv-1', conv, await ks.deriveSessionKey('pw'));
+    await ks.saveConversationState(device, 'conv-1', conv, key);
 
     // A different device (same identity string, different signature key) must NOT load it.
     const other = await engine.generateDeviceKeys('alice');
-    expect((await ks.loadConversations(other, 'pw', await ks.deriveSessionKey('pw'))).size).toBe(0);
+    expect((await ks.loadConversations(other, key)).size).toBe(0);
   });
 
   it('deleteConversationState removes a persisted conversation; clearDevice clears them all', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const device = await ks.getOrCreateDevice('alice', 'pw');
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    const device = await ks.getOrCreateDevice('alice', key);
     const peer = await engine.generateDeviceKeys('peer');
     const a = await engine.createConversation('a', device);
     const b = await engine.createConversation('b', device);
     await a.addMember(peer.publicPackage);
     await b.addMember(peer.publicPackage);
-    await ks.saveConversationState(device, 'a', a, await ks.deriveSessionKey('pw'));
-    await ks.saveConversationState(device, 'b', b, await ks.deriveSessionKey('pw'));
+    await ks.saveConversationState(device, 'a', a, key);
+    await ks.saveConversationState(device, 'b', b, key);
 
     await ks.deleteConversationState('a');
-    expect([
-      ...(await ks.loadConversations(device, 'pw', await ks.deriveSessionKey('pw'))).keys(),
-    ]).toEqual(['b']);
+    expect([...(await ks.loadConversations(device, key)).keys()]).toEqual(['b']);
 
     await ks.clearDevice();
-    const device2 = await ks.getOrCreateDevice('alice', 'pw');
-    expect((await ks.loadConversations(device2, 'pw', await ks.deriveSessionKey('pw'))).size).toBe(
-      0,
-    );
+    const device2 = await ks.getOrCreateDevice('alice', key);
+    expect((await ks.loadConversations(device2, key)).size).toBe(0);
   });
 
-  it('message log: append → reload → re-derive the session key → history round-trips', async () => {
+  it('message log: append → reload → history round-trips under the same unlock key', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const device = await ks.getOrCreateDevice('alice', 'pw');
-    const key = await ks.deriveSessionKey('pw');
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    const device = await ks.getOrCreateDevice('alice', key);
     await ks.appendMessages(device, 'c1', key, [
       msg('m2', 'there', '2026-01-01T00:00:02.000Z'),
       msg('m1', 'hi', '2026-01-01T00:00:01.000Z'), // out of order — load sorts by timestamp
     ]);
 
-    const reopened = await DeviceKeystore.open(engine, FAST);
-    const dev2 = await reopened.loadDevice('alice', 'pw');
+    const reopened = await DeviceKeystore.open(engine);
+    const dev2 = await reopened.loadDevice('alice', key);
     if (!dev2) throw new Error('expected a persisted device');
-    const key2 = await reopened.deriveSessionKey('pw'); // same passphrase + stored salt → same key
-    const log = await reopened.loadMessageLog(dev2, 'c1', key2);
+    const log = await reopened.loadMessageLog(dev2, 'c1', key);
     expect(log.map((m) => m.content)).toEqual(['hi', 'there']);
   });
 
   it('message log: upserts by id (a later status update replaces the entry)', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const device = await ks.getOrCreateDevice('alice', 'pw');
-    const key = await ks.deriveSessionKey('pw');
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    const device = await ks.getOrCreateDevice('alice', key);
     await ks.appendMessages(device, 'c1', key, [msg('m1', 'hello', 't', 'me', 'sending')]);
     await ks.appendMessages(device, 'c1', key, [msg('m1', 'hello', 't', 'me', 'read')]);
     const log = await ks.loadMessageLog(device, 'c1', key);
@@ -538,23 +432,21 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     expect(log[0]!.status).toBe('read');
   });
 
-  it('message log: fails closed on a wrong passphrase (empty history, no throw)', async () => {
+  it('message log: fails closed on a wrong unlock key (empty history, no throw)', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const device = await ks.getOrCreateDevice('alice', 'pw');
-    await ks.appendMessages(device, 'c1', await ks.deriveSessionKey('pw'), [
-      msg('m1', 'secret', 't'),
-    ]);
-    // A wrong passphrase derives a different key (same stored salt) → GCM auth fails → treated as no history.
-    const wrongKey = await ks.deriveSessionKey('not-the-passphrase');
-    expect(await ks.loadMessageLog(device, 'c1', wrongKey)).toEqual([]);
+    const key = await unlockKey(1);
+    const ks = await DeviceKeystore.open(engine);
+    const device = await ks.getOrCreateDevice('alice', key);
+    await ks.appendMessages(device, 'c1', key, [msg('m1', 'secret', 't')]);
+    // A wrong key → GCM auth fails → treated as no history.
+    expect(await ks.loadMessageLog(device, 'c1', await unlockKey(2))).toEqual([]);
   });
 
   it('message log: skips a log bound to a different device; loadAll + clearDevice', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const device = await ks.getOrCreateDevice('alice', 'pw');
-    const key = await ks.deriveSessionKey('pw');
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    const device = await ks.getOrCreateDevice('alice', key);
     await ks.appendMessages(device, 'a', key, [msg('m1', 'in a', 't')]);
     await ks.appendMessages(device, 'b', key, [msg('m2', 'in b', 't')]);
     expect([...(await ks.loadAllMessageLogs(device, key)).keys()].sort()).toEqual(['a', 'b']);
@@ -564,35 +456,34 @@ describe('DeviceKeystore — sealed at rest (checkpoint 18 gate lifted) + recove
     expect((await ks.loadAllMessageLogs(other, key)).size).toBe(0);
 
     await ks.clearDevice();
-    const device2 = await ks.getOrCreateDevice('alice', 'pw');
-    expect((await ks.loadAllMessageLogs(device2, await ks.deriveSessionKey('pw'))).size).toBe(0);
+    const device2 = await ks.getOrCreateDevice('alice', key);
+    expect((await ks.loadAllMessageLogs(device2, key)).size).toBe(0);
   });
 
   it('message log: concurrent cross-tab appends BOTH survive (CAS retry, no clobber)', async () => {
     const engine = await MlsEngine.create();
-    const ksA = await DeviceKeystore.open(engine, FAST);
-    const device = await ksA.getOrCreateDevice('alice', 'pw');
-    const keyA = await ksA.deriveSessionKey('pw');
+    const key = await unlockKey();
+    const ksA = await DeviceKeystore.open(engine);
+    const device = await ksA.getOrCreateDevice('alice', key);
 
     // A second keystore over the SAME IndexedDB = a second tab (its own in-memory appendChains).
-    const ksB = await DeviceKeystore.open(engine, FAST);
-    const devB = await ksB.loadDevice('alice', 'pw');
+    const ksB = await DeviceKeystore.open(engine);
+    const devB = await ksB.loadDevice('alice', key);
     if (!devB) throw new Error('expected a persisted device');
-    const keyB = await ksB.deriveSessionKey('pw'); // same passphrase + stored salt/params → same key
 
     // Both tabs append to the same conversation concurrently (e.g. A sends an echo while B persists a push).
     await Promise.all([
-      ksA.appendMessages(device, 'c1', keyA, [
+      ksA.appendMessages(device, 'c1', key, [
         msg('a1', 'from A', '2026-01-01T00:00:01.000Z', 'me'),
       ]),
-      ksB.appendMessages(devB, 'c1', keyB, [msg('b1', 'from B', '2026-01-01T00:00:02.000Z')]),
+      ksB.appendMessages(devB, 'c1', key, [msg('b1', 'from B', '2026-01-01T00:00:02.000Z')]),
     ]);
 
     // Neither entry is clobbered — a fresh reader sees both.
-    const ksC = await DeviceKeystore.open(engine, FAST);
-    const devC = await ksC.loadDevice('alice', 'pw');
+    const ksC = await DeviceKeystore.open(engine);
+    const devC = await ksC.loadDevice('alice', key);
     if (!devC) throw new Error('expected a persisted device');
-    const log = await ksC.loadMessageLog(devC, 'c1', await ksC.deriveSessionKey('pw'));
+    const log = await ksC.loadMessageLog(devC, 'c1', key);
     expect(log.map((m) => m.id).sort()).toEqual(['a1', 'b1']);
   });
 });

@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 const routeShells = [
   { path: '/settings', heading: 'Account settings', marker: 'Manage your profile' },
-  { path: '/security', heading: 'Security & recovery', marker: 'Recovery remains embedded' },
+  { path: '/security', heading: 'Security', marker: 'Unlocked by your passkey' },
   { path: '/devices', heading: 'Trusted devices', marker: 'Device management shell' },
   { path: '/storage', heading: 'Data & storage', marker: 'Encrypted local state only' },
 ];

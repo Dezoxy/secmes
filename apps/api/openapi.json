@@ -6821,31 +6821,6 @@
                       }
                     },
                     "additionalProperties": false
-                  },
-                  "prf": {
-                    "type": "object",
-                    "properties": {
-                      "enabled": {
-                        "type": "boolean"
-                      },
-                      "results": {
-                        "type": "object",
-                        "properties": {
-                          "first": {
-                            "type": "string",
-                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-                            "maxLength": 65536
-                          },
-                          "second": {
-                            "type": "string",
-                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-                            "maxLength": 65536
-                          }
-                        },
-                        "additionalProperties": false
-                      }
-                    },
-                    "additionalProperties": false
                   }
                 },
                 "additionalProperties": false
@@ -7042,30 +7017,7 @@
               },
               "clientExtensionResults": {
                 "type": "object",
-                "properties": {
-                  "prf": {
-                    "type": "object",
-                    "properties": {
-                      "results": {
-                        "type": "object",
-                        "properties": {
-                          "first": {
-                            "type": "string",
-                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-                            "maxLength": 65536
-                          },
-                          "second": {
-                            "type": "string",
-                            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
-                            "maxLength": 65536
-                          }
-                        },
-                        "additionalProperties": false
-                      }
-                    },
-                    "additionalProperties": false
-                  }
-                },
+                "properties": {},
                 "additionalProperties": false
               },
               "type": {

@@ -78,7 +78,7 @@ type SectionId =
 
 const baseSections: Array<{ id: SectionId; label: string; icon: LucideIcon }> = [
   { id: 'profile', label: 'Profile', icon: UserRound },
-  { id: 'security', label: 'Security & Recovery', icon: Shield },
+  { id: 'security', label: 'Security', icon: Shield },
   { id: 'privacy', label: 'Privacy', icon: Lock },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'appearance', label: 'Appearance', icon: Brush },

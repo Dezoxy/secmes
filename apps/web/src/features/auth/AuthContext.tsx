@@ -19,6 +19,7 @@ import {
   logoutSession,
   type MeBound,
 } from '../../lib/api';
+import { stashUnlockKey, unlockKeyFromResponse, withPrfSalt } from '../../lib/prf';
 
 export type { MeBound };
 
@@ -125,12 +126,19 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
 
   const login = useCallback(async (): Promise<void> => {
     const opts = await getAuthenticateOptions();
+    // Inject the PRF salt so this same assertion yields the keystore unlock secret (no second prompt). The
+    // server's options already enable PRF; the client supplies eval.first as raw bytes (lib/prf.ts).
     const response = await startAuthentication({
-      optionsJSON: opts.options as unknown as PublicKeyCredentialRequestOptionsJSON,
+      optionsJSON: withPrfSalt(opts.options as unknown as PublicKeyCredentialRequestOptionsJSON),
     });
+    // Derive the keystore unlock key from PRF AND strip the secret from `response` BEFORE the verify POST —
+    // the server is crypto-blind and must never receive it. null when the authenticator has no PRF (the
+    // device gate then surfaces the fresh-start message).
+    const unlockKey = await unlockKeyFromResponse(response);
     const { accessToken: token } = await verifyAuthentication(opts.ceremonyId, response);
     setToken(token); // must be set before fetchMe so the bearer header is present
     const me = await fetchMe();
+    if (unlockKey) stashUnlockKey(unlockKey);
     applySession(token, me.bound ? me : null);
   }, [applySession]);
 

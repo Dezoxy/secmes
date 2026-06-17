@@ -1,35 +1,30 @@
 import {
-  DEFAULT_ARGON2,
   MlsEngine,
-  deriveSessionKey as cryptoDeriveSessionKey,
-  deserializeDeviceIdentity,
   deserializeDeviceKeys,
   deserializeDeviceKeysArray,
   deviceIdentity,
   deviceSignaturePublicKeyB64,
-  openBackup,
   openWithKey,
-  sealBackup,
   sealWithKey,
-  serializeDeviceIdentity,
   serializeDeviceKeys,
   serializeDeviceKeysArray,
   serializeKeyPackage,
-  type Argon2Params,
   type Conversation,
   type DeviceKeys,
-  type SealedBackup,
   type SealedBlob,
 } from '@argus/crypto';
 import { openDB, type IDBPDatabase } from 'idb';
 
 import type { AttachmentRef } from './message-envelope';
 
-// SEALED at rest: the full device key material is stored in IndexedDB only as a passphrase-sealed blob
-// (Argon2id + AES-256-GCM, checkpoint 21); unlocking requires the passphrase. The server RECOVERY
-// artifact is a SEPARATE, narrower blob — identity-only (no one-time KeyPackage HPKE private keys) — so
-// a leaked backup can't decrypt a retained Welcome (forward secrecy, key-backup.md §4). The full at-rest
-// blob is never uploaded. See docs/threat-models/device-keystore.md + key-backup.md §4.
+// SEALED at rest: the full device key material is stored in IndexedDB only as an AES-256-GCM blob sealed
+// under the per-passkey UNLOCK KEY — a WebAuthn-PRF (hmac-secret) output imported as a non-extractable
+// CryptoKey (see lib/prf.ts + packages/crypto importUnlockKey). There is NO passphrase and NO Argon2: the
+// PRF secret is already uniformly-random 256 bits, so it seals every store directly via sealWithKey/
+// openWithKey. The SAME key seals the device, the one-time KeyPackage pool, and the per-conversation group
+// state / message log / pending commit. There is NO recovery: a lost passkey (or a wiped browser keystore)
+// is a fresh start — the admin mints a new registration code. See docs/threat-models/prf-keystore-unlock.md
+// + device-keystore.md.
 
 // Renamed from 'secmes-keystore' during the pre-launch rebrand. Safe to rename now: the web client is
 // not shipped, so no real browser holds a 'secmes-keystore' to strand. If a client is EVER released
@@ -41,18 +36,29 @@ const DB_NAME = 'argus-keystore';
 // GROUP-STATE store (live messaging, Slice 5). Shapes are incompatible across v1→v2: a stale v1 record
 // would be misread as a sealed device and fail to unlock, so the upgrade drops the legacy store;
 // v2→v3 and v3→v4 only ADD a store.
-const DB_VERSION = 6;
+// v7 CUTOVER: the keystore is now sealed under a passkey-PRF-derived key (no passphrase, no Argon2). Rows
+// from v1–v6 were sealed under a typed passphrase (or a passphrase-derived session key) and are unreadable
+// under the new key, so the upgrade WIPES every secret-bearing store and recreates them empty. Local history
+// starts fresh (a new device starts fresh anyway); the web client is unreleased, so no real user data is lost.
+const DB_VERSION = 7;
 const STORE = 'device';
 const POOL_STORE = 'key-package-pool'; // sealed one-time KeyPackage pool (privates retained for join)
 const GROUP_STORE = 'group-state'; // sealed MLS group state per conversation (ratchet secrets — Slice 5)
-const MSGLOG_STORE = 'message-log'; // sealed decrypted message history per conversation (session-key, history)
+const MSGLOG_STORE = 'message-log'; // sealed decrypted message history per conversation (history)
 const PENDING_STORE = 'pending-commit'; // sealed pending post-commit state — written BEFORE POST, cleared on apply/discard
-const META_STORE = 'meta'; // small non-secret per-profile values (the session-key salt)
-const SESSION_SALT_KEY = 'session-salt'; // META_STORE key — the per-profile Argon2 salt for the session key
 const SELF = 'self'; // single device per user in v1 (multi-device is deferred, B2)
+
+// Every secret-bearing store, in the order the upgrade (re)creates them. v7 wipes + recreates all of these.
+const SECRET_STORES = [STORE, POOL_STORE, GROUP_STORE, MSGLOG_STORE, PENDING_STORE] as const;
 
 const te = new TextEncoder();
 const td = new TextDecoder();
+
+// Domain-separation AAD for the unlock-key-sealed DEVICE and POOL blobs — distinct from the per-conversation
+// AADs (groupStateAad / pendingCommitAad / the bare conversationId used by the message log), so the same
+// unlock key can seal every store without a blob being replayable across slots.
+const DEVICE_AAD = te.encode('device');
+const POOL_AAD = te.encode('key-package-pool');
 
 // Message-log append CAS retry bound. Each round exactly one racer commits (its version advances), so N
 // concurrent appenders converge in ≤ N rounds — a single user's handful of tabs is far under this. The cap
@@ -64,31 +70,29 @@ export const POOL_TARGET = 10;
 
 interface StoredDevice {
   identity: string;
-  sealed: SealedBackup;
+  sealed: SealedBlob;
 }
 
 // The sealed KeyPackage pool is additionally bound to the device's SIGNATURE PUBLIC KEY — so a stale pool
-// from a re-created/recovered device (same identity string, different key) is never reused (its retained
-// privates would be orphaned, useless to the live key). Fail-closed against orphaned-key republishing.
+// from a re-created device (same identity string, different key) is never reused (its retained privates would
+// be orphaned, useless to the live key). Fail-closed against orphaned-key republishing.
 interface StoredPool {
   identity: string;
   signaturePublicKey: string;
-  sealed: SealedBackup;
+  sealed: SealedBlob;
 }
 
 // A conversation's sealed MLS group state (Slice 5). The ratchet carries live secret key material; it's
 // bound to the device identity + signature key so a re-created / recovered device (same identity string,
 // different key) can't load a group it can't drive. Keyed by conversationId in the store.
 //
-// SEALING: saves seal under the per-unlock SESSION KEY (cheap AES-GCM, like the message log) — the state
-// advances on EVERY send/receive, and a per-save Argon2id pass made each delivered message cost seconds.
-// `sealed` is a union for migration: pre-session-key rows are passphrase-sealed `SealedBackup`s; they open
-// via the legacy path once (on load) and re-seal in the session-key format at the next save.
+// SEALING: sealed under the per-unlock UNLOCK KEY (cheap AES-GCM, like the message log) — the state advances
+// on EVERY send/receive, so a per-save KDF would make each delivered message cost seconds.
 interface StoredGroupState {
   identity: string;
   signaturePublicKey: string;
   conversationId: string;
-  sealed: SealedBackup | SealedBlob;
+  sealed: SealedBlob;
   // Monotonic per-conversation version for the cross-instance CAS (see saveConversationState). Bumped on
   // every successful save; a write is only committed if the store still holds the version the writer last saw.
   version: number;
@@ -155,36 +159,6 @@ interface StoredPendingCommit {
   sealed: SealedBlob;
 }
 
-/** Shape-check a server-provided sealed blob before storing it (it's still GCM-authenticated on unseal). */
-function isSealedBackup(v: unknown): v is SealedBackup {
-  if (!v || typeof v !== 'object') return false;
-  const b = v as Record<string, unknown>;
-  const p = b.params as Record<string, unknown> | undefined;
-  return (
-    b.v === 1 &&
-    b.kdf === 'argon2id' &&
-    typeof b.salt === 'string' &&
-    typeof b.iv === 'string' &&
-    typeof b.ciphertext === 'string' &&
-    !!p &&
-    typeof p.m === 'number' &&
-    typeof p.t === 'number' &&
-    typeof p.p === 'number'
-  );
-}
-
-/**
- * Thrown by importRecoveryArtifact when a device already exists for this profile — raised ONLY after the
- * artifact has been authenticated + identity-bound, so callers can safely clear + re-import on this error
- * (a typed sentinel, so the recovery layer doesn't match on brittle message text).
- */
-export class DeviceExistsError extends Error {
-  constructor() {
-    super('keystore already holds a device; clear it before importing a backup');
-    this.name = 'DeviceExistsError';
-  }
-}
-
 /**
  * Thrown by saveConversationState when the persisted group state moved on under this instance — another tab
  * or a second unlock rehydrated its own Conversation and saved a newer state. A typed sentinel so the (5B)
@@ -198,7 +172,7 @@ export class GroupStateConflict extends Error {
   }
 }
 
-/** Client-side store for this device's MLS key material — sealed at rest under the user's passphrase. */
+/** Client-side store for this device's MLS key material — sealed at rest under the passkey-PRF unlock key. */
 export class DeviceKeystore {
   // Per-conversation version this instance last persisted — the CAS base for cross-instance save ordering.
   // Diverges from the store the moment another tab / unlock saves, so a stale write is caught (see
@@ -212,66 +186,53 @@ export class DeviceKeystore {
   private constructor(
     private readonly db: IDBPDatabase,
     private readonly engine: MlsEngine,
-    private readonly argon: Argon2Params,
   ) {}
 
-  static async open(
-    engine?: MlsEngine,
-    argon: Argon2Params = DEFAULT_ARGON2,
-  ): Promise<DeviceKeystore> {
+  static async open(engine?: MlsEngine): Promise<DeviceKeystore> {
     const db = await openDB(DB_NAME, DB_VERSION, {
-      upgrade(database, oldVersion) {
-        // Coming from the unsealed v1 schema → drop the legacy store and its unsealed records. This is
-        // best-effort at-rest clearing (the browser decides when backing pages are reclaimed), so a
-        // recovered/fresh device should rotate its key regardless (key-backup.md §4). A fresh sealed
-        // device is generated on next getOrCreateDevice; nothing in the dropped store can be unsealed.
-        if (oldVersion > 0 && oldVersion < 2 && database.objectStoreNames.contains(STORE)) {
-          database.deleteObjectStore(STORE);
+      upgrade(database) {
+        // v7 cutover (and any prior upgrade): every store from v1–v6 was sealed under a typed passphrase or
+        // a passphrase-derived session key, all unreadable under the new passkey-PRF unlock key. So WIPE +
+        // recreate every secret-bearing store. A fresh device is minted (sealed under PRF) on the next
+        // getOrCreateDevice; nothing in the dropped stores can be unsealed. The obsolete `meta` store (which
+        // held the old session-key salt) is dropped and NOT recreated. Best-effort at-rest clearing — the
+        // browser decides when backing pages are reclaimed (key-backup.md §4).
+        for (const name of Array.from(database.objectStoreNames)) {
+          database.deleteObjectStore(name);
         }
-        if (!database.objectStoreNames.contains(STORE)) database.createObjectStore(STORE);
-        // v3: the sealed one-time KeyPackage pool (device provisioning). Additive — keeps the device store.
-        if (!database.objectStoreNames.contains(POOL_STORE)) database.createObjectStore(POOL_STORE);
-        // v4: the sealed MLS group-state store (live messaging). Additive — keyed by conversationId.
-        if (!database.objectStoreNames.contains(GROUP_STORE))
-          database.createObjectStore(GROUP_STORE);
-        // v5: the sealed message-history log (per conversation) + a tiny meta store for the session-key
-        // salt. Additive — both keep all prior stores.
-        if (!database.objectStoreNames.contains(MSGLOG_STORE))
-          database.createObjectStore(MSGLOG_STORE);
-        if (!database.objectStoreNames.contains(META_STORE)) database.createObjectStore(META_STORE);
-        // v6: the sealed pending-commit slot — written before POST, cleared on successful applyStaged.
-        if (!database.objectStoreNames.contains(PENDING_STORE))
-          database.createObjectStore(PENDING_STORE);
+        for (const name of SECRET_STORES) database.createObjectStore(name);
       },
     });
-    return new DeviceKeystore(db, engine ?? (await MlsEngine.create()), argon);
+    return new DeviceKeystore(db, engine ?? (await MlsEngine.create()));
   }
 
   /**
-   * The persisted device (unsealed with `passphrase`), or a freshly generated one — sealed + stored.
-   * Single device per user; throws if the profile holds a device for a different identity, or if the
-   * passphrase is wrong (unseal fails).
+   * The persisted device (opened with the PRF `unlockKey`), or a freshly generated one — sealed + stored.
+   * Single device per user; throws if the profile holds a device for a different identity, or if the unlock
+   * key is wrong (open fails — GCM auth).
    */
-  async getOrCreateDevice(identity: string, passphrase: string): Promise<DeviceKeys> {
+  async getOrCreateDevice(identity: string, unlockKey: CryptoKey): Promise<DeviceKeys> {
     const existing = (await this.db.get(STORE, SELF)) as StoredDevice | undefined;
-    if (existing) return this.unseal(existing, identity, passphrase);
+    if (existing) return this.unseal(existing, identity, unlockKey);
 
     const keys = await this.engine.generateDeviceKeys(identity);
-    const sealed = await sealBackup(serializeDeviceKeys(keys), passphrase, this.argon);
+    const plaintext = serializeDeviceKeys(keys);
+    const sealed = await sealWithKey(unlockKey, plaintext, DEVICE_AAD);
+    plaintext.fill(0); // best-effort wipe of the transient device plaintext after sealing
 
     // Atomic put-if-absent: a racing first-run can't overwrite an already-sealed device.
     const tx = this.db.transaction(STORE, 'readwrite');
     const reread = (await tx.store.get(SELF)) as StoredDevice | undefined;
     if (!reread) await tx.store.put({ identity, sealed } satisfies StoredDevice, SELF);
     await tx.done;
-    return reread ? this.unseal(reread, identity, passphrase) : keys;
+    return reread ? this.unseal(reread, identity, unlockKey) : keys;
   }
 
-  /** The persisted device keys for `identity`, unsealed with `passphrase`; undefined if none yet. */
-  async loadDevice(identity: string, passphrase: string): Promise<DeviceKeys | undefined> {
+  /** The persisted device keys for `identity`, opened with the PRF `unlockKey`; undefined if none yet. */
+  async loadDevice(identity: string, unlockKey: CryptoKey): Promise<DeviceKeys | undefined> {
     const stored = (await this.db.get(STORE, SELF)) as StoredDevice | undefined;
     if (!stored) return undefined;
-    return this.unseal(stored, identity, passphrase);
+    return this.unseal(stored, identity, unlockKey);
   }
 
   /**
@@ -283,11 +244,11 @@ export class DeviceKeystore {
   private async readPool(
     identity: string,
     signaturePublicKey: string,
-    passphrase: string,
+    unlockKey: CryptoKey,
   ): Promise<{ rec: StoredPool | undefined; pool: DeviceKeys[] }> {
     const rec = (await this.db.get(POOL_STORE, SELF)) as StoredPool | undefined;
     if (rec && rec.identity === identity && rec.signaturePublicKey === signaturePublicKey) {
-      const opened = await openBackup(rec.sealed, passphrase);
+      const opened = await openWithKey(unlockKey, rec.sealed, POOL_AAD);
       try {
         return { rec, pool: deserializeDeviceKeysArray(opened) };
       } finally {
@@ -303,22 +264,22 @@ export class DeviceKeystore {
    * member's PRIVATE is retained (sealed) so the Welcome later sealed to its public KeyPackage can be
    * joined — never reuse a member across joins (forward secrecy; consumed members are removed on join).
    * The caller publishes the members' PUBLIC KeyPackages to the directory (#19). Pass the already-unlocked
-   * `device` (avoids a redundant unseal); `passphrase` seals the pool under the same key as the device.
+   * `device` (avoids a redundant unseal); `unlockKey` seals the pool under the same key as the device.
    */
   async ensurePool(
     device: DeviceKeys,
-    passphrase: string,
+    unlockKey: CryptoKey,
     target: number = POOL_TARGET,
   ): Promise<DeviceKeys[]> {
     const identity = deviceIdentity(device);
     const signaturePublicKey = deviceSignaturePublicKeyB64(device);
 
-    const { rec, pool } = await this.readPool(identity, signaturePublicKey, passphrase);
+    const { rec, pool } = await this.readPool(identity, signaturePublicKey, unlockKey);
     if (pool.length >= target) return pool;
 
     while (pool.length < target) pool.push(await this.engine.mintKeyPackage(device));
     const plaintext = serializeDeviceKeysArray(pool);
-    const sealed = await sealBackup(plaintext, passphrase, this.argon);
+    const sealed = await sealWithKey(unlockKey, plaintext, POOL_AAD);
     plaintext.fill(0); // best-effort wipe of the transient pool plaintext after sealing
 
     // Compare-and-swap: commit only if the store still holds exactly what we read (no racing tab wrote in
@@ -335,7 +296,7 @@ export class DeviceKeystore {
     await tx.done;
     if (won) return pool;
 
-    const winner = await this.readPool(identity, signaturePublicKey, passphrase); // a concurrent unlock persisted first — publish ITS retained pool
+    const winner = await this.readPool(identity, signaturePublicKey, unlockKey); // a concurrent unlock persisted first — publish ITS retained pool
     return winner.pool.length > 0 ? winner.pool : pool;
   }
 
@@ -349,21 +310,21 @@ export class DeviceKeystore {
    */
   async removePoolMember(
     device: DeviceKeys,
-    passphrase: string,
+    unlockKey: CryptoKey,
     publicKeyPackageB64: string,
   ): Promise<void> {
     const identity = deviceIdentity(device);
     const signaturePublicKey = deviceSignaturePublicKeyB64(device);
 
     for (let attempt = 0; attempt < 5; attempt++) {
-      const { rec, pool } = await this.readPool(identity, signaturePublicKey, passphrase);
+      const { rec, pool } = await this.readPool(identity, signaturePublicKey, unlockKey);
       const filtered = pool.filter(
         (m) => serializeKeyPackage(m.publicPackage) !== publicKeyPackageB64,
       );
       if (filtered.length === pool.length) return; // not present (or already pruned) — nothing to do
 
       const plaintext = serializeDeviceKeysArray(filtered);
-      const sealed = await sealBackup(plaintext, passphrase, this.argon);
+      const sealed = await sealWithKey(unlockKey, plaintext, POOL_AAD);
       plaintext.fill(0); // best-effort wipe of the transient pool plaintext after sealing
 
       // Compare-and-swap: commit only if the store still holds exactly what we read. On a lost CAS a racer
@@ -491,7 +452,6 @@ export class DeviceKeystore {
   /** Rehydrate ALL of THIS device's persisted conversations (on unlock) → conversationId → Conversation. */
   async loadConversations(
     device: DeviceKeys,
-    passphrase: string,
     sessionKey: CryptoKey,
     /**
      * Optional server verifier for orphaned pending-commit recovery (brand-new group crash window).
@@ -515,11 +475,7 @@ export class DeviceKeystore {
       // The decoded group state holds VIEWS into the unsealed bytes, so they must NOT be wiped — those bytes
       // ARE the live in-memory group state (as sensitive as the device keys, and unavoidably resident while
       // the conversation is open), not a transient copy.
-      // Session-key blobs are the steady state; a passphrase-sealed `SealedBackup` is a pre-migration row
-      // (opened via the legacy Argon2id path once — it re-seals in the session-key format on its next save).
-      const opened = isSealedBackup(rec.sealed)
-        ? await openBackup(rec.sealed, passphrase)
-        : await openWithKey(sessionKey, rec.sealed, groupStateAad(rec.conversationId));
+      const opened = await openWithKey(sessionKey, rec.sealed, groupStateAad(rec.conversationId));
 
       // Crash recovery: if a pending-commit slot exists, a prior session staged a commit and POSTed
       // it successfully but crashed before applyStaged/saveConversationState ran. `serializeStaged`
@@ -674,39 +630,12 @@ export class DeviceKeystore {
     await this.db.delete(PENDING_STORE, conversationId);
   }
 
-  // ---- Message history (local, sealed under the per-unlock session key) ----------------------------------
-
-  /**
-   * The per-profile session-key derivation material (NOT secret) — a random salt + the Argon2 params it was
-   * minted under. Generated once, then reused. The params are STORED (like SealedBackup self-describes) so a
-   * future DEFAULT_ARGON2 bump re-derives the SAME key instead of silently dropping all history. The
-   * get-or-create runs in one readwrite tx, which IndexedDB serializes across tabs — effectively put-if-absent.
-   */
-  private async sessionKeyMaterial(): Promise<{ salt: Uint8Array; params: Argon2Params }> {
-    const tx = this.db.transaction(META_STORE, 'readwrite');
-    let rec = (await tx.store.get(SESSION_SALT_KEY)) as
-      | { salt: Uint8Array; params: Argon2Params }
-      | undefined;
-    if (!rec) {
-      rec = { salt: crypto.getRandomValues(new Uint8Array(16)), params: this.argon };
-      await tx.store.put(rec, SESSION_SALT_KEY);
-    }
-    await tx.done;
-    return rec;
-  }
-
-  /**
-   * Derive this session's AES-256-GCM key from the passphrase + the stored per-profile salt + the STORED
-   * params (one Argon2id pass). Hold the returned key IN MEMORY ONLY for the session — it seals/opens the
-   * history log AND the per-send/receive group state cheaply (no per-message KDF). Never persist it.
-   * Nonce budget: sealWithKey uses a fresh CSPRNG 96-bit IV per seal; random-IV AES-GCM is safe to ~2^32
-   * seals per key (NIST SP 800-38D), and the per-unlock key rotation keeps any session's seal count many
-   * orders of magnitude below that even with both stores sealing per message.
-   */
-  async deriveSessionKey(passphrase: string): Promise<CryptoKey> {
-    const { salt, params } = await this.sessionKeyMaterial();
-    return cryptoDeriveSessionKey(passphrase, salt, params);
-  }
+  // ---- Message history (local, sealed under the per-unlock PRF unlock key) --------------------------------
+  // The "session key" threaded through the message-log + group-state APIs IS the passkey-PRF unlock key (the
+  // same non-extractable AES-256-GCM CryptoKey that seals the device + pool). There is no separate derivation:
+  // the PRF secret is already uniformly random, so it seals everything directly. Held in memory only for the
+  // session. Nonce budget: sealWithKey uses a fresh CSPRNG 96-bit IV per seal; random-IV AES-GCM is safe to
+  // ~2^32 seals per key (NIST SP 800-38D), far above any session's seal count even with per-message sealing.
 
   /** Open + decode a message-log record, or [] if it isn't this device's or the key/blob doesn't verify. */
   private async openLog(
@@ -726,7 +655,7 @@ export class DeviceKeystore {
       const bytes = await openWithKey(sessionKey, rec.sealed, te.encode(rec.conversationId));
       return JSON.parse(td.decode(bytes)) as StoredMessage[];
     } catch {
-      // Wrong key (different passphrase) or tampered/relocated blob — treat as no history; never throw to UI.
+      // Wrong key (a different unlock key) or tampered/relocated blob — treat as no history; never throw to UI.
       return [];
     }
   }
@@ -838,72 +767,9 @@ export class DeviceKeystore {
   }
 
   /**
-   * The identity-only sealed artifact to upload for cross-device recovery (key-backup.md §4). Unseals the
-   * local device with `passphrase`, strips it to identity material (no one-time KeyPackage HPKE private
-   * keys), and re-seals that under the same passphrase. Forward-secret: a leak of this artifact can't
-   * decrypt a retained Welcome. undefined if no device is stored yet.
-   */
-  async exportRecoveryArtifact(identity: string, passphrase: string): Promise<string | undefined> {
-    const stored = (await this.db.get(STORE, SELF)) as StoredDevice | undefined;
-    if (!stored) return undefined;
-    const keys = await this.unseal(stored, identity, passphrase);
-    const plaintext = serializeDeviceIdentity(this.engine.exportIdentity(keys));
-    const sealed = await sealBackup(plaintext, passphrase, this.argon);
-    plaintext.fill(0); // best-effort wipe of the transient identity plaintext after sealing
-    return JSON.stringify(sealed);
-  }
-
-  /**
-   * Restore on a fresh profile from an identity-only recovery artifact. Unseals with `passphrase`,
-   * checks the embedded identity, then mints a FRESH device under the recovered signing identity and
-   * stores it sealed at rest. Verification happens BEFORE the store is touched, so a wrong, tampered, or
-   * wrong-identity artifact is rejected without stranding the profile. Refuses to clobber an existing
-   * device (use `clearDevice` first). Returns the recovered working device; it must re-publish + re-join.
-   */
-  /** Read the identity embedded in a recovery artifact without side effects. Used by restore callers
-   * that need the identity before calling importRecoveryArtifact (the composite userId:uuid is encoded
-   * in the artifact and not known to the caller beforehand in B2 multi-device scenarios). */
-  async peekRecoveryArtifactIdentity(artifactJson: string, passphrase: string): Promise<string> {
-    const parsed: unknown = JSON.parse(artifactJson);
-    if (!isSealedBackup(parsed)) throw new Error('invalid recovery artifact');
-    const recovered = deserializeDeviceIdentity(await openBackup(parsed, passphrase));
-    return recovered.identity;
-  }
-
-  async importRecoveryArtifact(
-    identity: string,
-    sealedJson: string,
-    passphrase: string,
-  ): Promise<DeviceKeys> {
-    const parsed: unknown = JSON.parse(sealedJson);
-    if (!isSealedBackup(parsed)) throw new Error('invalid recovery artifact');
-
-    // Authenticate + bind BEFORE persisting: unseal (GCM rejects wrong passphrase / tampering), confirm
-    // the recovered identity, then mint a fresh device under that signing identity.
-    const recovered = deserializeDeviceIdentity(await openBackup(parsed, passphrase));
-    if (recovered.identity !== identity) {
-      throw new Error('recovered identity does not match the requested identity');
-    }
-    const keys = await this.engine.deviceFromIdentity(recovered);
-    const plaintext = serializeDeviceKeys(keys);
-    const sealed = await sealBackup(plaintext, passphrase, this.argon);
-    plaintext.fill(0); // best-effort wipe of the transient device plaintext after sealing
-
-    // Atomic put-if-absent: a racing import — or an overlap with first-run generation — can't clobber an
-    // existing device. Throw post-commit.
-    const tx = this.db.transaction(STORE, 'readwrite');
-    const existing = await tx.store.get(SELF);
-    if (!existing) await tx.store.put({ identity, sealed } satisfies StoredDevice, SELF);
-    await tx.done;
-    if (existing) {
-      throw new DeviceExistsError();
-    }
-    return keys;
-  }
-
-  /**
-   * Remove the stored device AND its KeyPackage pool — to recover from a bad import or reset this profile
-   * before re-importing. The pool privates are tied to the cleared device's identity, so they go too.
+   * Remove the stored device AND its KeyPackage pool — to reset this profile (e.g. clear a different
+   * account's device occupying the single slot). The pool privates are tied to the cleared device's
+   * identity, so they go too.
    *
    * Local-only by design: this cannot revoke the matching PUBLIC KeyPackages already published to the
    * directory, so until they are claimed a peer could seal a Welcome to one this browser can no longer
@@ -920,13 +786,12 @@ export class DeviceKeystore {
     await this.db.clear(GROUP_STORE); // drop this profile's persisted conversations too (Slice 5)
     await this.db.clear(MSGLOG_STORE); // drop this profile's message history (history feature)
     await this.db.clear(PENDING_STORE); // drop any pending-commit slots
-    await this.db.clear(META_STORE); // drop the session-key salt → a fresh account derives a fresh key
     this.groupStateVersions.clear();
     this.appendChains.clear();
   }
 
   /**
-   * Clear the device credential while preserving GROUP_STORE, MSGLOG_STORE, and META_STORE.
+   * Clear the device credential while preserving GROUP_STORE and MSGLOG_STORE.
    * Only the STORE (sealed device), POOL_STORE (one-time key packages), and PENDING_STORE
    * (pending commits) are removed. Use reidentifyDevice + clearPoolAndPending + rebindGroupStates
    * + rebindMessageLogs to migrate the identity string without regenerating the signing key.
@@ -935,14 +800,14 @@ export class DeviceKeystore {
     await this.db.delete(STORE, SELF);
     await this.db.delete(POOL_STORE, SELF);
     await this.db.clear(PENDING_STORE);
-    // GROUP_STORE, MSGLOG_STORE, and META_STORE are intentionally preserved.
+    // GROUP_STORE and MSGLOG_STORE are intentionally preserved.
   }
 
   /**
    * Clear only the one-time KeyPackage pool and any pending-commit slots (stale after a device
-   * withdraw + server-side re-provision). The device credential, group states, message logs, and
-   * META salt are left intact. Call after reidentifyDevice to discard the old pool whose HPKE
-   * privates belong to the pre-migration server device row.
+   * withdraw + server-side re-provision). The device credential, group states, and message logs are
+   * left intact. Call after reidentifyDevice to discard the old pool whose HPKE privates belong to the
+   * pre-migration server device row.
    */
   async clearPoolAndPending(): Promise<void> {
     await this.db.delete(POOL_STORE, SELF);
@@ -950,9 +815,9 @@ export class DeviceKeystore {
   }
 
   /**
-   * Reidentify the stored device: unseal it under `oldIdentity`, recreate it with the SAME Ed25519
+   * Reidentify the stored device: open it under `oldIdentity`, recreate it with the SAME Ed25519
    * signing key under `newIdentity` (via engine.exportIdentity + engine.deviceFromIdentity), reseal
-   * under `passphrase`, and write back to STORE. Preserves the signing key so existing MLS group
+   * under the PRF `unlockKey`, and write back to STORE. Preserves the signing key so existing MLS group
    * states (whose serialized ratchet embeds the private key) remain usable; only the identity string
    * metadata guard changes. Call clearPoolAndPending() + rebindGroupStates() + rebindMessageLogs()
    * afterwards to bring all metadata guards up to date.
@@ -960,15 +825,15 @@ export class DeviceKeystore {
   async reidentifyDevice(
     oldIdentity: string,
     newIdentity: string,
-    passphrase: string,
+    unlockKey: CryptoKey,
   ): Promise<DeviceKeys> {
     const stored = (await this.db.get(STORE, SELF)) as StoredDevice | undefined;
     if (!stored) throw new Error('no device to reidentify');
-    const oldDev = await this.unseal(stored, oldIdentity, passphrase);
+    const oldDev = await this.unseal(stored, oldIdentity, unlockKey);
     const idMat = this.engine.exportIdentity(oldDev);
     const newDev = await this.engine.deviceFromIdentity({ ...idMat, identity: newIdentity });
     const plaintext = serializeDeviceKeys(newDev);
-    const sealed = await sealBackup(plaintext, passphrase, this.argon);
+    const sealed = await sealWithKey(unlockKey, plaintext, DEVICE_AAD);
     plaintext.fill(0);
     await this.db.put(STORE, { identity: newIdentity, sealed } satisfies StoredDevice, SELF);
     return newDev;
@@ -1039,19 +904,18 @@ export class DeviceKeystore {
   private async unseal(
     stored: StoredDevice,
     identity: string,
-    passphrase: string,
+    unlockKey: CryptoKey,
   ): Promise<DeviceKeys> {
     if (stored.identity !== identity) {
       throw new Error('keystore holds a device for a different identity');
     }
-    const keys = deserializeDeviceKeys(await openBackup(stored.sealed, passphrase));
-    // Check the identity embedded in the decrypted KeyPackage, not just the caller-supplied metadata, so
-    // a recovery service that returns the wrong (genuine) sealed blob under this name — shared/reused
-    // passphrase, account switch — can't silently hand back another identity's keys. This is a
-    // confusion check, not full authenticity: proving a restored device is really `identity`'s is the
-    // key-directory + fingerprint job (checkpoint 20, docs/threat-models/key-directory.md).
+    const keys = deserializeDeviceKeys(await openWithKey(unlockKey, stored.sealed, DEVICE_AAD));
+    // Check the identity embedded in the decrypted KeyPackage, not just the caller-supplied metadata, so a
+    // stored blob under this name can't silently hand back another identity's keys. This is a confusion
+    // check, not full authenticity: proving a device is really `identity`'s is the key-directory +
+    // fingerprint job (checkpoint 20, docs/threat-models/key-directory.md).
     if (deviceIdentity(keys) !== identity) {
-      throw new Error('recovered device identity does not match the requested identity');
+      throw new Error('device identity does not match the requested identity');
     }
     return keys;
   }

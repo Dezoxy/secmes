@@ -1,8 +1,8 @@
 import {
   MlsEngine,
   deviceSignaturePublicKeyB64,
+  importUnlockKey,
   serializeKeyPackage,
-  type Argon2Params,
 } from '@argus/crypto';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,7 +13,6 @@ import { publishKeyPackages } from './api';
 import { DeviceKeystore } from './keystore';
 import { provisionDevice } from './provisioning';
 
-const FAST: Argon2Params = { m: 8192, t: 2, p: 1 };
 const publish = vi.mocked(publishKeyPackages);
 
 describe('provisionDevice', () => {
@@ -26,10 +25,11 @@ describe('provisionDevice', () => {
 
   it('ensures the pool and publishes its PUBLIC KeyPackages under the signature key', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const device = await ks.getOrCreateDevice('u1', 'pw');
+    const ks = await DeviceKeystore.open(engine);
+    const key = await importUnlockKey(new Uint8Array(32).fill(1));
+    const device = await ks.getOrCreateDevice('u1', key);
 
-    const { pool } = await provisionDevice(ks, device, 'pw');
+    const { pool } = await provisionDevice(ks, device, key);
 
     expect(publish).toHaveBeenCalledTimes(1);
     const [sig, keyPackages] = publish.mock.calls[0]!;
@@ -42,20 +42,22 @@ describe('provisionDevice', () => {
 
   it('is idempotent: a second provision republishes the same (already-sealed) pool', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const device = await ks.getOrCreateDevice('u1', 'pw');
+    const ks = await DeviceKeystore.open(engine);
+    const key = await importUnlockKey(new Uint8Array(32).fill(1));
+    const device = await ks.getOrCreateDevice('u1', key);
 
-    await provisionDevice(ks, device, 'pw');
+    await provisionDevice(ks, device, key);
     const first = publish.mock.calls[0]![1];
-    await provisionDevice(ks, device, 'pw');
+    await provisionDevice(ks, device, key);
     const second = publish.mock.calls[1]![1];
     expect(second).toEqual(first); // same pool — the server dedups, so re-publish is a safe no-op
   });
 
   it('replenishes with fresh packages when the server reports availability below target', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const device = await ks.getOrCreateDevice('u1', 'pw');
+    const ks = await DeviceKeystore.open(engine);
+    const key = await importUnlockKey(new Uint8Array(32).fill(1));
+    const device = await ks.getOrCreateDevice('u1', key);
 
     // First publish: only 2 of the 10 remain unclaimed (8 were claimed while offline). Second publish
     // (the replenishment) tops the directory back up to 10.
@@ -64,7 +66,7 @@ describe('provisionDevice', () => {
       .mockResolvedValueOnce({ deviceId: 'd', published: 10, available: 2 })
       .mockResolvedValueOnce({ deviceId: 'd', published: 8, available: 10 });
 
-    await provisionDevice(ks, device, 'pw');
+    await provisionDevice(ks, device, key);
 
     expect(publish).toHaveBeenCalledTimes(2);
     // the replenishment publishes 8 FRESH replacements (target 10 − available 2)…
@@ -76,12 +78,13 @@ describe('provisionDevice', () => {
 
   it('chunks publishing when the retained pool exceeds the server per-request limit', async () => {
     const engine = await MlsEngine.create();
-    const ks = await DeviceKeystore.open(engine, FAST);
-    const device = await ks.getOrCreateDevice('u1', 'pw');
-    await ks.ensurePool(device, 'pw', 105); // a grown pool (> the 100-per-request server limit)
+    const ks = await DeviceKeystore.open(engine);
+    const key = await importUnlockKey(new Uint8Array(32).fill(1));
+    const device = await ks.getOrCreateDevice('u1', key);
+    await ks.ensurePool(device, key, 105); // a grown pool (> the 100-per-request server limit)
     publish.mockReset().mockResolvedValue({ deviceId: 'd', published: 0, available: 105 });
 
-    await provisionDevice(ks, device, 'pw');
+    await provisionDevice(ks, device, key);
 
     // 105 members → two requests within the limit (100 + 5); no batch exceeds the contract.
     expect(publish).toHaveBeenCalledTimes(2);

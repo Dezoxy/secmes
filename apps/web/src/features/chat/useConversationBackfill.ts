@@ -253,13 +253,12 @@ export function useConversationHistoryRehydration({
   useEffect(() => {
     if (!messagingDeps || !sessionKey || rehydratedRef.current) return;
     rehydratedRef.current = true;
-    const { keystore, device, passphrase } = messagingDeps;
+    const { keystore, device } = messagingDeps;
     const sKey = sessionKey;
     void (async () => {
       try {
         const restored = await keystore.loadConversations(
           device,
-          passphrase,
           sKey,
           async (conversationId, epoch, clientCommitId) => {
             // Verify OUR commit (identified by clientCommitId) won the epoch slot — not another

@@ -218,7 +218,6 @@ export function useLiveConversations({
       pool: sessionPool,
       deviceId,
       keystore: messagingDeps.keystore,
-      passphrase: messagingDeps.passphrase,
       sessionKey: messagingDeps.sessionKey,
       // A one-time private was just spent: drop it from the SESSION pool so a later live nudge's drain can't
       // resurrect it (the keystore prune doesn't touch this in-memory pool). `member` is a reference from

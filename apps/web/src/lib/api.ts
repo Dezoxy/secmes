@@ -3,7 +3,6 @@
 
 import {
   AccessTokenResponseSchema,
-  BackupResponseSchema,
   BreakglassLoginRequestSchema,
   ClaimedKeyPackageSchema,
   CommitBodySchema,
@@ -43,7 +42,6 @@ import {
   RevokeKeyPackagesResponseSchema,
   SendConversationMessageRequestSchema,
   SentMessageSchema,
-  StoreBackupRequestSchema,
   SubscribePushRequestSchema,
   UpdateProfileSchema,
   InviteSummarySchema,
@@ -612,44 +610,6 @@ export async function claimAllKeyPackages(
       responseSchema: ClaimedKeyPackageSchema.array(),
     }),
   );
-}
-
-// --- Key backup (PUT/GET /backups/me) ---------------------------------------------------------------
-// The server holds an opaque copy of the IDENTITY-ONLY recovery artifact (passphrase-sealed client-side
-// before upload). The server never decrypts it — this is a convenience copy, not the source of truth.
-// The local download (RecoveryPanel) is always performed first; the server upload is best-effort.
-
-/**
- * Upload the identity-only sealed recovery artifact to the server (PUT /backups/me).
- * Caller must be authenticated; throws on non-OK.
- */
-export async function storeBackup(artifact: string): Promise<void> {
-  unwrapApiResult(
-    await requestStatus({
-      path: '/backups/me',
-      method: 'PUT',
-      body: { backup: artifact },
-      requestSchema: StoreBackupRequestSchema,
-    }),
-  );
-}
-
-/**
- * Fetch the server-stored sealed artifact (GET /backups/me).
- * Returns null when no backup is stored (404). Throws (classified message) on other non-OK responses.
- * The returned string is opaque — pass it directly to `restoreFromArtifact`. Mirrors the `claimKeyPackage`
- * 404 pattern so it reuses requestJson's network-error classification + response validation.
- */
-export async function fetchBackup(): Promise<string | null> {
-  const result = await requestJson({
-    path: '/backups/me',
-    responseSchema: BackupResponseSchema,
-  });
-  if (!result.ok) {
-    if (result.error.status === 404) return null;
-    return unwrapApiResult(result); // throws a classified message (never reached for 404)
-  }
-  return result.data.backup;
 }
 
 // --- Delivery receipts (POST/GET /conversations/:id/receipts) ---------------------------------------

@@ -203,6 +203,18 @@ export async function sealWithKey(
   return { iv: toB64(iv), ciphertext: toB64(ct) };
 }
 
+/**
+ * Import a raw 32-byte secret as a non-extractable AES-256-GCM `CryptoKey` for `sealWithKey`/`openWithKey`.
+ * Used to turn a WebAuthn-PRF output (a per-passkey HMAC secret, high-entropy) directly into the keystore
+ * unlock key — NO Argon2: the input is already uniformly random 256 bits, so a memory-hard KDF buys nothing.
+ * The key is non-extractable (the bytes can't be read back out) and lives in memory only; the caller must
+ * wipe the `raw` input after import. Throws if `raw` is not exactly 32 bytes.
+ */
+export async function importUnlockKey(raw: Uint8Array): Promise<CryptoKey> {
+  if (raw.length !== 32) throw new Error('unlock key material must be 32 bytes');
+  return crypto.subtle.importKey('raw', bytes(raw), 'AES-GCM', false, ['encrypt', 'decrypt']);
+}
+
 /** Open a session-key-sealed blob (with the same `context` it was sealed under). Throws on a wrong key, a
  * wrong context, or any tampering (AES-GCM auth failure). */
 export async function openWithKey(

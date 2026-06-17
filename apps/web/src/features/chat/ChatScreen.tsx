@@ -70,7 +70,7 @@ const SettingsPanel = lazy(() =>
  * message is through it; a failed round-trip marks it failed, never sent). The live loop swaps the
  * local peer for a remote member over the WS gateway and back-fills history by decrypting fetched
  * ciphertext; it needs the key directory + out-of-band fingerprint verification (#20). No plaintext
- * leaves the browser. The settings button opens profile, privacy, and key-recovery controls.
+ * leaves the browser. The settings button opens profile, privacy, and passkey-security controls.
  */
 // LIVE conversations start as a neutral-placeholder shell and are then NAMED via the directory (see
 // peer-naming.ts): joins resolve the welcome's verified senderUserId; rehydrates/incoming messages resolve
@@ -146,7 +146,7 @@ export default function ChatScreen() {
   // Per-conversation verification: conversationId → the safety number marked verified for it.
   const [verifiedByConv, setVerifiedByConv] = useState<Record<string, string>>({});
 
-  const { device, pool, deviceId, keystore, passphrase, sessionKey } = useDevice();
+  const { device, pool, deviceId, keystore, sessionKey } = useDevice();
   const { profile, subjectId } = useAuth();
   const { updateReady, applyUpdate } = usePwaUpdate();
   const profileSubjectId = subjectId ?? DEMO_PROFILE_SUBJECT;
@@ -163,15 +163,12 @@ export default function ChatScreen() {
     const avatar = hasPhoto ? anonymousProfile.avatar : dicebearAvatar(serverUserId);
     return { ...base, name, avatar };
   }, [anonymousProfile, serverDisplayName, serverUserId]);
-  // What every live send/receive needs to seal the advanced ratchet at rest (Slice 5). Null in demo mode.
-  // The session key (derived once at unlock) does the per-op group-state sealing; the passphrase stays for
-  // the rare join-time pool reseal.
+  // What every live send/receive needs to seal the advanced ratchet at rest (Slice 5). Null in demo mode and
+  // for the breakglass admin (no device). The passkey-PRF session key does the per-op group-state sealing AND
+  // the join-time pool reseal.
   const messagingDeps = useMemo<MessagingDeps | null>(
-    () =>
-      device && keystore && passphrase && sessionKey
-        ? { device, keystore, passphrase, sessionKey }
-        : null,
-    [device, keystore, passphrase, sessionKey],
+    () => (device && keystore && sessionKey ? { device, keystore, sessionKey } : null),
+    [device, keystore, sessionKey],
   );
   // A live conversation manager exists only with an unlocked device (not demo mode). New conversations
   // route through it (claim → #20 gate → create + persist + deliver); demo mode keeps the seed/loopback path.
