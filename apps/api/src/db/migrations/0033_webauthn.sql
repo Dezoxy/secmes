@@ -61,5 +61,5 @@ ALTER TABLE users ALTER COLUMN email DROP NOT NULL;
 -- this INSERT runs at migration time under the migration role (owner/superuser) which bypasses RLS.
 -- plan_tier='free' satisfies the NOT NULL constraint.
 INSERT INTO tenants (id, name, plan_tier)
-VALUES ('00000000-0000-0000-0000-000000000001', 'default', 'free')
+VALUES ('00000000-0000-4000-8000-000000000001', 'default', 'free')
 ON CONFLICT (id) DO NOTHING;
