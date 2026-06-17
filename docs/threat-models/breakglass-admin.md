@@ -158,6 +158,39 @@ mechanism into attacker persistence. The re-auth gate costs one extra Argon2id v
 
 ---
 
+## Atomic lockout counter
+
+The `failed_attempts` increment in both `login()` and `rotate()` is performed by a single atomic
+SQL `UPDATE`:
+
+```sql
+SET failed_attempts = failed_attempts + 1,
+    locked_until = CASE WHEN failed_attempts + 1 >= 5 THEN now() + interval '15 minutes' ELSE NULL END
+```
+
+A read-then-write pattern (`newCount = row.failedAttempts + 1; UPDATE SET failed_attempts = $newCount`)
+would be vulnerable to concurrent wrong-password requests racing — each reads the same stale count
+and writes it back, allowing more than 5 attempts before the lockout fires (CWE-362). The atomic
+SQL eliminates this race without any application-level locking.
+
+---
+
+## `rotate()` credential lookup scope
+
+`rotate()` queries `admin_credentials WHERE user_id = $userId`, where `userId` comes from the
+caller's AdminGuard JWT. This is **intentional by design**: only the breakglass user (the one
+who logged in via `POST /auth/breakglass/login`) holds a JWT whose `userId` matches the
+`admin_credentials` row. A WebAuthn admin or Zitadel admin with an admin JWT would get 503
+("breakglass not provisioned") since their `userId` has no matching row.
+
+This means: only the breakglass user themselves can rotate the breakglass credential. Operator-
+assisted rotation (a different admin rotating the breakglass credential on behalf of another) is
+out of scope. If that use case is ever needed, the query should switch to a singleton lookup
+(`WHERE tenant_id = DEFAULT_TENANT_ID LIMIT 1`) — which is safe since there is exactly one row
+per tenant by the `admin_credentials_tenant_username_idx` invariant.
+
+---
+
 ## Bootstrap atomicity
 
 `BreakglassService.onModuleInit()` creates three rows atomically in a single `withTenant()`

@@ -15,7 +15,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { argon2idAsync } from '@noble/hashes/argon2.js';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 import { schema, withTenant } from '../db/index.js';
 import { generateArgusId, isArgusIdCollision } from '../users/argus-id.js';
@@ -239,22 +239,27 @@ export class BreakglassService implements OnModuleInit {
 
     if (!row || !match) {
       if (row) {
-        const newCount = row.failedAttempts + 1;
-        const lockedUntil =
-          newCount >= MAX_ATTEMPTS ? new Date(Date.now() + LOCKOUT_DURATION_MS) : null;
+        // Atomic increment+lockout — avoids a race where concurrent wrong-password
+        // requests each read the same stale count and write it back, allowing more
+        // than MAX_ATTEMPTS before the lockout fires (CWE-362).
         await withTenant(DEFAULT_TENANT_ID, async (tx) => {
           await tx
             .update(schema.adminCredentials)
-            .set({ failedAttempts: newCount, lockedUntil, updatedAt: new Date() })
+            .set({
+              failedAttempts: sql`${schema.adminCredentials.failedAttempts} + 1`,
+              lockedUntil: sql`CASE WHEN ${schema.adminCredentials.failedAttempts} + 1 >= ${MAX_ATTEMPTS} THEN now() + interval '1 millisecond' * ${LOCKOUT_DURATION_MS} ELSE NULL END`,
+              updatedAt: new Date(),
+            })
             .where(eq(schema.adminCredentials.id, row.id));
         });
-        await this.audit.record(DEFAULT_TENANT_ID, {
-          eventType: 'breakglass.login_failed',
-          actorSub: null,
-          ip: requestContext.ip || null,
-          userAgent: requestContext.userAgent || null,
-        });
       }
+      // Always audit login failure — even for an unknown username (actorSub=null, IP+UA only).
+      await this.audit.record(DEFAULT_TENANT_ID, {
+        eventType: 'breakglass.login_failed',
+        actorSub: null,
+        ip: requestContext.ip || null,
+        userAgent: requestContext.userAgent || null,
+      });
       throw new UnauthorizedException('invalid credentials');
     }
 
@@ -326,13 +331,14 @@ export class BreakglassService implements OnModuleInit {
     const match = timingSafeEqual(candidateBytes, Buffer.from(row.passwordHash, 'base64'));
 
     if (!match) {
-      const newCount = row.failedAttempts + 1;
-      const lockedUntil =
-        newCount >= MAX_ATTEMPTS ? new Date(Date.now() + LOCKOUT_DURATION_MS) : null;
       await withTenant(DEFAULT_TENANT_ID, async (tx) => {
         await tx
           .update(schema.adminCredentials)
-          .set({ failedAttempts: newCount, lockedUntil, updatedAt: new Date() })
+          .set({
+            failedAttempts: sql`${schema.adminCredentials.failedAttempts} + 1`,
+            lockedUntil: sql`CASE WHEN ${schema.adminCredentials.failedAttempts} + 1 >= ${MAX_ATTEMPTS} THEN now() + interval '1 millisecond' * ${LOCKOUT_DURATION_MS} ELSE NULL END`,
+            updatedAt: new Date(),
+          })
           .where(eq(schema.adminCredentials.id, row.id));
       });
       await this.audit.record(DEFAULT_TENANT_ID, {
