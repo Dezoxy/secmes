@@ -51,6 +51,29 @@ const AuthCtx = createContext<AuthState | null>(null);
 // Nine-minute interval: renew before the 10-minute JWT window closes.
 const REFRESH_INTERVAL_MS = 9 * 60 * 1000;
 
+// Serialise refresh-cookie rotation across tabs via the Web Locks API.
+// The argus_refresh cookie is single-use; concurrent presenters are treated
+// as token reuse and the entire session family is revoked.
+// - boot path: blocking (wait) — both tabs must restore their session
+// - timer path: ifAvailable (skip) — the winning tab already rotated the cookie;
+//   the loser's JWT stays valid for the remaining ~1 min until the next tick.
+const SESSION_REFRESH_LOCK = 'argus-session-refresh';
+
+async function withRefreshLock<T>(
+  fn: () => Promise<T>,
+  ifAvailable: boolean,
+): Promise<T | undefined> {
+  if (!('locks' in navigator)) return fn();
+  return navigator.locks.request(
+    SESSION_REFRESH_LOCK,
+    ifAvailable ? { ifAvailable: true } : {},
+    async (lock: Lock | null) => {
+      if (lock === null) return undefined;
+      return fn();
+    },
+  );
+}
+
 export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
   const [profile, setProfile] = useState<MeBound | null>(null);
   const [authenticated, setAuthenticated] = useState(false);
@@ -77,14 +100,14 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
   useEffect(() => {
     if (demoMode) return;
     let active = true;
-    refreshSession()
-      .then(async ({ accessToken: token }) => {
-        if (!active) return;
-        setToken(token);
-        const me = await fetchMe();
-        if (!active) return;
-        applySession(token, me.bound ? me : null);
-      })
+    withRefreshLock(async () => {
+      const { accessToken: token } = await refreshSession();
+      if (!active) return;
+      setToken(token);
+      const me = await fetchMe();
+      if (!active) return;
+      applySession(token, me.bound ? me : null);
+    }, false)
       .catch(() => {
         // No valid cookie — start unauthenticated.
       })
@@ -99,17 +122,18 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
   // Refresh timer: keep access token alive while the tab is open.
   // Keyed on `authenticated` so unbound users (authenticated but no profile) still get refreshes
   // during the onboarding flow before they create/join a workspace.
+  // Uses ifAvailable so a concurrent tab's rotation wins; the loser's JWT
+  // stays valid for the remaining ~1 min until its next tick picks up the new cookie.
   useEffect(() => {
     if (demoMode) return;
     const timer = setInterval(() => {
       if (!authenticated) return;
-      refreshSession()
-        .then(async ({ accessToken: token }) => {
-          setToken(token);
-          const me = await fetchMe();
-          setProfile(me.bound ? me : null);
-        })
-        .catch(() => clearSession());
+      void withRefreshLock(async () => {
+        const { accessToken: token } = await refreshSession();
+        setToken(token);
+        const me = await fetchMe();
+        setProfile(me.bound ? me : null);
+      }, true).catch(() => clearSession());
     }, REFRESH_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [authenticated, clearSession]);
