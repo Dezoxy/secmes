@@ -228,7 +228,11 @@ describe.skipIf(!DB_URL)('SessionTokenService (DB integration)', () => {
   // pnpm --filter @argus/api test
 
   it('GUC unset → carve-out exposes zero rows (fail-closed)', async () => {
-    const { withRouting: realWithRouting, schema: realSchema } = await import('../db/index.js');
+    // This file vi.mock()s ../db/index.js for the unit tests above, so a plain dynamic import would
+    // return the MOCK (withRouting → undefined). Pull the REAL module so the carve-out runs against
+    // the live DB under FORCE RLS.
+    const { withRouting: realWithRouting, schema: realSchema } =
+      await vi.importActual<typeof import('../db/index.js')>('../db/index.js');
 
     const rows = await realWithRouting(async (tx) => {
       // Do NOT set the GUC — carve-out must expose nothing.

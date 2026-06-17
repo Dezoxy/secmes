@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import webpush from 'web-push';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { getDb } from '../db/index.js';
@@ -8,9 +9,13 @@ import { PushService } from './push.service.js';
 // Integration — needs a live Postgres with migrations applied. Auto-skips without DATABASE_URL.
 const DB_URL = process.env.DATABASE_URL;
 
+// A real-format VAPID keypair generated per run, so web-push's setVapidDetails() validation passes
+// when a test flips configured:true. Never a committed/CI key — actual sends are always mocked.
+const vapidKeys = webpush.generateVAPIDKeys();
+
 const configuredVapid: VapidConfig = {
-  publicKey: process.env.VAPID_PUBLIC_KEY ?? 'BFakePublicKey',
-  privateKey: process.env.VAPID_PRIVATE_KEY ?? 'fake-private-key',
+  publicKey: vapidKeys.publicKey,
+  privateKey: vapidKeys.privateKey,
   subject: 'mailto:test@argus.local',
   configured: false, // keep actual sends disabled in tests; we spy on webpush directly
 };

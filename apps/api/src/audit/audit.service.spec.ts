@@ -53,13 +53,16 @@ describe.skipIf(!DB_URL)('AuditService + audit_events', () => {
     expect(rows.length).toBe(0);
   });
 
-  it('is append-only: the app role cannot UPDATE or DELETE (42501 insufficient_privilege)', async () => {
-    // Assert the SPECIFIC permission error, so the test can't pass for an unrelated reason.
+  it('append-only for UPDATE (42501); DELETE is allowed for GDPR Art. 17 erasure (migration 0021)', async () => {
+    // UPDATE stays forbidden — assert the SPECIFIC permission error so the test can't pass for an
+    // unrelated reason. The audit log is immutable: existing rows can never be altered.
     await expect(
       asTenant(tenantA, (tx) => tx`update audit_events set event_type = 'tampered'`),
     ).rejects.toMatchObject({ code: '42501' });
-    await expect(asTenant(tenantA, (tx) => tx`delete from audit_events`)).rejects.toMatchObject({
-      code: '42501',
-    });
+    // DELETE is intentionally granted to argus_app (migration 0021) for the right-to-erasure flow,
+    // which removes a subject's audit rows by actor_sub — so it must succeed, not 42501.
+    await expect(
+      asTenant(tenantA, (tx) => tx`delete from audit_events where actor_sub = 'sub-a'`),
+    ).resolves.toBeDefined();
   });
 });
