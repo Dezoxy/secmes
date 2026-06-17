@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { and, count, eq, max, min, or, sql } from 'drizzle-orm';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
@@ -320,6 +320,13 @@ export class GdprService {
       const user = await resolveUserId(tx, auth);
       if (!user) return null; // already deleted or never provisioned — idempotent
 
+      // Guard: the breakglass-admin account cannot self-delete. Deleting the users row would
+      // cascade to admin_credentials (FK ON DELETE RESTRICT), disabling the emergency login path
+      // until the service restarts and re-provisions — a denial-of-recovery attack.
+      if (user.displayName === 'breakglass-admin') {
+        throw new ForbiddenException('breakglass-admin account cannot be deleted');
+      }
+
       // 1a. Delete conversation_welcomes — direct NO-ACTION FKs on both recipient and sender.
       //     The cascade through conversation_members covers recipient_user_id in theory, but
       //     sender_user_id has no cascade path, so we delete explicitly for both.
@@ -475,12 +482,16 @@ export class GdprService {
 async function resolveUserId(
   tx: Tx,
   auth: VerifiedAuth,
-): Promise<{ id: string; externalIdentityId: string; argusId: string } | undefined> {
+): Promise<
+  | { id: string; externalIdentityId: string; argusId: string; displayName: string | null }
+  | undefined
+> {
   const [row] = await tx
     .select({
       id: schema.users.id,
       externalIdentityId: schema.users.externalIdentityId,
       argusId: schema.users.argusId,
+      displayName: schema.users.displayName,
     })
     .from(schema.users)
     .where(

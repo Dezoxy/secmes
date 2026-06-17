@@ -7,7 +7,7 @@
 CREATE TABLE admin_credentials (
   id              uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id       uuid        NOT NULL,
-  user_id         uuid        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id         uuid        NOT NULL REFERENCES users(id) ON DELETE RESTRICT,  -- RESTRICT not CASCADE: prevents losing the breakglass credential via DELETE /me
   username        text        NOT NULL,
   password_hash   text        NOT NULL,   -- base64 raw 32-byte Argon2id output (never plaintext)
   salt            text        NOT NULL,   -- base64 16-byte CSPRNG salt
