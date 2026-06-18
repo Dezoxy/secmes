@@ -41,6 +41,12 @@ function releaseTagsNewestFirst() {
   try {
     out = git([
       'for-each-ref',
+      // Only tags reachable from the checked-out commit (HEAD = the release tag in CD). Without this, a build
+      // would list EVERY v*/aws-v* tag in the repo — so re-running an older tag's workflow, or the aws-v*
+      // experiment namespace running ahead of prod, could bake releases/commits that aren't in this artifact
+      // while the Version row still shows the older triggering tag.
+      '--merged',
+      'HEAD',
       '--sort=-creatordate',
       '--format=%(refname:short)\t%(creatordate:short)',
       'refs/tags/v*',
