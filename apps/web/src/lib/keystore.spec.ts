@@ -487,3 +487,74 @@ describe('DeviceKeystore — sealed at rest under the passkey-PRF unlock key', (
     expect(log.map((m) => m.id).sort()).toEqual(['a1', 'b1']);
   });
 });
+
+describe('DeviceKeystore — verified-peers sealed store', () => {
+  beforeEach(() => {
+    globalThis.indexedDB = new IDBFactory();
+  });
+
+  it('saveVerifiedPeer → loadVerifiedPeer round-trips the sorted numbers array', async () => {
+    const engine = await MlsEngine.create();
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    const numbers = ['11111 22222 33333 44444 55555 66666 77777 88888'];
+    await ks.saveVerifiedPeer('user-alice', numbers, key);
+    expect(await ks.loadVerifiedPeer('user-alice', key)).toEqual(numbers);
+  });
+
+  it('returns null for a peer that was never stored', async () => {
+    const engine = await MlsEngine.create();
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    expect(await ks.loadVerifiedPeer('nobody', key)).toBeNull();
+  });
+
+  it('returns null when the session key is wrong (fails closed, does not throw)', async () => {
+    const engine = await MlsEngine.create();
+    const ks = await DeviceKeystore.open(engine);
+    await ks.saveVerifiedPeer(
+      'user-alice',
+      ['00000 11111 22222 33333 44444 55555 66666 77777'],
+      await unlockKey(1),
+    );
+    expect(await ks.loadVerifiedPeer('user-alice', await unlockKey(2))).toBeNull();
+  });
+
+  it('returns null for a tampered ciphertext (AES-GCM auth fails → fails closed)', async () => {
+    const engine = await MlsEngine.create();
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    await ks.saveVerifiedPeer(
+      'user-alice',
+      ['00000 11111 22222 33333 44444 55555 66666 77777'],
+      key,
+    );
+    // Overwrite the stored ciphertext with garbage — AES-GCM authentication will fail on open.
+    const raw = await openDB('argus-keystore', 8);
+    const rec = (await raw.get('verified-peers', 'user-alice')) as {
+      peerUserId: string;
+      sealed: { iv: string; ciphertext: string };
+    };
+    await raw.put(
+      'verified-peers',
+      { ...rec, sealed: { ...rec.sealed, ciphertext: 'AAAAAAAAAA' } },
+      'user-alice',
+    );
+    raw.close();
+    expect(await ks.loadVerifiedPeer('user-alice', key)).toBeNull();
+  });
+
+  it("cross-slot AAD isolation: a blob sealed for peer A cannot be decrypted under peer B's slot", async () => {
+    const engine = await MlsEngine.create();
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    await ks.saveVerifiedPeer('alice', ['11111 22222 33333 44444 55555 66666 77777 88888'], key);
+    // Copy alice's raw sealed blob into the bob slot — same ciphertext, wrong AAD on open.
+    const raw = await openDB('argus-keystore', 8);
+    const rec = await raw.get('verified-peers', 'alice');
+    await raw.put('verified-peers', { ...rec, peerUserId: 'bob' }, 'bob');
+    raw.close();
+    // loadVerifiedPeer('bob') uses AAD "verified-peers:bob", but the blob was sealed under "verified-peers:alice".
+    expect(await ks.loadVerifiedPeer('bob', key)).toBeNull();
+  });
+});

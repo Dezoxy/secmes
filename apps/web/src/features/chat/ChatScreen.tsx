@@ -1,5 +1,6 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MessageCircle, X } from 'lucide-react';
+import { safetyNumberFromMember } from '@argus/crypto';
 import type { UserLookupResult } from '../../lib/api';
 import {
   ConversationManager,
@@ -47,7 +48,7 @@ import {
   paneBackExitMotion,
 } from '../ui';
 import type { Conversation, User } from './seed';
-import { persistPeerMapping } from './peer-naming';
+import { loadPersistedPeerMapping, persistPeerMapping } from './peer-naming';
 import { dicebearAvatar, isCustomPhoto } from '../../lib/dicebear';
 import {
   conversations as initialConversations,
@@ -146,6 +147,9 @@ export default function ChatScreen() {
   const [numbersByConv, setNumbersByConv] = useState<Record<string, string>>({});
   // Per-conversation verification: conversationId → the safety number marked verified for it.
   const [verifiedByConv, setVerifiedByConv] = useState<Record<string, string>>({});
+  // Set to a conversationId when the peer's safety numbers changed (reinstall detected) — auto-opens
+  // the VerifySecurity panel with a keyChanged banner for that conversation.
+  const [peerKeyChangedConvId, setPeerKeyChangedConvId] = useState<string | null>(null);
 
   const { device, pool, deviceId, keystore, sessionKey } = useDevice();
   const { profile, subjectId, demoMode } = useAuth();
@@ -219,6 +223,24 @@ export default function ChatScreen() {
     backfillInto,
     setConversations,
     onEnrollmentPending: (id) => setPendingEnrollmentId(id),
+    onPeerKeyChanged: useCallback(
+      (_peerUserId: string, conversationId: string, newNumbers: string[]) => {
+        setNumbersByConv((prev) => ({ ...prev, [conversationId]: newNumbers[0] ?? '' }));
+        setVerifiedByConv((prev) => {
+          const next = { ...prev };
+          delete next[conversationId];
+          return next;
+        });
+        setPeerKeyChangedConvId(conversationId);
+      },
+      [],
+    ),
+    onPeerVerified: useCallback((conversationId: string, safetyNumber: string) => {
+      setVerifiedByConv((prev) => ({ ...prev, [conversationId]: safetyNumber }));
+    }, []),
+    onSafetyNumberResolved: useCallback((conversationId: string, safetyNumber: string) => {
+      setNumbersByConv((prev) => ({ ...prev, [conversationId]: safetyNumber }));
+    }, []),
   });
 
   const { selectedConversation, isDirect, selectedIsLive, currentNumber, verified, isLive } =
@@ -248,6 +270,14 @@ export default function ChatScreen() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // When a peer key-change is detected for the currently-selected conversation, open the Verify panel
+  // automatically so the user sees the warning without having to click Verify manually.
+  useEffect(() => {
+    if (peerKeyChangedConvId !== null && peerKeyChangedConvId === selectedId) {
+      setVerifyOpen(true);
+    }
+  }, [peerKeyChangedConvId, selectedId]);
 
   useEffect(() => {
     return () => {
@@ -326,6 +356,38 @@ export default function ChatScreen() {
     setVerifiedByConv((prev) => ({ ...prev, [session.conversationId]: session.safetyNumber }));
     setSelectedId(session.conversationId);
     setStartOpen(false);
+    // Persist the verified safety-number set keyed by peerUserId. Computed from the group roster
+    // post-confirm using safetyNumberFromMember for cross-consistency with the joiner path (C2).
+    if (messagingDeps) {
+      const { device, keystore, sessionKey } = messagingDeps;
+      void (async () => {
+        try {
+          const members = session.conversation.members();
+          const selfSigKey = device.publicPackage.leafNode.signaturePublicKey;
+          const selfMember = members.find((m) => {
+            if (m.signaturePublicKey.length !== selfSigKey.length) return false;
+            for (let i = 0; i < selfSigKey.length; i++) {
+              if (m.signaturePublicKey[i] !== selfSigKey[i]) return false;
+            }
+            return true;
+          });
+          if (!selfMember) return;
+          const peerMembers = members.filter((m) => m !== selfMember);
+          if (peerMembers.length === 0) return;
+          const nums: string[] = await Promise.all(
+            peerMembers.map((pm) => safetyNumberFromMember(selfMember, pm)),
+          );
+          const sorted = [...new Set(nums)].sort();
+          await keystore.saveVerifiedPeer(peer.userId, sorted, sessionKey);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            'handleStarted: could not persist verified peer',
+            err instanceof Error ? err.message : err,
+          );
+        }
+      })();
+    }
   };
 
   const handleGroupCreated = (session: GroupConversationSession): void => {
@@ -634,15 +696,56 @@ export default function ChatScreen() {
           }
           safetyNumber={currentNumber}
           verified={verified}
-          onVerifiedChange={(v) =>
+          keyChanged={selectedId !== null && peerKeyChangedConvId === selectedId}
+          onVerifiedChange={(v) => {
             setVerifiedByConv((prev) => {
               const next = { ...prev };
               if (v && selectedId && currentNumber) next[selectedId] = currentNumber;
               else if (selectedId) delete next[selectedId];
               return next;
-            })
-          }
-          onClose={() => setVerifyOpen(false)}
+            });
+            // Clear the key-changed flag and persist the full per-member verified set on explicit confirm.
+            if (v && selectedId) setPeerKeyChangedConvId(null);
+            if (v && selectedId && messagingDeps) {
+              const { device, keystore, sessionKey } = messagingDeps;
+              // Use the persisted peerUserId (set on handleStarted / join) — not the participant.id from
+              // the conversation list, which may still be the placeholder when the directory lookup is pending.
+              const peerUserId = loadPersistedPeerMapping(selectedId);
+              const liveGroup = liveGroups.current.get(selectedId);
+              if (peerUserId && liveGroup) {
+                void (async () => {
+                  try {
+                    const members = liveGroup.members();
+                    const selfSigKey = device.publicPackage.leafNode.signaturePublicKey;
+                    const selfMember = members.find((m) => {
+                      if (m.signaturePublicKey.length !== selfSigKey.length) return false;
+                      for (let i = 0; i < selfSigKey.length; i++) {
+                        if (m.signaturePublicKey[i] !== selfSigKey[i]) return false;
+                      }
+                      return true;
+                    });
+                    if (!selfMember) return;
+                    const peerMembers = members.filter((m) => m !== selfMember);
+                    if (peerMembers.length === 0) return;
+                    const nums: string[] = await Promise.all(
+                      peerMembers.map((pm) => safetyNumberFromMember(selfMember, pm)),
+                    );
+                    const sorted = [...new Set(nums)].sort();
+                    await keystore.saveVerifiedPeer(peerUserId, sorted, sessionKey);
+                  } catch (err) {
+                    // eslint-disable-next-line no-console
+                    console.warn(
+                      'could not persist verified peer',
+                      err instanceof Error ? err.message : err,
+                    );
+                  }
+                })();
+              }
+            }
+          }}
+          onClose={() => {
+            setVerifyOpen(false);
+          }}
         />
       )}
     </div>
