@@ -1,23 +1,20 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import {
-  ConversationList,
-  acceptedFriendsFromConversations,
-  addPendingFriendRequest,
-  filterAcceptedFriends,
-} from './ConversationList';
+import { ConversationList } from './ConversationList';
 import {
   conversations as seedConversations,
   currentUser,
   type Conversation,
   type User,
 } from './seed';
+import type { Friend } from '../../lib/api';
 
 function renderConversationList(options?: {
   conversations?: Conversation[];
   currentUserProfile?: User;
   updateReady?: boolean;
+  friends?: Friend[];
 }): string {
   return renderToStaticMarkup(
     createElement(ConversationList, {
@@ -27,6 +24,7 @@ function renderConversationList(options?: {
       onSelect: () => undefined,
       updateReady: options?.updateReady,
       onApplyUpdate: () => undefined,
+      friends: options?.friends,
     }),
   );
 }
@@ -45,33 +43,33 @@ describe('ConversationList', () => {
     expect(html).toContain('accepted');
   });
 
-  it('uses the current profile id when deriving the accepted friend count', () => {
-    const liveSelf: User = { id: 'live-self', name: 'Live Self', avatar: '' };
-    const peerOne: User = { id: 'peer-one', name: 'Peer One', avatar: '' };
-    const peerTwo: User = { id: 'peer-two', name: 'Peer Two', avatar: '' };
-    const liveConversations: Conversation[] = [
+  it('shows the accepted-friend count from the friends prop', () => {
+    const stubFriends: Friend[] = [
       {
-        id: 'live-conv-1',
-        type: 'direct',
-        participants: [liveSelf, peerOne],
-        messages: [],
-        unreadCount: 0,
+        userId: 'peer-one',
+        argusId: 'argus-peer-one',
+        displayName: 'Peer One',
+        avatarSeed: null,
+        since: new Date().toISOString(),
       },
       {
-        id: 'live-conv-2',
-        type: 'direct',
-        participants: [liveSelf, peerTwo],
-        messages: [],
-        unreadCount: 0,
+        userId: 'peer-two',
+        argusId: 'argus-peer-two',
+        displayName: 'Peer Two',
+        avatarSeed: null,
+        since: new Date().toISOString(),
       },
     ];
 
-    const html = renderConversationList({
-      conversations: liveConversations,
-      currentUserProfile: liveSelf,
-    });
+    const html = renderConversationList({ friends: stubFriends });
 
     expect(html).toContain('2 accepted');
+  });
+
+  it('shows 0 accepted friends when the friends prop is absent (demo / unauthenticated)', () => {
+    const html = renderConversationList({ friends: undefined });
+
+    expect(html).toContain('0 accepted');
   });
 
   it('shows a bottom app update action when a PWA update is ready', () => {
@@ -81,34 +79,5 @@ describe('ConversationList', () => {
     expect(html).toContain('aria-live="polite"');
     expect(html).toContain('Update Argus');
     expect(html).toContain('Update');
-  });
-
-  it('derives accepted friends from direct conversations only', () => {
-    const friends = acceptedFriendsFromConversations(seedConversations, currentUser.id);
-    const names = friends.map((friend) => friend.user.name);
-
-    expect(names).toContain('Sarah Chen');
-    expect(names).toContain('Emily Davis');
-    expect(names).not.toContain('Marcus Johnson');
-    expect(names).not.toContain('Alex Rivera');
-  });
-
-  it('filters accepted friends by display name and argus id', () => {
-    const friends = acceptedFriendsFromConversations(seedConversations, currentUser.id);
-
-    expect(filterAcceptedFriends(friends, 'sarah')).toHaveLength(1);
-    expect(filterAcceptedFriends(friends, 'argus-bbbbbbbbbbbbbbbb-sarah')).toHaveLength(1);
-    expect(filterAcceptedFriends(friends, 'not-a-friend')).toHaveLength(0);
-  });
-
-  it('mock-sends a pending friend request without adding duplicates or existing friends', () => {
-    const friends = acceptedFriendsFromConversations(seedConversations, currentUser.id);
-    const first = addPendingFriendRequest([], 'argus-hhhhhhhhhhhhhhhh-new', friends);
-    const duplicate = addPendingFriendRequest(first, 'ARGUS-HHHHHHHHHHHHHHHH-NEW', friends);
-    const existing = addPendingFriendRequest(duplicate, 'Sarah Chen', friends);
-
-    expect(first).toEqual([{ argusId: 'argus-hhhhhhhhhhhhhhhh-new' }]);
-    expect(duplicate).toEqual(first);
-    expect(existing).toEqual(first);
   });
 });
