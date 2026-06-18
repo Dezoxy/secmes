@@ -8382,6 +8382,70 @@
         ],
         "additionalProperties": false
       },
+      "ExportFriendshipDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "maxLength": 36
+          },
+          "otherUserId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "the other party in the friendship/request",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "maxLength": 36
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "accepted"
+            ]
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "incoming",
+              "outgoing"
+            ],
+            "nullable": true,
+            "description": "set for pending requests only (null once accepted)"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          },
+          "resolvedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "id",
+          "otherUserId",
+          "status",
+          "direction",
+          "createdAt",
+          "resolvedAt",
+          "expiresAt"
+        ],
+        "additionalProperties": false
+      },
       "MeExportDto": {
         "type": "object",
         "properties": {
@@ -8508,6 +8572,13 @@
               "$ref": "#/components/schemas/ExportInviteDto"
             },
             "maxItems": 1000
+          },
+          "friendships": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExportFriendshipDto"
+            },
+            "maxItems": 1000
           }
         },
         "required": [
@@ -8520,7 +8591,8 @@
           "attachments",
           "pushSubscriptions",
           "auditEvents",
-          "invitesCreated"
+          "invitesCreated",
+          "friendships"
         ],
         "additionalProperties": false
       },
