@@ -12,7 +12,8 @@ export const CreateConversationSchema = z
     memberUserIds: z.array(z.string().uuid()).min(1).max(256),
     // Explicit classification so the server does not infer it from the initial solo member list
     // (groups start as solo rows before members join, which would make them appear as isDirect=true).
-    isDirect: z.boolean(),
+    // Optional with default=false so stale PWA bundles that omit the field keep working after deploy.
+    isDirect: z.boolean().optional().default(false),
   })
   .strict();
 export type CreateConversation = z.infer<typeof CreateConversationSchema>;

@@ -20,15 +20,19 @@ describe('CreateConversationSchema', () => {
       CreateConversationSchema.safeParse({ memberUserIds: [uuid], isDirect: false }).success,
     ).toBe(true);
   });
-  it('rejects an empty list, a non-uuid, missing isDirect, and unknown keys', () => {
+  it('rejects an empty list, a non-uuid, and unknown keys', () => {
     expect(CreateConversationSchema.safeParse({ memberUserIds: [] }).success).toBe(false);
     expect(
       CreateConversationSchema.safeParse({ memberUserIds: ['nope'], isDirect: true }).success,
     ).toBe(false);
-    expect(CreateConversationSchema.safeParse({ memberUserIds: [uuid] }).success).toBe(false); // missing isDirect
     expect(
       CreateConversationSchema.safeParse({ memberUserIds: [uuid], isDirect: true, x: 1 }).success,
     ).toBe(false);
+  });
+  it('accepts missing isDirect (stale clients default to false)', () => {
+    const result = CreateConversationSchema.safeParse({ memberUserIds: [uuid] });
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.isDirect).toBe(false);
   });
 });
 
