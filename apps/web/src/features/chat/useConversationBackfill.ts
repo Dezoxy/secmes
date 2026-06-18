@@ -39,6 +39,8 @@ interface HistoryRehydrationOptions {
   selfUserId: string | undefined;
   addLive: (conversationId: string, conversation: MlsGroup) => void;
   setConversations: Dispatch<SetStateAction<Conversation[]>>;
+  /** Called for each rehydrated conversation that has a stored verified-peer record — restores badge. */
+  onPeerVerified?: (conversationId: string, safetyNumber: string) => void;
 }
 
 interface ConversationBackfillResult {
@@ -248,6 +250,7 @@ export function useConversationHistoryRehydration({
   selfUserId,
   addLive,
   setConversations,
+  onPeerVerified,
 }: HistoryRehydrationOptions): void {
   const rehydratedRef = useRef(false);
 
@@ -305,13 +308,33 @@ export function useConversationHistoryRehydration({
               }
             }
           })();
+          // Restore verified badge: if we have a stored verified-peer record for this conversation,
+          // fire onPeerVerified so the badge reappears on reload without waiting for a new Welcome.
+          if (persistedPeerId && onPeerVerified) {
+            void keystore
+              .loadVerifiedPeer(persistedPeerId, sKey)
+              .then((verifiedNumbers) => {
+                if (verifiedNumbers !== null && verifiedNumbers.length > 0) {
+                  onPeerVerified(conversationId, verifiedNumbers[0]!);
+                }
+              })
+              .catch(() => {});
+          }
         }
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('rehydrate conversations failed', err instanceof Error ? err.message : err);
       }
     })();
-  }, [addLive, currentUserProfile, messagingDeps, selfUserId, sessionKey, setConversations]);
+  }, [
+    addLive,
+    currentUserProfile,
+    messagingDeps,
+    onPeerVerified,
+    selfUserId,
+    sessionKey,
+    setConversations,
+  ]);
 }
 
 /**
@@ -348,6 +371,7 @@ export function buildRosterPlaceholders(
         {
           id: peer.userId,
           name: peer.displayName?.trim() || peer.argusId,
+          argusId: peer.argusId,
           avatar: dicebearAvatar(peer.userId),
         },
       ],

@@ -333,6 +333,7 @@ export default function ChatScreen() {
     const peerUser: User = {
       id: peer.userId,
       name,
+      argusId: peer.argusId,
       avatar: dicebearAvatar(peer.userId),
       // No isOnline: presence is unknown for live peers — never claim Offline (see seed.ts User).
     };
@@ -372,7 +373,7 @@ export default function ChatScreen() {
             return true;
           });
           if (!selfMember) return;
-          const peerMembers = members.filter((m) => m !== selfMember);
+          const peerMembers = members.filter((m) => m.identity !== selfMember!.identity);
           if (peerMembers.length === 0) return;
           const nums: string[] = await Promise.all(
             peerMembers.map((pm) => safetyNumberFromMember(selfMember, pm)),
@@ -434,6 +435,10 @@ export default function ChatScreen() {
     selfUserId: profile?.userId,
     addLive,
     setConversations,
+    onPeerVerified: (conversationId, safetyNumber) => {
+      setVerifiedByConv((prev) => ({ ...prev, [conversationId]: safetyNumber }));
+      setNumbersByConv((prev) => ({ ...prev, [conversationId]: safetyNumber }));
+    },
   });
 
   useRosterRecovery({
@@ -666,6 +671,7 @@ export default function ChatScreen() {
                     .map((u) => ({
                       id: u.userId,
                       name: contactDisplayName(u),
+                      argusId: u.argusId,
                       avatar: dicebearAvatar(u.userId),
                     }));
                   return fresh.length === 0
@@ -706,40 +712,50 @@ export default function ChatScreen() {
             });
             // Clear the key-changed flag and persist the full per-member verified set on explicit confirm.
             if (v && selectedId) setPeerKeyChangedConvId(null);
-            if (v && selectedId && messagingDeps) {
+            if (selectedId && messagingDeps) {
               const { device, keystore, sessionKey } = messagingDeps;
-              // Use the persisted peerUserId (set on handleStarted / join) — not the participant.id from
-              // the conversation list, which may still be the placeholder when the directory lookup is pending.
               const peerUserId = loadPersistedPeerMapping(selectedId);
-              const liveGroup = liveGroups.current.get(selectedId);
-              if (peerUserId && liveGroup) {
-                void (async () => {
-                  try {
-                    const members = liveGroup.members();
-                    const selfSigKey = device.publicPackage.leafNode.signaturePublicKey;
-                    const selfMember = members.find((m) => {
-                      if (m.signaturePublicKey.length !== selfSigKey.length) return false;
-                      for (let i = 0; i < selfSigKey.length; i++) {
-                        if (m.signaturePublicKey[i] !== selfSigKey[i]) return false;
+              if (peerUserId) {
+                if (!v) {
+                  // User explicitly unverified — remove the persisted record so a later reload does not
+                  // silently restore the verified badge via loadVerifiedPeer.
+                  void keystore.deleteVerifiedPeer(peerUserId);
+                } else {
+                  // Use the persisted peerUserId (set on handleStarted / join) — not the participant.id from
+                  // the conversation list, which may still be the placeholder when the directory lookup is pending.
+                  const liveGroup = liveGroups.current.get(selectedId);
+                  if (liveGroup) {
+                    void (async () => {
+                      try {
+                        const members = liveGroup.members();
+                        const selfSigKey = device.publicPackage.leafNode.signaturePublicKey;
+                        const selfMember = members.find((m) => {
+                          if (m.signaturePublicKey.length !== selfSigKey.length) return false;
+                          for (let i = 0; i < selfSigKey.length; i++) {
+                            if (m.signaturePublicKey[i] !== selfSigKey[i]) return false;
+                          }
+                          return true;
+                        });
+                        if (!selfMember) return;
+                        const peerMembers = members.filter(
+                          (m) => m.identity !== selfMember!.identity,
+                        );
+                        if (peerMembers.length === 0) return;
+                        const nums: string[] = await Promise.all(
+                          peerMembers.map((pm) => safetyNumberFromMember(selfMember, pm)),
+                        );
+                        const sorted = [...new Set(nums)].sort();
+                        await keystore.saveVerifiedPeer(peerUserId, sorted, sessionKey);
+                      } catch (err) {
+                        // eslint-disable-next-line no-console
+                        console.warn(
+                          'could not persist verified peer',
+                          err instanceof Error ? err.message : err,
+                        );
                       }
-                      return true;
-                    });
-                    if (!selfMember) return;
-                    const peerMembers = members.filter((m) => m !== selfMember);
-                    if (peerMembers.length === 0) return;
-                    const nums: string[] = await Promise.all(
-                      peerMembers.map((pm) => safetyNumberFromMember(selfMember, pm)),
-                    );
-                    const sorted = [...new Set(nums)].sort();
-                    await keystore.saveVerifiedPeer(peerUserId, sorted, sessionKey);
-                  } catch (err) {
-                    // eslint-disable-next-line no-console
-                    console.warn(
-                      'could not persist verified peer',
-                      err instanceof Error ? err.message : err,
-                    );
+                    })();
                   }
-                })();
+                }
               }
             }
           }}

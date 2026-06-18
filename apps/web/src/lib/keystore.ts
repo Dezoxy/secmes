@@ -974,6 +974,10 @@ export class DeviceKeystore {
     );
   }
 
+  async deleteVerifiedPeer(peerUserId: string): Promise<void> {
+    await this.db.delete(VERIFIED_PEERS_STORE, peerUserId);
+  }
+
   private async unseal(
     stored: StoredDevice,
     identity: string,

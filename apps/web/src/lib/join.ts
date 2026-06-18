@@ -150,7 +150,10 @@ export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
             }
             return true;
           });
-          const peerMembers = members.filter((m) => m !== selfMember);
+          // Filter by identity string, not object reference: if the user has multiple enrolled
+          // devices they all share the same credential identity, so object-identity would incorrectly
+          // include own secondary devices in the peer key set and trigger false key-changed warnings.
+          const peerMembers = members.filter((m) => m.identity !== selfMember!.identity);
           let peerSafetyNumbers: string[] | null = null;
           if (selfMember && peerMembers.length > 0) {
             const nums: string[] = await Promise.all(
