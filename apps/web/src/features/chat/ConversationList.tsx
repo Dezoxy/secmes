@@ -126,8 +126,8 @@ export function ConversationList({
   const searchTouchStartY = useRef<number | null>(null);
   const sidebarTouchStartY = useRef<number | null>(null);
   const acceptedFriends = useMemo(
-    () => acceptedFriendsFromConversations(conversations),
-    [conversations],
+    () => acceptedFriendsFromConversations(conversations, currentUserProfile.id),
+    [conversations, currentUserProfile.id],
   );
   const filteredFriends = useMemo(
     () => filterAcceptedFriends(acceptedFriends, friendQuery),

@@ -7,13 +7,22 @@ import {
   addPendingFriendRequest,
   filterAcceptedFriends,
 } from './ConversationList';
-import { conversations, currentUser } from './seed';
+import {
+  conversations as seedConversations,
+  currentUser,
+  type Conversation,
+  type User,
+} from './seed';
 
-function renderConversationList(options?: { updateReady?: boolean }): string {
+function renderConversationList(options?: {
+  conversations?: Conversation[];
+  currentUserProfile?: User;
+  updateReady?: boolean;
+}): string {
   return renderToStaticMarkup(
     createElement(ConversationList, {
-      conversations: conversations.slice(0, 1),
-      currentUserProfile: currentUser,
+      conversations: options?.conversations ?? seedConversations.slice(0, 1),
+      currentUserProfile: options?.currentUserProfile ?? currentUser,
       selectedId: 'conv-1',
       onSelect: () => undefined,
       updateReady: options?.updateReady,
@@ -36,6 +45,35 @@ describe('ConversationList', () => {
     expect(html).toContain('accepted');
   });
 
+  it('uses the current profile id when deriving the accepted friend count', () => {
+    const liveSelf: User = { id: 'live-self', name: 'Live Self', avatar: '' };
+    const peerOne: User = { id: 'peer-one', name: 'Peer One', avatar: '' };
+    const peerTwo: User = { id: 'peer-two', name: 'Peer Two', avatar: '' };
+    const liveConversations: Conversation[] = [
+      {
+        id: 'live-conv-1',
+        type: 'direct',
+        participants: [liveSelf, peerOne],
+        messages: [],
+        unreadCount: 0,
+      },
+      {
+        id: 'live-conv-2',
+        type: 'direct',
+        participants: [liveSelf, peerTwo],
+        messages: [],
+        unreadCount: 0,
+      },
+    ];
+
+    const html = renderConversationList({
+      conversations: liveConversations,
+      currentUserProfile: liveSelf,
+    });
+
+    expect(html).toContain('2 accepted');
+  });
+
   it('shows a bottom app update action when a PWA update is ready', () => {
     const html = renderConversationList({ updateReady: true });
 
@@ -46,7 +84,7 @@ describe('ConversationList', () => {
   });
 
   it('derives accepted friends from direct conversations only', () => {
-    const friends = acceptedFriendsFromConversations(conversations, currentUser.id);
+    const friends = acceptedFriendsFromConversations(seedConversations, currentUser.id);
     const names = friends.map((friend) => friend.user.name);
 
     expect(names).toContain('Sarah Chen');
@@ -56,7 +94,7 @@ describe('ConversationList', () => {
   });
 
   it('filters accepted friends by display name and argus id', () => {
-    const friends = acceptedFriendsFromConversations(conversations, currentUser.id);
+    const friends = acceptedFriendsFromConversations(seedConversations, currentUser.id);
 
     expect(filterAcceptedFriends(friends, 'sarah')).toHaveLength(1);
     expect(filterAcceptedFriends(friends, 'argus-bbbbbbbbbbbbbbbb-sarah')).toHaveLength(1);
@@ -64,7 +102,7 @@ describe('ConversationList', () => {
   });
 
   it('mock-sends a pending friend request without adding duplicates or existing friends', () => {
-    const friends = acceptedFriendsFromConversations(conversations, currentUser.id);
+    const friends = acceptedFriendsFromConversations(seedConversations, currentUser.id);
     const first = addPendingFriendRequest([], 'argus-hhhhhhhhhhhhhhhh-new', friends);
     const duplicate = addPendingFriendRequest(first, 'ARGUS-HHHHHHHHHHHHHHHH-NEW', friends);
     const existing = addPendingFriendRequest(duplicate, 'Sarah Chen', friends);
