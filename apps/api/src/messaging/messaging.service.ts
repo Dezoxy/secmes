@@ -190,7 +190,11 @@ export class MessagingService {
 
       const [conv] = await tx
         .insert(schema.conversations)
-        .values({ tenantId: auth.tenantId, createdBy: creator })
+        .values({
+          tenantId: auth.tenantId,
+          createdBy: creator,
+          isDirect: memberUserIds.length === 1,
+        })
         .returning({ id: schema.conversations.id });
       if (!conv) throw new Error('conversation insert returned no row');
 

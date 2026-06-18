@@ -418,17 +418,26 @@ export class DevicesService {
   }
 
   /**
-   * Return the caller's conversation IDs. Used by D1 after approving D2 to compute the fan-out
-   * diff — which conversations D1 must issue add-commits for. METADATA ONLY: IDs, no content.
+   * Return the caller's conversations with type metadata. Used by D1 for the enrollment fan-out
+   * diff and by the client for roster recovery after reinstall. METADATA ONLY: no content.
    */
-  async listMyConversations(auth: VerifiedAuth): Promise<string[]> {
+  async listMyConversations(
+    auth: VerifiedAuth,
+  ): Promise<Array<{ conversationId: string; isDirect: boolean | null; createdAt: Date }>> {
     return withTenant(auth.tenantId, async (tx) => {
       const userId = await requireUser(tx, auth);
-      const rows = await tx
-        .select({ conversationId: schema.conversationMembers.conversationId })
+      return tx
+        .select({
+          conversationId: schema.conversationMembers.conversationId,
+          isDirect: schema.conversations.isDirect,
+          createdAt: schema.conversations.createdAt,
+        })
         .from(schema.conversationMembers)
+        .innerJoin(
+          schema.conversations,
+          eq(schema.conversationMembers.conversationId, schema.conversations.id),
+        )
         .where(eq(schema.conversationMembers.userId, userId));
-      return rows.map((r) => r.conversationId);
     });
   }
 }

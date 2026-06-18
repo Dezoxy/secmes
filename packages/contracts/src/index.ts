@@ -368,7 +368,16 @@ export const EnrollmentSchema = z
   .strip();
 export type Enrollment = z.infer<typeof EnrollmentSchema>;
 
-export const ConversationListSchema = z.object({ conversationIds: z.array(z.string().uuid()) });
+export const ConversationSummarySchema = z.object({
+  id: z.string().uuid(),
+  isDirect: z.boolean().nullable(),
+  createdAt: z.string(),
+});
+export type ConversationSummary = z.infer<typeof ConversationSummarySchema>;
+
+export const ConversationListSchema = z.object({
+  conversations: z.array(ConversationSummarySchema),
+});
 export type ConversationList = z.infer<typeof ConversationListSchema>;
 
 export const WithdrawDeviceBodySchema = z

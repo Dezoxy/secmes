@@ -27,6 +27,7 @@ import { VerifySecurity } from './VerifySecurity';
 import {
   useConversationBackfill,
   useConversationHistoryRehydration,
+  useRosterRecovery,
   useSelectedConversationBackfill,
 } from './useConversationBackfill';
 import { useChatState } from './useChatState';
@@ -366,6 +367,14 @@ export default function ChatScreen() {
     currentUserProfile,
     selfUserId: profile?.userId,
     addLive,
+    setConversations,
+  });
+
+  useRosterRecovery({
+    messagingDeps,
+    sessionKey,
+    currentUserProfile,
+    selfUserId: profile?.userId,
     setConversations,
   });
 

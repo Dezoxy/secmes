@@ -2,14 +2,16 @@ import { describe, expect, it } from 'vitest';
 import type { StoredMessage } from '../../lib/keystore';
 import type { AttachmentRef } from '../../lib/message-envelope';
 import type { DecryptedMessage } from '../../lib/messaging';
-import type { Conversation, Message } from './seed';
+import type { Conversation, Message, User } from './seed';
 import {
+  buildRosterPlaceholders,
   decryptedToMessage,
   decryptedToStoredMessage,
   mergeIncomingMessages,
   refToUiAttachment,
   storedToMessage,
 } from './useConversationBackfill';
+import { prependConversationIfMissing } from './useLiveConversations';
 
 const imageRef: AttachmentRef = {
   objectKey: 'tenant/conv/image',
@@ -174,5 +176,141 @@ describe('conversation backfill helpers', () => {
 
     expect(next[0]).toBe(selectedConversation);
     expect(next[1]).toBe(otherConversation);
+  });
+});
+
+// ── prependConversationIfMissing ────────────────────────────────────────────
+
+describe('prependConversationIfMissing', () => {
+  const conv: Conversation = {
+    id: 'conv-a',
+    type: 'direct',
+    participants: [],
+    messages: [],
+    unreadCount: 0,
+  };
+
+  it('prepends when the id is absent', () => {
+    const result = prependConversationIfMissing([], conv);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toBe(conv);
+  });
+
+  it('is a no-op when the id already exists', () => {
+    const existing = [conv];
+    const other: Conversation = { ...conv, id: 'conv-b' };
+    const result = prependConversationIfMissing(existing, other);
+    // other has a different id — should prepend
+    expect(result).toHaveLength(2);
+    expect(result[0]).toBe(other);
+
+    // same id — no-op
+    const noop = prependConversationIfMissing(existing, { ...conv, messages: [baseMessage] });
+    expect(noop).toBe(existing); // reference-stable
+  });
+});
+
+// ── buildRosterPlaceholders ────────────────────────────────────────────────
+
+const selfProfile: User = { id: 'self-id', name: 'Me', avatar: '' };
+
+function makeConv(id: string, isDirect: boolean | null, createdAt: string) {
+  return { id, isDirect, createdAt };
+}
+
+function makeMembers(convId: string, peerUserId: string, peerId2?: string) {
+  const members = [
+    { userId: 'self-id', argusId: 'me@argus', displayName: 'Me' },
+    { userId: peerUserId, argusId: `${peerUserId}@argus`, displayName: peerUserId },
+  ];
+  if (peerId2) members.push({ userId: peerId2, argusId: `${peerId2}@argus`, displayName: peerId2 });
+  const map = new Map<
+    string,
+    Array<{ userId: string; argusId: string; displayName: string | null }>
+  >();
+  map.set(convId, members);
+  return map;
+}
+
+describe('buildRosterPlaceholders', () => {
+  it('returns one placeholder per direct conversation', () => {
+    const convs = [makeConv('conv-1', true, '2026-01-01T00:00:00Z')];
+    const members = makeMembers('conv-1', 'peer-a');
+    const result = buildRosterPlaceholders(convs, members, 'self-id', selfProfile);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ id: 'conv-1', type: 'direct' });
+    expect(result[0]?.participants[1]).toMatchObject({ id: 'peer-a' });
+  });
+
+  it('excludes isDirect=false and isDirect=null rows', () => {
+    const convs = [
+      makeConv('conv-group', false, '2026-01-02T00:00:00Z'),
+      makeConv('conv-unknown', null, '2026-01-01T00:00:00Z'),
+    ];
+    const members = new Map<
+      string,
+      Array<{ userId: string; argusId: string; displayName: string | null }>
+    >();
+    const result = buildRosterPlaceholders(convs, members, 'self-id', selfProfile);
+    expect(result).toHaveLength(0);
+  });
+
+  it('deduplicates by peer userId keeping the most-recent conversation', () => {
+    const convs = [
+      makeConv('conv-older', true, '2025-06-01T00:00:00Z'),
+      makeConv('conv-newer', true, '2026-06-01T00:00:00Z'),
+    ];
+    // Both have the same peer
+    const members = new Map<
+      string,
+      Array<{ userId: string; argusId: string; displayName: string | null }>
+    >();
+    members.set('conv-older', [
+      { userId: 'self-id', argusId: 'me@argus', displayName: 'Me' },
+      { userId: 'peer-x', argusId: 'peer-x@argus', displayName: 'Peer X' },
+    ]);
+    members.set('conv-newer', [
+      { userId: 'self-id', argusId: 'me@argus', displayName: 'Me' },
+      { userId: 'peer-x', argusId: 'peer-x@argus', displayName: 'Peer X' },
+    ]);
+    const result = buildRosterPlaceholders(convs, members, 'self-id', selfProfile);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe('conv-newer');
+  });
+
+  it('excludes the calling user from peer selection', () => {
+    const convs = [makeConv('conv-1', true, '2026-01-01T00:00:00Z')];
+    const members = new Map<
+      string,
+      Array<{ userId: string; argusId: string; displayName: string | null }>
+    >();
+    members.set('conv-1', [
+      { userId: 'self-id', argusId: 'me@argus', displayName: 'Me' },
+      { userId: 'peer-b', argusId: 'peer-b@argus', displayName: 'Bob' },
+    ]);
+    const result = buildRosterPlaceholders(convs, members, 'self-id', selfProfile);
+    expect(result[0]?.participants[1]).toMatchObject({ id: 'peer-b', name: 'Bob' });
+  });
+
+  it('falls back to argusId when displayName is null', () => {
+    const convs = [makeConv('conv-1', true, '2026-01-01T00:00:00Z')];
+    const members = new Map<
+      string,
+      Array<{ userId: string; argusId: string; displayName: string | null }>
+    >();
+    members.set('conv-1', [
+      { userId: 'self-id', argusId: 'me@argus', displayName: 'Me' },
+      { userId: 'peer-c', argusId: 'handle@argus', displayName: null },
+    ]);
+    const result = buildRosterPlaceholders(convs, members, 'self-id', selfProfile);
+    expect(result[0]?.participants[1]).toMatchObject({ id: 'peer-c', name: 'handle@argus' });
+  });
+
+  it('produces empty messages array for each placeholder', () => {
+    const convs = [makeConv('conv-1', true, '2026-01-01T00:00:00Z')];
+    const members = makeMembers('conv-1', 'peer-a');
+    const [placeholder] = buildRosterPlaceholders(convs, members, 'self-id', selfProfile);
+    expect(placeholder?.messages).toEqual([]);
+    expect(placeholder?.unreadCount).toBe(0);
   });
 });
