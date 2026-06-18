@@ -7,6 +7,7 @@ import {
   buildRosterPlaceholders,
   decryptedToMessage,
   decryptedToStoredMessage,
+  filterNewPlaceholders,
   mergeIncomingMessages,
   refToUiAttachment,
   storedToMessage,
@@ -377,5 +378,72 @@ describe('buildRosterPlaceholders', () => {
     ]);
     const results = buildRosterPlaceholders(convs, members, 'self-id', selfProfile);
     expect(results.map((r) => r.id)).toEqual(['conv-new', 'conv-mid', 'conv-old']);
+  });
+});
+
+// ── filterNewPlaceholders ──────────────────────────────────────────────────
+
+function makePlaceholder(id: string, peerId: string): Conversation {
+  return {
+    id,
+    type: 'direct',
+    recoveredFromServer: true,
+    participants: [selfProfile, { id: peerId, name: peerId, avatar: '' }],
+    messages: [],
+    unreadCount: 0,
+  };
+}
+
+describe('filterNewPlaceholders', () => {
+  it('keeps placeholders whose conversation id and peer id are both new', () => {
+    const result = filterNewPlaceholders([], [makePlaceholder('conv-1', 'peer-a')]);
+    expect(result).toHaveLength(1);
+  });
+
+  it('drops a placeholder whose conversation id is already in the list', () => {
+    const existing: Conversation = makePlaceholder('conv-1', 'peer-a');
+    const result = filterNewPlaceholders([existing], [makePlaceholder('conv-1', 'peer-a')]);
+    expect(result).toHaveLength(0);
+  });
+
+  it('drops a placeholder whose peer id is already in a live direct conversation (different conv id)', () => {
+    // Keystore has conv-A with peer-a (live). Server roster returns conv-B (newer) for same peer.
+    const liveConv: Conversation = {
+      id: 'conv-a',
+      type: 'direct',
+      participants: [selfProfile, { id: 'peer-a', name: 'Peer A', avatar: '' }],
+      messages: [],
+      unreadCount: 0,
+    };
+    const result = filterNewPlaceholders([liveConv], [makePlaceholder('conv-b', 'peer-a')]);
+    expect(result).toHaveLength(0);
+  });
+
+  it('keeps placeholders for peers not yet represented, drops duplicates', () => {
+    const liveConv: Conversation = {
+      id: 'conv-a',
+      type: 'direct',
+      participants: [selfProfile, { id: 'peer-a', name: 'Peer A', avatar: '' }],
+      messages: [],
+      unreadCount: 0,
+    };
+    const result = filterNewPlaceholders(
+      [liveConv],
+      [makePlaceholder('conv-b', 'peer-a'), makePlaceholder('conv-c', 'peer-b')],
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe('conv-c');
+  });
+
+  it('does not filter against group conversations (peer id check is direct-only)', () => {
+    const groupConv: Conversation = {
+      id: 'conv-group',
+      type: 'group',
+      participants: [selfProfile, { id: 'peer-a', name: 'Peer A', avatar: '' }],
+      messages: [],
+      unreadCount: 0,
+    };
+    const result = filterNewPlaceholders([groupConv], [makePlaceholder('conv-1', 'peer-a')]);
+    expect(result).toHaveLength(1);
   });
 });

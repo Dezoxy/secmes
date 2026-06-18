@@ -354,6 +354,29 @@ export function buildRosterPlaceholders(
   return result;
 }
 
+/**
+ * From a fresh roster-recovery batch, return only the placeholders that are not already
+ * represented in `conversations` — either by conversation id or by peer user id. Exported
+ * for unit testing.
+ */
+export function filterNewPlaceholders(
+  conversations: Conversation[],
+  placeholders: Conversation[],
+): Conversation[] {
+  const existingIds = new Set(conversations.map((c) => c.id));
+  // Exclude placeholders whose peer is already in an existing direct conversation
+  // (covers the case where the keystore has conv-A with User B and the server roster
+  // returns a newer conv-B — also with User B — created by tap-to-resume).
+  const existingPeerIds = new Set(
+    conversations
+      .filter((c) => c.type === 'direct' && c.participants.length >= 2)
+      .map((c) => c.participants[1]!.id),
+  );
+  return placeholders.filter(
+    (p) => !existingIds.has(p.id) && !existingPeerIds.has(p.participants[1]!.id),
+  );
+}
+
 interface RosterRecoveryOptions {
   messagingDeps: MessagingDeps | null;
   sessionKey: CryptoKey | null;
@@ -406,8 +429,7 @@ export function useRosterRecovery({
         // Batch-prepend to preserve the newest-first order from buildRosterPlaceholders.
         // Per-item prepends would reverse the batch because each prepend inserts at the front.
         setConversations((prev) => {
-          const existingIds = new Set(prev.map((c) => c.id));
-          const toAdd = placeholders.filter((p) => !existingIds.has(p.id));
+          const toAdd = filterNewPlaceholders(prev, placeholders);
           return toAdd.length > 0 ? [...toAdd, ...prev] : prev;
         });
       } catch (err) {
