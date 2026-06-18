@@ -349,4 +349,33 @@ describe('buildRosterPlaceholders', () => {
     expect(placeholder?.messages).toEqual([]);
     expect(placeholder?.unreadCount).toBe(0);
   });
+
+  it('sets recoveredFromServer on every placeholder', () => {
+    const convs = [
+      makeConv('conv-1', true, '2026-01-02T00:00:00Z'),
+      makeConv('conv-2', true, '2026-01-01T00:00:00Z'),
+    ];
+    const members = new Map([
+      ...makeMembers('conv-1', 'peer-a'),
+      ...makeMembers('conv-2', 'peer-b'),
+    ]);
+    const results = buildRosterPlaceholders(convs, members, 'self-id', selfProfile);
+    expect(results).toHaveLength(2);
+    for (const p of results) expect(p.recoveredFromServer).toBe(true);
+  });
+
+  it('returns placeholders newest-first so batch-prepend preserves sidebar order', () => {
+    const convs = [
+      makeConv('conv-old', true, '2026-01-01T00:00:00Z'),
+      makeConv('conv-new', true, '2026-01-03T00:00:00Z'),
+      makeConv('conv-mid', true, '2026-01-02T00:00:00Z'),
+    ];
+    const members = new Map([
+      ...makeMembers('conv-old', 'peer-a'),
+      ...makeMembers('conv-new', 'peer-b'),
+      ...makeMembers('conv-mid', 'peer-c'),
+    ]);
+    const results = buildRosterPlaceholders(convs, members, 'self-id', selfProfile);
+    expect(results.map((r) => r.id)).toEqual(['conv-new', 'conv-mid', 'conv-old']);
+  });
 });

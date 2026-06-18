@@ -62,6 +62,9 @@ export type Conversation = {
   unreadCount: number;
   /** The userId of the member who created this group (live only; absent for seed/demo conversations). */
   creatorId?: string;
+  /** True for read-only placeholders from roster recovery (no keystore state). Suppresses safety-number
+   * computation and verification until the conversation is resumed via tap-to-resume (PR 4). */
+  recoveredFromServer?: true;
 };
 
 function hueFromString(s: string): number {

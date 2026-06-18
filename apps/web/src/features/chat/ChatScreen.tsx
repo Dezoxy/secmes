@@ -386,7 +386,8 @@ export default function ChatScreen() {
   // LIVE conversations are skipped — a started one already holds its REAL number, and none should spin up a
   // loopback session (which would compute the wrong, local number).
   useEffect(() => {
-    if (!selectedId || !isDirect || selectedIsLive) return;
+    if (!selectedId || !isDirect || selectedIsLive || selectedConversation?.recoveredFromServer)
+      return;
     void getMlsSession(selectedId)
       .then((s) =>
         setNumbersByConv((prev) =>
@@ -510,7 +511,11 @@ export default function ChatScreen() {
                 conversation={selectedConversation}
                 onBack={handleBackToConversations}
                 verified={verified}
-                onVerify={isDirect && currentNumber ? () => setVerifyOpen(true) : undefined}
+                onVerify={
+                  isDirect && currentNumber && !selectedConversation.recoveredFromServer
+                    ? () => setVerifyOpen(true)
+                    : undefined
+                }
                 onAddMember={
                   selectedConversation.type === 'group' &&
                   selectedConversation.creatorId === profile?.userId &&

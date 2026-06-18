@@ -10,11 +10,7 @@ import {
 } from '../../lib/messaging';
 import { loadPersistedPeerMapping, resolvePeerUser, withPeerNamed } from './peer-naming';
 import { dicebearAvatar } from '../../lib/dicebear';
-import {
-  liveConversationShell,
-  prependConversationIfMissing,
-  replaceOrPrependConversation,
-} from './useLiveConversations';
+import { liveConversationShell, replaceOrPrependConversation } from './useLiveConversations';
 import type { Attachment, Conversation, Message, User } from './seed';
 
 interface ConversationBackfillOptions {
@@ -342,6 +338,7 @@ export function buildRosterPlaceholders(
     result.push({
       id: conv.id,
       type: 'direct',
+      recoveredFromServer: true,
       participants: [
         selfProfile,
         {
@@ -406,11 +403,13 @@ export function useRosterRecovery({
           selfUserId,
           currentUserProfile,
         );
-        for (const placeholder of placeholders) {
-          // prependConversationIfMissing is a no-op when the id already exists (e.g. rehydrated
-          // from keystore), so live conversations are never replaced by placeholders.
-          setConversations((prev) => prependConversationIfMissing(prev, placeholder));
-        }
+        // Batch-prepend to preserve the newest-first order from buildRosterPlaceholders.
+        // Per-item prepends would reverse the batch because each prepend inserts at the front.
+        setConversations((prev) => {
+          const existingIds = new Set(prev.map((c) => c.id));
+          const toAdd = placeholders.filter((p) => !existingIds.has(p.id));
+          return toAdd.length > 0 ? [...toAdd, ...prev] : prev;
+        });
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn('roster recovery failed', err instanceof Error ? err.message : err);

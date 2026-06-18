@@ -186,6 +186,9 @@ export class MessagingService {
     memberUserIds: string[],
     isDirect: boolean,
   ): Promise<CreatedConversation> {
+    if (isDirect && memberUserIds.length !== 1) {
+      throw new BadRequestException('direct conversation requires exactly one peer');
+    }
     return withTenant(auth.tenantId, async (tx) => {
       const creator = await requireUser(tx, auth);
 

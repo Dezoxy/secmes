@@ -112,6 +112,12 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     );
   });
 
+  it('rejects isDirect=true with more than one peer (400)', async () => {
+    await expect(svc.createConversation(aliceAuth, [bobId, daveId], true)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
   it('a member can send; the stored row is the opaque ciphertext verbatim', async () => {
     const conv = await newConversation();
     const body = msg({ ciphertext: 'b3BhcXVl' });
