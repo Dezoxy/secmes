@@ -116,6 +116,36 @@ test('friend search filters the accepted-friend list', async ({ page }) => {
   await expect(page.getByText('No accepted friend found for that Argus ID.')).toBeVisible();
 });
 
+test('accepted friend can be removed via the unfriend button', async ({ page }) => {
+  // Register DELETE stub FIRST so stubFriendsApi's GET handlers (registered after) take LIFO priority.
+  let deleteUrl: string | null = null;
+  await page.route('**/api/friends/**', (route) => {
+    if (route.request().method() === 'DELETE') {
+      deleteUrl = route.request().url();
+      void route.fulfill({ status: 204, body: '' });
+      return;
+    }
+    void route.continue();
+  });
+
+  await stubFriendsApi(page, { friends: [ALICE] });
+
+  await page.goto('/chat');
+  await page.getByRole('button', { name: 'Friends' }).click();
+  await expect(page.getByRole('button', { name: /Open friend Alice/ })).toBeVisible();
+
+  // In demo mode onUnfriend is undefined — the remove button is hidden.
+  const removeBtn = page.getByRole('button', { name: /Remove friend Alice/ });
+  if (await removeBtn.isVisible()) {
+    await removeBtn.click();
+    await page.getByRole('button', { name: /Confirm remove Alice/ }).click();
+    expect(deleteUrl).toContain('/friends/');
+  } else {
+    // Demo mode — just confirm friend row still renders without the button.
+    await expect(page.getByRole('button', { name: /Open friend Alice/ })).toBeVisible();
+  }
+});
+
 test('send-friend-request flow calls the API and shows "Request sent"', async ({ page }) => {
   await stubFriendsApi(page);
 

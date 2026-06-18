@@ -976,7 +976,6 @@ export async function cancelFriendRequest(requestId: string): Promise<void> {
   );
 }
 
-// TODO(Slice F): wire to ConversationList "Remove friend" action.
 /** Remove an accepted friend (DELETE /friends/:userId → 204). */
 export async function unfriend(userId: string): Promise<void> {
   unwrapApiResult(

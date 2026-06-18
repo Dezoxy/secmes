@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Search,
   Plus,
+  UserMinus,
   UserPlus,
   Users,
   Settings,
@@ -75,6 +76,7 @@ interface ConversationListProps {
   onAcceptRequest?: (requestId: string) => Promise<void>;
   onDeclineRequest?: (requestId: string) => Promise<void>;
   onCancelRequest?: (requestId: string) => Promise<void>;
+  onUnfriend?: (userId: string) => Promise<void>;
   /** Set when the last friends data fetch failed — shows a non-blocking hint. */
   friendsLoadError?: boolean;
   /** Called when the friends panel is opened — triggers a lazy data fetch. */
@@ -99,6 +101,7 @@ export function ConversationList({
   onAcceptRequest,
   onDeclineRequest,
   onCancelRequest,
+  onUnfriend,
   friendsLoadError,
   onFriendsOpen,
 }: ConversationListProps) {
@@ -110,6 +113,7 @@ export function ConversationList({
   const [sendingRequest, setSendingRequest] = useState(false);
   const [sentArgusId, setSentArgusId] = useState<string | null>(null);
   const [sendRequestError, setSendRequestError] = useState<string | null>(null);
+  const [confirmingUnfriendId, setConfirmingUnfriendId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const touchStartY = useRef<number | null>(null);
@@ -312,32 +316,69 @@ export function ConversationList({
           )}
 
           {filteredFriends.map((friend) => (
-            <button
-              type="button"
+            <div
               key={friend.userId}
-              onClick={() => {
-                closeFriendsPanel();
-                onTapFriend?.(friend);
-              }}
-              className="flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:bg-[#1a1a26] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f16]"
-              aria-label={`Open friend ${friendDisplayName(friend)}`}
+              className="flex items-center gap-2 rounded-xl border border-transparent p-3 transition-colors hover:bg-[#1a1a26]"
             >
-              <div className="relative shrink-0" aria-hidden="true">
-                <Avatar
-                  src={dicebearAvatar(friend.userId)}
-                  name={friendDisplayName(friend)}
-                  size="md"
-                  shape="circle"
-                  className="ring-2 ring-white/5"
-                />
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium text-white/90">
-                  {friendDisplayName(friend)}
-                </p>
-                <p className="truncate font-mono text-xs text-white/40">{friend.argusId}</p>
-              </div>
-            </button>
+              <button
+                type="button"
+                onClick={() => {
+                  closeFriendsPanel();
+                  onTapFriend?.(friend);
+                }}
+                className="flex min-w-0 flex-1 items-center gap-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f16]"
+                aria-label={`Open friend ${friendDisplayName(friend)}`}
+              >
+                <div className="relative shrink-0" aria-hidden="true">
+                  <Avatar
+                    src={dicebearAvatar(friend.userId)}
+                    name={friendDisplayName(friend)}
+                    size="md"
+                    shape="circle"
+                    className="ring-2 ring-white/5"
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-white/90">
+                    {friendDisplayName(friend)}
+                  </p>
+                  <p className="truncate font-mono text-xs text-white/40">{friend.argusId}</p>
+                </div>
+              </button>
+              {onUnfriend && confirmingUnfriendId !== friend.userId && (
+                <button
+                  type="button"
+                  aria-label={`Remove friend ${friendDisplayName(friend)}`}
+                  onClick={() => setConfirmingUnfriendId(friend.userId)}
+                  className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.04] text-white/40 transition-colors hover:bg-red-500/15 hover:text-red-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
+                >
+                  <UserMinus className="h-4 w-4" />
+                </button>
+              )}
+              {onUnfriend && confirmingUnfriendId === friend.userId && (
+                <div className="flex shrink-0 gap-1">
+                  <button
+                    type="button"
+                    aria-label={`Confirm remove ${friendDisplayName(friend)}`}
+                    onClick={() => {
+                      setConfirmingUnfriendId(null);
+                      void onUnfriend(friend.userId);
+                    }}
+                    className="inline-flex h-8 items-center justify-center rounded-lg bg-red-500/15 px-2 text-xs font-medium text-red-300 transition-colors hover:bg-red-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400/60"
+                  >
+                    Remove
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Cancel remove"
+                    onClick={() => setConfirmingUnfriendId(null)}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/[0.04] text-white/50 transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+            </div>
           ))}
 
           {showFriendRequestAction && (
