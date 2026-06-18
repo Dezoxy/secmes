@@ -194,7 +194,23 @@ new capability. The signal is meaningful only to the *honest* client. Accepted.
 - E2E: reinstall simulation → tap placeholder → verify safety number → send → peer receives under new
   group; old placeholder gone, one conversation per contact; non-direct placeholders remain inert.
 
-## 6. Residual risk
+## 6. Residual risk — friendships table (Slice C, added 2026-06-18)
+
+The `friendships` table introduces pre-conversation social-graph metadata. The six risks below were identified in `docs/contact-list-recovery-plan.md` before the schema landed; this section satisfies the gate requirement that the threat model be updated before Slice D (API) begins.
+
+- **R-friends-1 (pre-conversation social graph):** `friendships` lets a DB-compromise/subpoena see "A and B are friends" with zero messages. Mitigated by storing **accepted-only** (no rejection/intent ledger) and bounding pending to the open-request lifetime. Same class as `conversation_members`; accepted + documented.
+
+- **R-friends-2 (open-request intent):** while `pending`, the server sees "A wants to reach B" and the direction. Bounded by TTL expiry + decline-as-DELETE; `requested_by` NULLed on accept. Residual: the open window. Closing it fully needs the deferred deliver-only model. **Pending TTL sweep is a TODO for Slice D** (noted in migration 0042).
+
+- **R-friends-3 (request-create enumeration oracle):** `POST /friends/requests` is a state-changing argus-id probe. Mitigated by the uniform `202` + the dedicated `sendFriendRequest` per-hour rate limit (Slice D). Residual: an attacker can still confirm existence by completing a friendship if the target accepts — but that needs target consent, so it is not a silent oracle.
+
+- **R-friends-4 (friendship injection — the friends-list analogue of T-resume-4):** a malicious server inserts a `friendships` row, making a stranger appear as an accepted friend. Mitigated by the safety-number gate being the only path to a conversation — an injected friend is inert until the user taps and completes the OOB `VerifySecurity` check. Same mitigation and residual as the existing T-resume-4.
+
+- **R-friends-5 (IDOR on request actions):** accept/decline/cancel take a request `:id`; without the recipient-only/requester-only predicate, A could accept a request not addressed to them. Mitigated by the app-layer authz predicate (Slice D) — `security-boundary-auditor` must assert it before any endpoint goes live.
+
+- **R-friends-6 (admin social-graph widening):** admin/ops must not query `friendships`; if a future ops need arises it must be threat-modelled separately. Keeps invariant #6's metadata-only admin surface from quietly absorbing the pre-conversation graph.
+
+## 7. Residual risk — tap-to-resume original risks
 
 - **TOFU on resume (both sides — T-resume-1 and T-resume-5):** the safety-number comparison is a
   change-detector, not a MITM-defeater. A legitimate reinstall and an attacker-injected key produce
