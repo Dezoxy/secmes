@@ -10,7 +10,11 @@ import {
 } from '../../lib/messaging';
 import { loadPersistedPeerMapping, resolvePeerUser, withPeerNamed } from './peer-naming';
 import { dicebearAvatar } from '../../lib/dicebear';
-import { liveConversationShell, prependConversationIfMissing } from './useLiveConversations';
+import {
+  liveConversationShell,
+  prependConversationIfMissing,
+  replaceOrPrependConversation,
+} from './useLiveConversations';
 import type { Attachment, Conversation, Message, User } from './seed';
 
 interface ConversationBackfillOptions {
@@ -282,7 +286,7 @@ export function useConversationHistoryRehydration({
           const history = stored.filter((m) => m.kind !== 'group-meta').map(storedToMessage);
           const creatorId = creatorIds.get(conversationId);
           setConversations((prev) =>
-            prependConversationIfMissing(prev, {
+            replaceOrPrependConversation(prev, {
               ...liveConversationShell(conversationId, currentUserProfile),
               messages: history,
               ...(groupName ? { name: groupName, type: 'group' as const } : {}),

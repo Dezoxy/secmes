@@ -87,6 +87,19 @@ export function prependConversationIfMissing(
     : [conversation, ...conversations];
 }
 
+/** Replace an existing entry by id, or prepend if not present. Use for live paths that are the
+ * ground truth — ensures a roster-recovery placeholder is replaced when the MLS group becomes live. */
+export function replaceOrPrependConversation(
+  conversations: Conversation[],
+  conversation: Conversation,
+): Conversation[] {
+  const idx = conversations.findIndex((c) => c.id === conversation.id);
+  if (idx === -1) return [conversation, ...conversations];
+  const next = [...conversations];
+  next[idx] = conversation;
+  return next;
+}
+
 export function useLiveConversations({
   device,
   pool,
@@ -229,7 +242,7 @@ export function useLiveConversations({
       onJoined: ({ conversationId, conversation, senderUserId }) => {
         addLive(conversationId, conversation);
         const shell = liveConversationShell(conversationId, currentUserProfile);
-        setConversations((prev) => prependConversationIfMissing(prev, shell));
+        setConversations((prev) => replaceOrPrependConversation(prev, shell));
         // Name the new conversation after the (verified) member who added us — best-effort, async; the
         // placeholder stays if the directory lookup misses.
         void resolvePeerUser(senderUserId, conversationId).then((peer) => {

@@ -11,7 +11,7 @@ import {
   refToUiAttachment,
   storedToMessage,
 } from './useConversationBackfill';
-import { prependConversationIfMissing } from './useLiveConversations';
+import { prependConversationIfMissing, replaceOrPrependConversation } from './useLiveConversations';
 
 const imageRef: AttachmentRef = {
   objectKey: 'tenant/conv/image',
@@ -207,6 +207,42 @@ describe('prependConversationIfMissing', () => {
     // same id — no-op
     const noop = prependConversationIfMissing(existing, { ...conv, messages: [baseMessage] });
     expect(noop).toBe(existing); // reference-stable
+  });
+});
+
+// ── replaceOrPrependConversation ────────────────────────────────────────────
+
+describe('replaceOrPrependConversation', () => {
+  const placeholder: Conversation = {
+    id: 'conv-a',
+    type: 'direct',
+    participants: [],
+    messages: [],
+    unreadCount: 0,
+  };
+
+  it('prepends when the id is absent', () => {
+    const result = replaceOrPrependConversation([], placeholder);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toBe(placeholder);
+  });
+
+  it('replaces an existing entry when the id matches (live path wins over placeholder)', () => {
+    const live: Conversation = { ...placeholder, messages: [baseMessage] };
+    const result = replaceOrPrependConversation([placeholder], live);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toBe(live);
+  });
+
+  it('preserves surrounding entries and their order when replacing', () => {
+    const before: Conversation = { ...placeholder, id: 'conv-before' };
+    const after: Conversation = { ...placeholder, id: 'conv-after' };
+    const live: Conversation = { ...placeholder, messages: [baseMessage] };
+    const result = replaceOrPrependConversation([before, placeholder, after], live);
+    expect(result).toHaveLength(3);
+    expect(result[0]!.id).toBe('conv-before');
+    expect(result[1]).toBe(live);
+    expect(result[2]!.id).toBe('conv-after');
   });
 });
 
