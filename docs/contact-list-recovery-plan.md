@@ -151,6 +151,11 @@ live. Reuse `peer-naming.ts` for names/avatars. No server change, no `@argus/con
   safety numbers are deferred (see *Out of scope*), and a group row must never feed tap-to-resume (which is 1:1
   only). Either skip group rows in PR2, or render them as inert, clearly-non-resumable entries; do **not** wire
   them to the resume path.
+- **De-duplicate by peer `userId`.** The server does not dedup 1:1s, and PR4 resume mints a *new*
+  `conversationId` each time while the old user-level membership row lingers — so the same pair can have several
+  direct rows. The placeholder builder must collapse them to **one entry per peer `userId`** (most-recently-
+  active row wins) before rendering, so a contact never appears twice and resume isn't left with sibling dead
+  rows. (Mirrors the existing one-direct-conversation-per-contact UI model, `findConversationWith`.)
 - Gates: `security-boundary-auditor` (both reads RLS + member-only, no content); unit tests for the placeholder
   builder; one Playwright E2E (fresh keystore + valid session → roster appears, history empty, send disabled).
 - **No `crypto-reviewer`** — say so in the PR body. The safe foundation.
@@ -162,6 +167,13 @@ The security spine of tap-to-resume; lands **before** PR 4 so the peer is never 
   **set of per-device safety numbers** for every present peer device (primary + secondaries), **sealed under the
   PRF session key in the `argus-keystore` IndexedDB** — **not** plain `localStorage` (the `userId ↔ number`
   association is social-graph metadata), and **never sent to the server**.
+- **Source of the per-device numbers (spell out for the implementer + crypto-reviewer):** a resumed conversation
+  arrives via a **Welcome** (`join.ts`), so the recipient has **no KeyPackage** for the sender — the numbers
+  must be computed from the **identity + signature public keys of the joined MLS group's *active members*** as
+  exposed by the `@argus/crypto` wrapper after join, **not** from fresh directory KeyPackages (which could
+  silently match an attacker-substituted package). `safetyNumber()` today accepts KeyPackages
+  ([packages/crypto/src/index.ts:203](packages/crypto/src/index.ts)); PR3 likely needs a thin variant that
+  takes present-member public keys. **This crypto-API addition is in PR3's `crypto-reviewer` scope.**
 - On an incoming new/resumed conversation whose set of present peer-device safety numbers **differs from the
   stored set** for that `peerUserId` (a changed *or* replaced device) → gate it unverified and surface the
   re-verify prompt, routing into the existing `VerifySecurity` panel.
