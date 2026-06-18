@@ -8,11 +8,15 @@
 > **This doc is the implementation roadmap.** The companion *threat-model note* lives at
 > `docs/threat-models/contact-list-recovery.md` (authored task #20, merged #234) and gets a friends-graph
 > section added (see *Residual risks*).
-> **Tracker / status:** task #20 (threat-model note) merged #234 · task #21 (roster recovery) merged #235 —
-> **its user-facing placeholders are now reverted, see Slice B** · task #22 (verified-state spine) in flight
-> as **PR #236 — keep as-is, see Slice A** · task #23 (tap-to-resume) folds into Slices E/F. New friends-graph
-> slices (table, API, UI wiring) are new tracker items. Sits **behind** the first AWS deploy — net-new, does
-> not block shipping.
+> **Tracker / status (updated post-merge 2026-06-18):** task #20 (threat-model note) merged #234 · task #21
+> (roster recovery) merged #235 — **its conversation-list placeholders are still in `main` and must be
+> reverted, see Slice B** · task #22 (verified-state spine) **merged #236** — done, but with **one outstanding
+> bug to fix** (a `selfUserId` stale-closure, see Slice A) · the friends-panel **mock UI** landed in `main` via
+> **#237** (it was folded into #236's branch before merge) — it must be wired to the real backend, see Slice E ·
+> this revised plan merged as **#238** (the 3-way merge re-introduced Codex's earlier `contact_requests` draft,
+> now removed — the `friendships` model below supersedes it). task #23 (tap-to-resume) folds into Slices E/F.
+> New friends-graph slices (table, API, UI wiring) are new tracker items. Sits **behind** the first AWS deploy —
+> net-new, does not block shipping.
 
 ## Owner ask (updated)
 
@@ -58,8 +62,9 @@ Three parts:
 3. **Tap-to-resume + identity-change signal (unchanged crux).** Tapping an accepted friend starts a **fresh
    1:1** (new messages only). Because a reinstall presents a *new* cryptographic identity, the peer is
    **warned "this contact's security code changed — verify again"** (Signal's safety-number-change pattern)
-   rather than silently re-trusted. This is the security spine in flight as **PR #236** and it is **unaffected
-   by the pivot** — it fires on the incoming Welcome regardless of how the user reached the resume.
+   rather than silently re-trusted. This is the security spine **merged as #236** (one follow-up bug noted in
+   Slice A) and it is **unaffected by the pivot** — it fires on the incoming Welcome regardless of how the user
+   reached the resume.
 
 We still **reject** any encrypted-roster blob — it would re-create the `key_backups` recoverable-secret
 surface that task #16 removed (#233).
@@ -273,81 +278,6 @@ convenience endpoint (**moot** — the friends list, not conversation-member rea
   app-layer authz predicate (#3) — `security-boundary-auditor` must assert it.
 - **R-friends-6 (admin social-graph widening):** admin/ops must not query `friendships`; threat-model separately
   if ever needed. Keeps #6's metadata-only admin surface from quietly absorbing the pre-conversation graph.
-group; cryptographic "proof it's the same human" beyond OOB safety-number re-verify (deferred "sealed identity
-transfer", multi-device-enrollment.md §5.4); group (N-party) safety numbers; any encrypted-roster blob /
-server-stored recoverable secret (rejected — contradicts #16).
-
-## Friend requests backend — planned contact source
-
-The current UI can mock "send friend request" locally, but the backend source of truth is not implemented yet.
-When this lands, accepted contacts should become the long-term contact-list source; existing 1:1 direct
-conversations remain the compatibility fallback until enough clients have migrated.
-
-### Data model
-
-Add a tenant-scoped `contact_requests` table via `/db-migration`:
-
-- `id uuid primary key default gen_random_uuid()`
-- `tenant_id uuid not null`
-- `requester_user_id uuid not null`
-- `recipient_user_id uuid not null`
-- `status text not null` with values `pending`, `accepted`, `declined`, `cancelled`
-- `created_at timestamptz not null default now()`
-- `resolved_at timestamptz`
-
-RLS requirements:
-
-- `tenant_id` is mandatory and FORCE RLS is mandatory.
-- A caller may read rows where they are requester or recipient.
-- A caller may create only rows where `requester_user_id` is their verified user id.
-- Only the recipient may accept or decline a pending request.
-- Composite foreign keys must pin `(tenant_id, requester_user_id)` and `(tenant_id, recipient_user_id)` to
-  `users(tenant_id, id)` so cross-tenant links fail at the DB boundary.
-
-Integrity requirements:
-
-- Reject self-requests.
-- Reject duplicate pending requests in either direction.
-- Reject duplicate accepted friendships in either direction.
-- Keep one canonical accepted friendship per pair. The implementation may either reuse the accepted request row
-  or add a separate `contacts` table, but the API contract below must not expose duplicate friends.
-
-### MVP API contract
-
-- `POST /contacts/requests` with `{ "argusId": string }`
-  - Exact-match lookup only, using the existing argus-id discovery model.
-  - Returns the created outgoing pending request.
-  - Uniform user-facing failure for not found, inactive, self, duplicate pending, and already accepted where
-    practical; do not create a new enumeration oracle.
-- `GET /contacts`
-  - Returns accepted friends for the caller: `userId`, `argusId`, `displayName`, `avatarSeed`, `acceptedAt`.
-  - This becomes the preferred contact-list recovery source.
-- `GET /contacts/requests?box=incoming|outgoing`
-  - Returns pending requests for the requested mailbox only.
-- `POST /contacts/requests/:id/accept`
-  - Recipient-only. Transitions pending to accepted and sets `resolved_at`.
-- `POST /contacts/requests/:id/decline`
-  - Recipient-only. Transitions pending to declined and sets `resolved_at`.
-
-### Security rules
-
-- No fuzzy search, prefix search, browsable directory, or global member list.
-- No message plaintext, ciphertext, keys, tokens, emails, full Authorization headers, or presigned URLs in
-  request/response/audit metadata.
-- Audit only metadata-safe events: requester id, recipient id, request id, status transition, and
-  well-formed target argus-id when needed. Never log free-form raw search text if it fails argus-id format.
-- Rate-limit request creation and argus-id lookup reuse to prevent scanning and spam.
-- Do not auto-create a conversation on accept. Starting chat still goes through the existing safety-number-gated
-  `ConversationManager.prepare()` -> `VerifySecurity` -> `confirm()` flow.
-
-## Invariants — all hold
-
-#1 crypto-blind (reuses opaque commit/welcome/ciphertext; identity-change signal is client-side, metadata-only,
-never sent; friend requests carry contact metadata only) · #2 no secret/content logging (trust state
-client-local, never logged; request audits stay metadata-only) · #3 RLS (existing roster reads are
-member/owner-scoped; the future `contact_requests` table must be tenant-scoped + FORCE RLS) · #4 no
-hand-rolled crypto (reuses `@argus/crypto` `safetyNumber` + `ConversationManager`) · #5 Key Vault untouched ·
-#6 no admin path.
 
 ---
 
@@ -357,21 +287,28 @@ Each slice independently shippable. Per-PR process for **every** PR: `/code-revi
 diff → fix findings → commit → push → `gh pr create` → request **both** reviews (`@codex review` +
 `@claude … VERDICT:`) → gate with `.claude/hooks/review-status.sh <pr> --wait`.
 
-**Dependency order:** A (done) → B and C (parallel) → D (needs C) → E (needs D) → F (needs E + A).
+**Dependency order:** A (merged) → B and C (parallel) → D (needs C) → E (needs D) → F (needs E + A).
 
-### Slice A — verified-state spine + identity-change signal (task #22) — **IN FLIGHT as PR #236** — crypto
+### Slice A — verified-state spine + identity-change signal (task #22) — **MERGED (#236)** — crypto
 
-**Keep exactly as-is and finish.** PR #236 touches only client + crypto (`ChatScreen.tsx`, `VerifySecurity.tsx`,
+**Done.** PR #236 touched only client + crypto (`ChatScreen.tsx`, `VerifySecurity.tsx`,
 `useConversationBackfill.ts`, `useLiveConversations.ts`, `join.ts`, `keystore.ts`,
-`packages/crypto/src/index.ts`, specs) and changes **zero server files and zero migrations** — the pivot is a
-server/data-model change, so it does not collide. PR #236's value survives the pivot completely: resume still
-mints a fresh MLS group, so the peer still receives a Welcome from a new identity and still needs the reset —
-whether the user reached resume via a placeholder (old) or a friend tap (new) is irrelevant; it fires on the
-incoming Welcome. **Before merge, grep the branch for `recoveredFromServer` / `buildRosterPlaceholders`** to be
-sure no assertion depends on roster placeholders (it operates on live conversations, so it shouldn't).
-- Gates: **`crypto-reviewer` REQUIRED** + `security-boundary-auditor` (confirm nothing leaves the client). Unit
-  tests (key-change resets verified; same-key keeps it); E2E (simulated peer identity change → warning, send
-  gated).
+`packages/crypto/src/index.ts`, specs) — **zero server files, zero migrations** — so the pivot did not collide
+with it. Its value survives the pivot completely: resume still mints a fresh MLS group, so the peer still
+receives a Welcome from a new identity and still needs the reset, regardless of whether the user reached resume
+via a (now-removed) placeholder or a friend tap; it fires on the incoming Welcome either way.
+- **Outstanding follow-up (must-fix — now sitting in `main`):** the `@claude` review caught a `selfUserId`
+  **stale-closure** in `useLiveConversations.ts` — `drainWelcomes` reads `selfUserId` but omits it from the
+  `useCallback` dep array, so on a mount race (`messagingDeps` resolving before the profile) the closure captures
+  `selfUserId === undefined` and the `senderUserId !== selfUserId` self-sender guard always passes — defeating the
+  fix that stops a device-enrollment Welcome from persisting the conversation as self. **Fix requires two parts:**
+  (1) add `selfUserId` to the `drainWelcomes` `useCallback` dep array so the callback never closes over a stale
+  value, and (2) gate the one-shot initial-drain `useEffect` on `selfUserId` being defined — otherwise the once-
+  latched drain fires with `undefined` and the dep-array fix alone is never re-applied. Part 1 alone is
+  insufficient because the one-shot latch (`joinRanRef`) prevents a corrective re-run. ESLint lacks
+  `eslint-plugin-react-hooks` here so `exhaustive-deps` won't surface either gap. Land as a small follow-up PR.
+- Shipped gates: `crypto-reviewer` + `security-boundary-auditor`; unit tests (key-change resets verified; same-key
+  keeps it). The simulated-identity-change **E2E is a remaining test gap** to close with the follow-up.
 
 ### Slice B — revert the conversation-list placeholders; keep `is_direct` + reads — **no crypto**
 
@@ -452,8 +389,7 @@ needs **no** schema change: verified-state is client-local and never sent; the r
 
 ## How to start (new session)
 
-1. **Finish Slice A (PR #236)** on its current scope — keep as-is; grep the branch for `recoveredFromServer` /
-   `buildRosterPlaceholders` before merge.
+1. **Slice A is done (merged #236 + #240).** The selfUserId stale-closure follow-up also landed in #240.
 2. **Slice B** (revert placeholders) and **Slice C** (`friendships` table + RLS) can proceed in parallel; C
    needs the threat-model note updated with the R-friends risks **before** it lands.
 3. Then **D** (API + contracts) → **E** (UI wiring) → **F** (resume polish). Branch each off `main`; one PR per
