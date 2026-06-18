@@ -36,14 +36,20 @@ export class FriendsService {
    * canonical-pair unique constraint (ON CONFLICT DO NOTHING).
    */
   async sendRequest(auth: VerifiedAuth, argusId: string): Promise<{ targetFound: boolean }> {
+    // Resolve the CALLER first. A revoked/soft-deleted caller still holding an unexpired token is
+    // rejected here (400) BEFORE any target-dependent branch — otherwise the not-found path (202) and
+    // the active-target path (which would 400 only later) differ, turning this into an active-user
+    // existence oracle for offboarded tokens. After this gate, the response depends only on the
+    // caller's own status, never on whether the target exists.
+    const me = await withTenant(auth.tenantId, (tx) => requireUser(tx, auth));
+
     const target = await this.users.lookupByArgusId(auth.tenantId, argusId);
     if (!target) return { targetFound: false };
+    // Reject self silently — uniform 202, no row.
+    if (target.userId === me) return { targetFound: true };
 
+    const { low, high } = canonicalPair(me, target.userId);
     await withTenant(auth.tenantId, async (tx) => {
-      const me = await requireUser(tx, auth);
-      // Reject self silently — uniform 202, no row.
-      if (target.userId === me) return;
-      const { low, high } = canonicalPair(me, target.userId);
       await tx
         .insert(schema.friendships)
         .values({

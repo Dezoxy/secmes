@@ -92,6 +92,21 @@ describe.skipIf(!DB_URL)('FriendsService (Slice D — friends API)', () => {
       expect(r.targetFound).toBe(true); // the lookup found the user…
       expect(await rowCount()).toBe(0); // …but no self-friendship row is written
     });
+
+    it('rejects a revoked caller BEFORE the target branch (no active-user oracle)', async () => {
+      // Soft-delete userC, then have them send to an EXISTING target (B) and a NON-EXISTENT target.
+      // Both must fail the same way (caller-active gate throws) — no 202-vs-400 split that would leak
+      // whether the target exists.
+      await sql`update users set status = 'suspended' where id = ${userC}`;
+      try {
+        const revoked = authFor(userC, 'fr-ext-c');
+        await expect(service.sendRequest(revoked, argusB)).rejects.toThrow();
+        await expect(service.sendRequest(revoked, 'argus-zzzzzzzzzzzzzzzz-nope')).rejects.toThrow();
+        expect(await rowCount()).toBe(0);
+      } finally {
+        await sql`update users set status = 'active' where id = ${userC}`;
+      }
+    });
   });
 
   describe('listRequests direction split', () => {
