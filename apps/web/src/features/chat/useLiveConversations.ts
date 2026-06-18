@@ -24,7 +24,12 @@ import {
   type MessageSocketStatus,
 } from '../../lib/ws';
 import { isReadReceiptsEnabled } from '../settings/privacy-settings';
-import { placeholderPeerId, resolvePeerUser, withPeerNamed } from './peer-naming';
+import {
+  persistPeerMapping,
+  placeholderPeerId,
+  resolvePeerUser,
+  withPeerNamed,
+} from './peer-naming';
 import { foldOwnMessageStatuses, type PeerWatermarks } from './receipts';
 import type { Conversation, User } from './seed';
 import { currentUser, generatedAvatar } from './seed';
@@ -270,6 +275,9 @@ export function useLiveConversations({
         addLive(conversationId, conversation);
         const shell = liveConversationShell(conversationId, currentUserProfile);
         setConversations((prev) => replaceOrPrependConversation(prev, shell));
+        // Persist the peerUserId mapping synchronously so the manual-verify path can look it up via
+        // loadPersistedPeerMapping later (even before the async directory lookup resolves the name).
+        persistPeerMapping(conversationId, senderUserId);
         // Name the new conversation after the (verified) member who added us — best-effort, async; the
         // placeholder stays if the directory lookup misses.
         void resolvePeerUser(senderUserId, conversationId).then((peer) => {

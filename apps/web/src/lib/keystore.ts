@@ -215,17 +215,22 @@ export class DeviceKeystore {
 
   static async open(engine?: MlsEngine): Promise<DeviceKeystore> {
     const db = await openDB(DB_NAME, DB_VERSION, {
-      upgrade(database) {
-        // v7 cutover (and any prior upgrade): every store from v1–v6 was sealed under a typed passphrase or
-        // a passphrase-derived session key, all unreadable under the new passkey-PRF unlock key. So WIPE +
-        // recreate every secret-bearing store. A fresh device is minted (sealed under PRF) on the next
-        // getOrCreateDevice; nothing in the dropped stores can be unsealed. The obsolete `meta` store (which
-        // held the old session-key salt) is dropped and NOT recreated. Best-effort at-rest clearing — the
-        // browser decides when backing pages are reclaimed.
-        for (const name of Array.from(database.objectStoreNames)) {
-          database.deleteObjectStore(name);
+      upgrade(database, oldVersion) {
+        if (oldVersion < 7) {
+          // v7 cutover: every store from v1–v6 was sealed under a typed passphrase or a passphrase-derived
+          // session key, all unreadable under the new passkey-PRF unlock key. Wipe every store (including the
+          // obsolete `meta` store that held the old session-key salt) and recreate only the PRF-sealed set.
+          // Nothing in the dropped stores can be unsealed; a fresh device is minted on the next
+          // getOrCreateDevice. Best-effort at-rest clearing — the browser decides when backing pages are reclaimed.
+          for (const name of Array.from(database.objectStoreNames)) {
+            database.deleteObjectStore(name);
+          }
         }
-        for (const name of SECRET_STORES) database.createObjectStore(name);
+        // v8+ additive: create any store that does not exist yet (idempotent for future upgrades).
+        // For a v7→v8 upgrade only VERIFIED_PEERS_STORE is missing; all other stores are left intact.
+        for (const name of SECRET_STORES) {
+          if (!database.objectStoreNames.contains(name)) database.createObjectStore(name);
+        }
       },
     });
     return new DeviceKeystore(db, engine ?? (await MlsEngine.create()));
