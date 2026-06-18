@@ -83,6 +83,14 @@ describe.skipIf(!DB_URL)('GdprService', () => {
       insert into conversation_members (tenant_id, conversation_id, user_id)
       values (${tenantA}, ${convId}, ${bobId})`;
 
+    // Accepted friendship between alice and bob (canonical pair; accepted rows null requested_by/expires_at).
+    {
+      const [low, high] = aliceId < bobId ? [aliceId, bobId] : [bobId, aliceId];
+      await sql`insert into friendships
+        (tenant_id, user_low_id, user_high_id, status, requested_by, expires_at, resolved_at)
+        values (${tenantA}, ${low}, ${high}, 'accepted', null, null, now())`;
+    }
+
     // Message from alice
     [{ id: msgId }] = await sql`
       insert into messages (tenant_id, conversation_id, sender_user_id, client_message_id, ciphertext, alg, epoch)
@@ -175,6 +183,12 @@ describe.skipIf(!DB_URL)('GdprService', () => {
 
       // Audit events
       expect(exp.auditEvents.some((e) => e.eventType === 'device.registered')).toBe(true);
+
+      // Friendships (GDPR Art. 20 completeness) — alice's accepted friendship with bob appears.
+      const friendship = exp.friendships.find((f) => f.otherUserId === bobId);
+      expect(friendship).toBeDefined();
+      expect(friendship!.status).toBe('accepted');
+      expect(friendship!.direction).toBeNull(); // requested_by cleared on accept
 
       // No ciphertext, no content keys
       const raw = JSON.stringify(exp);

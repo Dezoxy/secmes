@@ -661,5 +661,19 @@ export const MeExportSchema = z.object({
       revokedAt: z.string().datetime().nullable(),
     }),
   ),
+  // Accepted friendships + open requests where the caller is a party (GDPR Art. 20 completeness).
+  // `otherUserId` is the other party; `direction` is set for pending requests only (null once accepted,
+  // since requested_by is cleared on accept).
+  friendships: z.array(
+    z.object({
+      id: z.string().uuid(),
+      otherUserId: z.string().uuid(),
+      status: z.enum(['pending', 'accepted']),
+      direction: z.enum(['incoming', 'outgoing']).nullable(),
+      createdAt: z.string().datetime(),
+      resolvedAt: z.string().datetime().nullable(),
+      expiresAt: z.string().datetime().nullable(),
+    }),
+  ),
 });
 export type MeExport = z.infer<typeof MeExportSchema>;

@@ -212,6 +212,8 @@ the concrete endpoint behaviour that shipped in Slice D (`apps/api/src/friends/`
 
 - **R-friends-6 (admin social-graph widening):** admin/ops must not query `friendships`; if a future ops need arises it must be threat-modelled separately. Keeps invariant #6's metadata-only admin surface from quietly absorbing the pre-conversation graph. No admin friends endpoint exists.
 
+- **GDPR (Slice D):** `friendships` is personal data, so the Art. 20 export (`GET /me/export`) includes the caller's accepted friendships + open requests (other-party id, status, direction-while-pending, timestamps). Art. 17 erasure is automatic — the `(tenant_id, user_low_id/high_id)` FKs are `ON DELETE CASCADE`, so deleting the user row removes every friendship they are a party to. The `friends.request_created` audit metadata deliberately stores **only** the sanitised probed argus-id, never a `found` flag, so the export cannot be replayed as a stored enumeration oracle.
+
 ## 7. Residual risk — tap-to-resume original risks
 
 - **TOFU on resume (both sides — T-resume-1 and T-resume-5):** the safety-number comparison is a
