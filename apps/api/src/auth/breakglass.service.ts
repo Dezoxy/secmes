@@ -28,10 +28,10 @@ export const DEFAULT_TENANT_ID = '00000000-0000-4000-8000-000000000001';
 
 const MAX_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15-minute flat window
-const PARAMS = { m: 65536, t: 3, p: 1 }; // matches DEFAULT_ARGON2 in packages/crypto/src/key-backup.ts
+const PARAMS = { m: 65536, t: 3, p: 1 }; // 64 MiB · 3 passes · 1 lane (same floor as the keystore)
 const HASH_LEN = 32;
 const SALT_LEN = 16;
-const MIN_PARAMS = { m: 8192, t: 2, p: 1 }; // matches MIN_ARGON2 in packages/crypto/src/key-backup.ts
+const MIN_PARAMS = { m: 8192, t: 2, p: 1 }; // absolute floor — prevents a weak Key Vault value
 // Upper ceiling: 1 GiB / 200 iters / 16 threads — prevents a malformed Key Vault value from
 // causing an OOM or runaway CPU burn on the login path.
 const MAX_PARAMS = { m: 1048576, t: 200, p: 16 };

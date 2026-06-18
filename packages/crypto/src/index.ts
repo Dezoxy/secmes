@@ -36,20 +36,14 @@ import { makeKeyPackageRef } from 'ts-mls/keyPackage.js';
 import { defaultClientConfig } from 'ts-mls/clientConfig.js';
 
 export {
-  sealBackup,
-  openBackup,
-  deriveSessionKey,
   sealWithKey,
   openWithKey,
   importUnlockKey,
   encryptAttachment,
   decryptAttachment,
-  DEFAULT_ARGON2,
-  type SealedBackup,
   type SealedBlob,
   type EncryptedAttachment,
-  type Argon2Params,
-} from './key-backup.js';
+} from './seal.js';
 export {
   serializeDeviceKeys,
   deserializeDeviceKeys,
@@ -232,11 +226,10 @@ export async function enrollmentDisplayCode(signaturePublicKeyB64: string): Prom
 }
 
 /**
- * Identity-only recovery material: the device's stable signing identity, WITHOUT the one-time KeyPackage
- * HPKE private keys (`initPrivateKey`/`hpkePrivateKey`). This is all a cross-device backup may carry
- * (key-backup.md §4): restoring it re-establishes the identity (mint fresh KeyPackages, re-join groups),
- * but it cannot decrypt a previously-published Welcome, so a leaked backup can't recover history —
- * forward secrecy is preserved. The full DeviceKeys are never uploaded.
+ * The device's stable signing identity, WITHOUT the one-time KeyPackage HPKE private keys
+ * (`initPrivateKey`/`hpkePrivateKey`). Restoring from this re-establishes the identity (mint fresh
+ * KeyPackages, re-join groups) but cannot decrypt a previously-published Welcome — forward secrecy
+ * is preserved. The full DeviceKeys are never uploaded.
  */
 export interface DeviceIdentity {
   identity: string;
@@ -326,9 +319,9 @@ export class MlsEngine {
   }
 
   /**
-   * Strip a device to its identity-only recovery material (key-backup.md §4): the signing identity,
-   * minus the one-time KeyPackage HPKE private keys. Seal THIS — not the full DeviceKeys — for backup so
-   * a leaked backup can't decrypt a retained Welcome (forward secrecy).
+   * Strip a device to its identity-only material: the signing identity, minus the one-time KeyPackage
+   * HPKE private keys. Export THIS — not the full DeviceKeys — so a leaked export can't decrypt a
+   * retained Welcome (forward secrecy).
    */
   exportIdentity(keys: DeviceKeys): DeviceIdentity {
     return {
@@ -339,10 +332,9 @@ export class MlsEngine {
   }
 
   /**
-   * Re-establish a full device from identity-only recovery material by minting a FRESH KeyPackage under
-   * the same signature identity. The new device gets new one-time HPKE keys — so it cannot read a
-   * pre-existing Welcome — and must re-publish + re-join groups. The forward-secret recovery path of
-   * key-backup.md §4.
+   * Re-establish a full device from identity-only material by minting a FRESH KeyPackage under the same
+   * signature identity. The new device gets new one-time HPKE keys — so it cannot read a pre-existing
+   * Welcome — and must re-publish + re-join groups.
    */
   async deviceFromIdentity(id: DeviceIdentity): Promise<DeviceKeys> {
     const capabilities = { ...defaultCapabilities(), ciphersuites: [CIPHERSUITE] };
@@ -431,7 +423,7 @@ export class MlsEngine {
   }
 
   /**
-   * Reconstruct a Conversation from `Conversation.serialize()` bytes (after `openBackup` unseals them) — the
+   * Reconstruct a Conversation from `Conversation.serialize()` bytes (after `openWithKey` unseals them) — the
    * rehydrate path so a group survives a reload. `encodeGroupState` drops the behaviour-only `clientConfig`
    * (no key material), so re-attach the default — the config `createGroup`/`joinGroup` use. Throws on
    * malformed bytes.
@@ -469,7 +461,7 @@ export class Conversation {
    * Serialize this conversation's MLS group state to bytes — for SEALED durable storage. The ratchet
    * advances on every encrypt/decrypt, so the state must survive a reload or the group desyncs. Runs in the
    * op queue so it observes a consistent post-op snapshot. ⚠️ The bytes carry live SECRET key material
-   * (signature private + path/ratchet secrets) — seal them immediately (`sealBackup`); never persist or
+   * (signature private + path/ratchet secrets) — seal them immediately (`sealWithKey`); never persist or
    * transmit them raw. Inverse: `MlsEngine.deserializeConversation`.
    */
   async serialize(): Promise<Uint8Array> {
@@ -598,7 +590,7 @@ export class Conversation {
   /**
    * Serialize the pending post-commit state from a staged commit for sealed persistence (the
    * "pending keystore slot"). The returned bytes carry SECRET key material — seal immediately
-   * with `sealBackup`; never persist or transmit them raw. Inverse: `MlsEngine.deserializeConversation`.
+   * with `sealWithKey`; never persist or transmit them raw. Inverse: `MlsEngine.deserializeConversation`.
    */
   serializeStaged(staged: StagedCommit): Uint8Array {
     return encodeGroupState(staged._pendingState);

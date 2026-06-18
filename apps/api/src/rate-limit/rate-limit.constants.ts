@@ -2,8 +2,8 @@ import { seconds } from '@nestjs/throttler';
 
 // Per-VERIFIED-USER rate limits (the guard keys on tenant+sub, applied AFTER auth). A generous baseline so
 // normal use is never touched, plus tighter caps on the abuse-prone AUTHENTICATED mutations the threat
-// models flag: pool-drain on claim/publish/revoke (key-directory.md §3), backup drain (key-backup.md), and
-// upload abuse (encrypted-attachments.md). Unauthenticated-flood protection is the edge's job (Caddy/WAF),
+// models flag: pool-drain on claim/publish/revoke (key-directory.md §3) and upload abuse
+// (encrypted-attachments.md). Unauthenticated-flood protection is the edge's job (Caddy/WAF),
 // not this guard's — see rate-limiting.md §6. Single-VM in-memory storage; a Redis store is the
 // multi-instance / restart-safe upgrade (Redis is already wired for the realtime bus).
 export const DEFAULT_THROTTLE = [{ name: 'default', ttl: seconds(60), limit: 120 }];
@@ -34,10 +34,6 @@ export const SENSITIVE_LIMITS = {
   publishKeyPackages: 12,
   /** Own-device mutation; idempotent, but still a write — cap the hammering (key-directory.md). */
   revokeKeyPackages: 12,
-  /** Write abuse: each PUT stores/replaces a ≤64 KiB sealed blob (key-backup.md). */
-  storeBackup: 12,
-  /** Exfil/brute-force-restore: bound repeated fetches of the sealed backup blob (key-backup.md §49). */
-  fetchBackup: 20,
   /** Storage abuse: each grant authorizes a ≤10 MiB ciphertext upload (encrypted-attachments.md). */
   uploadGrant: 30,
   /** Presigned-URL minting: bound download-grant churn. Generous (attachments lazy-load) but < baseline;

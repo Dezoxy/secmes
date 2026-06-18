@@ -68,7 +68,7 @@ export const v2Conversations: V2Conversation[] = [
     id: 'ops',
     name: 'Operations',
     initials: 'OP',
-    preview: 'Backup digest posted.',
+    preview: 'Device verified.',
     time: '3h',
     status: 'quiet',
   },
@@ -152,7 +152,7 @@ export const v2MessagesByConversation: Record<string, V2Message[]> = {
     {
       id: 'ops-1',
       author: 'peer',
-      body: 'The backup digest posted successfully. No plaintext metadata changed.',
+      body: 'Device verified successfully.',
       time: '07:31',
     },
     {

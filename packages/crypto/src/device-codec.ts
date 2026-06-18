@@ -2,7 +2,7 @@ import type { RatchetTree, Welcome } from 'ts-mls';
 
 import type { ConversationInvite, DeviceIdentity, DeviceKeys, KeyPackage } from './index.js';
 
-// Fidelity-preserving codec for DeviceKeys → bytes (sealBackup needs a Uint8Array; IndexedDB's native
+// Fidelity-preserving codec for DeviceKeys → bytes (sealWithKey needs a Uint8Array; IndexedDB's native
 // structured clone can't produce bytes). ts-mls key objects contain Uint8Array AND bigint, so JSON
 // alone is insufficient — encode both explicitly. Pure data only (no functions/Maps), verified by the
 // round-trip test.
@@ -37,7 +37,7 @@ function taggedReviver(_k: string, v: unknown): unknown {
 
 /**
  * Serialize DeviceKeys to bytes (for sealing / backup). Inverse of `deserializeDeviceKeys`.
- * ⚠️ Output is UNSEALED secret key material — seal it immediately (`sealBackup`); never persist or
+ * ⚠️ Output is UNSEALED secret key material — seal it immediately (`sealWithKey`); never persist or
  * transmit the raw bytes.
  */
 export function serializeDeviceKeys(keys: DeviceKeys): Uint8Array {
@@ -143,7 +143,7 @@ export function deserializeInvite(s: SerializedInvite): ConversationInvite {
 }
 
 /**
- * Serialize identity-only recovery material to bytes (for sealing as a backup; key-backup.md §4).
+ * Serialize identity-only material to bytes (for sealing; carries the signing identity only).
  * Carries the signing identity only — NO one-time KeyPackage HPKE private keys. Inverse of
  * `deserializeDeviceIdentity`. ⚠️ Output contains the secret signing key — seal it immediately.
  */

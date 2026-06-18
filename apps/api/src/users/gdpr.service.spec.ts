@@ -71,11 +71,6 @@ describe.skipIf(!DB_URL)('GdprService', () => {
       values (${tenantA}, ${bobId}, 'pk-bob')
       returning id`;
 
-    // Key backup
-    await sql`
-      insert into key_backups (tenant_id, user_id, backup)
-      values (${tenantA}, ${aliceId}, 'sealed-backup-ciphertext')`;
-
     // Conversation + membership
     [{ id: convId }] = await sql`
       insert into conversations (tenant_id, created_by)
@@ -157,10 +152,6 @@ describe.skipIf(!DB_URL)('GdprService', () => {
       expect(exp.devices).toHaveLength(1);
       expect(exp.devices[0]!.id).toBe(deviceId);
 
-      // Key backup
-      expect(exp.keyBackup.exists).toBe(true);
-      expect(exp.keyBackup.createdAt).toBeTruthy();
-
       // Conversations
       expect(exp.conversations.some((c) => c.id === convId)).toBe(true);
 
@@ -229,16 +220,12 @@ describe.skipIf(!DB_URL)('GdprService', () => {
       expect(msg!.sender_user_id).toBeNull();
     });
 
-    it('deletes the user row (and cascades devices, key backup, push subs, memberships)', async () => {
+    it('deletes the user row (and cascades devices, push subs, memberships)', async () => {
       const [user] = await sql`select id from users where id = ${aliceId}`;
       expect(user).toBeUndefined();
 
       const [device] = await sql`select id from devices where id = ${deviceId}`;
       expect(device).toBeUndefined();
-
-      const [kb] =
-        await sql`select id from key_backups where user_id = ${aliceId} and tenant_id = ${tenantA}`;
-      expect(kb).toBeUndefined();
 
       const [member] = await sql`select id from conversation_members where user_id = ${aliceId}`;
       expect(member).toBeUndefined();

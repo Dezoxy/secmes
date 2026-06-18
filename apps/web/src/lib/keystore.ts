@@ -196,7 +196,7 @@ export class DeviceKeystore {
         // recreate every secret-bearing store. A fresh device is minted (sealed under PRF) on the next
         // getOrCreateDevice; nothing in the dropped stores can be unsealed. The obsolete `meta` store (which
         // held the old session-key salt) is dropped and NOT recreated. Best-effort at-rest clearing — the
-        // browser decides when backing pages are reclaimed (key-backup.md §4).
+        // browser decides when backing pages are reclaimed.
         for (const name of Array.from(database.objectStoreNames)) {
           database.deleteObjectStore(name);
         }
