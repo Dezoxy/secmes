@@ -109,6 +109,7 @@ export function ConversationList({
   const [friendQuery, setFriendQuery] = useState('');
   const [sendingRequest, setSendingRequest] = useState(false);
   const [sentArgusId, setSentArgusId] = useState<string | null>(null);
+  const [sendRequestError, setSendRequestError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const touchStartY = useRef<number | null>(null);
@@ -226,6 +227,7 @@ export function ConversationList({
   const closeFriendsPanel = () => {
     setFriendQuery('');
     setSentArgusId(null);
+    setSendRequestError(null);
     setSidebarTransition('back');
     setSidebarMode('conversations');
   };
@@ -238,9 +240,12 @@ export function ConversationList({
     if (!onSendFriendRequest || !trimmedFriendQuery || sendingRequest) return;
     setSendingRequest(true);
     setSentArgusId(null);
+    setSendRequestError(null);
     try {
       await onSendFriendRequest(trimmedFriendQuery);
       setSentArgusId(trimmedFriendQuery);
+    } catch {
+      setSendRequestError('Could not send request. Try again in a moment.');
     } finally {
       setSendingRequest(false);
     }
@@ -282,7 +287,10 @@ export function ConversationList({
             <input
               type="text"
               value={friendQuery}
-              onChange={(event) => setFriendQuery(event.target.value)}
+              onChange={(event) => {
+                setFriendQuery(event.target.value);
+                setSendRequestError(null);
+              }}
               aria-label="Search friends or enter Argus ID"
               placeholder="Search friends or enter Argus ID..."
               className="w-full rounded-xl border border-white/5 bg-[#1a1a26] py-2.5 pl-10 pr-4 text-sm text-white placeholder-white/30 transition-colors focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20"
@@ -344,16 +352,21 @@ export function ConversationList({
                     Request sent
                   </p>
                 ) : (
-                  <Button
-                    onClick={() => void handleSendRequest()}
-                    disabled={sendingRequest}
-                    variant="subtle"
-                    size="md"
-                    className="mt-3 w-full"
-                  >
-                    <UserPlus className="h-4 w-4" />
-                    {sendingRequest ? 'Sending…' : 'Send friend request'}
-                  </Button>
+                  <>
+                    <Button
+                      onClick={() => void handleSendRequest()}
+                      disabled={sendingRequest}
+                      variant="subtle"
+                      size="md"
+                      className="mt-3 w-full"
+                    >
+                      <UserPlus className="h-4 w-4" />
+                      {sendingRequest ? 'Sending…' : 'Send friend request'}
+                    </Button>
+                    {sendRequestError && (
+                      <p className="mt-2 text-xs text-red-400">{sendRequestError}</p>
+                    )}
+                  </>
                 ))}
             </div>
           )}

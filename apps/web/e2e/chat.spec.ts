@@ -14,7 +14,7 @@ test('friends panel opens and shows empty state in unauthenticated mode', async 
 
   await page.getByRole('button', { name: 'Friends' }).click();
   await expect(page.getByRole('heading', { name: 'Friends' })).toBeVisible();
-  // In demo / unauthenticated mode the friends list is empty (no API call is made without a manager).
+  // In demo/unauthenticated mode the friends list is empty (API calls may fire but fail silently; no manager → no mutations).
   await expect(page.getByText('No accepted friends yet')).toBeVisible();
   await expect(page.getByText('0 accepted')).toBeVisible();
 });

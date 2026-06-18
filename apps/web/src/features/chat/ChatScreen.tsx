@@ -340,9 +340,11 @@ export default function ChatScreen() {
       setOutgoingRequests(out);
       setFriendsError(false);
     } catch {
-      setFriendsError(true);
+      // Only surface the stale-data banner when authenticated; in demo/E2E mode failures are expected
+      // and silent (no manager → no session token → every call 401s/502s).
+      if (manager) setFriendsError(true);
     }
-  }, []);
+  }, [manager]);
 
   useEffect(() => {
     if (manager) void refreshFriends();
