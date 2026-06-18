@@ -200,7 +200,7 @@ export class ConversationManager {
       : [];
 
     // Create a SOLO conversation (just me — my own id dedups to the creator server-side).
-    const { conversationId } = await createConversation([this.selfUserId]);
+    const { conversationId } = await createConversation([this.selfUserId], true);
 
     // Peer secondary devices are already verified by the caller (safety numbers shown in prepare()).
     const peerSecPackages = pending.peerSecondaryDevices.map((d) => d.keyPackage);
@@ -431,7 +431,7 @@ export class GroupConversationManager {
       throw new Error('group commit produced no Welcome — check that members have packages');
 
     const inv = serializeInvite(staged.invite);
-    const { conversationId } = await createConversation([this.selfUserId]);
+    const { conversationId } = await createConversation([this.selfUserId], false);
 
     const welcomes = [
       ...pending.members.flatMap((m) =>

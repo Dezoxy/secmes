@@ -322,12 +322,15 @@ export async function claimKeyPackage(userId: string): Promise<ClaimedKeyPackage
 }
 
 /** Create a conversation with the given other members (the caller is added server-side). */
-export async function createConversation(memberUserIds: string[]): Promise<CreatedConversation> {
+export async function createConversation(
+  memberUserIds: string[],
+  isDirect: boolean,
+): Promise<CreatedConversation> {
   return unwrapApiResult(
     await requestJson({
       path: '/conversations',
       method: 'POST',
-      body: { memberUserIds },
+      body: { memberUserIds, isDirect },
       requestSchema: CreateConversationRequestSchema,
       responseSchema: CreatedConversationSchema,
     }),

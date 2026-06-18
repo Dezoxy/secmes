@@ -12,13 +12,23 @@ import {
 const uuid = '550e8400-e29b-41d4-a716-446655440000'; // a valid RFC-4122 UUID (correct version + variant)
 
 describe('CreateConversationSchema', () => {
-  it('accepts 1–256 member uuids', () => {
-    expect(CreateConversationSchema.safeParse({ memberUserIds: [uuid] }).success).toBe(true);
+  it('accepts 1–256 member uuids with isDirect', () => {
+    expect(
+      CreateConversationSchema.safeParse({ memberUserIds: [uuid], isDirect: true }).success,
+    ).toBe(true);
+    expect(
+      CreateConversationSchema.safeParse({ memberUserIds: [uuid], isDirect: false }).success,
+    ).toBe(true);
   });
-  it('rejects an empty list, a non-uuid, and unknown keys', () => {
+  it('rejects an empty list, a non-uuid, missing isDirect, and unknown keys', () => {
     expect(CreateConversationSchema.safeParse({ memberUserIds: [] }).success).toBe(false);
-    expect(CreateConversationSchema.safeParse({ memberUserIds: ['nope'] }).success).toBe(false);
-    expect(CreateConversationSchema.safeParse({ memberUserIds: [uuid], x: 1 }).success).toBe(false);
+    expect(
+      CreateConversationSchema.safeParse({ memberUserIds: ['nope'], isDirect: true }).success,
+    ).toBe(false);
+    expect(CreateConversationSchema.safeParse({ memberUserIds: [uuid] }).success).toBe(false); // missing isDirect
+    expect(
+      CreateConversationSchema.safeParse({ memberUserIds: [uuid], isDirect: true, x: 1 }).success,
+    ).toBe(false);
   });
 });
 

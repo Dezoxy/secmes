@@ -79,7 +79,7 @@ describe('typed API client boundary', () => {
     const result = await requestJson({
       path: '/example',
       method: 'POST',
-      body: { memberUserIds: ['not-a-uuid'] },
+      body: { memberUserIds: ['not-a-uuid'], isDirect: true },
       requestSchema: CreateConversationRequestSchema,
       responseSchema: ServiceInfoSchema,
     });

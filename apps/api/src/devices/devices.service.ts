@@ -435,7 +435,10 @@ export class DevicesService {
         .from(schema.conversationMembers)
         .innerJoin(
           schema.conversations,
-          eq(schema.conversationMembers.conversationId, schema.conversations.id),
+          and(
+            eq(schema.conversationMembers.conversationId, schema.conversations.id),
+            eq(schema.conversationMembers.tenantId, schema.conversations.tenantId),
+          ),
         )
         .where(eq(schema.conversationMembers.userId, userId));
     });

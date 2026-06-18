@@ -7687,10 +7687,15 @@
               "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
               "maxLength": 36
             }
+          },
+          "isDirect": {
+            "type": "boolean",
+            "description": "true = 1:1 direct conversation; false = group. Explicit: the server cannot infer this from the initial solo member list."
           }
         },
         "required": [
-          "memberUserIds"
+          "memberUserIds",
+          "isDirect"
         ],
         "additionalProperties": false
       },

@@ -112,10 +112,11 @@ describe('api client', () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(new Response(JSON.stringify({ conversationId }), { status: 201 }));
-    await expect(createConversation([peerUserId])).resolves.toEqual({ conversationId });
+    await expect(createConversation([peerUserId], true)).resolves.toEqual({ conversationId });
     expect(fetchSpy.mock.calls[0]?.[0]).toBe('/api/conversations');
     expect(JSON.parse(fetchSpy.mock.calls[0]?.[1]?.body as string)).toEqual({
       memberUserIds: [peerUserId],
+      isDirect: true,
     });
   });
 

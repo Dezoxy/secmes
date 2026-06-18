@@ -184,6 +184,7 @@ export class MessagingService {
   async createConversation(
     auth: VerifiedAuth,
     memberUserIds: string[],
+    isDirect: boolean,
   ): Promise<CreatedConversation> {
     return withTenant(auth.tenantId, async (tx) => {
       const creator = await requireUser(tx, auth);
@@ -193,7 +194,7 @@ export class MessagingService {
         .values({
           tenantId: auth.tenantId,
           createdBy: creator,
-          isDirect: memberUserIds.length === 1,
+          isDirect,
         })
         .returning({ id: schema.conversations.id });
       if (!conv) throw new Error('conversation insert returned no row');

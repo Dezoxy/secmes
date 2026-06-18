@@ -521,7 +521,7 @@ export default function ChatScreen() {
                 <ReconnectBanner status={connectionStatus} className="mx-4 mt-3" />
               )}
               <MessageList conversation={selectedConversation} onImageClick={setPreviewImage} />
-              <ChatInput onSend={handleSend} />
+              {selectedIsLive && <ChatInput onSend={handleSend} />}
             </div>
           ) : (
             <div
