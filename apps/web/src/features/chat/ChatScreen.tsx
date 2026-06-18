@@ -1,7 +1,15 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MessageCircle, X } from 'lucide-react';
 import { safetyNumberFromMember } from '@argus/crypto';
-import type { UserLookupResult } from '../../lib/api';
+import type { UserLookupResult, Friend, FriendRequest } from '../../lib/api';
+import {
+  listFriends,
+  listFriendRequests,
+  sendFriendRequest,
+  acceptFriendRequest,
+  declineFriendRequest,
+  cancelFriendRequest,
+} from '../../lib/api';
 import {
   ConversationManager,
   GroupConversationManager,
@@ -203,7 +211,13 @@ export default function ChatScreen() {
     [messagingDeps, profile, deviceId],
   );
   const [startOpen, setStartOpen] = useState(false);
+  const [startPrefillArgusId, setStartPrefillArgusId] = useState<string | undefined>();
   const [groupCreateOpen, setGroupCreateOpen] = useState(false);
+  const [friends, setFriends] = useState<Friend[]>([]);
+  const [incomingRequests, setIncomingRequests] = useState<FriendRequest[]>([]);
+  const [outgoingRequests, setOutgoingRequests] = useState<FriendRequest[]>([]);
+  const [friendsError, setFriendsError] = useState(false);
+  const inFlightRequestIds = useRef(new Set<string>());
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   const { appendHistory, mergeIncoming, backfillInto } = useConversationBackfill({
     messagingDeps,
@@ -312,6 +326,106 @@ export default function ChatScreen() {
   };
 
   // A 1:1 is unique per peer: find an existing direct conversation with this user (the picker opens it
+  // ── Friends (Slice E) ────────────────────────────────────────────────────────
+
+  const refreshFriends = useCallback(async () => {
+    try {
+      const [fl, inc, out] = await Promise.all([
+        listFriends(),
+        listFriendRequests('incoming'),
+        listFriendRequests('outgoing'),
+      ]);
+      setFriends(fl);
+      setIncomingRequests(inc);
+      setOutgoingRequests(out);
+      setFriendsError(false);
+    } catch {
+      // Only surface the stale-data banner when authenticated; in demo/E2E mode failures are expected
+      // and silent (no manager → no session token → every call 401s/502s).
+      if (manager) setFriendsError(true);
+    }
+  }, [manager]);
+
+  useEffect(() => {
+    if (manager) void refreshFriends();
+  }, [refreshFriends, manager]);
+
+  const handleTapFriend = useCallback(
+    (friend: Friend) => {
+      const existingId =
+        conversations.find(
+          (c) => c.type === 'direct' && c.participants.some((p) => p.id === friend.userId),
+        )?.id ?? null;
+      if (existingId) {
+        if (mobileThreadBackTimerRef.current !== undefined)
+          window.clearTimeout(mobileThreadBackTimerRef.current);
+        if (mobileSidebarReturnTimerRef.current !== undefined)
+          window.clearTimeout(mobileSidebarReturnTimerRef.current);
+        setMobileThreadClosing(false);
+        setMobileSidebarReturning(false);
+        setSelectedId(existingId);
+        if (window.innerWidth < 1024) setShowSidebar(false);
+        setStartOpen(false);
+        return;
+      }
+      setStartPrefillArgusId(friend.argusId ?? undefined);
+      setStartOpen(true);
+    },
+    [conversations],
+  );
+
+  const handleSendFriendRequest = useCallback(
+    async (argusId: string) => {
+      await sendFriendRequest(argusId);
+      await refreshFriends();
+    },
+    [refreshFriends],
+  );
+
+  const handleAcceptRequest = useCallback(
+    async (requestId: string) => {
+      if (inFlightRequestIds.current.has(requestId)) return;
+      inFlightRequestIds.current.add(requestId);
+      try {
+        await acceptFriendRequest(requestId);
+        await refreshFriends();
+      } finally {
+        inFlightRequestIds.current.delete(requestId);
+      }
+    },
+    [refreshFriends],
+  );
+
+  const handleDeclineRequest = useCallback(
+    async (requestId: string) => {
+      if (inFlightRequestIds.current.has(requestId)) return;
+      inFlightRequestIds.current.add(requestId);
+      try {
+        await declineFriendRequest(requestId);
+        await refreshFriends();
+      } finally {
+        inFlightRequestIds.current.delete(requestId);
+      }
+    },
+    [refreshFriends],
+  );
+
+  const handleCancelRequest = useCallback(
+    async (requestId: string) => {
+      if (inFlightRequestIds.current.has(requestId)) return;
+      inFlightRequestIds.current.add(requestId);
+      try {
+        await cancelFriendRequest(requestId);
+        await refreshFriends();
+      } finally {
+        inFlightRequestIds.current.delete(requestId);
+      }
+    },
+    [refreshFriends],
+  );
+
+  // ─────────────────────────────────────────────────────────────────────────────
+
   // instead of creating a duplicate). Matches on the REAL peer user id, which creator-made conversations
   // carry from the start and joined/rehydrated ones gain via peer-naming (or the persisted mapping on
   // reload — see persistPeerMapping in handleStarted below and useConversationHistoryRehydration).
@@ -323,6 +437,7 @@ export default function ChatScreen() {
   const handleOpenExisting = (conversationId: string): void => {
     setSelectedId(conversationId);
     setStartOpen(false);
+    setStartPrefillArgusId(undefined);
   };
 
   // Add a freshly-started LIVE conversation to the list: its safety number is the REAL one from the
@@ -356,6 +471,7 @@ export default function ChatScreen() {
     setVerifiedByConv((prev) => ({ ...prev, [session.conversationId]: session.safetyNumber }));
     setSelectedId(session.conversationId);
     setStartOpen(false);
+    setStartPrefillArgusId(undefined);
     // Persist the verified safety-number set keyed by peerUserId. Computed from the group roster
     // post-confirm using safetyNumberFromMember for cross-consistency with the joiner path (C2).
     if (messagingDeps) {
@@ -546,6 +662,16 @@ export default function ChatScreen() {
             onNewGroup={groupManager ? () => setGroupCreateOpen(true) : undefined}
             updateReady={updateReady}
             onApplyUpdate={applyUpdate}
+            friends={friends}
+            incomingRequests={incomingRequests}
+            outgoingRequests={outgoingRequests}
+            friendsLoadError={friendsError}
+            onFriendsOpen={refreshFriends}
+            onTapFriend={manager ? handleTapFriend : undefined}
+            onSendFriendRequest={manager ? handleSendFriendRequest : undefined}
+            onAcceptRequest={manager ? handleAcceptRequest : undefined}
+            onDeclineRequest={manager ? handleDeclineRequest : undefined}
+            onCancelRequest={manager ? handleCancelRequest : undefined}
           />
         </aside>
 
@@ -622,7 +748,11 @@ export default function ChatScreen() {
           existingConversationWith={findConversationWith}
           onOpenExisting={handleOpenExisting}
           onStarted={handleStarted}
-          onClose={() => setStartOpen(false)}
+          prefillArgusId={startPrefillArgusId}
+          onClose={() => {
+            setStartOpen(false);
+            setStartPrefillArgusId(undefined);
+          }}
         />
       )}
       {groupCreateOpen && groupManager && messagingDeps && (

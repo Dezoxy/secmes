@@ -9,31 +9,22 @@ test('chat route renders the main messaging surface', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Open settings' })).toBeVisible();
 });
 
-test('friends panel lists accepted friends and mocks outgoing requests', async ({ page }) => {
+test('friends panel opens and shows empty state in unauthenticated mode', async ({ page }) => {
   await page.goto('/chat');
 
   await page.getByRole('button', { name: 'Friends' }).click();
   await expect(page.getByRole('heading', { name: 'Friends' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Open friend Sarah Chen' })).toBeVisible();
-  await expect(page.getByText('Marcus Johnson')).toHaveCount(0);
-
-  const friendSearch = page.getByRole('textbox', { name: 'Search friends or enter Argus ID' });
-  await friendSearch.fill('argus-hhhhhhhhhhhhhhhh-new');
-  await page.getByRole('button', { name: 'Send friend request' }).click();
-
-  await expect(page.getByText('Request sent').first()).toBeVisible();
+  // In demo/unauthenticated mode the friends list is empty (API calls may fire but fail silently; no manager → no mutations).
+  await expect(page.getByText('No accepted friends yet')).toBeVisible();
+  await expect(page.getByText('0 accepted')).toBeVisible();
 });
 
-test('mobile friends panel opens the selected accepted friend chat', async ({ page }) => {
+test('mobile layout shows chat after selecting a conversation', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/chat');
 
-  await page.getByRole('button', { name: 'Friends' }).click();
-  const friendSearch = page.getByRole('textbox', { name: 'Search friends or enter Argus ID' });
-  await friendSearch.fill('Sarah');
-  await page.getByRole('button', { name: 'Open friend Sarah Chen' }).click();
+  await page.getByRole('button', { name: 'Open conversation with' }).first().click();
 
   await expect(page.getByRole('main', { name: 'Chat' })).toBeVisible();
   await expect(page.getByRole('complementary', { name: 'Conversations' })).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'Sarah Chen' })).toBeVisible();
 });

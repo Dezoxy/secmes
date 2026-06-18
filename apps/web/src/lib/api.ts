@@ -84,6 +84,13 @@ import {
   type Enrollment as ContractEnrollment,
   type ConversationList as ContractConversationList,
   type ConversationSummary as ContractConversationSummary,
+  FriendListResponseSchema,
+  FriendRequestListResponseSchema,
+  SendFriendRequestSchema,
+  SendFriendRequestResponseSchema,
+  type Friend,
+  type FriendRequest,
+  type FriendRequestBox,
 } from '@argus/contracts';
 import { requestJson, requestStatus, unwrapApiResult } from './api-client';
 
@@ -902,4 +909,77 @@ export async function listMyConversationsWithMeta(): Promise<ConversationSummary
       responseSchema: ConversationListSchema,
     }),
   ).conversations;
+}
+
+// ── Friends (Slice D API — contact-list recovery) ─────────────────────────────
+
+export type { Friend, FriendRequest, FriendRequestBox };
+
+/** List accepted friends (GET /friends). The durable contact-recovery source. */
+export async function listFriends(): Promise<Friend[]> {
+  return unwrapApiResult(
+    await requestJson({ path: '/friends', responseSchema: FriendListResponseSchema }),
+  ).friends;
+}
+
+/** List pending friend requests for one mailbox (GET /friends/requests?box=). */
+export async function listFriendRequests(box: FriendRequestBox): Promise<FriendRequest[]> {
+  return unwrapApiResult(
+    await requestJson({
+      path: `/friends/requests?box=${encodeURIComponent(box)}`,
+      responseSchema: FriendRequestListResponseSchema,
+    }),
+  ).requests;
+}
+
+/** Send a friend request by argus-id (POST /friends/requests). Always returns 202 (uniform — no oracle). */
+export async function sendFriendRequest(argusId: string): Promise<{ status: 'accepted' }> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/friends/requests',
+      method: 'POST',
+      body: { argusId },
+      requestSchema: SendFriendRequestSchema,
+      responseSchema: SendFriendRequestResponseSchema,
+      expectedStatuses: [202],
+    }),
+  );
+}
+
+/** Accept an incoming friend request (POST /friends/requests/:id/accept → 204). */
+export async function acceptFriendRequest(requestId: string): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: `/friends/requests/${encodeURIComponent(requestId)}/accept`,
+      method: 'POST',
+    }),
+  );
+}
+
+/** Decline an incoming friend request — hard DELETE (POST /friends/requests/:id/decline → 204). */
+export async function declineFriendRequest(requestId: string): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: `/friends/requests/${encodeURIComponent(requestId)}/decline`,
+      method: 'POST',
+    }),
+  );
+}
+
+/** Cancel an outgoing friend request — hard DELETE (DELETE /friends/requests/:id → 204). */
+export async function cancelFriendRequest(requestId: string): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: `/friends/requests/${encodeURIComponent(requestId)}`,
+      method: 'DELETE',
+    }),
+  );
+}
+
+// TODO(Slice F): wire to ConversationList "Remove friend" action.
+/** Remove an accepted friend (DELETE /friends/:userId → 204). */
+export async function unfriend(userId: string): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({ path: `/friends/${encodeURIComponent(userId)}`, method: 'DELETE' }),
+  );
 }

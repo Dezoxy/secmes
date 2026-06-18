@@ -1,5 +1,16 @@
 import { useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Search, Plus, UserPlus, Users, Settings, RefreshCw } from 'lucide-react';
+import {
+  ArrowLeft,
+  Search,
+  Plus,
+  UserPlus,
+  Users,
+  Settings,
+  RefreshCw,
+  Check,
+  X,
+} from 'lucide-react';
+import type { Friend, FriendRequest } from '../../lib/api';
 import type { Conversation, User } from './seed';
 import {
   currentUser,
@@ -9,15 +20,7 @@ import {
   formatMessageTime,
 } from './seed';
 import { Avatar, Button, EmptyState, conversationEnterMotion, paneBackEnterMotion } from '../ui';
-
-export interface AcceptedFriend {
-  conversationId: string;
-  user: User;
-}
-
-export interface PendingFriendRequest {
-  argusId: string;
-}
+import { dicebearAvatar } from '../../lib/dicebear';
 
 type SidebarMode = 'conversations' | 'friends';
 type SidebarTransition = 'forward' | 'back' | null;
@@ -26,64 +29,20 @@ function normalizedContactText(value: string): string {
   return value.trim().toLowerCase();
 }
 
-function friendSearchText(friend: AcceptedFriend): string {
-  return [friend.user.name, friend.user.argusId]
-    .filter((value): value is string => Boolean(value))
-    .join(' ')
-    .toLowerCase();
+function friendDisplayName(friend: Friend): string {
+  return friend.displayName ?? friend.argusId;
 }
 
-export function acceptedFriendsFromConversations(
-  conversations: Conversation[],
-  selfUserId = currentUser.id,
-): AcceptedFriend[] {
-  const seenUserIds = new Set<string>();
-  const friends: AcceptedFriend[] = [];
-
-  for (const conversation of conversations) {
-    if (conversation.type !== 'direct') continue;
-    const peer = conversation.participants.find((participant) => participant.id !== selfUserId);
-    if (!peer || seenUserIds.has(peer.id)) continue;
-    seenUserIds.add(peer.id);
-    friends.push({ conversationId: conversation.id, user: peer });
-  }
-
-  return friends.sort((left, right) =>
-    left.user.name.localeCompare(right.user.name, undefined, { sensitivity: 'base' }),
-  );
-}
-
-export function filterAcceptedFriends(
-  friends: AcceptedFriend[],
-  rawQuery: string,
-): AcceptedFriend[] {
+function filterFriends(friends: Friend[], rawQuery: string): Friend[] {
   const query = normalizedContactText(rawQuery);
   if (!query) return friends;
-  return friends.filter((friend) => friendSearchText(friend).includes(query));
-}
-
-export function addPendingFriendRequest(
-  requests: PendingFriendRequest[],
-  rawArgusId: string,
-  friends: AcceptedFriend[],
-): PendingFriendRequest[] {
-  const argusId = rawArgusId.trim();
-  const normalizedArgusId = normalizedContactText(argusId);
-  if (!normalizedArgusId) return requests;
-
-  const alreadyFriend = friends.some(
-    (friend) =>
-      normalizedContactText(friend.user.argusId ?? '') === normalizedArgusId ||
-      normalizedContactText(friend.user.name) === normalizedArgusId,
+  return friends.filter((f) =>
+    [f.displayName, f.argusId]
+      .filter((v): v is string => Boolean(v))
+      .join(' ')
+      .toLowerCase()
+      .includes(query),
   );
-  if (alreadyFriend) return requests;
-
-  const alreadyPending = requests.some(
-    (request) => normalizedContactText(request.argusId) === normalizedArgusId,
-  );
-  if (alreadyPending) return requests;
-
-  return [{ argusId }, ...requests];
 }
 
 interface ConversationListProps {
@@ -101,6 +60,25 @@ interface ConversationListProps {
   updateReady?: boolean;
   /** Applies the waiting PWA shell update and reloads the app. */
   onApplyUpdate?: () => void | Promise<void>;
+
+  // ── Friends panel (real API data; all absent in demo / unauthenticated mode) ──
+  /** Accepted friends from GET /friends. */
+  friends?: Friend[];
+  /** Pending incoming requests from GET /friends/requests?box=incoming. */
+  incomingRequests?: FriendRequest[];
+  /** Pending outgoing requests from GET /friends/requests?box=outgoing. */
+  outgoingRequests?: FriendRequest[];
+  /** Called when user taps an accepted friend — ChatScreen handles routing. */
+  onTapFriend?: (friend: Friend) => void;
+  /** Called when user submits a new friend request by argus-id. */
+  onSendFriendRequest?: (argusId: string) => Promise<void>;
+  onAcceptRequest?: (requestId: string) => Promise<void>;
+  onDeclineRequest?: (requestId: string) => Promise<void>;
+  onCancelRequest?: (requestId: string) => Promise<void>;
+  /** Set when the last friends data fetch failed — shows a non-blocking hint. */
+  friendsLoadError?: boolean;
+  /** Called when the friends panel is opened — triggers a lazy data fetch. */
+  onFriendsOpen?: () => Promise<void>;
 }
 
 export function ConversationList({
@@ -113,32 +91,45 @@ export function ConversationList({
   onNewGroup,
   updateReady = false,
   onApplyUpdate,
+  friends,
+  incomingRequests,
+  outgoingRequests,
+  onTapFriend,
+  onSendFriendRequest,
+  onAcceptRequest,
+  onDeclineRequest,
+  onCancelRequest,
+  friendsLoadError,
+  onFriendsOpen,
 }: ConversationListProps) {
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('conversations');
   const [sidebarTransition, setSidebarTransition] = useState<SidebarTransition>(null);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
   const [friendQuery, setFriendQuery] = useState('');
-  const [pendingFriendRequests, setPendingFriendRequests] = useState<PendingFriendRequest[]>([]);
+  const [sendingRequest, setSendingRequest] = useState(false);
+  const [sentArgusId, setSentArgusId] = useState<string | null>(null);
+  const [sendRequestError, setSendRequestError] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const touchStartY = useRef<number | null>(null);
   const searchTouchStartY = useRef<number | null>(null);
   const sidebarTouchStartY = useRef<number | null>(null);
-  const acceptedFriends = useMemo(
-    () => acceptedFriendsFromConversations(conversations, currentUserProfile.id),
-    [conversations, currentUserProfile.id],
-  );
+
+  const effectiveFriends = friends ?? [];
   const filteredFriends = useMemo(
-    () => filterAcceptedFriends(acceptedFriends, friendQuery),
-    [acceptedFriends, friendQuery],
+    () => filterFriends(effectiveFriends, friendQuery),
+    [effectiveFriends, friendQuery],
   );
   const trimmedFriendQuery = friendQuery.trim();
-  const pendingForQuery = pendingFriendRequests.some(
-    (request) =>
-      normalizedContactText(request.argusId) === normalizedContactText(trimmedFriendQuery),
-  );
+  const effectiveOutgoing = outgoingRequests ?? [];
+  const effectiveIncoming = incomingRequests ?? [];
+
+  // Show the "send request" CTA when the query doesn't match any accepted friend.
   const showFriendRequestAction = trimmedFriendQuery.length > 0 && filteredFriends.length === 0;
+  const pendingForQuery =
+    sentArgusId !== null &&
+    normalizedContactText(sentArgusId) === normalizedContactText(trimmedFriendQuery);
 
   const revealSearch = () => setSearchVisible(true);
 
@@ -228,30 +219,38 @@ export function ConversationList({
 
   const openFriendsPanel = () => {
     hideSearch();
+    void onFriendsOpen?.();
     setSidebarTransition('forward');
     setSidebarMode('friends');
   };
 
   const closeFriendsPanel = () => {
     setFriendQuery('');
+    setSentArgusId(null);
+    setSendRequestError(null);
     setSidebarTransition('back');
     setSidebarMode('conversations');
-  };
-
-  const handleFriendSelect = (conversationId: string) => {
-    closeFriendsPanel();
-    onSelect(conversationId);
-  };
-
-  const handleMockFriendRequest = () => {
-    setPendingFriendRequests((prev) =>
-      addPendingFriendRequest(prev, trimmedFriendQuery, acceptedFriends),
-    );
   };
 
   const handleSidebarAnimationEnd = (event: React.AnimationEvent<HTMLDivElement>) => {
     if (event.currentTarget === event.target) setSidebarTransition(null);
   };
+
+  const handleSendRequest = async () => {
+    if (!onSendFriendRequest || !trimmedFriendQuery || sendingRequest) return;
+    setSendingRequest(true);
+    setSentArgusId(null);
+    setSendRequestError(null);
+    try {
+      await onSendFriendRequest(trimmedFriendQuery);
+      setSentArgusId(trimmedFriendQuery);
+    } catch {
+      setSendRequestError('Could not send request. Try again in a moment.');
+    } finally {
+      setSendingRequest(false);
+    }
+  };
+
   const friendsPanelMotion = sidebarTransition === 'forward' ? conversationEnterMotion : '';
   const conversationsPanelMotion = sidebarTransition === 'back' ? paneBackEnterMotion : '';
 
@@ -274,8 +273,8 @@ export function ConversationList({
             <div className="min-w-0">
               <h2 className="truncate text-base font-semibold text-white">Friends</h2>
               <p className="truncate text-xs text-white/45">
-                {acceptedFriends.length} accepted{' '}
-                {acceptedFriends.length === 1 ? 'friend' : 'friends'}
+                {effectiveFriends.length} accepted{' '}
+                {effectiveFriends.length === 1 ? 'friend' : 'friends'}
               </p>
             </div>
           </div>
@@ -288,7 +287,10 @@ export function ConversationList({
             <input
               type="text"
               value={friendQuery}
-              onChange={(event) => setFriendQuery(event.target.value)}
+              onChange={(event) => {
+                setFriendQuery(event.target.value);
+                setSendRequestError(null);
+              }}
               aria-label="Search friends or enter Argus ID"
               placeholder="Search friends or enter Argus ID..."
               className="w-full rounded-xl border border-white/5 bg-[#1a1a26] py-2.5 pl-10 pr-4 text-sm text-white placeholder-white/30 transition-colors focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20"
@@ -297,43 +299,46 @@ export function ConversationList({
         </div>
 
         <div className="flex-1 space-y-2 overflow-y-auto px-2 py-3">
-          {acceptedFriends.length === 0 && (
+          {friendsLoadError && (
+            <p className="mx-2 text-xs text-amber-400/70">
+              Could not refresh friends — data may be stale.
+            </p>
+          )}
+
+          {effectiveFriends.length === 0 && (
             <EmptyState title="No accepted friends yet" icon={Users} compact className="mx-2 mt-4">
-              Existing 1:1 conversations will appear here.
+              Add friends by their Argus ID to keep contacts after reinstall.
             </EmptyState>
           )}
 
-          {filteredFriends.map((friend) => {
-            const { user, conversationId } = friend;
-            return (
-              <button
-                type="button"
-                key={conversationId}
-                onClick={() => handleFriendSelect(conversationId)}
-                className="flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:bg-[#1a1a26] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f16]"
-                aria-label={`Open friend ${user.name}`}
-              >
-                <div className="relative shrink-0" aria-hidden="true">
-                  <Avatar
-                    src={user.avatar}
-                    name={user.name}
-                    size="md"
-                    shape="circle"
-                    className="ring-2 ring-white/5"
-                  />
-                  {user.isOnline && (
-                    <div className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-green-500 ring-2 ring-[#12121a]" />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-white/90">{user.name}</p>
-                  <p className="truncate font-mono text-xs text-white/40">
-                    {user.argusId ?? 'Accepted friend'}
-                  </p>
-                </div>
-              </button>
-            );
-          })}
+          {filteredFriends.map((friend) => (
+            <button
+              type="button"
+              key={friend.userId}
+              onClick={() => {
+                closeFriendsPanel();
+                onTapFriend?.(friend);
+              }}
+              className="flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:bg-[#1a1a26] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f16]"
+              aria-label={`Open friend ${friendDisplayName(friend)}`}
+            >
+              <div className="relative shrink-0" aria-hidden="true">
+                <Avatar
+                  src={dicebearAvatar(friend.userId)}
+                  name={friendDisplayName(friend)}
+                  size="md"
+                  shape="circle"
+                  className="ring-2 ring-white/5"
+                />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-white/90">
+                  {friendDisplayName(friend)}
+                </p>
+                <p className="truncate font-mono text-xs text-white/40">{friend.argusId}</p>
+              </div>
+            </button>
+          ))}
 
           {showFriendRequestAction && (
             <div className="mx-2 rounded-xl border border-white/5 bg-white/[0.03] p-3">
@@ -341,37 +346,98 @@ export function ConversationList({
                 No accepted friend found for that Argus ID.
               </p>
               <p className="mt-1 truncate font-mono text-xs text-white/45">{trimmedFriendQuery}</p>
-              {pendingForQuery ? (
-                <p className="mt-3 rounded-lg border border-emerald-400/20 bg-emerald-500/[0.08] px-3 py-2 text-sm font-medium text-emerald-200">
-                  Request sent
-                </p>
-              ) : (
-                <Button
-                  onClick={handleMockFriendRequest}
-                  variant="subtle"
-                  size="md"
-                  className="mt-3 w-full"
-                >
-                  <UserPlus className="h-4 w-4" />
-                  Send friend request
-                </Button>
-              )}
+              {onSendFriendRequest &&
+                (pendingForQuery ? (
+                  <p className="mt-3 rounded-lg border border-emerald-400/20 bg-emerald-500/[0.08] px-3 py-2 text-sm font-medium text-emerald-200">
+                    Request sent
+                  </p>
+                ) : (
+                  <>
+                    <Button
+                      onClick={() => void handleSendRequest()}
+                      disabled={sendingRequest}
+                      variant="subtle"
+                      size="md"
+                      className="mt-3 w-full"
+                    >
+                      <UserPlus className="h-4 w-4" />
+                      {sendingRequest ? 'Sending…' : 'Send friend request'}
+                    </Button>
+                    {sendRequestError && (
+                      <p className="mt-2 text-xs text-red-400">{sendRequestError}</p>
+                    )}
+                  </>
+                ))}
             </div>
           )}
 
-          {pendingFriendRequests.length > 0 && (
+          {effectiveIncoming.length > 0 && (
+            <div className="mx-2 pt-2">
+              <p className="mb-2 px-1 text-xs font-medium uppercase tracking-[0.08em] text-white/35">
+                Incoming requests
+              </p>
+              <div className="space-y-1">
+                {effectiveIncoming.map((req) => (
+                  <div
+                    key={req.requestId}
+                    className="flex items-center gap-2 rounded-xl border border-white/5 bg-[#1a1a26] px-3 py-2"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-white/85">
+                        {req.displayName ?? req.argusId}
+                      </p>
+                      <p className="truncate font-mono text-xs text-white/45">{req.argusId}</p>
+                    </div>
+                    <div className="flex shrink-0 gap-1">
+                      <button
+                        type="button"
+                        aria-label={`Accept request from ${req.displayName ?? req.argusId}`}
+                        onClick={() => void onAcceptRequest?.(req.requestId)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-300 transition-colors hover:bg-emerald-500/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/60"
+                      >
+                        <Check className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Decline request from ${req.displayName ?? req.argusId}`}
+                        onClick={() => void onDeclineRequest?.(req.requestId)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/[0.04] text-white/50 transition-colors hover:bg-white/[0.08] hover:text-white/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {effectiveOutgoing.length > 0 && (
             <div className="mx-2 pt-2">
               <p className="mb-2 px-1 text-xs font-medium uppercase tracking-[0.08em] text-white/35">
                 Outgoing requests
               </p>
               <div className="space-y-1">
-                {pendingFriendRequests.map((request) => (
+                {effectiveOutgoing.map((req) => (
                   <div
-                    key={request.argusId}
-                    className="rounded-xl border border-white/5 bg-[#1a1a26] px-3 py-2"
+                    key={req.requestId}
+                    className="flex items-center gap-2 rounded-xl border border-white/5 bg-[#1a1a26] px-3 py-2"
                   >
-                    <p className="truncate font-mono text-xs text-white/60">{request.argusId}</p>
-                    <p className="mt-0.5 text-xs font-medium text-emerald-200">Request sent</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-white/85">
+                        {req.displayName ?? req.argusId}
+                      </p>
+                      <p className="truncate font-mono text-xs text-white/45">{req.argusId}</p>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label={`Cancel request to ${req.displayName ?? req.argusId}`}
+                      onClick={() => void onCancelRequest?.(req.requestId)}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-white/45 transition-colors hover:bg-white/[0.06] hover:text-white/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      Cancel
+                    </button>
                   </div>
                 ))}
               </div>
@@ -430,7 +496,7 @@ export function ConversationList({
           <span className="min-w-0 flex-1">
             <span className="block font-medium">Friends</span>
             <span className="block truncate text-xs text-white/40">
-              {acceptedFriends.length} accepted
+              {effectiveFriends.length} accepted
             </span>
           </span>
         </button>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { Search, UserPlus, X } from 'lucide-react';
 
@@ -27,6 +27,8 @@ interface StartConversationProps {
   onOpenExisting: (conversationId: string) => void;
   onStarted: (session: ConversationSession, peer: UserLookupResult) => void;
   onClose: () => void;
+  /** When set, pre-populates the argus-id input and fires the lookup automatically on mount. */
+  prefillArgusId?: string;
 }
 
 const CARD =
@@ -44,6 +46,7 @@ export function StartConversation({
   onOpenExisting,
   onStarted,
   onClose,
+  prefillArgusId,
 }: StartConversationProps) {
   const [argusId, setArgusId] = useState('');
   const [lookupResult, setLookupResult] = useState<UserLookupResult | null>(null);
@@ -55,6 +58,18 @@ export function StartConversation({
   const [secondaryStep, setSecondaryStep] = useState(-1);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<SafeUiError | null>(null);
+
+  // When opened from the friends panel with a pre-known argus-id, auto-populate and fire the lookup.
+  useEffect(() => {
+    if (!prefillArgusId) return;
+    setArgusId(prefillArgusId);
+    lookupUserByArgusId(prefillArgusId)
+      .then((result) => {
+        if (result) setLookupResult(result);
+        else setLookupError('No user found with that argus-id.');
+      })
+      .catch(() => setLookupError('Lookup failed. Check the id and try again.'));
+  }, [prefillArgusId]);
 
   const handleLookup = (): void => {
     const id = argusId.trim();
