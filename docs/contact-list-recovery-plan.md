@@ -301,9 +301,12 @@ via a (now-removed) placeholder or a friend tap; it fires on the incoming Welcom
   **stale-closure** in `useLiveConversations.ts` — `drainWelcomes` reads `selfUserId` but omits it from the
   `useCallback` dep array, so on a mount race (`messagingDeps` resolving before the profile) the closure captures
   `selfUserId === undefined` and the `senderUserId !== selfUserId` self-sender guard always passes — defeating the
-  fix that stops a device-enrollment Welcome from persisting the conversation as self. **Fix = add `selfUserId` to
-  the dep array** (ESLint here lacks `eslint-plugin-react-hooks`, so `exhaustive-deps` won't catch it). Land as a
-  small follow-up PR.
+  fix that stops a device-enrollment Welcome from persisting the conversation as self. **Fix requires two parts:**
+  (1) add `selfUserId` to the `drainWelcomes` `useCallback` dep array so the callback never closes over a stale
+  value, and (2) gate the one-shot initial-drain `useEffect` on `selfUserId` being defined — otherwise the once-
+  latched drain fires with `undefined` and the dep-array fix alone is never re-applied. Part 1 alone is
+  insufficient because the one-shot latch (`joinRanRef`) prevents a corrective re-run. ESLint lacks
+  `eslint-plugin-react-hooks` here so `exhaustive-deps` won't surface either gap. Land as a small follow-up PR.
 - Shipped gates: `crypto-reviewer` + `security-boundary-auditor`; unit tests (key-change resets verified; same-key
   keeps it). The simulated-identity-change **E2E is a remaining test gap** to close with the follow-up.
 
