@@ -437,6 +437,8 @@ export function useRosterRecovery({
           return toAdd.length > 0 ? [...toAdd, ...prev] : prev;
         });
       } catch (err) {
+        // Reset so the next dep-change (reconnect, session refresh) can retry.
+        recoveredRef.current = false;
         // eslint-disable-next-line no-console
         console.warn('roster recovery failed', err instanceof Error ? err.message : err);
       }
