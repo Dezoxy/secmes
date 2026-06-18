@@ -60,6 +60,7 @@ ALTER TABLE friendships FORCE ROW LEVEL SECURITY;
 -- nullif guard: handles '' → NULL on pooled connections (GUC reverts to '' on txn end), consistent
 -- with auth_sessions_isolation (0031) and other policies in this repo.
 CREATE POLICY friendships_tenant_isolation ON friendships
+  TO argus_app                                                              -- scope to app role; argus_cleanup gets its own policies below
   USING      (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid)
   WITH CHECK (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
 
