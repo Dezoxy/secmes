@@ -146,14 +146,17 @@ Extend `useConversationHistoryRehydration`
 is empty but the session is valid (the reinstall case), repopulate placeholders from
 `GET /devices/me/conversations` + `GET /conversations/:id/members`; render **read-only** (no composer) until
 live. Reuse `peer-naming.ts` for names/avatars. No server change, no `@argus/contracts` change.
-- **Direct conversations only.** Build recoverable contact placeholders from conversations whose **explicit
-  type is `direct`** — read the conversation's `type`/kind field (as the UI already does, `c.type === 'direct'`),
-  **do not** infer 1:1-ness from a member count of 2 (a small group can also have two members, and membership
-  is mutable). If the recovery endpoints don't already return the type, surface it (a one-field addition).
-  Non-`direct` conversations must **not** become resumable placeholders — group recovery + N-party safety
-  numbers are deferred (see *Out of scope*), and a group row must never feed tap-to-resume (which is 1:1 only).
-  Either skip them in PR2, or render them as inert, clearly-non-resumable entries; do **not** wire them to the
-  resume path.
+- **Direct conversations only — PREREQUISITE: a server-side direct/group signal.** There is **no conversation
+  type on the server today** — the `conversations` table ([0007_messaging.sql](apps/api/src/db/migrations/0007_messaging.sql))
+  is type-less; the client's `type: 'direct' | 'group'` is **assigned locally at creation** and is exactly what
+  a reinstall wipes. So recovery cannot read a type, and 1:1-ness must **not** be inferred from a member count
+  of 2 (a small group can also have two members, and membership is mutable). Before PR2 can filter, add a
+  **server-side signal**: a small `conversations.is_direct` (or `type`) column, set at creation and backfilled
+  for existing rows, returned by the recovery read. The table already has `tenant_id` + FORCE RLS, so this is a
+  trivial non-tenant-sensitive metadata column (do it via `/db-migration`). Recovery then builds placeholders
+  only for `is_direct` rows; non-direct rows must **not** become resumable placeholders (group recovery +
+  N-party safety numbers are deferred — see *Out of scope*) and must never feed tap-to-resume. Skip them in PR2
+  or render them inert/non-resumable; do **not** wire them to the resume path.
 - **De-duplicate by peer `userId`.** The server does not dedup 1:1s, and PR4 resume mints a *new*
   `conversationId` each time while the old user-level membership row lingers — so the same pair can have several
   direct rows. The placeholder builder must collapse them to **one entry per peer `userId`** (most-recently-
@@ -210,9 +213,12 @@ schema in `@argus/contracts`. **Default: skip.**
 
 ## DB / schema
 
-**None.** `conversation_members` already has `tenant_id` + FORCE RLS + leading-`tenant_id` index
-([0007_messaging.sql](apps/api/src/db/migrations/0007_messaging.sql)). All new trust state is client-local and
-never sent. PR 5's optional endpoint reads existing tables only.
+**One small column in PR 2:** `conversations.is_direct` (or `type`), set at creation + backfilled, so recovery
+can distinguish direct from group without trusting member count (see PR 2). The `conversations` table already
+has `tenant_id` + FORCE RLS ([0007_messaging.sql](apps/api/src/db/migrations/0007_messaging.sql)), so this is a
+non-tenant-sensitive metadata column via `/db-migration` — no new RLS work. Everything else needs **no** schema
+change: `conversation_members` already carries the graph under RLS; all new trust state is client-local and
+never sent; PR 5's optional endpoint reads existing tables only.
 
 ## How to start (new session)
 
