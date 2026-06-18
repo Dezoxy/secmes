@@ -20,7 +20,18 @@ export interface ProfileUpdateMeta {
   fieldsUpdated: ('displayName' | 'avatarSeed')[];
 }
 
-export type AuditMetadata = LookupUserMeta | ProfileUpdateMeta;
+/**
+ * Metadata for the `friends.request_created` audit event.
+ * `targetArgusId` is sanitised by the controller (verbatim only if well-formed, else <invalid-format>)
+ * — the friend-request path is a state-changing argus-id probe (R-friends-3); `found` records whether
+ * the probe hit an active user. Pseudonymous identifiers + a boolean — no PII, no content.
+ */
+export interface FriendRequestMeta {
+  targetArgusId: string;
+  found: boolean;
+}
+
+export type AuditMetadata = LookupUserMeta | ProfileUpdateMeta | FriendRequestMeta;
 
 export interface AuditEventInput {
   eventType: string;
@@ -41,9 +52,15 @@ const ProfileUpdateMetaSchema = z.object({
   fieldsUpdated: z.array(z.enum(['displayName', 'avatarSeed'])).max(2),
 });
 
+const FriendRequestMetaSchema = z.object({
+  targetArgusId: z.string().max(128),
+  found: z.boolean(),
+});
+
 function validateMetadata(eventType: string, metadata: AuditMetadata): AuditMetadata {
   if (eventType === 'users.lookup') return LookupUserMetaSchema.parse(metadata);
   if (eventType === 'users.profile_updated') return ProfileUpdateMetaSchema.parse(metadata);
+  if (eventType === 'friends.request_created') return FriendRequestMetaSchema.parse(metadata);
   throw new Error(`No metadata schema registered for eventType "${eventType}"`);
 }
 
