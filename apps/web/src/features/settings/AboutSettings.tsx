@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type UIEvent } from 'react';
 import { ServiceInfoSchema } from '@argus/contracts';
 import { ExternalLink, RefreshCw } from 'lucide-react';
 import { requestJson, type ApiResult } from '../../lib/api-client';
+import { APP_VERSION_TAG } from '../../lib/app-version';
 import { releaseNotes } from '../../lib/release-notes';
 import { usePwaUpdate, type PwaUpdateStatus } from '../pwa/PwaUpdateContext';
 
@@ -132,6 +133,11 @@ export function AboutSettings() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between gap-4 rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3">
+        <span className="text-sm font-medium text-white">Version</span>
+        <span className="text-sm font-medium text-white/60">{APP_VERSION_TAG}</span>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between gap-4 rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3">
         <span className="text-sm font-medium text-white">Backend status</span>
         <span className={`text-sm font-medium ${online ? 'text-green-400' : 'text-white/60'}`}>
           {statusLabel(backendStatus)}

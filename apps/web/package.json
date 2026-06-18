@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "gen:notes": "node scripts/gen-release-notes.mjs",
     "test": "vitest run",
     "pretest:e2e": "playwright install --with-deps chromium",
     "test:e2e": "playwright test"

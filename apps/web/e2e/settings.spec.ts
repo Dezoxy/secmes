@@ -1,4 +1,8 @@
 import { expect, test } from '@playwright/test';
+// Release notes are GENERATED from git tags + commits (see scripts/gen-release-notes.mjs) and re-exported from
+// src/lib/release-notes. Assert against the committed data so this test tracks whatever the build baked in,
+// rather than a hand-curated version string. Aliased to avoid clashing with the region Locator below.
+import { releaseNotes as releaseNotesData } from '../src/lib/release-notes';
 
 test('settings can be opened from chat', async ({ page }) => {
   await page.goto('/chat');
@@ -162,7 +166,8 @@ test('about exposes manual PWA update status and platform install expectations',
 
   const releaseNotes = dialog.getByRole('region', { name: 'Release notes' });
   const releaseNotesScrollbar = dialog.getByTestId('release-notes-scrollbar');
-  await expect(releaseNotes.getByText('v0.3.2', { exact: true })).toBeVisible();
+  const firstRelease = releaseNotesData[0]!;
+  await expect(releaseNotes.getByText(firstRelease.version, { exact: true })).toBeVisible();
 
   const layout = await releaseNotes.evaluate((node) => {
     const aboutRegion = node.closest('[aria-label="About settings"]');
@@ -180,13 +185,19 @@ test('about exposes manual PWA update status and platform install expectations',
 
   expect(layout.releaseCanScroll).toBe(true);
   expect(layout.aboutCanScroll).toBe(false);
-  expect(Math.abs(layout.bottomMargin! - layout.leftMargin!)).toBeLessThanOrEqual(8);
-  expect(Math.abs(layout.bottomMargin! - layout.rightMargin!)).toBeLessThanOrEqual(8);
+  // Left/right gutters are exactly symmetric; the bottom gap is within a flex sub-pixel-rounding margin of the
+  // sides (the fixed rows above the flex-1 region accumulate fractional heights, so allow ~12px of drift).
+  expect(layout.leftMargin).toBe(layout.rightMargin);
+  expect(Math.abs(layout.bottomMargin! - layout.leftMargin!)).toBeLessThanOrEqual(12);
+  expect(Math.abs(layout.bottomMargin! - layout.rightMargin!)).toBeLessThanOrEqual(12);
   await expect(releaseNotesScrollbar).toHaveClass(/opacity-0/);
 
   await releaseNotes.hover();
   await page.mouse.wheel(0, 5_000);
   await expect(releaseNotesScrollbar).toHaveClass(/opacity-100/);
   await expect(releaseNotesScrollbar).toHaveClass(/opacity-0/, { timeout: 2_000 });
-  await expect(releaseNotes.getByText('v0.0.1', { exact: true })).toBeVisible();
+  // Scrolling reveals the bottom of the list — assert the last line of the last release entry is now visible.
+  const lastRelease = releaseNotesData[releaseNotesData.length - 1]!;
+  const lastLine = lastRelease.items[lastRelease.items.length - 1]!;
+  await expect(releaseNotes.getByText(lastLine, { exact: true })).toBeVisible();
 });

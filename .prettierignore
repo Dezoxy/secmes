@@ -6,6 +6,7 @@ charts/**
 infra/**
 *.tfvars
 apps/api/openapi.json
+**/generated/
 
 # markdown is prose — not worth prettier churn
 **/*.md
