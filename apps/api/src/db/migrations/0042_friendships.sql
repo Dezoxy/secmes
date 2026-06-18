@@ -33,6 +33,12 @@ CREATE TABLE IF NOT EXISTS friendships (
   CONSTRAINT friendships_status_check CHECK (status IN ('pending', 'accepted')),
   CONSTRAINT friendships_low_ne_high CHECK (user_low_id <> user_high_id),
   CONSTRAINT friendships_canonical_order CHECK (user_low_id < user_high_id),
+  -- Enforce TTL integrity: pending rows MUST carry an expiry (so the sweep can never miss them)
+  -- and accepted rows MUST NOT (nulled on accept). Also requires requested_by for pending rows.
+  CONSTRAINT friendships_pending_must_have_expiry
+    CHECK (status <> 'pending' OR (expires_at IS NOT NULL AND requested_by IS NOT NULL)),
+  CONSTRAINT friendships_accepted_must_clear_expiry
+    CHECK (status <> 'accepted' OR (expires_at IS NULL AND requested_by IS NULL)),
   CONSTRAINT friendships_tenant_low_fk
     FOREIGN KEY (tenant_id, user_low_id) REFERENCES users(tenant_id, id) ON DELETE CASCADE,
   CONSTRAINT friendships_tenant_high_fk
