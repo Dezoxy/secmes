@@ -330,6 +330,7 @@ export function useLiveConversations({
     onPeerVerified,
     onSafetyNumberResolved,
     pool,
+    selfUserId,
     setConversations,
   ]);
 
@@ -337,12 +338,18 @@ export function useLiveConversations({
     drainRef.current = drainWelcomes;
   }, [drainWelcomes]);
 
-  // Join on connect: the initial drain once the device is unlocked and provisioned.
+  // Join on connect: the initial drain once the device is unlocked and provisioned. Gate on selfUserId too —
+  // drainWelcomes uses it to tell a peer's Welcome from our own device-enrollment Welcome (senderUserId ===
+  // selfUserId). Draining before the profile resolves would capture selfUserId === undefined, so the guard
+  // always passes and a self-sent enrollment Welcome gets persisted as a peer. joinRanRef latches the drain to
+  // run once, so without this gate the stale-closure run could never be corrected. (Mirrors the WS-socket
+  // effect below, which already requires selfUserId.)
   useEffect(() => {
-    if (!device || !pool || !deviceId || !messagingDeps || joinRanRef.current) return;
+    if (!device || !pool || !deviceId || !messagingDeps || !selfUserId || joinRanRef.current)
+      return;
     joinRanRef.current = true;
     drainWelcomes();
-  }, [device, deviceId, drainWelcomes, messagingDeps, pool]);
+  }, [device, deviceId, drainWelcomes, messagingDeps, pool, selfUserId]);
 
   // Realtime push (Slice 5C): one reconnecting WebSocket authenticated in the first frame.
   useEffect(() => {
