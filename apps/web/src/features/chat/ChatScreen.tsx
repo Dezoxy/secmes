@@ -28,7 +28,6 @@ import { VerifySecurity } from './VerifySecurity';
 import {
   useConversationBackfill,
   useConversationHistoryRehydration,
-  useRosterRecovery,
   useSelectedConversationBackfill,
 } from './useConversationBackfill';
 import { useChatState } from './useChatState';
@@ -441,20 +440,11 @@ export default function ChatScreen() {
     },
   });
 
-  useRosterRecovery({
-    messagingDeps,
-    sessionKey,
-    currentUserProfile,
-    selfUserId: profile?.userId,
-    setConversations,
-  });
-
   // Compute the selected DIRECT conversation's own safety number (from its own loopback session), once.
   // LIVE conversations are skipped — a started one already holds its REAL number, and none should spin up a
   // loopback session (which would compute the wrong, local number).
   useEffect(() => {
-    if (!selectedId || !isDirect || selectedIsLive || selectedConversation?.recoveredFromServer)
-      return;
+    if (!selectedId || !isDirect || selectedIsLive) return;
     void getMlsSession(selectedId)
       .then((s) =>
         setNumbersByConv((prev) =>
@@ -578,11 +568,7 @@ export default function ChatScreen() {
                 conversation={selectedConversation}
                 onBack={handleBackToConversations}
                 verified={verified}
-                onVerify={
-                  isDirect && currentNumber && !selectedConversation.recoveredFromServer
-                    ? () => setVerifyOpen(true)
-                    : undefined
-                }
+                onVerify={isDirect && currentNumber ? () => setVerifyOpen(true) : undefined}
                 onAddMember={
                   selectedConversation.type === 'group' &&
                   selectedConversation.creatorId === profile?.userId &&
