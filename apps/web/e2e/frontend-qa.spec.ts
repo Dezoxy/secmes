@@ -68,16 +68,17 @@ test('F1C mobile settings and profile QA flow stays navigable', async ({ page })
   const dialog = page.getByRole('dialog', { name: 'Settings' });
   await expect(dialog.getByRole('heading', { name: 'Settings' })).toBeVisible();
 
-  const profileSection = dialog.getByRole('button', { name: 'Profile' });
-  await expect(profileSection).toHaveAttribute('aria-current', 'page');
-
-  await profileSection.click();
-  await expect(dialog.getByRole('region', { name: 'Profile settings' })).toBeFocused();
+  await expect(dialog.getByRole('button', { name: 'Profile' })).toHaveCount(0);
+  await expect(dialog.getByRole('heading', { name: 'Profile' })).toBeVisible();
   await expect(dialog.getByText('Display name')).toBeVisible();
   await expect(dialog.getByText('Upload photo')).toBeVisible();
 
+  const securitySection = dialog.getByRole('button', { name: 'Security', exact: true });
+  await securitySection.click();
+  await expect(dialog.getByRole('region', { name: 'Security settings' })).toBeFocused();
+
   await dialog.getByRole('button', { name: 'Back to settings menu' }).click();
-  await expect(profileSection).toBeFocused();
+  await expect(securitySection).toBeFocused();
   await expect(dialog.getByRole('button', { name: 'Appearance' })).toBeVisible();
   expect(issues).toEqual([]);
 });

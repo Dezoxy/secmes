@@ -273,6 +273,81 @@ convenience endpoint (**moot** — the friends list, not conversation-member rea
   app-layer authz predicate (#3) — `security-boundary-auditor` must assert it.
 - **R-friends-6 (admin social-graph widening):** admin/ops must not query `friendships`; threat-model separately
   if ever needed. Keeps #6's metadata-only admin surface from quietly absorbing the pre-conversation graph.
+group; cryptographic "proof it's the same human" beyond OOB safety-number re-verify (deferred "sealed identity
+transfer", multi-device-enrollment.md §5.4); group (N-party) safety numbers; any encrypted-roster blob /
+server-stored recoverable secret (rejected — contradicts #16).
+
+## Friend requests backend — planned contact source
+
+The current UI can mock "send friend request" locally, but the backend source of truth is not implemented yet.
+When this lands, accepted contacts should become the long-term contact-list source; existing 1:1 direct
+conversations remain the compatibility fallback until enough clients have migrated.
+
+### Data model
+
+Add a tenant-scoped `contact_requests` table via `/db-migration`:
+
+- `id uuid primary key default gen_random_uuid()`
+- `tenant_id uuid not null`
+- `requester_user_id uuid not null`
+- `recipient_user_id uuid not null`
+- `status text not null` with values `pending`, `accepted`, `declined`, `cancelled`
+- `created_at timestamptz not null default now()`
+- `resolved_at timestamptz`
+
+RLS requirements:
+
+- `tenant_id` is mandatory and FORCE RLS is mandatory.
+- A caller may read rows where they are requester or recipient.
+- A caller may create only rows where `requester_user_id` is their verified user id.
+- Only the recipient may accept or decline a pending request.
+- Composite foreign keys must pin `(tenant_id, requester_user_id)` and `(tenant_id, recipient_user_id)` to
+  `users(tenant_id, id)` so cross-tenant links fail at the DB boundary.
+
+Integrity requirements:
+
+- Reject self-requests.
+- Reject duplicate pending requests in either direction.
+- Reject duplicate accepted friendships in either direction.
+- Keep one canonical accepted friendship per pair. The implementation may either reuse the accepted request row
+  or add a separate `contacts` table, but the API contract below must not expose duplicate friends.
+
+### MVP API contract
+
+- `POST /contacts/requests` with `{ "argusId": string }`
+  - Exact-match lookup only, using the existing argus-id discovery model.
+  - Returns the created outgoing pending request.
+  - Uniform user-facing failure for not found, inactive, self, duplicate pending, and already accepted where
+    practical; do not create a new enumeration oracle.
+- `GET /contacts`
+  - Returns accepted friends for the caller: `userId`, `argusId`, `displayName`, `avatarSeed`, `acceptedAt`.
+  - This becomes the preferred contact-list recovery source.
+- `GET /contacts/requests?box=incoming|outgoing`
+  - Returns pending requests for the requested mailbox only.
+- `POST /contacts/requests/:id/accept`
+  - Recipient-only. Transitions pending to accepted and sets `resolved_at`.
+- `POST /contacts/requests/:id/decline`
+  - Recipient-only. Transitions pending to declined and sets `resolved_at`.
+
+### Security rules
+
+- No fuzzy search, prefix search, browsable directory, or global member list.
+- No message plaintext, ciphertext, keys, tokens, emails, full Authorization headers, or presigned URLs in
+  request/response/audit metadata.
+- Audit only metadata-safe events: requester id, recipient id, request id, status transition, and
+  well-formed target argus-id when needed. Never log free-form raw search text if it fails argus-id format.
+- Rate-limit request creation and argus-id lookup reuse to prevent scanning and spam.
+- Do not auto-create a conversation on accept. Starting chat still goes through the existing safety-number-gated
+  `ConversationManager.prepare()` -> `VerifySecurity` -> `confirm()` flow.
+
+## Invariants — all hold
+
+#1 crypto-blind (reuses opaque commit/welcome/ciphertext; identity-change signal is client-side, metadata-only,
+never sent; friend requests carry contact metadata only) · #2 no secret/content logging (trust state
+client-local, never logged; request audits stay metadata-only) · #3 RLS (existing roster reads are
+member/owner-scoped; the future `contact_requests` table must be tenant-scoped + FORCE RLS) · #4 no
+hand-rolled crypto (reuses `@argus/crypto` `safetyNumber` + `ConversationManager`) · #5 Key Vault untouched ·
+#6 no admin path.
 
 ---
 

@@ -106,7 +106,7 @@ export async function resolvePeerUser(
     }
     if (!found) return null;
     const name = found.displayName?.trim() || 'Anonymous';
-    return { id: found.userId, name, avatar: dicebearAvatar(found.userId) };
+    return { id: found.userId, name, argusId: found.argusId, avatar: dicebearAvatar(found.userId) };
   } catch {
     return null;
   }
@@ -132,7 +132,13 @@ export function withPeerNamed(
       ...conversation,
       participants: conversation.participants.map((participant) =>
         participant.id === placeholder
-          ? { ...participant, id: peer.id, name: peer.name, avatar: peer.avatar }
+          ? {
+              ...participant,
+              id: peer.id,
+              name: peer.name,
+              argusId: peer.argusId,
+              avatar: peer.avatar,
+            }
           : participant,
       ),
     };

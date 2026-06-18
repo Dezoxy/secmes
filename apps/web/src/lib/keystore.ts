@@ -40,16 +40,28 @@ const DB_NAME = 'argus-keystore';
 // from v1–v6 were sealed under a typed passphrase (or a passphrase-derived session key) and are unreadable
 // under the new key, so the upgrade WIPES every secret-bearing store and recreates them empty. Local history
 // starts fresh (a new device starts fresh anyway); the web client is unreleased, so no real user data is lost.
-const DB_VERSION = 7;
+// v8 ADDS the verified-peers store (one row per peerUserId, keyed safety-number set sealed under the session
+// key). No new wipe: v8 only creates the new store in the existing recreate loop — existing stores are
+// untouched. Reinstall → no stored verified-peers → re-verify on first conversation (correct default).
+const DB_VERSION = 8;
 const STORE = 'device';
 const POOL_STORE = 'key-package-pool'; // sealed one-time KeyPackage pool (privates retained for join)
 const GROUP_STORE = 'group-state'; // sealed MLS group state per conversation (ratchet secrets — Slice 5)
 const MSGLOG_STORE = 'message-log'; // sealed decrypted message history per conversation (history)
 const PENDING_STORE = 'pending-commit'; // sealed pending post-commit state — written BEFORE POST, cleared on apply/discard
+const VERIFIED_PEERS_STORE = 'verified-peers'; // sealed per-peer verified safety-number sets (contact-list recovery)
 const SELF = 'self'; // single device per user in v1 (multi-device is deferred, B2)
 
 // Every secret-bearing store, in the order the upgrade (re)creates them. v7 wipes + recreates all of these.
-const SECRET_STORES = [STORE, POOL_STORE, GROUP_STORE, MSGLOG_STORE, PENDING_STORE] as const;
+// v8 adds VERIFIED_PEERS_STORE — it is added to this list so the existing loop auto-creates it on upgrade.
+const SECRET_STORES = [
+  STORE,
+  POOL_STORE,
+  GROUP_STORE,
+  MSGLOG_STORE,
+  PENDING_STORE,
+  VERIFIED_PEERS_STORE,
+] as const;
 
 const te = new TextEncoder();
 const td = new TextDecoder();
@@ -144,6 +156,19 @@ function pendingCommitAad(conversationId: string): Uint8Array {
   return te.encode(`pending-commit:${conversationId}`);
 }
 
+/** AAD for a verified-peers blob — pins it to the peerUserId slot and domain-separates from all other stores. */
+function verifiedPeersAad(peerUserId: string): Uint8Array {
+  return te.encode(`verified-peers:${peerUserId}`);
+}
+
+// One row in the verified-peers store (key = peerUserId). Holds the sorted, deduped set of per-device
+// safety numbers verified by the user for this peer's currently-present MLS devices. Sealed under the
+// per-session PRF key — the `peerUserId → numbers` association is social-graph metadata, never plain-text.
+interface StoredVerifiedPeer {
+  peerUserId: string;
+  sealed: SealedBlob;
+}
+
 // A pending post-commit state persisted BEFORE the POST, so a crash between a successful POST and
 // applyStaged/saveConversationState doesn't desync the device (the device reloads at the old epoch
 // while the server/peers are already at the new epoch). On reload, loadConversations promotes the
@@ -190,17 +215,22 @@ export class DeviceKeystore {
 
   static async open(engine?: MlsEngine): Promise<DeviceKeystore> {
     const db = await openDB(DB_NAME, DB_VERSION, {
-      upgrade(database) {
-        // v7 cutover (and any prior upgrade): every store from v1–v6 was sealed under a typed passphrase or
-        // a passphrase-derived session key, all unreadable under the new passkey-PRF unlock key. So WIPE +
-        // recreate every secret-bearing store. A fresh device is minted (sealed under PRF) on the next
-        // getOrCreateDevice; nothing in the dropped stores can be unsealed. The obsolete `meta` store (which
-        // held the old session-key salt) is dropped and NOT recreated. Best-effort at-rest clearing — the
-        // browser decides when backing pages are reclaimed.
-        for (const name of Array.from(database.objectStoreNames)) {
-          database.deleteObjectStore(name);
+      upgrade(database, oldVersion) {
+        if (oldVersion < 7) {
+          // v7 cutover: every store from v1–v6 was sealed under a typed passphrase or a passphrase-derived
+          // session key, all unreadable under the new passkey-PRF unlock key. Wipe every store (including the
+          // obsolete `meta` store that held the old session-key salt) and recreate only the PRF-sealed set.
+          // Nothing in the dropped stores can be unsealed; a fresh device is minted on the next
+          // getOrCreateDevice. Best-effort at-rest clearing — the browser decides when backing pages are reclaimed.
+          for (const name of Array.from(database.objectStoreNames)) {
+            database.deleteObjectStore(name);
+          }
         }
-        for (const name of SECRET_STORES) database.createObjectStore(name);
+        // v8+ additive: create any store that does not exist yet (idempotent for future upgrades).
+        // For a v7→v8 upgrade only VERIFIED_PEERS_STORE is missing; all other stores are left intact.
+        for (const name of SECRET_STORES) {
+          if (!database.objectStoreNames.contains(name)) database.createObjectStore(name);
+        }
       },
     });
     return new DeviceKeystore(db, engine ?? (await MlsEngine.create()));
@@ -786,6 +816,7 @@ export class DeviceKeystore {
     await this.db.clear(GROUP_STORE); // drop this profile's persisted conversations too (Slice 5)
     await this.db.clear(MSGLOG_STORE); // drop this profile's message history (history feature)
     await this.db.clear(PENDING_STORE); // drop any pending-commit slots
+    await this.db.clear(VERIFIED_PEERS_STORE); // drop verified-peer trust records
     this.groupStateVersions.clear();
     this.appendChains.clear();
   }
@@ -899,6 +930,52 @@ export class DeviceKeystore {
   async storedIdentity(): Promise<string | undefined> {
     const stored = (await this.db.get(STORE, SELF)) as StoredDevice | undefined;
     return stored?.identity;
+  }
+
+  /**
+   * Load the verified safety-number set for a peer, or `null` if the peer has never been verified on
+   * this device (including after a reinstall that wiped the store). Returns `null` — not `[]` — on a
+   * missing record so callers can distinguish "never verified" from "verified but tampered/wrong key".
+   * Errors (wrong session key, tampered blob) return `null` silently — fail-safe toward re-verify.
+   */
+  async loadVerifiedPeer(peerUserId: string, sessionKey: CryptoKey): Promise<string[] | null> {
+    const rec = (await this.db.get(VERIFIED_PEERS_STORE, peerUserId)) as
+      | StoredVerifiedPeer
+      | undefined;
+    if (!rec) return null;
+    try {
+      const bytes = await openWithKey(sessionKey, rec.sealed, verifiedPeersAad(peerUserId));
+      return JSON.parse(td.decode(bytes)) as string[];
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Persist the verified safety-number set for a peer. `sortedNumbers` must be sorted and deduped
+   * (callers are responsible — the load path does no normalization). Overwrites any prior record for
+   * this peerUserId. Called when the user explicitly marks a peer verified via the VerifySecurity panel,
+   * and when a rejoined conversation's number set matches the previously stored set.
+   */
+  async saveVerifiedPeer(
+    peerUserId: string,
+    sortedNumbers: string[],
+    sessionKey: CryptoKey,
+  ): Promise<void> {
+    const sealed = await sealWithKey(
+      sessionKey,
+      te.encode(JSON.stringify(sortedNumbers)),
+      verifiedPeersAad(peerUserId),
+    );
+    await this.db.put(
+      VERIFIED_PEERS_STORE,
+      { peerUserId, sealed } satisfies StoredVerifiedPeer,
+      peerUserId,
+    );
+  }
+
+  async deleteVerifiedPeer(peerUserId: string): Promise<void> {
+    await this.db.delete(VERIFIED_PEERS_STORE, peerUserId);
   }
 
   private async unseal(

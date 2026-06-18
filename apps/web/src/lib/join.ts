@@ -12,6 +12,7 @@ import {
   NoMatchingPoolMember,
   deserializeInvite,
   deviceSignatureSeed,
+  safetyNumberFromMember,
   serializeKeyPackage,
   type Conversation,
   type DeviceKeys,
@@ -43,6 +44,12 @@ export interface JoinedConversation {
   conversation: Conversation;
   /** The verified member who added us (from the welcome row) — lets the UI name the conversation. */
   senderUserId: string;
+  /**
+   * Per-device safety numbers for every non-self member in the joined group, sorted and deduped.
+   * Null if self could not be identified in the roster (should not happen; treat as first-time join).
+   * Used by the identity-change detector in useLiveConversations to compare against the stored set.
+   */
+  peerSafetyNumbers: string[] | null;
 }
 
 export interface JoinDeps {
@@ -132,10 +139,33 @@ export async function joinPendingConversations(deps: JoinDeps): Promise<void> {
             joined.conversation,
             sessionKey,
           );
+          // Compute per-device safety numbers from the group roster for identity-change detection.
+          // Self-identified by signature key byte-match (same idiom as enroll.ts:41).
+          const members = joined.conversation.members();
+          const selfSigKey = device.publicPackage.leafNode.signaturePublicKey;
+          const selfMember = members.find((m) => {
+            if (m.signaturePublicKey.length !== selfSigKey.length) return false;
+            for (let i = 0; i < selfSigKey.length; i++) {
+              if (m.signaturePublicKey[i] !== selfSigKey[i]) return false;
+            }
+            return true;
+          });
+          // Filter by identity string, not object reference: if the user has multiple enrolled
+          // devices they all share the same credential identity, so object-identity would incorrectly
+          // include own secondary devices in the peer key set and trigger false key-changed warnings.
+          const peerMembers = members.filter((m) => m.identity !== selfMember!.identity);
+          let peerSafetyNumbers: string[] | null = null;
+          if (selfMember && peerMembers.length > 0) {
+            const nums: string[] = await Promise.all(
+              peerMembers.map((pm) => safetyNumberFromMember(selfMember, pm)),
+            );
+            peerSafetyNumbers = [...new Set(nums)].sort();
+          }
           onJoined({
             conversationId: w.conversationId,
             conversation: joined.conversation,
             senderUserId: w.senderUserId,
+            peerSafetyNumbers,
           });
         }
         // The join is now DURABLE (freshly persisted just above, or already-owned on a replay): only NOW
