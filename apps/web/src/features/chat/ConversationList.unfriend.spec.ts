@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+// jsdom (devDep): needed for interactive React DOM tests; the friends panel is gated on `manager`
+// (full crypto device + auth), so it cannot be exercised in E2E demo mode — jsdom fills that gap.
 import { createElement } from 'react';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
