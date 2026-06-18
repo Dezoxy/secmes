@@ -9,6 +9,7 @@ export default tseslint.config(
       '**/dist/**',
       '**/node_modules/**',
       '**/*.config.*',
+      '**/generated/**', // machine-generated (e.g. apps/web/src/generated/release-notes.generated.ts)
       'infra/**',
       'charts/**',
       '.claude/**',

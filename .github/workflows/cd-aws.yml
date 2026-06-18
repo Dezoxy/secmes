@@ -46,6 +46,8 @@ jobs:
             dockerfile: infra/stack/caddy/Dockerfile
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0 # full history + tags for the About release-notes generator
 
       - name: Resolve image ref (lowercase owner — GHCR requires it)
         env:
@@ -63,6 +65,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Generate the About changelog from git tags + commits (ingress bakes the PWA). Runs here in the runner
+      # job because the Docker build context excludes .git; the emitted .ts then rides into the build context.
+      - name: Generate About release notes
+        if: matrix.name == 'ingress'
+        env:
+          RELEASE_TAG: ${{ env.IMAGE_TAG }} # scope the changelog to this tag's namespace (experiment aws-v*)
+        run: node apps/web/scripts/gen-release-notes.mjs
+
       - name: Build and push ${{ matrix.name }}
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
@@ -70,6 +80,9 @@ jobs:
           file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ env.IMAGE }}
+          # The PWA About version follows the release tag (IMAGE_TAG = github.ref_name); the api image ignores it.
+          build-args: |
+            VITE_APP_VERSION=${{ env.IMAGE_TAG }}
           cache-from: type=registry,ref=${{ env.CACHE }}
           cache-to: type=registry,ref=${{ env.CACHE }},mode=max
 

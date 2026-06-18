@@ -119,7 +119,11 @@ function bundleIntegrityManifestPlugin(): Plugin {
 // React + Vite PWA — the static, crypto-blind-friendly client for argus.
 export default defineConfig({
   define: {
-    'import.meta.env.VITE_APP_VERSION': JSON.stringify(webPackage.version),
+    // CD injects VITE_APP_VERSION = the git tag (github.ref_name) so the About page version follows the
+    // release; falls back to the package version locally (→ normalized to 0.0.0 in app-version.ts).
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(
+      process.env.VITE_APP_VERSION || webPackage.version,
+    ),
   },
   // Dev-only: proxy `/api/*` to the local API so the browser talks same-origin (no CORS). The API
   // runs on the host via `make api-dev`; see docs/local-auth.md. Prod uses a real origin (VITE_API_URL).

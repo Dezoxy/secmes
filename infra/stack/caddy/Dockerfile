@@ -20,6 +20,11 @@ COPY . .
 RUN pnpm install --frozen-lockfile
 # Auth is passkey-only (Phase 6) — the PWA has no build-time OIDC config. `prepare` already built
 # packages/*; build the PWA itself → apps/web/dist.
+# VITE_APP_VERSION = the release tag (CD passes --build-arg from github.ref_name) so the About page version
+# follows the release. The generated release-notes file is already in the context (CD regenerates it before
+# this build; the committed copy is the fallback) — the build only consumes it. Unset → falls back to 0.0.0.
+ARG VITE_APP_VERSION=
+ENV VITE_APP_VERSION=$VITE_APP_VERSION
 RUN pnpm --filter @argus/web build
 
 # ---- runtime: Caddy serving the built PWA + proxying the API ----

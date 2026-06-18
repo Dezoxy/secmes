@@ -24,16 +24,17 @@ function renderAbout(value: Partial<PwaUpdateContextValue> = {}): string {
 }
 
 describe('AboutSettings', () => {
-  it('shows backend status and release notes without a standalone version footer', () => {
+  it('shows the version, backend status, and generated release notes', () => {
     const html = renderAbout();
 
+    // Version row follows the build tag; with no VITE_APP_VERSION injected (tests) it's the 0.0.0 fallback.
+    expect(html).toContain('Version');
+    expect(html).toContain('v0.0.0');
     expect(html).toContain('Backend status');
     expect(html).toContain('Offline');
     expect(html).toContain('Release notes');
     expect(html).toContain(releaseNotes[0]!.version);
     expect(html).toContain(releaseNotes[0]!.title);
-    expect(html).toContain(releaseNotes.at(-1)!.version);
-    expect(html).not.toContain('v0.0.0');
     expect(html).not.toContain('Argus secure messaging');
     expect(html).not.toContain('Safe diagnostic export');
     expect(html).not.toContain('Diagnostics menu reserved');

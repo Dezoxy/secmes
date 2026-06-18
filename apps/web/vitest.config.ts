@@ -4,7 +4,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['src/**/*.spec.ts'],
+    include: ['src/**/*.spec.ts', 'scripts/**/*.spec.ts'],
     setupFiles: ['fake-indexeddb/auto'],
     // Keystore tests do Argon2id + many IndexedDB ops; under CPU contention (the pre-push hook / CI running
     // multiple suites) they can exceed the 5s default. Generous headroom so legitimately-slow-under-load work
