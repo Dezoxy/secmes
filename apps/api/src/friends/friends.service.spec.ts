@@ -194,6 +194,31 @@ describe.skipIf(!DB_URL)('FriendsService (Slice D — friends API)', () => {
     });
   });
 
+  describe('TTL enforced at the API layer (before the sweep runs)', () => {
+    it('hides and rejects an expired pending request', async () => {
+      const a = authFor(userA, 'fr-ext-a');
+      const b = authFor(userB, 'fr-ext-b');
+      // Seed an already-expired pending request (canonical pair, A as requester) directly — simulates a
+      // row the cleanup sweep has not yet reaped.
+      const [low, high] = userA < userB ? [userA, userB] : [userB, userA];
+      const [seeded] = await sql`insert into friendships
+        (tenant_id, user_low_id, user_high_id, status, requested_by, expires_at)
+        values (${tenant}, ${low}, ${high}, 'pending', ${userA}, now() - interval '1 day')
+        returning id`;
+      const expiredId = (seeded as { id: string }).id;
+
+      // Invisible in both boxes…
+      expect(await service.listRequests(b, 'incoming')).toHaveLength(0);
+      expect(await service.listRequests(a, 'outgoing')).toHaveLength(0);
+      // …and inert to accept / decline / cancel.
+      await expect(service.accept(b, expiredId)).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.decline(b, expiredId)).rejects.toBeInstanceOf(NotFoundException);
+      await expect(service.cancel(a, expiredId)).rejects.toBeInstanceOf(NotFoundException);
+      // The row is still present (only the sweep deletes it) but unusable.
+      expect(await rowCount()).toBe(1);
+    });
+  });
+
   describe('listFriends + unfriend', () => {
     it('returns accepted friends with the other party profile, then unfriends', async () => {
       const a = authFor(userA, 'fr-ext-a');

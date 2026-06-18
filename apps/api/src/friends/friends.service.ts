@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { Friend, FriendRequest, FriendRequestBox } from '@argus/contracts';
-import { and, eq, ne, or, sql } from 'drizzle-orm';
+import { and, eq, gt, ne, or, sql } from 'drizzle-orm';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
@@ -129,6 +129,9 @@ export class FriendsService {
           and(
             eq(schema.friendships.tenantId, auth.tenantId),
             eq(schema.friendships.status, 'pending'),
+            // Enforce the TTL at the API layer too — an expired request is invisible/inert even if the
+            // argus_cleanup sweep has not run yet (no scheduler is wired until a later slice).
+            gt(schema.friendships.expiresAt, new Date()),
             or(eq(schema.friendships.userLowId, me), eq(schema.friendships.userHighId, me)),
             directionPredicate,
           ),
@@ -191,6 +194,8 @@ export class FriendsService {
             eq(schema.friendships.id, requestId),
             eq(schema.friendships.tenantId, auth.tenantId),
             eq(schema.friendships.status, 'pending'),
+            // Expired requests are inert at the API layer even before the sweep runs.
+            gt(schema.friendships.expiresAt, new Date()),
             // requester-only: requested_by is the canonical opener; it is always a party (DB CHECK).
             eq(schema.friendships.requestedBy, me),
           ),
@@ -232,6 +237,8 @@ export class FriendsService {
       eq(schema.friendships.id, requestId),
       eq(schema.friendships.tenantId, tenantId),
       eq(schema.friendships.status, 'pending'),
+      // Expired requests are inert at the API layer even before the sweep runs.
+      gt(schema.friendships.expiresAt, new Date()),
       or(eq(schema.friendships.userLowId, me), eq(schema.friendships.userHighId, me)),
       ne(schema.friendships.requestedBy, me),
     );

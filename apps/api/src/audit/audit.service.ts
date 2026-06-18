@@ -23,12 +23,13 @@ export interface ProfileUpdateMeta {
 /**
  * Metadata for the `friends.request_created` audit event.
  * `targetArgusId` is sanitised by the controller (verbatim only if well-formed, else <invalid-format>)
- * — the friend-request path is a state-changing argus-id probe (R-friends-3); `found` records whether
- * the probe hit an active user. Pseudonymous identifiers + a boolean — no PII, no content.
+ * — the friend-request path is a state-changing argus-id probe (R-friends-3). We deliberately record
+ * ONLY the probed argus-id, NOT whether it matched an active user: the probe pattern is visible from the
+ * argus-id sequence for abuse detection, while a stored `found` boolean would be replayable to the actor
+ * via the GDPR Art. 20 export — a durable enumeration oracle defeating the uniform-202. No PII, no content.
  */
 export interface FriendRequestMeta {
   targetArgusId: string;
-  found: boolean;
 }
 
 export type AuditMetadata = LookupUserMeta | ProfileUpdateMeta | FriendRequestMeta;
@@ -54,7 +55,6 @@ const ProfileUpdateMetaSchema = z.object({
 
 const FriendRequestMetaSchema = z.object({
   targetArgusId: z.string().max(128),
-  found: z.boolean(),
 });
 
 function validateMetadata(eventType: string, metadata: AuditMetadata): AuditMetadata {

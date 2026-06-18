@@ -134,12 +134,14 @@ export class FriendsController {
     @CurrentAuth() auth: VerifiedAuth,
     @Body(new ZodValidationPipe(SendFriendRequestSchema)) body: SendFriendRequest,
   ): Promise<SendFriendRequestResponseDto> {
-    const { targetFound } = await this.friends.sendRequest(auth, body.argusId);
+    await this.friends.sendRequest(auth, body.argusId);
     const safeArgusId = ARGUS_ID_RE.test(body.argusId) ? body.argusId : '<invalid-format>';
+    // Record ONLY the (sanitised) probed argus-id — never whether it matched. A stored `found` flag
+    // would be replayable to the actor via the GDPR export, a durable enumeration oracle.
     await this.audit.record(auth.tenantId, {
       eventType: 'friends.request_created',
       actorSub: auth.sub,
-      metadata: { targetArgusId: safeArgusId, found: targetFound },
+      metadata: { targetArgusId: safeArgusId },
     });
     // Constant body for EVERY outcome — preserves the uniform-202 non-oracle property.
     return { status: 'accepted' };
