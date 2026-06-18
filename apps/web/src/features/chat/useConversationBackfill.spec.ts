@@ -279,6 +279,13 @@ describe('buildRosterPlaceholders', () => {
     expect(result[0]?.participants[1]).toMatchObject({ id: 'peer-a' });
   });
 
+  it('excludes isDirect=true rows with more than one non-self member (malformed/group-after-add)', () => {
+    const convs = [makeConv('conv-1', true, '2026-01-01T00:00:00Z')];
+    const members = makeMembers('conv-1', 'peer-a', 'peer-b'); // two non-self members
+    const result = buildRosterPlaceholders(convs, members, 'self-id', selfProfile);
+    expect(result).toHaveLength(0);
+  });
+
   it('excludes isDirect=false and isDirect=null rows', () => {
     const convs = [
       makeConv('conv-group', false, '2026-01-02T00:00:00Z'),

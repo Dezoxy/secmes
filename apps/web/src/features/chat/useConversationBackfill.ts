@@ -332,8 +332,12 @@ export function buildRosterPlaceholders(
   const result: Conversation[] = [];
   for (const conv of directConvs) {
     const convMembers = membersMap.get(conv.id) ?? [];
-    const peer = convMembers.find((m) => m.userId !== selfUserId);
-    if (!peer || seenPeers.has(peer.userId)) continue;
+    const nonSelfMembers = convMembers.filter((m) => m.userId !== selfUserId);
+    // Require exactly one peer — isDirect=true rows that gained extra members after creation
+    // (via add-member commits) would otherwise render as a 1:1 placeholder with a random peer.
+    if (nonSelfMembers.length !== 1) continue;
+    const peer = nonSelfMembers[0]!;
+    if (seenPeers.has(peer.userId)) continue;
     seenPeers.add(peer.userId);
     result.push({
       id: conv.id,
