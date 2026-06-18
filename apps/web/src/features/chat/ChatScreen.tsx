@@ -430,6 +430,7 @@ export default function ChatScreen() {
   const handleOpenExisting = (conversationId: string): void => {
     setSelectedId(conversationId);
     setStartOpen(false);
+    setStartPrefillArgusId(undefined);
   };
 
   // Add a freshly-started LIVE conversation to the list: its safety number is the REAL one from the
@@ -463,6 +464,7 @@ export default function ChatScreen() {
     setVerifiedByConv((prev) => ({ ...prev, [session.conversationId]: session.safetyNumber }));
     setSelectedId(session.conversationId);
     setStartOpen(false);
+    setStartPrefillArgusId(undefined);
     // Persist the verified safety-number set keyed by peerUserId. Computed from the group roster
     // post-confirm using safetyNumberFromMember for cross-consistency with the joiner path (C2).
     if (messagingDeps) {
