@@ -123,6 +123,14 @@ class ConversationListDto {
     description: 'Conversations the caller is a member of (metadata only)',
   })
   conversations!: ConversationSummaryDto[];
+
+  @ApiProperty({
+    type: [String],
+    deprecated: true,
+    description:
+      'Backward-compat shim for stale PWA bundles that read .conversationIds. Remove once the new client version is confirmed shipped.',
+  })
+  conversationIds!: string[];
 }
 
 class WithdrawDeviceBodyDto {
@@ -308,12 +316,16 @@ export class DevicesController {
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async listConversations(@CurrentAuth() auth: VerifiedAuth): Promise<ConversationListDto> {
     const rows = await this.devices.listMyConversations(auth);
+    const conversations = rows.map((r) => ({
+      id: r.conversationId,
+      isDirect: r.isDirect,
+      createdAt: r.createdAt.toISOString(),
+    }));
     return {
-      conversations: rows.map((r) => ({
-        id: r.conversationId,
-        isDirect: r.isDirect,
-        createdAt: r.createdAt.toISOString(),
-      })),
+      conversations,
+      // Backward-compat shim: stale PWA bundles read .conversationIds from this endpoint.
+      // Remove once the new client version is confirmed shipped.
+      conversationIds: rows.map((r) => r.conversationId),
     };
   }
 }
