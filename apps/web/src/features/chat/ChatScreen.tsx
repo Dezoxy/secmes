@@ -148,7 +148,7 @@ export default function ChatScreen() {
   const [verifiedByConv, setVerifiedByConv] = useState<Record<string, string>>({});
 
   const { device, pool, deviceId, keystore, sessionKey } = useDevice();
-  const { profile, subjectId } = useAuth();
+  const { profile, subjectId, demoMode } = useAuth();
   const { updateReady, applyUpdate } = usePwaUpdate();
   const profileSubjectId = subjectId ?? DEMO_PROFILE_SUBJECT;
   const [anonymousProfile, setAnonymousProfile] = useState<AnonymousProfile>(() =>
@@ -229,6 +229,10 @@ export default function ChatScreen() {
       numbersByConv,
       verifiedByConv,
     });
+  // In demo mode (E2E / no auth) all seed conversations behave as live so the composer renders.
+  // The hooks that consume the real selectedIsLive (receipt-sending, backfill) already guard on
+  // messagingDeps, which is null in demo mode, so they remain no-ops.
+  const effectiveSelectedIsLive = demoMode ? !!selectedId : selectedIsLive;
 
   const handleSend = useMessageSending({
     selectedId,
@@ -517,11 +521,11 @@ export default function ChatScreen() {
                 updateReady={updateReady}
                 onApplyUpdate={applyUpdate}
               />
-              {selectedIsLive && (
+              {effectiveSelectedIsLive && (
                 <ReconnectBanner status={connectionStatus} className="mx-4 mt-3" />
               )}
               <MessageList conversation={selectedConversation} onImageClick={setPreviewImage} />
-              {selectedIsLive && <ChatInput onSend={handleSend} />}
+              {effectiveSelectedIsLive && <ChatInput onSend={handleSend} />}
             </div>
           ) : (
             <div
