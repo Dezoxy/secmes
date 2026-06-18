@@ -232,6 +232,7 @@ export function ConversationList({
     setFriendQuery('');
     setSentArgusId(null);
     setSendRequestError(null);
+    setConfirmingUnfriendId(null);
     setSidebarTransition('back');
     setSidebarMode('conversations');
   };
