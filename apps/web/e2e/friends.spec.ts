@@ -134,16 +134,11 @@ test('accepted friend can be removed via the unfriend button', async ({ page }) 
   await page.getByRole('button', { name: 'Friends' }).click();
   await expect(page.getByRole('button', { name: /Open friend Alice/ })).toBeVisible();
 
-  // In demo mode onUnfriend is undefined — the remove button is hidden.
-  const removeBtn = page.getByRole('button', { name: /Remove friend Alice/ });
-  if (await removeBtn.isVisible()) {
-    await removeBtn.click();
-    await page.getByRole('button', { name: /Confirm remove Alice/ }).click();
-    expect(deleteUrl).toContain('/friends/');
-  } else {
-    // Demo mode — just confirm friend row still renders without the button.
-    await expect(page.getByRole('button', { name: /Open friend Alice/ })).toBeVisible();
-  }
+  // In demo mode onUnfriend is undefined — the remove button must not be visible.
+  // The unit tests in ConversationList.spec.ts cover the button's rendering and confirm
+  // flow when onUnfriend is provided (an authenticated session is required in E2E).
+  await expect(page.getByRole('button', { name: /Remove friend Alice/ })).toHaveCount(0);
+  expect(deleteUrl).toBeNull();
 });
 
 test('send-friend-request flow calls the API and shows "Request sent"', async ({ page }) => {
