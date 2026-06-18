@@ -286,6 +286,19 @@ describe.skipIf(!DB_URL)('FriendsService (Slice D — friends API)', () => {
       expect(await service.listFriends(b)).toHaveLength(0);
     });
 
+    it('unfriends correctly even when the friend userId is passed upper-cased (canonical normalisation)', async () => {
+      const a = authFor(userA, 'fr-ext-a');
+      const b = authFor(userB, 'fr-ext-b');
+      await service.sendRequest(a, argusB);
+      const [req] = await service.listRequests(b, 'incoming');
+      await service.accept(b, req!.requestId);
+      expect(await rowCount()).toBe(1);
+
+      // ParseUUIDPipe accepts upper-case UUIDs; canonicalPair must still resolve the same stored row.
+      await service.unfriend(a, userB.toUpperCase());
+      expect(await rowCount()).toBe(0);
+    });
+
     it('404s when unfriending someone who is not an accepted friend', async () => {
       await expect(service.unfriend(authFor(userA, 'fr-ext-a'), userC)).rejects.toBeInstanceOf(
         NotFoundException,

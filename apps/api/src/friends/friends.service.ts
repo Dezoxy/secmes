@@ -14,9 +14,17 @@ const FRIEND_REQUEST_TTL_DAYS = 14;
  * Canonical pair ordering: the friendships table stores ONE row per unordered pair, keyed by
  * (user_low_id < user_high_id). Sorting the two ids here matches the DB's `friendships_canonical_order`
  * CHECK so both directions collapse to the same row (no bidirectional-duplicate bug).
+ *
+ * UUIDs are lower-cased first: a client-supplied id (e.g. the unfriend `:userId` path param) passes
+ * ParseUUIDPipe in EITHER case, and JS string `<` is case-sensitive ('A'(0x41) < 'a'(0x61)). An
+ * uppercase input could flip the low/high decision vs the stored (lower-case canonical) row, so the
+ * WHERE would match nothing — a spurious 404 unfriending a real friend. Lower-casing makes the JS
+ * ordering agree with Postgres's uuid byte ordering.
  */
 function canonicalPair(a: string, b: string): { low: string; high: string } {
-  return a < b ? { low: a, high: b } : { low: b, high: a };
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  return x < y ? { low: x, high: y } : { low: y, high: x };
 }
 
 /** SQL expression for "the OTHER party in this row, relative to `me`". */
