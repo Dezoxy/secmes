@@ -4,9 +4,9 @@
 -- METADATA ONLY: stores user-id pairs and request state — no keys, no content (invariant #1).
 -- ACCEPTED-ONLY model: once accepted, requested_by is NULLed and expires_at is NULLed.
 -- DECLINE / CANCEL = hard DELETE (no rejection ledger — bounds pre-conversation social graph exposure).
--- PENDING TTL: expires_at bounds the open-request window; see sweep_expired_friend_requests() below.
--- No NestJS @Cron / pg_cron exists in this repo yet — call the function via an external cron or
--- add a NestJS ScheduleModule job in Slice D (see R-friends-2 in threat model).
+-- PENDING TTL: expires_at bounds the open-request window. Sweep follows the 0013 (attachments_cleanup)
+-- pattern: argus_cleanup role + scoped RLS policies (see bottom of this migration). No SECURITY DEFINER
+-- function. A NestJS ScheduleModule job or external cron calls DELETE via argus_cleanup in Slice D.
 --
 -- Canonical pair ordering: user_low_id = LEAST(a, b), user_high_id = GREATEST(a, b).
 -- The UNIQUE constraint on (tenant_id, user_low_id, user_high_id) enforces one row per pair.
@@ -68,22 +68,20 @@ CREATE POLICY friendships_tenant_isolation ON friendships
 GRANT SELECT, INSERT, DELETE ON friendships TO argus_app;
 GRANT UPDATE (status, requested_by, expires_at, resolved_at) ON friendships TO argus_app;
 
--- TTL sweep function: deletes pending requests whose expiry has passed.
--- Call periodically (pg_cron, external cron, or NestJS ScheduleModule in Slice D):
---   SELECT sweep_expired_friend_requests();
-CREATE OR REPLACE FUNCTION sweep_expired_friend_requests()
-RETURNS INTEGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-  deleted_count INTEGER;
-BEGIN
-  DELETE FROM friendships
-  WHERE status = 'pending' AND expires_at < NOW();
-  GET DIAGNOSTICS deleted_count = ROW_COUNT;
-  RETURN deleted_count;
-END;
-$$;
+-- TTL sweep — follows the 0013 (attachments_cleanup) pattern. No SECURITY DEFINER function.
+-- The argus_cleanup role (nologin nosuperuser nobypassrls noinherit) was created in 0013.
+-- It sees + deletes ONLY expired pending rows — never live rows, never accepted friendships.
+-- The tenant-isolation policy above uses nullif/missing_ok so it returns false (not throws) for
+-- argus_cleanup; these policies OR-combine with it, giving argus_cleanup exactly what it needs.
+CREATE POLICY friendships_cleanup_select ON friendships
+  FOR SELECT
+  TO argus_cleanup
+  USING (status = 'pending' AND expires_at IS NOT NULL AND expires_at < NOW());
 
-GRANT EXECUTE ON FUNCTION sweep_expired_friend_requests() TO argus_app;
+CREATE POLICY friendships_cleanup_delete ON friendships
+  FOR DELETE
+  TO argus_cleanup
+  USING (status = 'pending' AND expires_at IS NOT NULL AND expires_at < NOW());
+
+-- schema public USAGE is already granted to argus_cleanup in 0013.
+GRANT SELECT (id, expires_at), DELETE ON friendships TO argus_cleanup;
