@@ -217,6 +217,50 @@ describe.skipIf(!DB_URL)('FriendsService (Slice D — friends API)', () => {
       // The row is still present (only the sweep deletes it) but unusable.
       expect(await rowCount()).toBe(1);
     });
+
+    it('revives an expired pending request on a fresh send (no permanent deadlock)', async () => {
+      const a = authFor(userA, 'fr-ext-a');
+      const b = authFor(userB, 'fr-ext-b');
+      const [low, high] = userA < userB ? [userA, userB] : [userB, userA];
+      // An expired pending row from A that the sweep has not yet removed.
+      await sql`insert into friendships
+        (tenant_id, user_low_id, user_high_id, status, requested_by, expires_at)
+        values (${tenant}, ${low}, ${high}, 'pending', ${userA}, now() - interval '1 day')`;
+
+      // B sends a fresh request to A → the dead row is revived (still one row), now live and from B.
+      await service.sendRequest(b, argusA);
+      expect(await rowCount()).toBe(1);
+      const incoming = await service.listRequests(a, 'incoming');
+      expect(incoming).toHaveLength(1);
+      expect(incoming[0]?.userId).toBe(userB); // requester is now B
+    });
+
+    it('does NOT revive or alter a live pending request on a duplicate send', async () => {
+      const a = authFor(userA, 'fr-ext-a');
+      const b = authFor(userB, 'fr-ext-b');
+      await service.sendRequest(a, argusB); // live pending, requester A
+      await service.sendRequest(b, argusA); // duplicate from the other side → no-op, not a flip
+      expect(await rowCount()).toBe(1);
+      const [row] = await sql`select requested_by from friendships where tenant_id = ${tenant}`;
+      expect((row as { requested_by: string }).requested_by).toBe(userA); // unchanged
+    });
+  });
+
+  describe('accept requires the requester to remain active', () => {
+    it('404s when the requester was offboarded before acceptance', async () => {
+      const a = authFor(userA, 'fr-ext-a');
+      const b = authFor(userB, 'fr-ext-b');
+      await service.sendRequest(a, argusB);
+      const [req] = await service.listRequests(b, 'incoming');
+      await sql`update users set status = 'suspended' where id = ${userA}`;
+      try {
+        await expect(service.accept(b, req!.requestId)).rejects.toBeInstanceOf(NotFoundException);
+        const [row] = await sql`select status from friendships where tenant_id = ${tenant}`;
+        expect((row as { status: string }).status).toBe('pending'); // not accepted
+      } finally {
+        await sql`update users set status = 'active' where id = ${userA}`;
+      }
+    });
   });
 
   describe('listFriends + unfriend', () => {

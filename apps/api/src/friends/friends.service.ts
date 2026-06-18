@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { Friend, FriendRequest, FriendRequestBox } from '@argus/contracts';
-import { and, eq, gt, ne, or, sql } from 'drizzle-orm';
+import { and, eq, gt, lt, ne, or, sql } from 'drizzle-orm';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
@@ -49,6 +49,7 @@ export class FriendsService {
     if (target.userId === me) return { targetFound: true };
 
     const { low, high } = canonicalPair(me, target.userId);
+    const expiresAt = new Date(Date.now() + FRIEND_REQUEST_TTL_DAYS * 24 * 60 * 60 * 1000);
     await withTenant(auth.tenantId, async (tx) => {
       await tx
         .insert(schema.friendships)
@@ -58,15 +59,24 @@ export class FriendsService {
           userHighId: high,
           status: 'pending',
           requestedBy: me,
-          expiresAt: new Date(Date.now() + FRIEND_REQUEST_TTL_DAYS * 24 * 60 * 60 * 1000),
+          expiresAt,
         })
-        // One row per canonical pair: any existing pending/accepted row makes this a no-op.
-        .onConflictDoNothing({
+        // One row per canonical pair. On conflict, REVIVE the row only if the existing one is an
+        // EXPIRED pending request (resetting requester + expiry from this caller). A live pending row
+        // or an accepted friendship is left untouched (setWhere matches nothing → no-op). Without this,
+        // an expired-but-unswept row would deadlock the pair: every re-request would silently no-op
+        // against it while the API treats it as inert, until the cleanup sweep finally deletes it.
+        .onConflictDoUpdate({
           target: [
             schema.friendships.tenantId,
             schema.friendships.userLowId,
             schema.friendships.userHighId,
           ],
+          set: { status: 'pending', requestedBy: me, expiresAt, resolvedAt: null },
+          setWhere: and(
+            eq(schema.friendships.status, 'pending'),
+            lt(schema.friendships.expiresAt, new Date()),
+          ),
         });
     });
     return { targetFound: true };
@@ -151,7 +161,9 @@ export class FriendsService {
   /**
    * Accept a pending request — RECIPIENT-ONLY. The authz lives entirely in the WHERE clause: the caller
    * must be a member of the pair AND must NOT be the requester. A non-recipient (or wrong-id) caller
-   * matches 0 rows → uniform 404, never another user's row (R-friends-5 / IDOR gate).
+   * matches 0 rows → uniform 404, never another user's row (R-friends-5 / IDOR gate). The requester must
+   * ALSO still be an active user — accepting an offboarded requester would mint a live friendship to a
+   * dead account (the requester is the `requested_by` party; an inactive one yields 0 rows → 404).
    */
   async accept(auth: VerifiedAuth, requestId: string): Promise<void> {
     const updated = await withTenant(auth.tenantId, async (tx) => {
@@ -165,7 +177,13 @@ export class FriendsService {
           requestedBy: null,
           expiresAt: null,
         })
-        .where(this.recipientPredicate(requestId, me, auth.tenantId))
+        .where(
+          and(
+            this.recipientPredicate(requestId, me, auth.tenantId),
+            // The requester must still be active (RLS already scopes `users` to this tenant).
+            sql`exists (select 1 from users where users.id = ${schema.friendships.requestedBy} and users.status = 'active')`,
+          ),
+        )
         .returning({ id: schema.friendships.id });
     });
     if (updated.length === 0) throw new NotFoundException();
