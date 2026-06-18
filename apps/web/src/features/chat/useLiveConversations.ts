@@ -275,9 +275,10 @@ export function useLiveConversations({
         addLive(conversationId, conversation);
         const shell = liveConversationShell(conversationId, currentUserProfile);
         setConversations((prev) => replaceOrPrependConversation(prev, shell));
-        // Persist the peerUserId mapping synchronously so the manual-verify path can look it up via
-        // loadPersistedPeerMapping later (even before the async directory lookup resolves the name).
-        persistPeerMapping(conversationId, senderUserId);
+        // Persist the peerUserId mapping only when the sender is the real peer — not self. In the
+        // device-enrollment flow, an existing own device sends the Welcome to D2, making senderUserId
+        // equal to selfUserId; persisting that would map the conversation to ourselves.
+        if (senderUserId !== selfUserId) persistPeerMapping(conversationId, senderUserId);
         // Name the new conversation after the (verified) member who added us — best-effort, async; the
         // placeholder stays if the directory lookup misses.
         void resolvePeerUser(senderUserId, conversationId).then((peer) => {
@@ -293,6 +294,9 @@ export function useLiveConversations({
             .then((stored) => {
               if (stored === null) return; // never verified — leave unverified, no forced panel open
               if (!setsEqual(stored, peerSafetyNumbers)) {
+                // Delete the stale record before surfacing the prompt: if the user closes before
+                // re-verifying, rehydration must NOT restore the old badge from the now-invalid row.
+                void messagingDeps.keystore.deleteVerifiedPeer(senderUserId);
                 onPeerKeyChanged?.(senderUserId, conversationId, peerSafetyNumbers);
               } else {
                 // Same key: restore verified state immediately (no prompt needed).
