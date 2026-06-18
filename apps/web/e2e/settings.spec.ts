@@ -12,6 +12,7 @@ test('settings can be opened from chat', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible();
   await expect(page.getByText('Display name')).toBeVisible();
   await expect(page.getByText('Upload photo')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Profile' })).toHaveCount(0);
   await expect(page.getByText('Anonymous account settings')).toHaveCount(0);
   await expect(page.getByText('Auto-assigned. Unique within your organization.')).toHaveCount(0);
 });
@@ -22,7 +23,9 @@ test('mobile settings opens sections from the menu', async ({ page }) => {
   await page.getByRole('button', { name: 'Open settings' }).click();
 
   await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Profile' })).toBeHidden();
+  await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible();
+  await expect(page.getByText('Display name')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Profile' })).toHaveCount(0);
 
   await page.getByRole('button', { name: 'Security', exact: true }).click();
   const securityRegion = page.getByRole('region', { name: 'Security settings' });
@@ -48,7 +51,7 @@ test('profile display name is read-only and survives section navigation', async 
   await dialog.getByRole('button', { name: 'Appearance' }).click();
   await expect(dialog.getByRole('heading', { name: 'Appearance' })).toBeVisible();
 
-  await dialog.getByRole('button', { name: 'Profile' }).click();
+  await expect(dialog.getByRole('button', { name: 'Profile' })).toHaveCount(0);
   await expect(dialog.getByText('Display name')).toBeVisible();
 });
 
