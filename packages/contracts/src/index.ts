@@ -139,6 +139,66 @@ export const UpdateProfileSchema = z.object({
 });
 export type UpdateProfile = z.infer<typeof UpdateProfileSchema>;
 
+// ─── Friends (contact-list recovery) ──────────────────────────────────────────────────────────────
+// Server-backed friend graph: accepted friendships are the durable contact source after a reinstall.
+// Requests are ephemeral (TTL'd pending; decline/cancel = hard DELETE). The server stores metadata only.
+
+/** Send a friend request, addressed by the target's exact argus-id (same bound as the lookup query). */
+export const SendFriendRequestSchema = z.object({
+  argusId: z.string().min(1).max(128),
+});
+export type SendFriendRequest = z.infer<typeof SendFriendRequestSchema>;
+
+/**
+ * Uniform response to a send-request — a CONSTANT body for every outcome (found / not-found / inactive
+ * / self / already-friends / already-pending). Carries no outcome signal, so it is not an enumeration
+ * oracle; it exists only so the 202 has a typed body.
+ */
+export const SendFriendRequestResponseSchema = z.object({
+  status: z.literal('accepted'),
+});
+export type SendFriendRequestResponse = z.infer<typeof SendFriendRequestResponseSchema>;
+
+/** Which mailbox of open requests to read: requests sent TO me, or requests sent BY me. */
+export const FriendRequestBoxSchema = z.enum(['incoming', 'outgoing']);
+export type FriendRequestBox = z.infer<typeof FriendRequestBoxSchema>;
+
+/** An accepted friend — the contact-recovery surface. `since` = when the friendship was accepted. */
+export const FriendSchema = z.object({
+  userId: z.string().uuid(),
+  argusId: z.string(),
+  displayName: z.string().nullable(),
+  avatarSeed: z.string().nullable(),
+  since: z.string().datetime(),
+});
+export type Friend = z.infer<typeof FriendSchema>;
+
+/**
+ * An open (pending) friend request. `userId`/`argusId`/… describe the OTHER party; `direction` says
+ * whether it is incoming (they asked me) or outgoing (I asked them). `requestId` is the friendship row
+ * id used by accept/decline/cancel.
+ */
+export const FriendRequestSchema = z.object({
+  requestId: z.string().uuid(),
+  userId: z.string().uuid(),
+  argusId: z.string(),
+  displayName: z.string().nullable(),
+  avatarSeed: z.string().nullable(),
+  direction: FriendRequestBoxSchema,
+  createdAt: z.string().datetime(),
+});
+export type FriendRequest = z.infer<typeof FriendRequestSchema>;
+
+export const FriendListResponseSchema = z.object({
+  friends: z.array(FriendSchema),
+});
+export type FriendListResponse = z.infer<typeof FriendListResponseSchema>;
+
+export const FriendRequestListResponseSchema = z.object({
+  requests: z.array(FriendRequestSchema),
+});
+export type FriendRequestListResponse = z.infer<typeof FriendRequestListResponseSchema>;
+
 export const MeSchema = z.discriminatedUnion('bound', [MeUnboundSchema, MeBoundSchema]);
 export type Me = z.infer<typeof MeSchema>;
 
@@ -599,6 +659,20 @@ export const MeExportSchema = z.object({
       expiresAt: z.string().datetime(),
       acceptedAt: z.string().datetime().nullable(),
       revokedAt: z.string().datetime().nullable(),
+    }),
+  ),
+  // Accepted friendships + open requests where the caller is a party (GDPR Art. 20 completeness).
+  // `otherUserId` is the other party; `direction` is set for pending requests only (null once accepted,
+  // since requested_by is cleared on accept).
+  friendships: z.array(
+    z.object({
+      id: z.string().uuid(),
+      otherUserId: z.string().uuid(),
+      status: z.enum(['pending', 'accepted']),
+      direction: z.enum(['incoming', 'outgoing']).nullable(),
+      createdAt: z.string().datetime(),
+      resolvedAt: z.string().datetime().nullable(),
+      expiresAt: z.string().datetime().nullable(),
     }),
   ),
 });

@@ -27,6 +27,7 @@ export class GdprService {
       pushSubs,
       auditEvents,
       invitesCreated,
+      friendships,
     ] = await Promise.all([
       // Profile
       withTenant(auth.tenantId, async (tx) => {
@@ -196,6 +197,35 @@ export class GdprService {
             ),
           );
       }),
+
+      // Friendships (accepted) + open requests where this user is a party — pre-conversation
+      // social-graph metadata the server holds about the caller (GDPR Art. 20). Erasure is covered
+      // by the ON DELETE CASCADE FKs on (tenant_id, user_low_id/high_id) when the user row is deleted.
+      withTenant(auth.tenantId, async (tx) => {
+        const user = await resolveUserId(tx, auth);
+        if (!user) return [];
+        return tx
+          .select({
+            id: schema.friendships.id,
+            userLowId: schema.friendships.userLowId,
+            userHighId: schema.friendships.userHighId,
+            status: schema.friendships.status,
+            requestedBy: schema.friendships.requestedBy,
+            createdAt: schema.friendships.createdAt,
+            resolvedAt: schema.friendships.resolvedAt,
+            expiresAt: schema.friendships.expiresAt,
+          })
+          .from(schema.friendships)
+          .where(
+            and(
+              eq(schema.friendships.tenantId, auth.tenantId),
+              or(
+                eq(schema.friendships.userLowId, user.id),
+                eq(schema.friendships.userHighId, user.id),
+              ),
+            ),
+          );
+      }),
     ]);
 
     if (!profile) {
@@ -267,6 +297,25 @@ export class GdprService {
         acceptedAt: i.acceptedAt?.toISOString() ?? null,
         revokedAt: i.revokedAt?.toISOString() ?? null,
       })),
+      friendships: friendships.map((f) => {
+        const otherUserId = f.userLowId === profile.id ? f.userHighId : f.userLowId;
+        // Direction is meaningful only while pending (requested_by is cleared on accept).
+        const direction =
+          f.status === 'pending' && f.requestedBy
+            ? f.requestedBy === profile.id
+              ? ('outgoing' as const)
+              : ('incoming' as const)
+            : null;
+        return {
+          id: f.id,
+          otherUserId,
+          status: f.status as 'pending' | 'accepted',
+          direction,
+          createdAt: f.createdAt.toISOString(),
+          resolvedAt: f.resolvedAt?.toISOString() ?? null,
+          expiresAt: f.expiresAt?.toISOString() ?? null,
+        };
+      }),
     };
   }
 
@@ -491,5 +540,6 @@ function buildEmptyExport(): MeExport {
     pushSubscriptions: [],
     auditEvents: [],
     invitesCreated: [],
+    friendships: [],
   };
 }

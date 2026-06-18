@@ -4,6 +4,7 @@ import { AdminModule } from './admin/admin.module.js';
 import { AuditModule } from './audit/audit.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { DevicesModule } from './devices/devices.module.js';
+import { FriendsModule } from './friends/friends.module.js';
 import { KeyDirectoryModule } from './key-directory/key-directory.module.js';
 import { MessagingModule } from './messaging/messaging.module.js';
 import { PushModule } from './push/push.module.js';
@@ -16,6 +17,7 @@ import { UsersModule } from './users/users.module.js';
     AdminModule,
     AuthModule,
     DevicesModule,
+    FriendsModule,
     UsersModule,
     AuditModule,
     KeyDirectoryModule,

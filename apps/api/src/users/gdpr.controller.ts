@@ -111,6 +111,22 @@ class ExportInviteDto {
   @ApiProperty({ type: String, format: 'date-time', nullable: true }) revokedAt!: string | null;
 }
 
+class ExportFriendshipDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty({ format: 'uuid', description: 'the other party in the friendship/request' })
+  otherUserId!: string;
+  @ApiProperty({ enum: ['pending', 'accepted'] }) status!: 'pending' | 'accepted';
+  @ApiProperty({
+    enum: ['incoming', 'outgoing'],
+    nullable: true,
+    description: 'set for pending requests only (null once accepted)',
+  })
+  direction!: 'incoming' | 'outgoing' | null;
+  @ApiProperty({ format: 'date-time' }) createdAt!: string;
+  @ApiProperty({ type: String, format: 'date-time', nullable: true }) resolvedAt!: string | null;
+  @ApiProperty({ type: String, format: 'date-time', nullable: true }) expiresAt!: string | null;
+}
+
 class MeExportDto {
   @ApiProperty({ enum: ['1'] }) schemaVersion!: '1';
   @ApiProperty({ format: 'date-time' }) exportedAt!: string;
@@ -149,6 +165,7 @@ class MeExportDto {
   pushSubscriptions!: ExportPushSubscriptionDto[];
   @ApiProperty({ type: [ExportAuditEventDto] }) auditEvents!: ExportAuditEventDto[];
   @ApiProperty({ type: [ExportInviteDto] }) invitesCreated!: ExportInviteDto[];
+  @ApiProperty({ type: [ExportFriendshipDto] }) friendships!: ExportFriendshipDto[];
 }
 
 // ---------------------------------------------------------------------------
