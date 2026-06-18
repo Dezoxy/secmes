@@ -145,7 +145,10 @@ Extend `useConversationHistoryRehydration`
 ([useConversationBackfill.ts:243](apps/web/src/features/chat/useConversationBackfill.ts)): when the local roster
 is empty but the session is valid (the reinstall case), repopulate placeholders from
 `GET /devices/me/conversations` + `GET /conversations/:id/members`; render **read-only** (no composer) until
-live. Reuse `peer-naming.ts` for names/avatars. No server change, no `@argus/contracts` change.
+live. Reuse `peer-naming.ts` for names/avatars. **Server + schema work IS in PR2 scope** (it was not in the
+original Option-A sketch, which assumed a server-side type already existed): the `conversations.is_direct`
+migration, setting it at conversation creation, backfilling existing rows, returning it from the recovery read,
+and the matching `@argus/contracts` response field (see the prerequisite bullet below). Still **no crypto.**
 - **Direct conversations only — PREREQUISITE: a server-side direct/group signal.** There is **no conversation
   type on the server today** — the `conversations` table ([0007_messaging.sql](apps/api/src/db/migrations/0007_messaging.sql))
   is type-less; the client's `type: 'direct' | 'group'` is **assigned locally at creation** and is exactly what
@@ -162,8 +165,12 @@ live. Reuse `peer-naming.ts` for names/avatars. No server change, no `@argus/con
   direct rows. The placeholder builder must collapse them to **one entry per peer `userId`** (most-recently-
   active row wins) before rendering, so a contact never appears twice and resume isn't left with sibling dead
   rows. (Mirrors the existing one-direct-conversation-per-contact UI model, `findConversationWith`.)
-- Gates: `security-boundary-auditor` (both reads RLS + member-only, no content); unit tests for the placeholder
-  builder; one Playwright E2E (fresh keystore + valid session → roster appears, history empty, send disabled).
+- Gates: **`/db-migration`** (the `is_direct` column — `tenant_id` + FORCE RLS already on the table, so a plain
+  metadata column + backfill); **`security-boundary-auditor`** (both reads RLS + member-only, no content; the new
+  column + the creation-time write); **`/api-spec`** → regenerate `apps/api/openapi.json` → 42Crunch audit (the
+  recovery response gains `is_direct`, and the Zod schema in `@argus/contracts` updates with it); unit tests for
+  the placeholder builder + dedup; one Playwright E2E (fresh keystore + valid session → roster appears, history
+  empty, send disabled).
 - **No `crypto-reviewer`** — say so in the PR body. The safe foundation.
 
 ### PR 3 — persist + reset verified-state by peer `userId`; peer-side "security code changed" signal (task #22) — crypto
