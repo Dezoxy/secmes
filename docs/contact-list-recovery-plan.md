@@ -146,11 +146,14 @@ Extend `useConversationHistoryRehydration`
 is empty but the session is valid (the reinstall case), repopulate placeholders from
 `GET /devices/me/conversations` + `GET /conversations/:id/members`; render **read-only** (no composer) until
 live. Reuse `peer-naming.ts` for names/avatars. No server change, no `@argus/contracts` change.
-- **Direct conversations only.** Build recoverable contact placeholders from **exactly-two-member (direct)**
-  conversations. Group (3+ member) rows must **not** become resumable placeholders — group recovery + N-party
-  safety numbers are deferred (see *Out of scope*), and a group row must never feed tap-to-resume (which is 1:1
-  only). Either skip group rows in PR2, or render them as inert, clearly-non-resumable entries; do **not** wire
-  them to the resume path.
+- **Direct conversations only.** Build recoverable contact placeholders from conversations whose **explicit
+  type is `direct`** — read the conversation's `type`/kind field (as the UI already does, `c.type === 'direct'`),
+  **do not** infer 1:1-ness from a member count of 2 (a small group can also have two members, and membership
+  is mutable). If the recovery endpoints don't already return the type, surface it (a one-field addition).
+  Non-`direct` conversations must **not** become resumable placeholders — group recovery + N-party safety
+  numbers are deferred (see *Out of scope*), and a group row must never feed tap-to-resume (which is 1:1 only).
+  Either skip them in PR2, or render them as inert, clearly-non-resumable entries; do **not** wire them to the
+  resume path.
 - **De-duplicate by peer `userId`.** The server does not dedup 1:1s, and PR4 resume mints a *new*
   `conversationId` each time while the old user-level membership row lingers — so the same pair can have several
   direct rows. The placeholder builder must collapse them to **one entry per peer `userId`** (most-recently-
