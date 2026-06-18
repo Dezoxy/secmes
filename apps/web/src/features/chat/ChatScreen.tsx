@@ -357,7 +357,14 @@ export default function ChatScreen() {
           (c) => c.type === 'direct' && c.participants.some((p) => p.id === friend.userId),
         )?.id ?? null;
       if (existingId) {
+        if (mobileThreadBackTimerRef.current !== undefined)
+          window.clearTimeout(mobileThreadBackTimerRef.current);
+        if (mobileSidebarReturnTimerRef.current !== undefined)
+          window.clearTimeout(mobileSidebarReturnTimerRef.current);
+        setMobileThreadClosing(false);
+        setMobileSidebarReturning(false);
         setSelectedId(existingId);
+        if (window.innerWidth < 1024) setShowSidebar(false);
         setStartOpen(false);
         return;
       }
