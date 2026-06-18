@@ -14,6 +14,8 @@ export type User = {
   id: string;
   name: string;
   avatar: string;
+  /** Public contact handle. Demo users use stable fake handles; live users get this from server metadata. */
+  argusId?: string;
   /**
    * Presence. OPTIONAL — there is no presence system for live remote peers, so a real contact carries
    * `undefined` (= unknown) and the UI must not claim Online/Offline for them. Seed/demo users set it.
@@ -130,19 +132,20 @@ export const currentUser: User = {
   id: 'current-user',
   name: 'Alex Thompson',
   avatar: generatedAvatar('Alex Thompson'),
+  argusId: 'argus-aaaaaaaaaaaaaaaa-alex',
   isOnline: true,
 };
 
-function user(id: string, name: string, isOnline: boolean): User {
-  return { id, name, isOnline, avatar: generatedAvatar(name) };
+function user(id: string, name: string, isOnline: boolean, argusId: string): User {
+  return { id, name, argusId, isOnline, avatar: generatedAvatar(name) };
 }
 
-const sarah = user('user-1', 'Sarah Chen', true);
-const marcus = user('user-2', 'Marcus Johnson', false);
-const emily = user('user-3', 'Emily Davis', true);
-const alexR = user('user-4', 'Alex Rivera', false);
-const jordan = user('user-5', 'Jordan Kim', true);
-const taylor = user('user-6', 'Taylor Smith', false);
+const sarah = user('user-1', 'Sarah Chen', true, 'argus-bbbbbbbbbbbbbbbb-sarah');
+const marcus = user('user-2', 'Marcus Johnson', false, 'argus-cccccccccccccccc-marcus');
+const emily = user('user-3', 'Emily Davis', true, 'argus-dddddddddddddddd-emily');
+const alexR = user('user-4', 'Alex Rivera', false, 'argus-eeeeeeeeeeeeeeee-rivera');
+const jordan = user('user-5', 'Jordan Kim', true, 'argus-ffffffffffffffff-jordan');
+const taylor = user('user-6', 'Taylor Smith', false, 'argus-gggggggggggggggg-taylor');
 
 export const users: User[] = [sarah, marcus, emily, alexR, jordan, taylor];
 

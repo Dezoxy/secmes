@@ -140,9 +140,6 @@ export function ProfileSettings({
         <p className="rounded-xl border border-white/5 bg-[#1a1a26] px-4 py-2.5 text-sm text-white">
           {displayName ?? '—'}
         </p>
-        <p className="mt-1.5 text-xs text-white/60">
-          Auto-assigned. Unique within your organization.
-        </p>
       </div>
 
       <div>
