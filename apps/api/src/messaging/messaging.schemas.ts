@@ -8,8 +8,12 @@ const base64url = z.string().regex(/^[A-Za-z0-9_-]+$/, 'must be base64url');
 
 export const CreateConversationSchema = z
   .object({
-    // The OTHER participants — the creator is always added automatically. 1:1 = a single other user.
+    // The OTHER participants — the creator is always added automatically.
     memberUserIds: z.array(z.string().uuid()).min(1).max(256),
+    // Explicit classification so the server does not infer it from the initial solo member list
+    // (groups start as solo rows before members join, which would make them appear as isDirect=true).
+    // Optional with default=false so stale PWA bundles that omit the field keep working after deploy.
+    isDirect: z.boolean().optional().default(false),
   })
   .strict();
 export type CreateConversation = z.infer<typeof CreateConversationSchema>;

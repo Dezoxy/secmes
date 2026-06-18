@@ -102,8 +102,34 @@ class EnrollmentDto {
   approverSignaturePublicKey!: string | null;
 }
 
+class ConversationSummaryDto {
+  @ApiProperty({ format: 'uuid', description: 'Conversation ID' })
+  id!: string;
+
+  @ApiProperty({
+    type: 'boolean',
+    nullable: true,
+    description: 'true = direct 1:1; false = group; null = pre-migration (unknown)',
+  })
+  isDirect!: boolean | null;
+
+  @ApiProperty({ format: 'date-time', description: 'When the conversation was created' })
+  createdAt!: string;
+}
+
 class ConversationListDto {
-  @ApiProperty({ type: [String], description: 'Conversation IDs the caller is a member of' })
+  @ApiProperty({
+    type: [ConversationSummaryDto],
+    description: 'Conversations the caller is a member of (metadata only)',
+  })
+  conversations!: ConversationSummaryDto[];
+
+  @ApiProperty({
+    type: [String],
+    deprecated: true,
+    description:
+      'Backward-compat shim for stale PWA bundles that read .conversationIds. Remove once the new client version is confirmed shipped.',
+  })
   conversationIds!: string[];
 }
 
@@ -281,16 +307,26 @@ export class DevicesController {
   @Get('devices/me/conversations')
   @Throttle(perMinute(SENSITIVE_LIMITS.enrollmentConversationList))
   @ApiOperation({
-    summary: "List the caller's conversation IDs (enrollment fan-out diff)",
+    summary: "List the caller's conversations (enrollment fan-out diff + roster recovery)",
     operationId: 'listMyConversations',
     description:
-      'Returns conversation IDs the caller is a member of. Used by D1 after approving D2 to compute which conversations need an add-commit. Metadata only — no conversation content.',
+      'Returns conversations the caller is a member of with type metadata. Used by D1 for the enrollment fan-out diff and by the client for roster recovery after reinstall. Metadata only — no conversation content.',
   })
   @ApiOkResponse({ type: ConversationListDto })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async listConversations(@CurrentAuth() auth: VerifiedAuth): Promise<ConversationListDto> {
-    const conversationIds = await this.devices.listMyConversations(auth);
-    return { conversationIds };
+    const rows = await this.devices.listMyConversations(auth);
+    const conversations = rows.map((r) => ({
+      id: r.conversationId,
+      isDirect: r.isDirect,
+      createdAt: r.createdAt.toISOString(),
+    }));
+    return {
+      conversations,
+      // Backward-compat shim: stale PWA bundles read .conversationIds from this endpoint.
+      // Remove once the new client version is confirmed shipped.
+      conversationIds: rows.map((r) => r.conversationId),
+    };
   }
 }
 

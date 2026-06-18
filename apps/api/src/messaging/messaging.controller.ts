@@ -45,6 +45,12 @@ class CreateConversationBody {
     maxItems: 256,
   })
   memberUserIds!: string[];
+
+  @ApiProperty({
+    description:
+      'true = 1:1 direct conversation; false = group. Explicit: the server cannot infer this from the initial solo member list.',
+  })
+  isDirect!: boolean;
 }
 
 class SendMessageBody {
@@ -249,7 +255,7 @@ export class MessagingController {
     @CurrentAuth() auth: VerifiedAuth,
     @Body(new ZodValidationPipe(CreateConversationSchema)) body: CreateConversation,
   ): Promise<CreatedConversationDto> {
-    return this.messaging.createConversation(auth, body.memberUserIds);
+    return this.messaging.createConversation(auth, body.memberUserIds, body.isDirect);
   }
 
   @Post(':conversationId/messages')

@@ -2,14 +2,15 @@ import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } fr
 import type { Conversation as MlsGroup } from '@argus/crypto';
 import type { StoredMessage } from '../../lib/keystore';
 import type { AttachmentRef } from '../../lib/message-envelope';
-import { listCommits } from '../../lib/api';
+import { getConversationMembers, listCommits, listMyConversationsWithMeta } from '../../lib/api';
 import {
   backfillConversation,
   type DecryptedMessage,
   type MessagingDeps,
 } from '../../lib/messaging';
 import { loadPersistedPeerMapping, resolvePeerUser, withPeerNamed } from './peer-naming';
-import { liveConversationShell, prependConversationIfMissing } from './useLiveConversations';
+import { dicebearAvatar } from '../../lib/dicebear';
+import { liveConversationShell, replaceOrPrependConversation } from './useLiveConversations';
 import type { Attachment, Conversation, Message, User } from './seed';
 
 interface ConversationBackfillOptions {
@@ -281,7 +282,7 @@ export function useConversationHistoryRehydration({
           const history = stored.filter((m) => m.kind !== 'group-meta').map(storedToMessage);
           const creatorId = creatorIds.get(conversationId);
           setConversations((prev) =>
-            prependConversationIfMissing(prev, {
+            replaceOrPrependConversation(prev, {
               ...liveConversationShell(conversationId, currentUserProfile),
               messages: history,
               ...(groupName ? { name: groupName, type: 'group' as const } : {}),
@@ -311,4 +312,136 @@ export function useConversationHistoryRehydration({
       }
     })();
   }, [addLive, currentUserProfile, messagingDeps, selfUserId, sessionKey, setConversations]);
+}
+
+/**
+ * Pure helper: given the server roster and per-conversation member lists, return the ordered
+ * set of placeholder Conversation objects for the recovery UI. Exported for unit testing.
+ */
+export function buildRosterPlaceholders(
+  conversations: Array<{ id: string; isDirect: boolean | null; createdAt: string }>,
+  membersMap: Map<string, Array<{ userId: string; argusId: string; displayName: string | null }>>,
+  selfUserId: string,
+  selfProfile: User,
+): Conversation[] {
+  const directConvs = conversations
+    .filter((c) => c.isDirect === true)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  const seenPeers = new Set<string>();
+  const result: Conversation[] = [];
+  for (const conv of directConvs) {
+    const convMembers = membersMap.get(conv.id) ?? [];
+    const nonSelfMembers = convMembers.filter((m) => m.userId !== selfUserId);
+    // Require exactly one peer — isDirect=true rows that gained extra members after creation
+    // (via add-member commits) would otherwise render as a 1:1 placeholder with a random peer.
+    if (nonSelfMembers.length !== 1) continue;
+    const peer = nonSelfMembers[0]!;
+    if (seenPeers.has(peer.userId)) continue;
+    seenPeers.add(peer.userId);
+    result.push({
+      id: conv.id,
+      type: 'direct',
+      recoveredFromServer: true,
+      participants: [
+        selfProfile,
+        {
+          id: peer.userId,
+          name: peer.displayName?.trim() || peer.argusId,
+          avatar: dicebearAvatar(peer.userId),
+        },
+      ],
+      messages: [],
+      unreadCount: 0,
+    });
+  }
+  return result;
+}
+
+/**
+ * From a fresh roster-recovery batch, return only the placeholders that are not already
+ * represented in `conversations` — either by conversation id or by peer user id. Exported
+ * for unit testing.
+ */
+export function filterNewPlaceholders(
+  conversations: Conversation[],
+  placeholders: Conversation[],
+): Conversation[] {
+  const existingIds = new Set(conversations.map((c) => c.id));
+  // Exclude placeholders whose peer is already in an existing direct conversation
+  // (covers the case where the keystore has conv-A with User B and the server roster
+  // returns a newer conv-B — also with User B — created by tap-to-resume).
+  const existingPeerIds = new Set(
+    conversations
+      .filter((c) => c.type === 'direct' && c.participants.length >= 2)
+      .map((c) => c.participants[1]!.id),
+  );
+  return placeholders.filter(
+    (p) => !existingIds.has(p.id) && !existingPeerIds.has(p.participants[1]!.id),
+  );
+}
+
+interface RosterRecoveryOptions {
+  messagingDeps: MessagingDeps | null;
+  sessionKey: CryptoKey | null;
+  currentUserProfile: User;
+  selfUserId: string | undefined;
+  setConversations: Dispatch<SetStateAction<Conversation[]>>;
+}
+
+/**
+ * Recover the direct-conversation roster from the server after a PWA reinstall.
+ *
+ * Runs once after device unlock. Fetches all conversations the caller is a member of, filters
+ * to confirmed direct (is_direct = true) rows, deduplicates by peer userId keeping the most
+ * recently-created conversation, then prepends read-only placeholder entries for contacts whose
+ * conversation is not already present in local state (no MLS group in keystore).
+ *
+ * Placeholders are not added to liveIds — selectedIsLive remains false for them, so the existing
+ * ChatInput disabled path prevents sending until tap-to-resume (PR 4) creates a fresh MLS group.
+ */
+export function useRosterRecovery({
+  messagingDeps,
+  sessionKey,
+  currentUserProfile,
+  selfUserId,
+  setConversations,
+}: RosterRecoveryOptions): void {
+  const recoveredRef = useRef(false);
+
+  useEffect(() => {
+    if (!messagingDeps || !sessionKey || !selfUserId || recoveredRef.current) return;
+    recoveredRef.current = true;
+
+    void (async () => {
+      try {
+        const allConvs = await listMyConversationsWithMeta();
+        // Fetch members for each potentially-direct conversation.
+        const membersMap = new Map<
+          string,
+          Array<{ userId: string; argusId: string; displayName: string | null }>
+        >();
+        for (const conv of allConvs.filter((c) => c.isDirect === true)) {
+          membersMap.set(conv.id, await getConversationMembers(conv.id));
+        }
+        const placeholders = buildRosterPlaceholders(
+          allConvs,
+          membersMap,
+          selfUserId,
+          currentUserProfile,
+        );
+        // Batch-prepend to preserve the newest-first order from buildRosterPlaceholders.
+        // Per-item prepends would reverse the batch because each prepend inserts at the front.
+        setConversations((prev) => {
+          const toAdd = filterNewPlaceholders(prev, placeholders);
+          return toAdd.length > 0 ? [...toAdd, ...prev] : prev;
+        });
+      } catch (err) {
+        // Reset so the next dep-change (reconnect, session refresh) can retry.
+        recoveredRef.current = false;
+        // eslint-disable-next-line no-console
+        console.warn('roster recovery failed', err instanceof Error ? err.message : err);
+      }
+    })();
+  }, [messagingDeps, sessionKey, selfUserId, currentUserProfile, setConversations]);
 }

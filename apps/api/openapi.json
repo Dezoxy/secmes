@@ -2237,7 +2237,7 @@
     },
     "/devices/me/conversations": {
       "get": {
-        "description": "Returns conversation IDs the caller is a member of. Used by D1 after approving D2 to compute which conversations need an add-commit. Metadata only — no conversation content.",
+        "description": "Returns conversations the caller is a member of with type metadata. Used by D1 for the enrollment fan-out diff and by the client for roster recovery after reinstall. Metadata only — no conversation content.",
         "operationId": "listMyConversations",
         "parameters": [],
         "responses": {
@@ -2337,7 +2337,7 @@
             "bearer": []
           }
         ],
-        "summary": "List the caller's conversation IDs (enrollment fan-out diff)",
+        "summary": "List the caller's conversations (enrollment fan-out diff + roster recovery)",
         "tags": [
           "devices"
         ]
@@ -7032,11 +7032,50 @@
         ],
         "additionalProperties": false
       },
+      "ConversationSummaryDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Conversation ID",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "maxLength": 36
+          },
+          "isDirect": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "true = direct 1:1; false = group; null = pre-migration (unknown)"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the conversation was created",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "id",
+          "isDirect",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
       "ConversationListDto": {
         "type": "object",
         "properties": {
+          "conversations": {
+            "description": "Conversations the caller is a member of (metadata only)",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConversationSummaryDto"
+            },
+            "maxItems": 1000
+          },
           "conversationIds": {
-            "description": "Conversation IDs the caller is a member of",
+            "deprecated": true,
+            "description": "Backward-compat shim for stale PWA bundles that read .conversationIds. Remove once the new client version is confirmed shipped.",
             "type": "array",
             "items": {
               "type": "string",
@@ -7047,6 +7086,7 @@
           }
         },
         "required": [
+          "conversations",
           "conversationIds"
         ],
         "additionalProperties": false
@@ -7659,10 +7699,15 @@
               "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
               "maxLength": 36
             }
+          },
+          "isDirect": {
+            "type": "boolean",
+            "description": "true = 1:1 direct conversation; false = group. Explicit: the server cannot infer this from the initial solo member list."
           }
         },
         "required": [
-          "memberUserIds"
+          "memberUserIds",
+          "isDirect"
         ],
         "additionalProperties": false
       },

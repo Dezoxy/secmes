@@ -184,13 +184,21 @@ export class MessagingService {
   async createConversation(
     auth: VerifiedAuth,
     memberUserIds: string[],
+    isDirect: boolean,
   ): Promise<CreatedConversation> {
+    if (isDirect && memberUserIds.length !== 1) {
+      throw new BadRequestException('direct conversation requires exactly one peer');
+    }
     return withTenant(auth.tenantId, async (tx) => {
       const creator = await requireUser(tx, auth);
 
       const [conv] = await tx
         .insert(schema.conversations)
-        .values({ tenantId: auth.tenantId, createdBy: creator })
+        .values({
+          tenantId: auth.tenantId,
+          createdBy: creator,
+          isDirect,
+        })
         .returning({ id: schema.conversations.id });
       if (!conv) throw new Error('conversation insert returned no row');
 

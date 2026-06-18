@@ -73,6 +73,7 @@ export const conversations = pgTable('conversations', {
   id: uuid('id').primaryKey().defaultRandom(),
   tenantId: uuid('tenant_id').notNull(),
   createdBy: uuid('created_by'), // nullable after GDPR erasure (migration 0020)
+  isDirect: boolean('is_direct'), // null = pre-migration; true = 1:1; false = group (migration 0041)
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

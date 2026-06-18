@@ -90,7 +90,7 @@ describe('ConversationManager', () => {
     const session = await mgr.confirm(pending);
 
     // Creates a SOLO conversation (just the caller); the peer is added atomically by deliverWelcome.
-    expect(create).toHaveBeenCalledWith(['me-user']);
+    expect(create).toHaveBeenCalledWith(['me-user'], true);
     expect(session.conversationId).toBe('conv-1');
     expect(mgr.get('conv-1')).toBe(session);
 

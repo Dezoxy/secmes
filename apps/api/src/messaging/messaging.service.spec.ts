@@ -94,12 +94,12 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
   });
 
   async function newConversation(): Promise<string> {
-    const { conversationId } = await svc.createConversation(aliceAuth, [bobId]);
+    const { conversationId } = await svc.createConversation(aliceAuth, [bobId], true);
     return conversationId;
   }
 
   it('creates a conversation with the creator + members', async () => {
-    const { conversationId } = await svc.createConversation(aliceAuth, [bobId]);
+    const { conversationId } = await svc.createConversation(aliceAuth, [bobId], true);
     const rows =
       await sql`select user_id from conversation_members where conversation_id = ${conversationId} order by user_id`;
     const ids = rows.map((r) => r.user_id).sort();
@@ -107,7 +107,13 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
   });
 
   it('rejects a member id from another tenant (composite FK → 400)', async () => {
-    await expect(svc.createConversation(aliceAuth, [carolId])).rejects.toBeInstanceOf(
+    await expect(svc.createConversation(aliceAuth, [carolId], true)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
+
+  it('rejects isDirect=true with more than one peer (400)', async () => {
+    await expect(svc.createConversation(aliceAuth, [bobId, daveId], true)).rejects.toBeInstanceOf(
       BadRequestException,
     );
   });
@@ -176,7 +182,7 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
   });
 
   it('a suspended (soft-deleted) caller cannot create or send, even with a valid token', async () => {
-    await expect(svc.createConversation(frankAuth, [bobId])).rejects.toBeInstanceOf(
+    await expect(svc.createConversation(frankAuth, [bobId], true)).rejects.toBeInstanceOf(
       BadRequestException,
     );
     const conv = await newConversation();
@@ -242,9 +248,9 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
 
   // ── catch-up sync across conversations (checkpoint 30) ───────────────────────────────────────────
   it('syncs messages across the caller’s conversations (tagged with conversationId), excluding others', async () => {
-    const c1 = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
-    const c2 = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
-    const cOther = (await svc.createConversation(aliceAuth, [daveId])).conversationId; // bob NOT a member
+    const c1 = (await svc.createConversation(aliceAuth, [bobId], true)).conversationId;
+    const c2 = (await svc.createConversation(aliceAuth, [bobId], true)).conversationId;
+    const cOther = (await svc.createConversation(aliceAuth, [daveId], true)).conversationId; // bob NOT a member
     const m1 = (await svc.sendMessage(aliceAuth, c1, msg())).messageId;
     const m2 = (await svc.sendMessage(aliceAuth, c2, msg())).messageId;
     await svc.sendMessage(aliceAuth, cOther, msg());
@@ -258,8 +264,8 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
   });
 
   it('sync paginates with the opaque nextCursor across conversations', async () => {
-    const a = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
-    const b = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
+    const a = (await svc.createConversation(aliceAuth, [bobId], true)).conversationId;
+    const b = (await svc.createConversation(aliceAuth, [bobId], true)).conversationId;
     const ids = [
       (await svc.sendMessage(aliceAuth, a, msg())).messageId,
       (await svc.sendMessage(aliceAuth, b, msg())).messageId,
@@ -300,7 +306,7 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
   });
 
   it('returns a resume cursor even on a partial final page (progress is persistable)', async () => {
-    const c = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
+    const c = (await svc.createConversation(aliceAuth, [bobId], true)).conversationId;
     await svc.sendMessage(aliceAuth, c, msg());
     const page = await svc.syncMessages(bobAuth, { limit: 100 }); // partial page (< 100)
     expect(page.messages.length).toBeLessThan(100);
@@ -318,14 +324,14 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
   it('preserves sync progress after the caller is removed from a conversation', async () => {
     // Bob has a cursor from conversation X, then is removed from X. He must still sync his OTHER
     // conversations — the opaque cursor carries (created_at, id), so it doesn't depend on X-membership.
-    const x = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
+    const x = (await svc.createConversation(aliceAuth, [bobId], true)).conversationId;
     await svc.sendMessage(aliceAuth, x, msg()); // bob's last-seen is in X
     const afterX = (await svc.syncMessages(bobAuth, { limit: 1 })).nextCursor;
     if (!afterX) throw new Error('expected a cursor');
 
     // Remove bob from X, then send into a DIFFERENT conversation bob is in.
     await sql`delete from conversation_members where conversation_id = ${x} and user_id = ${bobId}`;
-    const y = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
+    const y = (await svc.createConversation(aliceAuth, [bobId], true)).conversationId;
     const my = (await svc.sendMessage(aliceAuth, y, msg())).messageId;
 
     const page = await svc.syncMessages(bobAuth, { limit: 100, after: afterX });
@@ -390,7 +396,7 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
 
   it('rejects a receipt for a message not in the conversation', async () => {
     const conv = await newConversation();
-    const other = (await svc.createConversation(aliceAuth, [bobId])).conversationId;
+    const other = (await svc.createConversation(aliceAuth, [bobId], true)).conversationId;
     const foreign = (await svc.sendMessage(aliceAuth, other, msg())).messageId; // message in a DIFFERENT conv
     await expect(
       svc.recordReceipt(bobAuth, conv, { status: 'read', throughMessageId: foreign }),

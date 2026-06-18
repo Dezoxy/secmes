@@ -27,6 +27,7 @@ import { VerifySecurity } from './VerifySecurity';
 import {
   useConversationBackfill,
   useConversationHistoryRehydration,
+  useRosterRecovery,
   useSelectedConversationBackfill,
 } from './useConversationBackfill';
 import { useChatState } from './useChatState';
@@ -147,7 +148,7 @@ export default function ChatScreen() {
   const [verifiedByConv, setVerifiedByConv] = useState<Record<string, string>>({});
 
   const { device, pool, deviceId, keystore, sessionKey } = useDevice();
-  const { profile, subjectId } = useAuth();
+  const { profile, subjectId, demoMode } = useAuth();
   const { updateReady, applyUpdate } = usePwaUpdate();
   const profileSubjectId = subjectId ?? DEMO_PROFILE_SUBJECT;
   const [anonymousProfile, setAnonymousProfile] = useState<AnonymousProfile>(() =>
@@ -228,6 +229,10 @@ export default function ChatScreen() {
       numbersByConv,
       verifiedByConv,
     });
+  // In demo mode (E2E / no auth) all seed conversations behave as live so the composer renders.
+  // The hooks that consume the real selectedIsLive (receipt-sending, backfill) already guard on
+  // messagingDeps, which is null in demo mode, so they remain no-ops.
+  const effectiveSelectedIsLive = demoMode ? !!selectedId : selectedIsLive;
 
   const handleSend = useMessageSending({
     selectedId,
@@ -369,11 +374,20 @@ export default function ChatScreen() {
     setConversations,
   });
 
+  useRosterRecovery({
+    messagingDeps,
+    sessionKey,
+    currentUserProfile,
+    selfUserId: profile?.userId,
+    setConversations,
+  });
+
   // Compute the selected DIRECT conversation's own safety number (from its own loopback session), once.
   // LIVE conversations are skipped — a started one already holds its REAL number, and none should spin up a
   // loopback session (which would compute the wrong, local number).
   useEffect(() => {
-    if (!selectedId || !isDirect || selectedIsLive) return;
+    if (!selectedId || !isDirect || selectedIsLive || selectedConversation?.recoveredFromServer)
+      return;
     void getMlsSession(selectedId)
       .then((s) =>
         setNumbersByConv((prev) =>
@@ -497,7 +511,11 @@ export default function ChatScreen() {
                 conversation={selectedConversation}
                 onBack={handleBackToConversations}
                 verified={verified}
-                onVerify={isDirect && currentNumber ? () => setVerifyOpen(true) : undefined}
+                onVerify={
+                  isDirect && currentNumber && !selectedConversation.recoveredFromServer
+                    ? () => setVerifyOpen(true)
+                    : undefined
+                }
                 onAddMember={
                   selectedConversation.type === 'group' &&
                   selectedConversation.creatorId === profile?.userId &&
@@ -508,11 +526,11 @@ export default function ChatScreen() {
                 updateReady={updateReady}
                 onApplyUpdate={applyUpdate}
               />
-              {selectedIsLive && (
+              {effectiveSelectedIsLive && (
                 <ReconnectBanner status={connectionStatus} className="mx-4 mt-3" />
               )}
               <MessageList conversation={selectedConversation} onImageClick={setPreviewImage} />
-              <ChatInput onSend={handleSend} />
+              {effectiveSelectedIsLive && <ChatInput onSend={handleSend} />}
             </div>
           ) : (
             <div

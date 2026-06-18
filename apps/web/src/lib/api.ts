@@ -83,6 +83,7 @@ import {
   type WelcomeMaterial as ContractWelcomeMaterial,
   type Enrollment as ContractEnrollment,
   type ConversationList as ContractConversationList,
+  type ConversationSummary as ContractConversationSummary,
 } from '@argus/contracts';
 import { requestJson, requestStatus, unwrapApiResult } from './api-client';
 
@@ -321,12 +322,15 @@ export async function claimKeyPackage(userId: string): Promise<ClaimedKeyPackage
 }
 
 /** Create a conversation with the given other members (the caller is added server-side). */
-export async function createConversation(memberUserIds: string[]): Promise<CreatedConversation> {
+export async function createConversation(
+  memberUserIds: string[],
+  isDirect: boolean,
+): Promise<CreatedConversation> {
   return unwrapApiResult(
     await requestJson({
       path: '/conversations',
       method: 'POST',
-      body: { memberUserIds },
+      body: { memberUserIds, isDirect },
       requestSchema: CreateConversationRequestSchema,
       responseSchema: CreatedConversationSchema,
     }),
@@ -792,6 +796,7 @@ export async function listAdminAudit(cursor?: string, limit = 50): Promise<Admin
 
 export type Enrollment = ContractEnrollment;
 export type ConversationList = ContractConversationList;
+export type ConversationSummary = ContractConversationSummary;
 
 /** D2 registers a pending enrollment request (shows its fingerprint for D1 to verify). */
 export async function registerEnrollment(
@@ -886,5 +891,15 @@ export async function listMyConversations(): Promise<string[]> {
       path: '/devices/me/conversations',
       responseSchema: ConversationListSchema,
     }),
-  ).conversationIds;
+  ).conversations.map((c) => c.id);
+}
+
+/** Return the caller's conversations with type metadata (for roster recovery after reinstall). */
+export async function listMyConversationsWithMeta(): Promise<ConversationSummary[]> {
+  return unwrapApiResult(
+    await requestJson<ConversationList>({
+      path: '/devices/me/conversations',
+      responseSchema: ConversationListSchema,
+    }),
+  ).conversations;
 }
