@@ -276,16 +276,6 @@ export const DownloadGrantSchema = z.object({
 });
 export type DownloadGrant = z.infer<typeof DownloadGrantSchema>;
 
-// Opaque sealed backup blob — the server stores and returns it verbatim (never parsed, crypto-blind).
-// Size-capped at 64 KiB to match the server enforcement in key-backup.schemas.ts.
-export const StoreBackupRequestSchema = z.object({ backup: z.string().min(1).max(65536) }).strict();
-export type StoreBackupRequest = z.infer<typeof StoreBackupRequestSchema>;
-
-// Cap the response at the same 64 KiB as the request: the fetched blob is JSON.parsed + Argon2id-unsealed
-// client-side, so bounding it stops a misbehaving/compromised server from forcing an oversized parse + KDF.
-export const BackupResponseSchema = z.object({ backup: z.string().min(1).max(65536) });
-export type BackupResponse = z.infer<typeof BackupResponseSchema>;
-
 // Delivery/read receipts (checkpoint 31). Metadata only — a member id + a "through message id" + when.
 // Mirrors the server-local RecordReceiptSchema in apps/api messaging.schemas.ts (same de-facto duplication
 // as SendMessage above; the server doesn't import this package).
@@ -548,11 +538,6 @@ export const MeExportSchema = z.object({
       createdAt: z.string().datetime(),
     }),
   ),
-  keyBackup: z.object({
-    exists: z.boolean(),
-    createdAt: z.string().datetime().nullable(),
-    updatedAt: z.string().datetime().nullable(),
-  }),
   conversations: z.array(
     z.object({
       id: z.string().uuid(),

@@ -3470,221 +3470,6 @@
         ]
       }
     },
-    "/backups/me": {
-      "put": {
-        "operationId": "storeBackup",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BackupBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "backup stored"
-          },
-          "400": {
-            "description": "invalid body, or user not provisioned",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Store/replace the caller's sealed backup",
-        "tags": [
-          "key-backup"
-        ]
-      },
-      "get": {
-        "operationId": "getBackup",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "description": "the opaque sealed backup blob",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BackupBody"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "no backup stored for this user",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Fetch the caller's sealed backup for restore",
-        "tags": [
-          "key-backup"
-        ]
-      }
-    },
     "/conversations": {
       "post": {
         "operationId": "createConversation",
@@ -7342,34 +7127,6 @@
         ],
         "additionalProperties": false
       },
-      "ExportKeyBackupDto": {
-        "type": "object",
-        "properties": {
-          "exists": {
-            "type": "boolean"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true,
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true,
-            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
-            "maxLength": 40
-          }
-        },
-        "required": [
-          "exists",
-          "createdAt",
-          "updatedAt"
-        ],
-        "additionalProperties": false
-      },
       "ExportConversationDto": {
         "type": "object",
         "properties": {
@@ -7722,9 +7479,6 @@
             },
             "maxItems": 1000
           },
-          "keyBackup": {
-            "$ref": "#/components/schemas/ExportKeyBackupDto"
-          },
           "conversations": {
             "type": "array",
             "items": {
@@ -7769,7 +7523,6 @@
           "exportedAt",
           "notice",
           "devices",
-          "keyBackup",
           "conversations",
           "messageSummary",
           "attachments",
@@ -7889,22 +7642,6 @@
         },
         "required": [
           "revoked"
-        ],
-        "additionalProperties": false
-      },
-      "BackupBody": {
-        "type": "object",
-        "properties": {
-          "backup": {
-            "type": "string",
-            "description": "opaque passphrase-sealed backup blob (the server never opens it)",
-            "minLength": 1,
-            "maxLength": 65536,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          }
-        },
-        "required": [
-          "backup"
         ],
         "additionalProperties": false
       },

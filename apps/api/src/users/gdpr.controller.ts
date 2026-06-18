@@ -48,12 +48,6 @@ class ExportDeviceDto {
   @ApiProperty({ format: 'date-time' }) createdAt!: string;
 }
 
-class ExportKeyBackupDto {
-  @ApiProperty() exists!: boolean;
-  @ApiProperty({ type: String, format: 'date-time', nullable: true }) createdAt!: string | null;
-  @ApiProperty({ type: String, format: 'date-time', nullable: true }) updatedAt!: string | null;
-}
-
 class ExportConversationDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ format: 'date-time' }) createdAt!: string;
@@ -148,7 +142,6 @@ class MeExportDto {
   })
   profile!: ExportProfileDto | null;
   @ApiProperty({ type: [ExportDeviceDto] }) devices!: ExportDeviceDto[];
-  @ApiProperty({ type: ExportKeyBackupDto }) keyBackup!: ExportKeyBackupDto;
   @ApiProperty({ type: [ExportConversationDto] }) conversations!: ExportConversationDto[];
   @ApiProperty({ type: ExportMessageSummaryDto }) messageSummary!: ExportMessageSummaryDto;
   @ApiProperty({ type: [ExportAttachmentDto] }) attachments!: ExportAttachmentDto[];

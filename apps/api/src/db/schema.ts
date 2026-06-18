@@ -67,16 +67,6 @@ export const keyPackages = pgTable('key_packages', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-// Passphrase-sealed key backup — ciphertext only, opaque to the server (roadmap 22). RLS in 0006.
-export const keyBackups = pgTable('key_backups', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  tenantId: uuid('tenant_id').notNull(),
-  userId: uuid('user_id').notNull(),
-  backup: text('backup').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
-
 // Messaging (roadmap 25) — CIPHERTEXT ONLY for content. RLS + grants in 0007. See messaging-schema.md.
 // A conversation / MLS group — metadata only (no name/title: that would be plaintext metadata).
 export const conversations = pgTable('conversations', {

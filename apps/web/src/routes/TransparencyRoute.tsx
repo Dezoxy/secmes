@@ -92,7 +92,7 @@ export default function TransparencyRoute() {
             <p>
               <span className="font-medium text-white">The server is crypto-blind.</span> Argus
               stores and forwards ciphertext — it never holds decryption keys and cannot read
-              message content, attachment data, or key backups.
+              message content or attachment data.
             </p>
             <p>
               <span className="font-medium text-white">Protocol: MLS (RFC 9420).</span> Messages are
@@ -114,12 +114,6 @@ export default function TransparencyRoute() {
               . Each message advances the ratchet, providing{' '}
               <span className="font-medium text-white">forward secrecy</span> — a compromised key
               cannot decrypt past messages.
-            </p>
-            <p>
-              <span className="font-medium text-white">Key backup.</span> Your private key material
-              is sealed with AES-256-GCM under a key derived from your passphrase via Argon2id
-              (memory-hard KDF). Only the resulting ciphertext is stored server-side — the server
-              cannot recover your keys without your passphrase.
             </p>
             <div className="rounded-lg border border-amber-400/20 bg-amber-400/5 px-4 py-3">
               <p className="font-medium text-amber-300">PWA code-delivery caveat</p>

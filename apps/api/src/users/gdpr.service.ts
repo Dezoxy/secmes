@@ -21,7 +21,6 @@ export class GdprService {
     const [
       profile,
       devices,
-      keyBackup,
       conversations,
       messageSummaryRaw,
       attachments,
@@ -65,32 +64,6 @@ export class GdprService {
           .where(
             and(eq(schema.devices.tenantId, auth.tenantId), eq(schema.devices.userId, user.id)),
           );
-      }),
-
-      // Key backup existence
-      withTenant(auth.tenantId, async (tx) => {
-        const user = await resolveUserId(tx, auth);
-        if (!user) return { exists: false, createdAt: null, updatedAt: null };
-        const [row] = await tx
-          .select({
-            createdAt: schema.keyBackups.createdAt,
-            updatedAt: schema.keyBackups.updatedAt,
-          })
-          .from(schema.keyBackups)
-          .where(
-            and(
-              eq(schema.keyBackups.tenantId, auth.tenantId),
-              eq(schema.keyBackups.userId, user.id),
-            ),
-          )
-          .limit(1);
-        return row
-          ? {
-              exists: true,
-              createdAt: row.createdAt.toISOString(),
-              updatedAt: row.updatedAt.toISOString(),
-            }
-          : { exists: false, createdAt: null as string | null, updatedAt: null as string | null };
       }),
 
       // Conversations (as member)
@@ -252,7 +225,6 @@ export class GdprService {
         id: d.id,
         createdAt: d.createdAt.toISOString(),
       })),
-      keyBackup,
       conversations: conversations.map((c) => ({
         id: c.id,
         createdAt: c.createdAt.toISOString(),
@@ -303,7 +275,7 @@ export class GdprService {
    *
    * Deletion order respects NO-ACTION FK constraints (welcome rows, sent messages pseudonymized,
    * invite accepted_by nulled) before the user row is deleted (which cascades devices, key
-   * packages, key backups, push subscriptions, conversation memberships and receipts). Blobs are
+   * packages, push subscriptions, conversation memberships and receipts). Blobs are
    * deleted best-effort AFTER the DB transaction: rows are gone first so no new auth path can
    * generate a grant; the content keys lived in MLS envelopes only, never in this DB.
    *
@@ -425,7 +397,6 @@ export class GdprService {
 
       // 1h. Delete the user row — cascades:
       //     • devices → key_packages (cascade), push_subscriptions (cascade)
-      //     • key_backups (cascade)
       //     • auth_sessions (cascade) — migration 0032
       //     • conversation_members (cascade) → conversation_receipts (cascade)
       //     • tenant_invites.created_by (cascade)
@@ -514,7 +485,6 @@ function buildEmptyExport(): MeExport {
       'This export contains only the metadata the server holds.',
     profile: null,
     devices: [],
-    keyBackup: { exists: false, createdAt: null, updatedAt: null },
     conversations: [],
     messageSummary: { totalCount: 0, byConversation: [] },
     attachments: [],
