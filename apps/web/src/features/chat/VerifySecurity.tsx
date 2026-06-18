@@ -18,6 +18,11 @@ interface VerifySecurityProps {
   mode?: 'demo' | 'live';
   /** Optional inline error (e.g. a failed conversation create) shown above the action. */
   error?: SafeUiError | null;
+  /**
+   * When true, shows a banner indicating the peer's security code changed — they may have
+   * reinstalled. Prompts the user to re-verify before the conversation is trusted.
+   */
+  keyChanged?: boolean;
 }
 
 export function VerifySecurity({
@@ -28,6 +33,7 @@ export function VerifySecurity({
   onClose,
   mode = 'demo',
   error,
+  keyChanged = false,
 }: VerifySecurityProps) {
   const groups = safetyNumber ? safetyNumber.split(' ') : [];
 
@@ -52,6 +58,13 @@ export function VerifySecurity({
           <X className="h-5 w-5" />
         </IconButton>
       </div>
+
+      {keyChanged && (
+        <div className="mb-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+          This contact&apos;s security code changed — they may have reinstalled. Verify the numbers
+          match before sending.
+        </div>
+      )}
 
       <p className="mb-4 text-sm leading-relaxed text-white/50">
         Compare this safety number with <span className="text-white/80">{peerName}</span> on a

@@ -2,24 +2,15 @@ import { expect, test } from '@playwright/test';
 
 // B2 device-linking E2E tests. The full two-device flow (D1 approves D2) requires two separate
 // browser contexts plus a live backend — those tests are marked skip until the staging environment
-// exposes enrollment endpoints. The single-device UI tests below run against the static PWA.
+// exposes enrollment endpoints. The static Settings modal currently hides device-linking entrypoints.
 
-test('Devices settings section is accessible from Settings', async ({ page }) => {
+test('Devices settings section is hidden from Settings', async ({ page }) => {
   await page.goto('/chat');
   await page.getByRole('button', { name: 'Open settings' }).click();
-  await page.getByRole('button', { name: 'Devices' }).click();
 
-  await expect(page.getByRole('heading', { name: 'Devices' })).toBeVisible();
-  await expect(page.getByText('Current device')).toBeVisible();
-});
-
-test('Link another device button absent when no device is provisioned', async ({ page }) => {
-  await page.goto('/chat');
-  await page.getByRole('button', { name: 'Open settings' }).click();
-  await page.getByRole('button', { name: 'Devices' }).click();
-
-  // In demo mode (OIDC unconfigured) deviceId is null — the button should not render.
-  await expect(page.getByRole('button', { name: 'Link another device' })).toHaveCount(0);
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await expect(dialog.getByRole('button', { name: 'Devices' })).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Link another device' })).toHaveCount(0);
 });
 
 // The tests below require two live browser contexts authenticated as the SAME user on a real
@@ -36,12 +27,9 @@ test.skip('Full link flow: D2 shows code, D1 approves, D2 joins pre-existing con
   // D1: navigate to chat (already has an unlocked device with conversations)
   await d1Page.goto('/chat');
 
-  // D2: navigate and unlock, then open Settings → Devices → Link another device
+  // D2: navigate and unlock, then open the future device-linking entrypoint.
   await d2Page.goto('/chat');
   // ... unlock D2 with passphrase ...
-  await d2Page.getByRole('button', { name: 'Open settings' }).click();
-  await d2Page.getByRole('button', { name: 'Devices' }).click();
-  await d2Page.getByRole('button', { name: 'Link another device' }).click();
 
   // D2: dialog appears and shows a 9-digit code
   const d2Dialog = d2Page.getByRole('dialog', { name: 'Link this device' });

@@ -5,12 +5,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Database,
-  HardDrive,
   Info,
   Lock,
   ShieldCheck,
   Shield,
-  UserRound,
   Users,
   X,
   type LucideIcon,
@@ -42,7 +40,6 @@ import {
 import { AboutSettings } from './AboutSettings';
 import { AppearanceSettings, FONT_SIZE_LEVELS } from './AppearanceSettings';
 import { DataStorageSettings } from './DataStorageSettings';
-import { DeviceSettings } from './DeviceSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { PrivacySettings, type PrivacySettingsRecord } from './PrivacySettings';
 import { readStoredPrivacySettings, writeStoredPrivacySettings } from './privacy-settings';
@@ -65,25 +62,21 @@ interface SettingsPanelProps {
 }
 
 type SectionId =
-  | 'profile'
   | 'security'
   | 'privacy'
   | 'notifications'
   | 'appearance'
   | 'storage'
-  | 'devices'
   | 'about'
   | 'team'
   | 'admin';
 
 const baseSections: Array<{ id: SectionId; label: string; icon: LucideIcon }> = [
-  { id: 'profile', label: 'Profile', icon: UserRound },
   { id: 'security', label: 'Security', icon: Shield },
   { id: 'privacy', label: 'Privacy', icon: Lock },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'appearance', label: 'Appearance', icon: Brush },
   { id: 'storage', label: 'Data & Storage', icon: Database },
-  { id: 'devices', label: 'Devices', icon: HardDrive },
   { id: 'about', label: 'About', icon: Info },
 ];
 
@@ -180,7 +173,7 @@ export function SettingsPanel({
 }: SettingsPanelProps) {
   const isAdmin = serverProfile?.role === 'admin';
   const sections = isAdmin ? [...baseSections, teamSection, adminSection] : baseSections;
-  const [active, setActive] = useState<SectionId>('profile');
+  const [active, setActive] = useState<SectionId>('security');
   const [closing, setClosing] = useState(false);
   const [mobileSectionOpen, setMobileSectionOpen] = useState(false);
   const [mobileBackAnimating, setMobileBackAnimating] = useState(false);
@@ -332,7 +325,7 @@ export function SettingsPanel({
       <aside
         className={`${
           mobileSectionOpen || mobileBackAnimating ? 'hidden' : 'flex'
-        } w-full flex-col bg-[#0f0f16] p-3 sm:flex sm:w-64 sm:shrink-0 sm:border-r sm:border-white/5 sm:p-4 ${
+        } w-full flex-col overflow-y-auto bg-[#0f0f16] p-3 sm:flex sm:w-80 sm:shrink-0 sm:border-r sm:border-white/5 sm:p-4 ${
           mobileMenuReturning ? paneBackEnterMotion : ''
         }`}
       >
@@ -342,7 +335,25 @@ export function SettingsPanel({
             <X className="h-5 w-5" />
           </IconButton>
         </div>
-        <nav className="space-y-1" aria-label="Settings sections">
+
+        <section
+          className="rounded-2xl border border-white/5 bg-white/[0.02] p-3"
+          aria-labelledby="settings-profile-heading"
+        >
+          <h3 id="settings-profile-heading" className="mb-4 text-base font-semibold text-white">
+            Profile
+          </h3>
+          <ProfileSettings
+            profile={profile}
+            displayName={serverHandle}
+            avatar={avatar}
+            profileError={profileError}
+            onAvatarChange={setAvatar}
+            onProfileErrorChange={setProfileError}
+          />
+        </section>
+
+        <nav className="mt-5 space-y-1 border-t border-white/5 pt-4" aria-label="Settings sections">
           {sections.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -404,7 +415,6 @@ export function SettingsPanel({
             </div>
             <div className="min-w-0">
               <h3 className="text-xl font-semibold text-white">{activeSection.label}</h3>
-              <p className="text-sm text-white/60">Anonymous account settings</p>
             </div>
             <IconButton
               onClick={closeSettings}
@@ -414,17 +424,6 @@ export function SettingsPanel({
               <X className="h-5 w-5" />
             </IconButton>
           </div>
-
-          {active === 'profile' && (
-            <ProfileSettings
-              profile={profile}
-              displayName={serverHandle}
-              avatar={avatar}
-              profileError={profileError}
-              onAvatarChange={setAvatar}
-              onProfileErrorChange={setProfileError}
-            />
-          )}
 
           {active === 'security' && <SecuritySettings />}
 
@@ -444,8 +443,6 @@ export function SettingsPanel({
           )}
 
           {active === 'storage' && <DataStorageSettings />}
-
-          {active === 'devices' && <DeviceSettings deviceId={deviceId} />}
 
           {active === 'about' && <AboutSettings />}
 

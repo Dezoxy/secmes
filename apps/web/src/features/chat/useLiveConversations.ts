@@ -24,7 +24,12 @@ import {
   type MessageSocketStatus,
 } from '../../lib/ws';
 import { isReadReceiptsEnabled } from '../settings/privacy-settings';
-import { placeholderPeerId, resolvePeerUser, withPeerNamed } from './peer-naming';
+import {
+  persistPeerMapping,
+  placeholderPeerId,
+  resolvePeerUser,
+  withPeerNamed,
+} from './peer-naming';
 import { foldOwnMessageStatuses, type PeerWatermarks } from './receipts';
 import type { Conversation, User } from './seed';
 import { currentUser, generatedAvatar } from './seed';
@@ -45,6 +50,22 @@ interface UseLiveConversationsOptions {
   setConversations: Dispatch<SetStateAction<Conversation[]>>;
   /** Called when another device of this user registers a pending enrollment request (D1 side). */
   onEnrollmentPending?: (enrollmentId: string) => void;
+  /**
+   * Called when a joined conversation's peer safety numbers differ from the stored verified set —
+   * the peer has a new cryptographic identity (reinstall or device replacement). The UI should
+   * clear the verified badge and open the re-verify prompt.
+   */
+  onPeerKeyChanged?: (peerUserId: string, conversationId: string, newNumbers: string[]) => void;
+  /**
+   * Called when a joined conversation's peer safety numbers exactly match the stored verified set —
+   * the peer's identity is unchanged; restore the verified state immediately (no prompt needed).
+   */
+  onPeerVerified?: (conversationId: string, safetyNumber: string) => void;
+  /**
+   * Called with the resolved safety number for any joined conversation that has computable safety
+   * numbers. Feeds numbersByConv so the Verify button shows the correct number.
+   */
+  onSafetyNumberResolved?: (conversationId: string, safetyNumber: string) => void;
 }
 
 interface UseLiveConversationsResult {
@@ -100,6 +121,14 @@ export function replaceOrPrependConversation(
   return next;
 }
 
+export function setsEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 export function useLiveConversations({
   device,
   pool,
@@ -111,6 +140,9 @@ export function useLiveConversations({
   backfillInto,
   setConversations,
   onEnrollmentPending,
+  onPeerKeyChanged,
+  onPeerVerified,
+  onSafetyNumberResolved,
 }: UseLiveConversationsOptions): UseLiveConversationsResult {
   const [liveIds, setLiveIds] = useState<Set<string>>(() => new Set());
   const [connectionStatus, setConnectionStatus] = useState<MessageSocketStatus>('offline');
@@ -239,15 +271,42 @@ export function useLiveConversations({
         const at = sessionPool.indexOf(member);
         if (at !== -1) sessionPool.splice(at, 1);
       },
-      onJoined: ({ conversationId, conversation, senderUserId }) => {
+      onJoined: ({ conversationId, conversation, senderUserId, peerSafetyNumbers }) => {
         addLive(conversationId, conversation);
         const shell = liveConversationShell(conversationId, currentUserProfile);
         setConversations((prev) => replaceOrPrependConversation(prev, shell));
+        // Persist the peerUserId mapping only when the sender is the real peer — not self. In the
+        // device-enrollment flow, an existing own device sends the Welcome to D2, making senderUserId
+        // equal to selfUserId; persisting that would map the conversation to ourselves.
+        if (senderUserId !== selfUserId) persistPeerMapping(conversationId, senderUserId);
         // Name the new conversation after the (verified) member who added us — best-effort, async; the
         // placeholder stays if the directory lookup misses.
         void resolvePeerUser(senderUserId, conversationId).then((peer) => {
           if (peer) setConversations((prev) => withPeerNamed(prev, conversationId, peer));
         });
+        // Identity-change detection: compare the joined group's safety numbers against the stored set.
+        // Fire-and-forget: the default (unverified) is the fail-safe state while this resolves.
+        if (peerSafetyNumbers !== null && messagingDeps) {
+          const primaryNumber = peerSafetyNumbers[0];
+          if (primaryNumber) onSafetyNumberResolved?.(conversationId, primaryNumber);
+          void messagingDeps.keystore
+            .loadVerifiedPeer(senderUserId, messagingDeps.sessionKey)
+            .then((stored) => {
+              if (stored === null) return; // never verified — leave unverified, no forced panel open
+              if (!setsEqual(stored, peerSafetyNumbers)) {
+                // Delete the stale record before surfacing the prompt: if the user closes before
+                // re-verifying, rehydration must NOT restore the old badge from the now-invalid row.
+                void messagingDeps.keystore.deleteVerifiedPeer(senderUserId);
+                onPeerKeyChanged?.(senderUserId, conversationId, peerSafetyNumbers);
+              } else {
+                // Same key: restore verified state immediately (no prompt needed).
+                onPeerVerified?.(conversationId, peerSafetyNumbers[0] ?? '');
+              }
+            })
+            .catch(() => {
+              // treat as never verified — fail safe
+            });
+        }
       },
     })
       .catch((err: unknown) => {
@@ -261,7 +320,18 @@ export function useLiveConversations({
           drainRef.current();
         }
       });
-  }, [addLive, currentUserProfile, device, deviceId, messagingDeps, pool, setConversations]);
+  }, [
+    addLive,
+    currentUserProfile,
+    device,
+    deviceId,
+    messagingDeps,
+    onPeerKeyChanged,
+    onPeerVerified,
+    onSafetyNumberResolved,
+    pool,
+    setConversations,
+  ]);
 
   useEffect(() => {
     drainRef.current = drainWelcomes;

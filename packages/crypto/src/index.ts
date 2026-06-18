@@ -159,21 +159,27 @@ function compareBytes(a: Uint8Array, b: Uint8Array): number {
   return a.length - b.length;
 }
 
-// Per-device fingerprint over (domain || length-prefixed identity || signature public key), all read
-// from a PUBLIC KeyPackage (the peer's published material) — no private key needed. The signature key
-// is the device's stable identity; the length prefix removes identity/key boundary ambiguity.
+// Shared fingerprint core: (domain || length-prefixed identity || signature public key).
+// The 16-bit length prefix removes identity/key boundary ambiguity. `identityBytes` must be
+// the raw credential bytes — callers are responsible for any encoding/re-encoding step.
+async function deviceFingerprintRaw(
+  identityBytes: Uint8Array,
+  sigPub: Uint8Array,
+): Promise<Uint8Array> {
+  if (identityBytes.length > 0xffff)
+    throw new Error('identity too long for the safety-number encoding');
+  const idLen = new Uint8Array([(identityBytes.length >>> 8) & 0xff, identityBytes.length & 0xff]);
+  return sha256(concatBytes(FP_DOMAIN, idLen, identityBytes, sigPub));
+}
+
+// Per-device fingerprint over a PUBLIC KeyPackage. The credential identity bytes are used directly
+// (avoids any lossy UTF-8 round-trip from the raw wire format).
 async function deviceFingerprint(pkg: KeyPackage): Promise<Uint8Array> {
   const cred = pkg.leafNode.credential;
   if (cred.credentialType !== 'basic') {
     throw new Error(`unsupported credential type: ${cred.credentialType}`);
   }
-  const identity = cred.identity; // raw identity bytes (avoids any lossy UTF-8 round-trip)
-  // The 16-bit length prefix is what removes identity/key boundary ambiguity; enforce its bound so a
-  // future longer identity can't silently wrap it and reintroduce the ambiguity.
-  if (identity.length > 0xffff) throw new Error('identity too long for the safety-number encoding');
-  const sigPub = pkg.leafNode.signaturePublicKey;
-  const idLen = new Uint8Array([(identity.length >>> 8) & 0xff, identity.length & 0xff]);
-  return sha256(concatBytes(FP_DOMAIN, idLen, identity, sigPub));
+  return deviceFingerprintRaw(cred.identity, pkg.leafNode.signaturePublicKey);
 }
 
 /** Render a 32-byte digest as 8 space-separated groups of 5 decimal digits (read-aloud friendly). */
@@ -197,6 +203,27 @@ function renderSafetyNumber(digest: Uint8Array): string {
 export async function safetyNumber(local: KeyPackage, remote: KeyPackage): Promise<string> {
   const a = await deviceFingerprint(local);
   const b = await deviceFingerprint(remote);
+  const [first, second] = compareBytes(a, b) <= 0 ? [a, b] : [b, a];
+  return renderSafetyNumber(await sha256(concatBytes(first, second)));
+}
+
+/**
+ * Variant of {@link safetyNumber} for the group-roster path: takes {@link GroupMember} values
+ * instead of KeyPackages. Used on the joiner side (and by the initiator post-confirm) where only
+ * the joined MLS group's active-member roster is available — not the original directory KeyPackages.
+ *
+ * Produces the **same number** as `safetyNumber()` for the same underlying device, because both
+ * reduce to `deviceFingerprintRaw(identityBytes, sigPub)`. `member.identity` is a string decoded
+ * strict-UTF-8 by the MLS wrapper; re-encoding it via TextEncoder is lossless (guaranteed by the
+ * strict decoder). The C2 cross-consistency test in `safety-number.spec.ts` covers this,
+ * including a non-ASCII multi-byte identity, so any future decoder relaxation is caught immediately.
+ */
+export async function safetyNumberFromMember(
+  local: GroupMember,
+  remote: GroupMember,
+): Promise<string> {
+  const a = await deviceFingerprintRaw(te.encode(local.identity), local.signaturePublicKey);
+  const b = await deviceFingerprintRaw(te.encode(remote.identity), remote.signaturePublicKey);
   const [first, second] = compareBytes(a, b) <= 0 ? [a, b] : [b, a];
   return renderSafetyNumber(await sha256(concatBytes(first, second)));
 }
