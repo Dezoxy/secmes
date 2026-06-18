@@ -68,11 +68,16 @@ task #16 removes.
   per-contact guard `findConversationWith` ([ChatScreen.tsx:284](apps/web/src/features/chat/ChatScreen.tsx))
   collapses them to one entry. **No server change.** Residual: the peer keeps a stale dead thread until they
   also resume (bounded, 1:1 only, accepted).
-- **Identity-change handling (the crux).** Persist the verified safety number keyed by **peer `userId`** (not
-  conversationId — that changes on resume). On the **peer's** side, when a new conversation arrives for a
-  previously-verified contact with a *different* safety number → don't auto-trust; gate it and surface
+- **Identity-change handling (the crux).** Persist verified safety numbers keyed by **peer `userId`**, covering
+  **every currently-present peer device** — primary **and** secondaries (the 1:1 start flow already claims
+  `peerSecondaryDevices` and verifies each) — as a **set** of per-device numbers, **not** a single number.
+  (A single number per user would let a *replaced secondary device* slip through: the primary still matches the
+  stored number, so the reset never fires.) Store it **sealed under the PRF session key in the `argus-keystore`
+  IndexedDB** — the `userId ↔ verified-number` association is social-graph metadata, so **never** plain
+  `localStorage`, and **never sent to the server**. On the **peer's** side, when a new/resumed conversation's
+  set of present peer-device safety numbers differs from the stored set → don't auto-trust; gate it and surface
   "{contact}'s security code changed (they may have reinstalled) — verify before sending." Computed entirely
-  client-side from public keys; **never sent to the server.**
+  client-side from public keys.
 
 ## The trade-off, in one paragraph (for the owner)
 
@@ -124,6 +129,10 @@ halves: roster recovery (Option A) **and** tap-to-resume + the identity-change s
 - **T-resume-2:** stale "verified" badge after resume → mitigated by keying verified-state to the safety number
   and resetting on change.
 - **T-resume-3:** two-threads-per-contact residual (peer keeps the dead 1:1) — bounded, accepted.
+- **T-resume-4 (roster injection):** the server fabricates the roster itself — inserting a `userId` into
+  `conversation_members` for a contact the user never spoke to, so an unexpected name appears in the recovered
+  roster. Not a *new* server capability (it already controls routing), but name it explicitly; mitigated by the
+  same safety-number gate that runs before any message is sent (an injected contact can't be silently messaged).
 
 Cross-reference fingerprint-verification.md (§3 stale trust, §6 deferred live key-change),
 multi-device-enrollment.md (§5.4 deferred sealed identity transfer; reinstall is **outside** the enrollment
@@ -137,6 +146,11 @@ Extend `useConversationHistoryRehydration`
 is empty but the session is valid (the reinstall case), repopulate placeholders from
 `GET /devices/me/conversations` + `GET /conversations/:id/members`; render **read-only** (no composer) until
 live. Reuse `peer-naming.ts` for names/avatars. No server change, no `@argus/contracts` change.
+- **Direct conversations only.** Build recoverable contact placeholders from **exactly-two-member (direct)**
+  conversations. Group (3+ member) rows must **not** become resumable placeholders — group recovery + N-party
+  safety numbers are deferred (see *Out of scope*), and a group row must never feed tap-to-resume (which is 1:1
+  only). Either skip group rows in PR2, or render them as inert, clearly-non-resumable entries; do **not** wire
+  them to the resume path.
 - Gates: `security-boundary-auditor` (both reads RLS + member-only, no content); unit tests for the placeholder
   builder; one Playwright E2E (fresh keystore + valid session → roster appears, history empty, send disabled).
 - **No `crypto-reviewer`** — say so in the PR body. The safe foundation.
@@ -144,10 +158,13 @@ live. Reuse `peer-naming.ts` for names/avatars. No server change, no `@argus/con
 ### PR 3 — persist + reset verified-state by peer `userId`; peer-side "security code changed" signal (task #22) — crypto
 
 The security spine of tap-to-resume; lands **before** PR 4 so the peer is never silently switched.
-- Move `verifiedByConv` from ephemeral `useState` to a **persisted** `peerUserId → lastVerifiedSafetyNumber`
-  record (sealed in IndexedDB / localStorage like the existing peer-mapping; **never sent to the server**).
-- On an incoming new conversation whose peer matches a previously-verified contact with a *different* safety
-  number → gate it unverified and surface the re-verify prompt, routing into the existing `VerifySecurity` panel.
+- Move `verifiedByConv` from ephemeral `useState` to a **persisted** record keyed by `peerUserId` holding the
+  **set of per-device safety numbers** for every present peer device (primary + secondaries), **sealed under the
+  PRF session key in the `argus-keystore` IndexedDB** — **not** plain `localStorage` (the `userId ↔ number`
+  association is social-graph metadata), and **never sent to the server**.
+- On an incoming new/resumed conversation whose set of present peer-device safety numbers **differs from the
+  stored set** for that `peerUserId` (a changed *or* replaced device) → gate it unverified and surface the
+  re-verify prompt, routing into the existing `VerifySecurity` panel.
 - Reuses `@argus/crypto` `safetyNumber` ([packages/crypto/src/index.ts:203](packages/crypto/src/index.ts)).
 - Gates: **`crypto-reviewer` REQUIRED** (touches the safety-number/trust model) + `security-boundary-auditor`
   (confirm nothing leaves the client). Unit tests (key-change resets verified; same-key keeps it); E2E
@@ -160,6 +177,11 @@ Wire the placeholder tap → `ConversationManager.prepare(peerUserId)` → `Veri
 replace-in-place via `findConversationWith(peerUserId)`
 ([ChatScreen.tsx:284](apps/web/src/features/chat/ChatScreen.tsx)). Reuses `ConversationManager` unchanged; no
 server/schema change.
+- **Pin the replace-in-place mechanics (PR4 spec):** `findConversationWith` only *finds*; `handleStarted`
+  ([ChatScreen.tsx:296](apps/web/src/features/chat/ChatScreen.tsx)) only *adds*. PR4 must specify the exact
+  state mutation: **after `confirm()` succeeds**, remove the placeholder row (the dead `conversationId`) from
+  the `conversations` state array and insert the new live conversation in one update, so the contact never
+  appears twice and a failed/cancelled `confirm()` leaves the placeholder intact.
 - Gates: **`crypto-reviewer` REQUIRED** (drives MLS group creation + Welcome from the recovery flow) +
   `security-boundary-auditor`. E2E: reinstall → tap placeholder → verify safety number → send → peer receives
   under the new group; old placeholder gone, one conversation per contact.
