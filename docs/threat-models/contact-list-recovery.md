@@ -155,8 +155,9 @@ new capability. The signal is meaningful only to the *honest* client. Accepted.
 - `security-boundary-auditor` gates: both reads confirm RLS + member-only, no content; creation-time
   write sets the flag; backfill predicate reviewed.
 - `/api-spec` → regenerate `openapi.json` → 42Crunch audit (target 90+, fix all incl. LOW).
-- Unit tests: placeholder builder dedup by `peerUserId` (most-recent row wins); backfill does not
-  misclassify a 2-member group; non-`is_direct` rows produce no resumable placeholder.
+- Unit tests: placeholder builder dedup by `peerUserId` (highest `conversations.created_at` wins —
+  the column indexed by `conversations_tenant_idx`); backfill does not misclassify a 2-member group;
+  non-`is_direct` rows produce no resumable placeholder.
 - Playwright E2E: fresh keystore + valid session → roster appears, history empty, composer disabled.
 - **No `crypto-reviewer`** (no crypto surface in PR 2).
 
@@ -168,8 +169,12 @@ new capability. The signal is meaningful only to the *honest* client. Accepted.
     `packages/crypto/src/index.ts:526`). The variant must re-encode it to bytes with `TextEncoder`
     before feeding it to `deviceFingerprint` — this is lossless because strict decode rejects
     invalid sequences, but the re-encode dependency must be called out explicitly.
-  - Use the same domain tag + u16-length-prefix framing: `FP_DOMAIN || u16(len(identityBytes)) ||
-    identityBytes || signaturePublicKey` (as in `deviceFingerprint`, `packages/crypto/src/index.ts:165-177`).
+  - Use the same per-device framing: `FP_DOMAIN || u16(len(identityBytes)) || identityBytes ||
+    signaturePublicKey` (as in `deviceFingerprint`, `packages/crypto/src/index.ts:165-177`).
+  - Combine **two** per-device fingerprints — local device and peer device — exactly as
+    `safetyNumber(local, remote)` does: sort the two fingerprint byte arrays, concatenate
+    (sorted[0] || sorted[1]), hash with SHA-256, render as decimal groups. Sorting preserves
+    symmetry; both sides of the OOB comparison must produce the same output.
   - Gate on a **cross-consistency test**: `newVariant(memberView(kp)) === safetyNumber(kpA, kpB)`
     for the same underlying device. Without this test the feature can ship looking correct and
     silently produce different numbers than the `prepare()` side, breaking every OOB comparison.
