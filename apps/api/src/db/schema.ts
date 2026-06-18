@@ -274,6 +274,23 @@ export const webauthnChallenges = pgTable('webauthn_challenges', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
 
+// Friendships (contact-list-recovery Slice C) — mutual friendship graph, METADATA ONLY (no keys, no content).
+// Canonical pair ordering: userLowId = least(a, b), userHighId = greatest(a, b) — one row per pair.
+// Accepted-only model: pending requests TTL'd; decline/cancel = hard DELETE (no rejection ledger).
+// DDL, RLS (FORCE), indexes, and grants live in 0042_friendships.sql.
+// See docs/threat-models/contact-list-recovery.md §R-friends.
+export const friendships = pgTable('friendships', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  tenantId: uuid('tenant_id').notNull(),
+  userLowId: uuid('user_low_id').notNull(), // canonical: least(userId_a, userId_b)
+  userHighId: uuid('user_high_id').notNull(), // canonical: greatest(userId_a, userId_b)
+  status: text('status').notNull(), // 'pending' | 'accepted'
+  requestedBy: uuid('requested_by'), // who opened it; NULLed on accept
+  expiresAt: timestamp('expires_at', { withTimezone: true }), // pending TTL; NULL once accepted
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }), // set on accept
+});
+
 // Phase 3 — breakglass admin credential. Argon2id-hashed password + lockout state. FORCE RLS, see 0037.
 // See docs/threat-models/breakglass-admin.md.
 export const adminCredentials = pgTable('admin_credentials', {
