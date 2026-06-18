@@ -4,9 +4,9 @@
 -- METADATA ONLY: stores user-id pairs and request state — no keys, no content (invariant #1).
 -- ACCEPTED-ONLY model: once accepted, requested_by is NULLed and expires_at is NULLed.
 -- DECLINE / CANCEL = hard DELETE (no rejection ledger — bounds pre-conversation social graph exposure).
--- PENDING TTL: expires_at bounds the open-request window. An external sweep (or pg_cron) should run:
---   DELETE FROM friendships WHERE status = 'pending' AND expires_at < NOW();
--- No NestJS scheduler exists yet — TODO: Slice D adds the periodic sweep (see R-friends-2 in threat model).
+-- PENDING TTL: expires_at bounds the open-request window; see sweep_expired_friend_requests() below.
+-- No NestJS @Cron / pg_cron exists in this repo yet — call the function via an external cron or
+-- add a NestJS ScheduleModule job in Slice D (see R-friends-2 in threat model).
 --
 -- Canonical pair ordering: user_low_id = LEAST(a, b), user_high_id = GREATEST(a, b).
 -- The UNIQUE constraint on (tenant_id, user_low_id, user_high_id) enforces one row per pair.
@@ -39,6 +39,9 @@ CREATE TABLE IF NOT EXISTS friendships (
     CHECK (status <> 'pending' OR (expires_at IS NOT NULL AND requested_by IS NOT NULL)),
   CONSTRAINT friendships_accepted_must_clear_expiry
     CHECK (status <> 'accepted' OR (expires_at IS NULL AND requested_by IS NULL)),
+  -- requested_by must be one of the two canonical parties (prevents orphaned direction metadata).
+  CONSTRAINT friendships_requested_by_is_party
+    CHECK (requested_by IS NULL OR requested_by = user_low_id OR requested_by = user_high_id),
   CONSTRAINT friendships_tenant_low_fk
     FOREIGN KEY (tenant_id, user_low_id) REFERENCES users(tenant_id, id) ON DELETE CASCADE,
   CONSTRAINT friendships_tenant_high_fk
@@ -64,3 +67,23 @@ CREATE POLICY friendships_tenant_isolation ON friendships
 -- expires_at, resolved_at), DELETE (decline / cancel = hard delete). No DDL.
 GRANT SELECT, INSERT, DELETE ON friendships TO argus_app;
 GRANT UPDATE (status, requested_by, expires_at, resolved_at) ON friendships TO argus_app;
+
+-- TTL sweep function: deletes pending requests whose expiry has passed.
+-- Call periodically (pg_cron, external cron, or NestJS ScheduleModule in Slice D):
+--   SELECT sweep_expired_friend_requests();
+CREATE OR REPLACE FUNCTION sweep_expired_friend_requests()
+RETURNS INTEGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  deleted_count INTEGER;
+BEGIN
+  DELETE FROM friendships
+  WHERE status = 'pending' AND expires_at < NOW();
+  GET DIAGNOSTICS deleted_count = ROW_COUNT;
+  RETURN deleted_count;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION sweep_expired_friend_requests() TO argus_app;
