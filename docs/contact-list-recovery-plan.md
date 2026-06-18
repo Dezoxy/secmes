@@ -389,8 +389,7 @@ needs **no** schema change: verified-state is client-local and never sent; the r
 
 ## How to start (new session)
 
-1. **Finish Slice A (PR #236)** on its current scope — keep as-is; grep the branch for `recoveredFromServer` /
-   `buildRosterPlaceholders` before merge.
+1. **Slice A is done (merged #236 + #240).** The selfUserId stale-closure follow-up also landed in #240.
 2. **Slice B** (revert placeholders) and **Slice C** (`friendships` table + RLS) can proceed in parallel; C
    needs the threat-model note updated with the R-friends risks **before** it lands.
 3. Then **D** (API + contracts) → **E** (UI wiring) → **F** (resume polish). Branch each off `main`; one PR per
