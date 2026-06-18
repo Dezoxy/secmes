@@ -135,8 +135,8 @@ test('accepted friend can be removed via the unfriend button', async ({ page }) 
   await expect(page.getByRole('button', { name: /Open friend Alice/ })).toBeVisible();
 
   // In demo mode onUnfriend is undefined — the remove button must not be visible.
-  // The unit tests in ConversationList.spec.ts cover the button's rendering and confirm
-  // flow when onUnfriend is provided (an authenticated session is required in E2E).
+  // The interactive click→confirm→call flow is covered by ConversationList.unfriend.spec.ts
+  // (an authenticated session is required to exercise it in E2E).
   await expect(page.getByRole('button', { name: /Remove friend Alice/ })).toHaveCount(0);
   expect(deleteUrl).toBeNull();
 });
