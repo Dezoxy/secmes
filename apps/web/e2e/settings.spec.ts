@@ -12,6 +12,8 @@ test('settings can be opened from chat', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible();
   await expect(page.getByText('Display name')).toBeVisible();
   await expect(page.getByText('Upload photo')).toBeVisible();
+  await expect(page.getByText('Anonymous account settings')).toHaveCount(0);
+  await expect(page.getByText('Auto-assigned. Unique within your organization.')).toHaveCount(0);
 });
 
 test('mobile settings opens sections from the menu', async ({ page }) => {
@@ -72,7 +74,7 @@ test('privacy switches persist across section changes', async ({ page }) => {
   await expect(reopened.getByRole('switch', { name: 'Read receipts' })).not.toBeChecked();
 });
 
-test('security section shows passkey-only unlock (no recovery surface)', async ({ page }) => {
+test('security section shows passkey-only login (no recovery surface)', async ({ page }) => {
   await page.goto('/chat');
   await page.getByRole('button', { name: 'Open settings' }).click();
 
@@ -80,7 +82,8 @@ test('security section shows passkey-only unlock (no recovery surface)', async (
   await dialog.getByRole('button', { name: 'Security', exact: true }).click();
 
   await expect(dialog.getByText('Passkey only')).toBeVisible();
-  await expect(dialog.getByText('Your passkey (no password)')).toBeVisible();
+  await expect(dialog.getByText('Device unlock')).toHaveCount(0);
+  await expect(dialog.getByText('Your passkey (no password)')).toHaveCount(0);
   // The recovery-file / passphrase surface is gone — no restore controls.
   await expect(dialog.getByRole('button', { name: 'Restore on this device' })).toHaveCount(0);
   await expect(dialog.getByText('Recovery passphrase')).toHaveCount(0);
@@ -117,9 +120,7 @@ test('settings sections preserve defaults after component split', async ({ page 
   await expect(dialog.getByText('Encrypted local message cache')).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Reset' })).toBeVisible();
 
-  await dialog.getByRole('button', { name: 'Devices' }).click();
-  await expect(dialog.getByRole('heading', { name: 'Devices' })).toBeVisible();
-  await expect(dialog.getByText('Current device')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Devices' })).toHaveCount(0);
 });
 
 test('appearance font size preview follows the slider', async ({ page }) => {

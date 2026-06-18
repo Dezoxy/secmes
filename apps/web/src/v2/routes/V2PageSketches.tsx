@@ -325,7 +325,6 @@ export function V2SecuritySketch() {
             value="Discoverable passkey, no password."
             tone="verified"
           />
-          <V2FactRow label="Device unlock" value="Passkey PRF — no recovery file." />
         </V2AsidePanel>
       }
     >

@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react';
-import { Search, Plus, Users, Settings, RefreshCw } from 'lucide-react';
+import { useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Search, Plus, UserPlus, Users, Settings, RefreshCw } from 'lucide-react';
 import type { Conversation, User } from './seed';
 import {
   currentUser,
@@ -8,7 +8,83 @@ import {
   getOtherParticipant,
   formatMessageTime,
 } from './seed';
-import { Avatar, Button, EmptyState } from '../ui';
+import { Avatar, Button, EmptyState, conversationEnterMotion, paneBackEnterMotion } from '../ui';
+
+export interface AcceptedFriend {
+  conversationId: string;
+  user: User;
+}
+
+export interface PendingFriendRequest {
+  argusId: string;
+}
+
+type SidebarMode = 'conversations' | 'friends';
+type SidebarTransition = 'forward' | 'back' | null;
+
+function normalizedContactText(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function friendSearchText(friend: AcceptedFriend): string {
+  return [friend.user.name, friend.user.argusId]
+    .filter((value): value is string => Boolean(value))
+    .join(' ')
+    .toLowerCase();
+}
+
+export function acceptedFriendsFromConversations(
+  conversations: Conversation[],
+  selfUserId = currentUser.id,
+): AcceptedFriend[] {
+  const seenUserIds = new Set<string>();
+  const friends: AcceptedFriend[] = [];
+
+  for (const conversation of conversations) {
+    if (conversation.type !== 'direct') continue;
+    const peer = conversation.participants.find((participant) => participant.id !== selfUserId);
+    if (!peer || seenUserIds.has(peer.id)) continue;
+    seenUserIds.add(peer.id);
+    friends.push({ conversationId: conversation.id, user: peer });
+  }
+
+  return friends.sort((left, right) =>
+    left.user.name.localeCompare(right.user.name, undefined, { sensitivity: 'base' }),
+  );
+}
+
+export function filterAcceptedFriends(
+  friends: AcceptedFriend[],
+  rawQuery: string,
+): AcceptedFriend[] {
+  const query = normalizedContactText(rawQuery);
+  if (!query) return friends;
+  return friends.filter((friend) => friendSearchText(friend).includes(query));
+}
+
+export function addPendingFriendRequest(
+  requests: PendingFriendRequest[],
+  rawArgusId: string,
+  friends: AcceptedFriend[],
+): PendingFriendRequest[] {
+  const argusId = rawArgusId.trim();
+  const normalizedArgusId = normalizedContactText(argusId);
+  if (!normalizedArgusId) return requests;
+
+  const alreadyFriend = friends.some(
+    (friend) =>
+      normalizedContactText(friend.user.argusId ?? '') === normalizedArgusId ||
+      normalizedContactText(friend.user.name) === normalizedArgusId,
+  );
+  if (alreadyFriend) return requests;
+
+  const alreadyPending = requests.some(
+    (request) => normalizedContactText(request.argusId) === normalizedArgusId,
+  );
+  if (alreadyPending) return requests;
+
+  return [{ argusId }, ...requests];
+}
 
 interface ConversationListProps {
   conversations: Conversation[];
@@ -38,13 +114,31 @@ export function ConversationList({
   updateReady = false,
   onApplyUpdate,
 }: ConversationListProps) {
+  const [sidebarMode, setSidebarMode] = useState<SidebarMode>('conversations');
+  const [sidebarTransition, setSidebarTransition] = useState<SidebarTransition>(null);
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
+  const [friendQuery, setFriendQuery] = useState('');
+  const [pendingFriendRequests, setPendingFriendRequests] = useState<PendingFriendRequest[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const touchStartY = useRef<number | null>(null);
   const searchTouchStartY = useRef<number | null>(null);
   const sidebarTouchStartY = useRef<number | null>(null);
+  const acceptedFriends = useMemo(
+    () => acceptedFriendsFromConversations(conversations),
+    [conversations],
+  );
+  const filteredFriends = useMemo(
+    () => filterAcceptedFriends(acceptedFriends, friendQuery),
+    [acceptedFriends, friendQuery],
+  );
+  const trimmedFriendQuery = friendQuery.trim();
+  const pendingForQuery = pendingFriendRequests.some(
+    (request) =>
+      normalizedContactText(request.argusId) === normalizedContactText(trimmedFriendQuery),
+  );
+  const showFriendRequestAction = trimmedFriendQuery.length > 0 && filteredFriends.length === 0;
 
   const revealSearch = () => setSearchVisible(true);
 
@@ -132,9 +226,166 @@ export function ConversationList({
     window.requestAnimationFrame(() => searchInputRef.current?.focus());
   };
 
+  const openFriendsPanel = () => {
+    hideSearch();
+    setSidebarTransition('forward');
+    setSidebarMode('friends');
+  };
+
+  const closeFriendsPanel = () => {
+    setFriendQuery('');
+    setSidebarTransition('back');
+    setSidebarMode('conversations');
+  };
+
+  const handleFriendSelect = (conversationId: string) => {
+    closeFriendsPanel();
+    onSelect(conversationId);
+  };
+
+  const handleMockFriendRequest = () => {
+    setPendingFriendRequests((prev) =>
+      addPendingFriendRequest(prev, trimmedFriendQuery, acceptedFriends),
+    );
+  };
+
+  const handleSidebarAnimationEnd = (event: React.AnimationEvent<HTMLDivElement>) => {
+    if (event.currentTarget === event.target) setSidebarTransition(null);
+  };
+  const friendsPanelMotion = sidebarTransition === 'forward' ? conversationEnterMotion : '';
+  const conversationsPanelMotion = sidebarTransition === 'back' ? paneBackEnterMotion : '';
+
+  if (sidebarMode === 'friends') {
+    return (
+      <div
+        className={`flex h-full flex-col ${friendsPanelMotion}`}
+        onAnimationEnd={handleSidebarAnimationEnd}
+      >
+        <div className="border-b border-white/5 p-4">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={closeFriendsPanel}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white/55 transition-colors hover:bg-white/[0.05] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#12121a]"
+              aria-label="Back to conversations"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+            <div className="min-w-0">
+              <h2 className="truncate text-base font-semibold text-white">Friends</h2>
+              <p className="truncate text-xs text-white/45">
+                {acceptedFriends.length} accepted{' '}
+                {acceptedFriends.length === 1 ? 'friend' : 'friends'}
+              </p>
+            </div>
+          </div>
+
+          <div className="relative mt-4">
+            <Search
+              aria-hidden="true"
+              className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30"
+            />
+            <input
+              type="text"
+              value={friendQuery}
+              onChange={(event) => setFriendQuery(event.target.value)}
+              aria-label="Search friends or enter Argus ID"
+              placeholder="Search friends or enter Argus ID..."
+              className="w-full rounded-xl border border-white/5 bg-[#1a1a26] py-2.5 pl-10 pr-4 text-sm text-white placeholder-white/30 transition-colors focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20"
+            />
+          </div>
+        </div>
+
+        <div className="flex-1 space-y-2 overflow-y-auto px-2 py-3">
+          {acceptedFriends.length === 0 && (
+            <EmptyState title="No accepted friends yet" icon={Users} compact className="mx-2 mt-4">
+              Existing 1:1 conversations will appear here.
+            </EmptyState>
+          )}
+
+          {filteredFriends.map((friend) => {
+            const { user, conversationId } = friend;
+            return (
+              <button
+                type="button"
+                key={conversationId}
+                onClick={() => handleFriendSelect(conversationId)}
+                className="flex w-full items-center gap-3 rounded-xl border border-transparent p-3 text-left transition-colors hover:bg-[#1a1a26] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f16]"
+                aria-label={`Open friend ${user.name}`}
+              >
+                <div className="relative shrink-0" aria-hidden="true">
+                  <Avatar
+                    src={user.avatar}
+                    name={user.name}
+                    size="md"
+                    shape="circle"
+                    className="ring-2 ring-white/5"
+                  />
+                  {user.isOnline && (
+                    <div className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-green-500 ring-2 ring-[#12121a]" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-white/90">{user.name}</p>
+                  <p className="truncate font-mono text-xs text-white/40">
+                    {user.argusId ?? 'Accepted friend'}
+                  </p>
+                </div>
+              </button>
+            );
+          })}
+
+          {showFriendRequestAction && (
+            <div className="mx-2 rounded-xl border border-white/5 bg-white/[0.03] p-3">
+              <p className="text-sm font-medium text-white/85">
+                No accepted friend found for that Argus ID.
+              </p>
+              <p className="mt-1 truncate font-mono text-xs text-white/45">{trimmedFriendQuery}</p>
+              {pendingForQuery ? (
+                <p className="mt-3 rounded-lg border border-emerald-400/20 bg-emerald-500/[0.08] px-3 py-2 text-sm font-medium text-emerald-200">
+                  Request sent
+                </p>
+              ) : (
+                <Button
+                  onClick={handleMockFriendRequest}
+                  variant="subtle"
+                  size="md"
+                  className="mt-3 w-full"
+                >
+                  <UserPlus className="h-4 w-4" />
+                  Send friend request
+                </Button>
+              )}
+            </div>
+          )}
+
+          {pendingFriendRequests.length > 0 && (
+            <div className="mx-2 pt-2">
+              <p className="mb-2 px-1 text-xs font-medium uppercase tracking-[0.08em] text-white/35">
+                Outgoing requests
+              </p>
+              <div className="space-y-1">
+                {pendingFriendRequests.map((request) => (
+                  <div
+                    key={request.argusId}
+                    className="rounded-xl border border-white/5 bg-[#1a1a26] px-3 py-2"
+                  >
+                    <p className="truncate font-mono text-xs text-white/60">{request.argusId}</p>
+                    <p className="mt-0.5 text-xs font-medium text-emerald-200">Request sent</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
-      className="flex h-full flex-col"
+      className={`flex h-full flex-col ${conversationsPanelMotion}`}
+      onAnimationEnd={handleSidebarAnimationEnd}
       onWheelCapture={handleSidebarWheelCapture}
       onTouchStartCapture={handleSidebarTouchStartCapture}
       onTouchMoveCapture={handleSidebarTouchMoveCapture}
@@ -167,6 +418,21 @@ export function ConversationList({
               <Settings className="w-4 h-4" />
             </span>
           </div>
+        </button>
+        <button
+          type="button"
+          onClick={openFriendsPanel}
+          className="mt-3 flex w-full items-center gap-3 rounded-xl border border-white/5 bg-white/[0.03] px-3 py-2.5 text-left text-sm text-white/70 transition-all duration-300 hover:border-purple-500/30 hover:bg-[#1a1a26] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[#12121a]"
+        >
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-purple-500/15 text-purple-200">
+            <Users className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-medium">Friends</span>
+            <span className="block truncate text-xs text-white/40">
+              {acceptedFriends.length} accepted
+            </span>
+          </span>
         </button>
       </div>
 

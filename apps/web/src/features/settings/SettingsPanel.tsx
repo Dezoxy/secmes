@@ -5,7 +5,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Database,
-  HardDrive,
   Info,
   Lock,
   ShieldCheck,
@@ -42,7 +41,6 @@ import {
 import { AboutSettings } from './AboutSettings';
 import { AppearanceSettings, FONT_SIZE_LEVELS } from './AppearanceSettings';
 import { DataStorageSettings } from './DataStorageSettings';
-import { DeviceSettings } from './DeviceSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { PrivacySettings, type PrivacySettingsRecord } from './PrivacySettings';
 import { readStoredPrivacySettings, writeStoredPrivacySettings } from './privacy-settings';
@@ -71,7 +69,6 @@ type SectionId =
   | 'notifications'
   | 'appearance'
   | 'storage'
-  | 'devices'
   | 'about'
   | 'team'
   | 'admin';
@@ -83,7 +80,6 @@ const baseSections: Array<{ id: SectionId; label: string; icon: LucideIcon }> = 
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'appearance', label: 'Appearance', icon: Brush },
   { id: 'storage', label: 'Data & Storage', icon: Database },
-  { id: 'devices', label: 'Devices', icon: HardDrive },
   { id: 'about', label: 'About', icon: Info },
 ];
 
@@ -404,7 +400,6 @@ export function SettingsPanel({
             </div>
             <div className="min-w-0">
               <h3 className="text-xl font-semibold text-white">{activeSection.label}</h3>
-              <p className="text-sm text-white/60">Anonymous account settings</p>
             </div>
             <IconButton
               onClick={closeSettings}
@@ -444,8 +439,6 @@ export function SettingsPanel({
           )}
 
           {active === 'storage' && <DataStorageSettings />}
-
-          {active === 'devices' && <DeviceSettings deviceId={deviceId} />}
 
           {active === 'about' && <AboutSettings />}
 
