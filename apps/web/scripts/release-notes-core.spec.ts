@@ -5,6 +5,7 @@ import {
   buildReleaseNotes,
   normalizeTagVersion,
   parseCommitSubject,
+  tagRefGlobs,
 } from './release-notes-core.mjs';
 
 describe('parseCommitSubject', () => {
@@ -84,5 +85,21 @@ describe('normalizeTagVersion', () => {
     expect(normalizeTagVersion('aws-v0.4.0')).toBe('0.4.0');
     expect(normalizeTagVersion('v1.2.3')).toBe('1.2.3');
     expect(normalizeTagVersion('0.0.0')).toBe('0.0.0');
+  });
+});
+
+describe('tagRefGlobs', () => {
+  it('scopes an experiment build to the aws-v* namespace only', () => {
+    expect(tagRefGlobs('aws-v0.4.0')).toEqual(['refs/tags/aws-v*']);
+  });
+
+  it('scopes a prod build to the v* namespace only', () => {
+    expect(tagRefGlobs('v1.2.3')).toEqual(['refs/tags/v*']);
+  });
+
+  it('falls back to both namespaces when the trigger is unknown/empty (local/dev)', () => {
+    expect(tagRefGlobs('')).toEqual(['refs/tags/v*', 'refs/tags/aws-v*']);
+    expect(tagRefGlobs(undefined)).toEqual(['refs/tags/v*', 'refs/tags/aws-v*']);
+    expect(tagRefGlobs('nightly')).toEqual(['refs/tags/v*', 'refs/tags/aws-v*']);
   });
 });

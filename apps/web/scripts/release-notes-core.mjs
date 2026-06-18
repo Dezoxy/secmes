@@ -78,3 +78,18 @@ export function buildReleaseNotes(tags) {
 export function normalizeTagVersion(tag) {
   return (tag ?? '').trim().replace(/^aws-/, '').replace(/^v/, '');
 }
+
+/**
+ * The git `refs/tags/*` globs to scan for a given triggering tag. The changelog must stay within ONE release
+ * lineage: prod tags are `v*` (cd.yml), the experiment is `aws-v*` (cd-aws.yml). Their version lines are
+ * independent, so a prod build must not treat a reachable `aws-v*` tag as a previous release (and vice versa).
+ * Unknown/empty (local/dev, no CD trigger) → both namespaces. Order matters: `aws-v…` also starts with no `v`.
+ * @param {string} releaseTag e.g. "v0.4.0", "aws-v0.4.0", or "" when run outside CD
+ * @returns {string[]}
+ */
+export function tagRefGlobs(releaseTag) {
+  const tag = (releaseTag ?? '').trim();
+  if (tag.startsWith('aws-v')) return ['refs/tags/aws-v*'];
+  if (tag.startsWith('v')) return ['refs/tags/v*'];
+  return ['refs/tags/v*', 'refs/tags/aws-v*'];
+}

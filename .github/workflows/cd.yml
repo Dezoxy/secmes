@@ -67,6 +67,8 @@ jobs:
       # job because the Docker build context excludes .git; the emitted .ts then rides into the build context.
       - name: Generate About release notes
         if: matrix.name == 'ingress'
+        env:
+          RELEASE_TAG: ${{ env.IMAGE_TAG }} # scope the changelog to this tag's namespace (prod v*)
         run: node apps/web/scripts/gen-release-notes.mjs
 
       - name: Build and push ${{ matrix.name }}

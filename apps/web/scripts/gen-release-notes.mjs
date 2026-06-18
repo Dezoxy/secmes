@@ -20,6 +20,7 @@ import {
   buildReleaseNotes,
   normalizeTagVersion,
   buildReleaseEntry,
+  tagRefGlobs,
 } from './release-notes-core.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -29,6 +30,10 @@ const outFile = resolve(here, '../src/generated/release-notes.generated.ts');
 function git(args) {
   return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8' });
 }
+
+// The release lineage being built. CD sets RELEASE_TAG = github.ref_name (the triggering tag) so the changelog
+// stays within one namespace (prod v* vs experiment aws-v*); see tagRefGlobs. Unset (local/dev) → both.
+const RELEASE_TAG = (process.env.RELEASE_TAG ?? '').trim();
 
 /** Subjects (newest-first) in `range`, merges excluded. `range` is e.g. "v0.3.0..v0.4.0" or a single ref. */
 function subjectsIn(range) {
@@ -42,15 +47,14 @@ function releaseTagsNewestFirst() {
     out = git([
       'for-each-ref',
       // Only tags reachable from the checked-out commit (HEAD = the release tag in CD). Without this, a build
-      // would list EVERY v*/aws-v* tag in the repo — so re-running an older tag's workflow, or the aws-v*
-      // experiment namespace running ahead of prod, could bake releases/commits that aren't in this artifact
-      // while the Version row still shows the older triggering tag.
+      // would list EVERY tag in the namespace — so re-running an older tag's workflow could bake releases/commits
+      // that aren't in this artifact while the Version row still shows the older triggering tag.
       '--merged',
       'HEAD',
       '--sort=-creatordate',
       '--format=%(refname:short)\t%(creatordate:short)',
-      'refs/tags/v*',
-      'refs/tags/aws-v*',
+      // …and only the triggering tag's namespace (prod v* vs experiment aws-v*), so the two lineages don't mix.
+      ...tagRefGlobs(RELEASE_TAG),
     ]).trim();
   } catch {
     return []; // not a git repo / no tags reachable → fall back to the dev entry
