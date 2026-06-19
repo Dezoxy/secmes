@@ -82,9 +82,9 @@ the VM/static edge layer. It does not add a telemetry transport and does not cha
   - `Content-Security-Policy` with restrictive defaults — `script-src 'self'` (no inline scripts; ts-mls is
     pure JS so no `wasm-eval`), `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`, and
     `connect-src` scoped to same-origin (REST/WS) + the **exact** B2 presigned-URL bucket host
-    (`<bucket>.s3.<region>.backblazeb2.com`, virtual-host style — the live wildcard `*.s3…` and the bare
-    path-style `s3.<region>.backblazeb2.com` endpoint are both over-broad and are tightened to the single
-    bucket host by CSP-1 in `docs/reviews/05-client-pwa.md`) — no IdP origin, since passkey auth replaced
+    (`attachment-r8xq4m7z2p9n6k3v.s3.eu-central-003.backblazeb2.com`, virtual-host style — CSP-1 resolved
+    2026-06-19: the former wildcard `*.s3…` and the bare path-style `s3.<region>.backblazeb2.com` endpoint are
+    both removed, pinned to the single bucket host in `infra/stack/caddy/Caddyfile`) — no IdP origin, since passkey auth replaced
     Zitadel (#223); `img-src 'self' data: blob:` for generated avatars +
     decrypted attachment object URLs.
   - `Referrer-Policy: no-referrer` (tightened from `strict-origin-when-cross-origin`).
@@ -105,12 +105,14 @@ the VM/static edge layer. It does not add a telemetry transport and does not cha
   (eyeball the B2 presigned upload/download + the same-origin REST/WS calls specifically). The other #43 frontend-build
   items (SRI, service-worker pinning, published bundle hash) have since shipped — see `code-delivery-integrity.md`.
 - **CSP `connect-src` is scoped to the single-origin VM topology.** Same-origin REST/WS rely on `'self'`
-  (no IdP origin — Zitadel was decommissioned, #223). The B2 attachment egress is **currently a wildcard**
-  (`https://*.s3.eu-central-003.backblazeb2.com`, virtual-host style) — which over-permits into a shared-tenant
-  region namespace; pinning it to the exact bucket host is tracked as CSP-1 in
-  `docs/reviews/05-client-pwa.md`. A **split deployment** (`VITE_API_URL`/`VITE_WS_URL` on a different host)
-  would silently break live delivery until `connect-src` is extended with that explicit origin — a too-wide
-  `connect-src` would also weaken the protection.
+  (no IdP origin — Zitadel was decommissioned, #223). The B2 attachment egress is **pinned (CSP-1, resolved
+  2026-06-19) to the single virtual-host bucket** `https://attachment-r8xq4m7z2p9n6k3v.s3.eu-central-003.backblazeb2.com`;
+  the former wildcard `*.s3.eu-central-003.backblazeb2.com` and the bare path-style `s3.<region>.backblazeb2.com`
+  host are removed (both over-permitted into the shared-tenant region namespace — a CSP source is host-only and
+  cannot restrict the path). The pinned host must stay in sync with `ATTACHMENT_BUCKET` in `deploy.sh`
+  (`scripts/check-csp-connect-src.sh` fails CI on drift). A **split deployment** (`VITE_API_URL`/`VITE_WS_URL`
+  on a different host) would silently break live delivery until `connect-src` is extended with that explicit
+  origin — a too-wide `connect-src` would also weaken the protection.
 - **No telemetry sender exists yet.** When one is added, it needs a separate PR and threat-model update that
   covers retention, EU data residency, opt-in/default behavior, and failure handling.
 - **Bundle visibility is not a budget.** It reports size but does not fail CI. A hard budget can be added

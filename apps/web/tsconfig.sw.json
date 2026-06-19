@@ -4,5 +4,5 @@
     "lib": ["ES2022", "WebWorker"],
     "types": ["vite/client", "vite-plugin-pwa/client"]
   },
-  "include": ["src/sw.ts", "src/lib/pwa-cache-policy.ts"]
+  "include": ["src/sw.ts", "src/lib/pwa-cache-policy.ts", "src/lib/sw-integrity.ts"]
 }

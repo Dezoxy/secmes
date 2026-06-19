@@ -170,7 +170,9 @@ export default defineConfig({
     // index.html. It does NOT cover dynamically-`import()`ed chunks (the React.lazy routes + ts-mls's internal
     // crypto chunks) — native dynamic import can't carry an integrity attribute (a browser-platform gap; the
     // spec's fix is import-map integrity, not yet broadly supported + collides with our inline-script CSP). That
-    // gap is an ACCEPTED residual (Codex #152 P1) — see docs/threat-models/code-delivery-integrity.md §6.
+    // gap is now CLOSED at the SW layer (CDI-1): the inline-sw-integrity post-build step bakes the sha384 map
+    // into dist/sw.js and the SW fetch handler verifies those chunks. See sw.ts + scripts/inline-sw-integrity.mjs
+    // and docs/threat-models/code-delivery-integrity.md §6.
     sri(),
     // Published bundle hash (#43): emits dist/bundle-manifest.json. Hashes assets read back from disk in
     // writeBundle, so it is order-independent of sri / vite-plugin-pwa.

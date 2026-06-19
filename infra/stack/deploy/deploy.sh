@@ -584,6 +584,9 @@ fi
 #         (unset ⇒ feature not provisioned yet ⇒ skip with a log, mirroring the SKIP_* knobs — NOT a silent
 #         apply failure). See docs/threat-models/b2-cors-convergence.md. ---
 B2_CORS_KEY_ID="${B2_CORS_KEY_ID:-}"
+# This bucket name is also pinned in the Caddyfile CSP connect-src (CSP-1): the browser may only
+# reach attachment-r8xq4m7z2p9n6k3v.s3.eu-central-003.backblazeb2.com. If this bucket changes, update
+# infra/stack/caddy/Caddyfile too — scripts/check-csp-connect-src.sh fails CI if the two drift.
 ATTACHMENT_BUCKET="attachment-r8xq4m7z2p9n6k3v"
 B2_AUTH_URL="https://api.backblazeb2.com/b2api/v3/b2_authorize_account"
 # B2 canonicalizes CORS header NAMES to lowercase on storage (e.g. "ETag" -> "etag"). Lowercase the header

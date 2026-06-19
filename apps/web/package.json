@@ -6,10 +6,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node scripts/inline-sw-integrity.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "gen:notes": "node scripts/gen-release-notes.mjs",
+    "check:sw-integrity": "node scripts/check-sw-integrity.mjs",
     "test": "vitest run",
     "pretest:e2e": "playwright install --with-deps chromium",
     "test:e2e": "playwright test"
