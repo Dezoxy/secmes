@@ -35,6 +35,13 @@ Environment=PGDATABASE=argus
 Environment=S3_ENDPOINT=https://s3.eu-central-003.backblazeb2.com
 Environment=S3_REGION=eu-central-003
 Environment=S3_BUCKET=attachment-r8xq4m7z2p9n6k3v
+# This worker DELETEs from the attachment bucket, so it needs a credential with deleteFiles there. It uses the
+# broad `argus-b2-app-key` (key-id = B2_APP_KEY_ID, same as the backup worker) — which spans BOTH buckets with
+# delete on both (the BKP-2 over-broad key). It deliberately does NOT use the api's attachment key
+# (`argus-s3-secret-access-key`/S3_ACCESS_KEY_ID): that one mints presigned PUT/GET URLs and need not carry
+# deleteFiles, so pairing it here would risk a silent 403 on delete. When BKP-2 splits the keys into
+# least-privilege bucket-scoped keys, give this worker a credential scoped to the attachment bucket WITH
+# delete, and re-point both the key-id and the LoadCredential source below.
 Environment=S3_ACCESS_KEY_ID=REPLACE_WITH_B2_KEY_ID
 
 # --- Secret: the B2 application key, delivered as a credential FILE, never in env/Helm at rest (invariant

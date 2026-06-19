@@ -403,6 +403,9 @@ install -m 0644 "$REPO_ROOT/infra/backup/argus-db-backup.timer" /etc/systemd/sys
 install -m 0644 "$REPO_ROOT/infra/cleanup/argus-attachment-cleanup.service" /etc/systemd/system/argus-attachment-cleanup.service
 install -m 0644 "$REPO_ROOT/infra/cleanup/argus-attachment-cleanup.timer" /etc/systemd/system/argus-attachment-cleanup.timer
 install -m 0644 "$REPO_ROOT/infra/notify/argus-notify-failure@.service" /etc/systemd/system/argus-notify-failure@.service
+# Both workers use the broad `argus-b2-app-key` (key-id B2_APP_KEY_ID): backup writes the db-backups bucket;
+# cleanup deletes from the attachment bucket via the same over-broad key (which has delete on both — BKP-2).
+# See the cleanup unit's comment for why it does NOT use the api's attachment key. BKP-2 will split these.
 sed -i "s|REPLACE_WITH_B2_KEY_ID|${B2_APP_KEY_ID}|" \
   /etc/systemd/system/argus-db-backup.service /etc/systemd/system/argus-attachment-cleanup.service
 sed -i "s|REPLACE_WITH_AGE_PUBLIC_KEY|${BACKUP_AGE_RECIPIENT}|" /etc/systemd/system/argus-db-backup.service
