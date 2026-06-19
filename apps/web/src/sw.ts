@@ -5,11 +5,7 @@ import {
 } from 'workbox-precaching';
 import { NavigationRoute, registerRoute } from 'workbox-routing';
 import { pwaNavigateFallback, pwaNavigateFallbackDenylist } from './lib/pwa-cache-policy';
-import {
-  buildVerifiedResponse,
-  checkAssetIntegrity,
-  integrityManifestKey,
-} from './lib/sw-integrity';
+import { buildVerifiedResponse, checkAssetIntegrity, expectedHashFor } from './lib/sw-integrity';
 
 declare let self: ServiceWorkerGlobalScope & typeof globalThis;
 
@@ -25,41 +21,39 @@ const INTEGRITY_MANIFEST: Record<string, string> = JSON.parse(
   '__SW_INTEGRITY_MANIFEST_JSON__',
 ) as Record<string, string>;
 
+// SRI enforcement for same-origin built assets the browser loads via native dynamic import() (the ts-mls
+// crypto chunks), which cannot carry an SRI integrity= attribute. Registered through Workbox's router and
+// BEFORE precacheAndRoute, so for a guarded /assets/* path this route wins over the precache route (Workbox
+// evaluates routes in registration order, first match handles it) — otherwise the precache would serve the
+// crypto chunks from Cache Storage WITHOUT the integrity check, defeating CDI-1. Only matches paths in the
+// inlined manifest; unknown paths (api/ws/attachments/future-build chunks) don't match → fall through to the
+// precache/network untouched, so a mid-deploy version skew never bricks the app. It re-hashes the bytes
+// actually received (network OR HTTP cache, so a cache-poisoned immutable asset is still caught) and fails
+// closed on a mismatch. It writes nothing to Cache Storage — the SW caches only the precache shell.
+registerRoute(
+  ({ request, url }) =>
+    request.method === 'GET' &&
+    url.origin === self.location.origin &&
+    expectedHashFor(url.pathname, INTEGRITY_MANIFEST) !== undefined,
+  async ({ request, url }) => {
+    const expected = expectedHashFor(url.pathname, INTEGRITY_MANIFEST);
+    const response = await fetch(request);
+    const buffer = await response.clone().arrayBuffer();
+    const decision = await checkAssetIntegrity(expected, buffer);
+    if (!decision.ok) {
+      // Fail closed: the dynamic import() rejects and the crypto operation errors out rather than
+      // executing a tampered chunk. 502 (not a forged 200) so the failure is unambiguous.
+      return new Response(null, { status: 502, statusText: 'Asset integrity check failed' });
+    }
+    // Re-emit the verified bytes (the original body stream was consumed by clone().arrayBuffer()).
+    // buildVerifiedResponse drops the now-stale Content-Encoding/Content-Length (fetch already decoded the
+    // body) so the browser doesn't double-decode the chunk. See sw-integrity.ts.
+    return buildVerifiedResponse(buffer, response);
+  },
+);
+
 cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
-
-// SRI enforcement for same-origin built assets the browser loads via native dynamic import() (the ts-mls
-// crypto chunks), which cannot carry an SRI integrity= attribute. For any GET whose path is a manifest key,
-// re-hash the bytes actually received (network OR HTTP cache — so a cache-poisoned immutable asset is still
-// caught) and refuse to serve a mismatch. Unknown paths (api/ws/attachments/future-build chunks) are NOT
-// intercepted — we `return` so the browser handles them normally. We never write to Cache Storage here:
-// the SW caches nothing but the precache shell.
-self.addEventListener('fetch', (event: FetchEvent) => {
-  const { request } = event;
-  if (request.method !== 'GET') return;
-  const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return;
-  const key = integrityManifestKey(url.pathname);
-  const expected = key ? INTEGRITY_MANIFEST[key] : undefined;
-  if (!expected) return; // unknown path → untouched (mandatory: mid-deploy skew must not brick)
-
-  event.respondWith(
-    (async () => {
-      const response = await fetch(request);
-      const buffer = await response.clone().arrayBuffer();
-      const decision = await checkAssetIntegrity(expected, buffer);
-      if (!decision.ok) {
-        // Fail closed: the dynamic import() rejects and the crypto operation errors out rather than
-        // executing a tampered chunk. 502 (not a forged 200) so the failure is unambiguous.
-        return new Response(null, { status: 502, statusText: 'Asset integrity check failed' });
-      }
-      // Re-emit the verified bytes (the original body stream was consumed by clone().arrayBuffer()).
-      // buildVerifiedResponse drops the now-stale Content-Encoding/Content-Length (fetch already decoded the
-      // body) so the browser doesn't double-decode the chunk. See sw-integrity.ts.
-      return buildVerifiedResponse(buffer, response);
-    })(),
-  );
-});
 
 // SPA navigation fallback — serves index.html for all navigation requests not in the denylist.
 registerRoute(

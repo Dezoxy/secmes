@@ -20,6 +20,19 @@ export function integrityManifestKey(pathname: string): string | null {
   return key.length > 0 ? key : null;
 }
 
+/**
+ * The expected sha384 (base64) for a request path, or undefined when the path is not a guarded asset.
+ * `manifest` is the build-inlined { "assets/<file>": "<sha384>" } map. Used by both the SW route's match
+ * predicate and its handler, so "is this guarded?" and "what hash do I check?" can't diverge.
+ */
+export function expectedHashFor(
+  pathname: string,
+  manifest: Record<string, string>,
+): string | undefined {
+  const key = integrityManifestKey(pathname);
+  return key ? manifest[key] : undefined;
+}
+
 /** Base64 of the SHA-384 over `bytes` — the exact encoding bundle-manifest.json and the SRI attrs use. */
 export async function sha384Base64(bytes: ArrayBuffer): Promise<string> {
   // This is a CHECKSUM over PUBLIC static build artifacts (the same sha384 the SRI integrity= attrs and

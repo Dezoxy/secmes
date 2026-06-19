@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildVerifiedResponse,
   checkAssetIntegrity,
+  expectedHashFor,
   integrityManifestKey,
   sha384Base64,
 } from './sw-integrity';
@@ -32,6 +33,18 @@ describe('sw-integrity', () => {
     });
     it('returns null for the root path', () => {
       expect(integrityManifestKey('/')).toBeNull();
+    });
+  });
+
+  describe('expectedHashFor', () => {
+    const manifest = { 'assets/nist-D6IHJPI4.js': HASH_CHUNK };
+    it('returns the hash for a guarded asset path', () => {
+      expect(expectedHashFor('/assets/nist-D6IHJPI4.js', manifest)).toBe(HASH_CHUNK);
+    });
+    it('returns undefined for an unguarded path (so the SW route does not match it)', () => {
+      expect(expectedHashFor('/assets/future-chunk.js', manifest)).toBeUndefined();
+      expect(expectedHashFor('/api/me', manifest)).toBeUndefined();
+      expect(expectedHashFor('/', manifest)).toBeUndefined();
     });
   });
 
