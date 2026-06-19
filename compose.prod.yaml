@@ -14,13 +14,13 @@ name: argus-prod
 #     only on the internal Docker network. The only way in is the authenticated Cloudflare tunnel.
 #   - non-root + no-new-privileges + cap_drop:[ALL] where the image allows; resource limits on every service.
 #
-# SECRETS (invariant #5): no secret VALUES live in this file. Data-plane secrets are mounted credential
-# FILES (Docker secrets at /run/secrets/*): the Postgres password (POSTGRES_PASSWORD_FILE), the api's
-# password-bearing connection URL (DATABASE_URL_FILE), and the B2 secret key (S3_SECRET_ACCESS_KEY_FILE).
-# The cloudflared TUNNEL_TOKEN is the one credential delivered as a runtime-fetched value (the image has no
-# shell / no --token-file), injected from the deploy environment — never a committed env file. Slice 3
-# populates all of these from Key Vault via the VM's Managed Identity (systemd); see docs/roadmap.md Phase 0
-# #8, docs/deploy.md, and .env.prod.example.
+# SECRETS (invariant #5): no secret VALUES live in this file. EVERY data-plane secret is a mounted credential
+# FILE (Docker secrets at /run/secrets/*): the Postgres password (POSTGRES_PASSWORD_FILE), the api's
+# password-bearing connection URL (DATABASE_URL_FILE), the B2 secret key (S3_SECRET_ACCESS_KEY_FILE), and the
+# cloudflared tunnel token (TUNNEL_TOKEN_FILE → /run/secrets/tunnel_token; cloudflared >=2025.4.0 reads
+# --token-file / TUNNEL_TOKEN_FILE). No secret is delivered via a container env var, so none surfaces in
+# `docker inspect`. Slice 3 populates all of these from Key Vault via the VM's Managed Identity (systemd); see
+# docs/roadmap.md Phase 0 #8, docs/deploy.md, and .env.prod.example.
 # AUTH: login is passkey-only — the API mints/verifies its own EdDSA session tokens (no external IdP).
 # Zitadel/OIDC was decommissioned in Phase 6 (docs/threat-models/phase-6-decommission.md).
 
@@ -229,13 +229,14 @@ services:
     image: cloudflare/cloudflared:2025.6.1
     restart: unless-stopped
     command: ['tunnel', '--no-autoupdate', 'run']
-    # TUNNEL_TOKEN is the one secret that can't be a mounted file: the cloudflared image has no shell and no
-    # `--token-file` flag (only `--token` / `$TUNNEL_TOKEN`). Invariant #5 permits a "runtime-fetched value"
-    # as well as a file, so it's injected from the deploy environment — NOT from a committed/on-disk env file.
-    # The stack launcher sets it from the Slice-3 credential file:
-    #   export TUNNEL_TOKEN="$(cat /run/argus/secrets/tunnel_token)"   # delivered by argus-secrets.service
+    # Token is delivered as a mounted credential FILE, never env — so it never lands in the daemon's at-rest
+    # container config (`docker inspect`). cloudflared >=2025.4.0 reads TUNNEL_TOKEN_FILE / --token-file; we
+    # pin 2025.6.1 (above). The file at /run/secrets/tunnel_token is the Slice-3 Key Vault credential
+    # (argus-secrets.service / fetch-keyvault-secrets.sh → ARGUS_SECRETS_DIR/tunnel_token, root-owned 0444).
     environment:
-      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+      TUNNEL_TOKEN_FILE: /run/secrets/tunnel_token
+    secrets:
+      - tunnel_token
     depends_on:
       caddy:
         condition: service_started
@@ -535,8 +536,8 @@ secrets:
   # NOTE: the on-disk files are root-owned mode 0444 (NOT 0400). File-based Compose secrets are bind-mounted
   # into the container with the host owner/mode UNCHANGED on Linux — there is NO uid/gid remapping (that only
   # happens on macOS Docker Desktop's file-sharing layer, which is why a Mac test of 0400 misleadingly passes).
-  # Our services run NON-root (api/node uid 1000, postgres uid 999, grafana uid 472, redis uid 999), so a
-  # root-owned 0400 file would be unreadable and the stack would fail to start on the real VM. 0444 lets the
+  # Our services run NON-root (api/node uid 1000, postgres uid 999, grafana uid 472, redis uid 999, cloudflared
+  # non-root), so a root-owned 0400 file would be unreadable and the stack would fail to start on the real VM. 0444 lets the
   # container user read it; confinement is the 0700 root tmpfs SECRETS_DIR (host non-root users can't traverse
   # it; the root daemon mounts the file in), NOT the file mode. Set by fetch-keyvault-secrets.sh / deploy.sh.
   postgres_password:
@@ -592,6 +593,12 @@ secrets:
     # in Key Vault as argus-admin-bootstrap-hash. Empty = /auth/breakglass/login returns 503; everything
     # else is unaffected. See docs/threat-models/breakglass-admin.md.
     file: ${ARGUS_SECRETS_DIR:-./secrets}/admin_bootstrap_hash
+  tunnel_token:
+    # Cloudflare tunnel token — cloudflared reads it via TUNNEL_TOKEN_FILE (>=2025.4.0), NOT a TUNNEL_TOKEN
+    # env var, so it never enters container config / `docker inspect`. MANDATORY: in fetch-keyvault-secrets.sh's
+    # required set (argus-tunnel-token), so a missing token fails the fetch closed (the tunnel — the only
+    # ingress — won't start). Provision it in Key Vault before the first deploy.
+    file: ${ARGUS_SECRETS_DIR:-./secrets}/tunnel_token
 
 volumes:
   pgdata:

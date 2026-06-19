@@ -29,7 +29,7 @@ consumers `Requires=` this unit, so they don't start on a missing secret).
 | `argus-database-url`            | `database_url`                     | `api` (`DATABASE_URL_FILE`) — **`argus_app` DSN**   |
 | `argus-s3-secret-access-key`    | `s3_secret_access_key`             | `api` (`S3_SECRET_ACCESS_KEY_FILE`) — B2 attachments|
 | `argus-redis-password`          | `redis_password`                   | `redis` (`requirepass` via the deploy-generated `redis.conf`; healthcheck reads this file) + `api` (`REDIS_URL_FILE`, deploy-generated `redis_url`) — never in env; must be URL-safe (e.g. `openssl rand -hex 32`) |
-| `argus-tunnel-token`            | `tunnel_token`                     | `cloudflared` (`TUNNEL_TOKEN`, runtime value)       |
+| `argus-tunnel-token`            | `tunnel_token`                     | `cloudflared` (`TUNNEL_TOKEN_FILE` — file-secret mount, not env) |
 | `argus-session-signing-key`     | `session_signing_key`              | `api` (`SESSION_SIGNING_KEY_FILE`) — Ed25519 PEM signing passkey session JWTs (**mandatory**) |
 | `argus-grafana-admin-password`  | `grafana_admin_password`           | `grafana` (`GF_SECURITY_ADMIN_PASSWORD__FILE`) — observability dashboards admin login |
 | `argus-backup-db-password`      | `backup-db-password`               | `argus-db-backup` (`LoadCredential`) — `argus_backup` role |
@@ -102,11 +102,11 @@ Requires=argus-secrets.service
 After=argus-secrets.service
 ```
 
-and the Compose stack runs with the secrets dir + tunnel token pointed at the delivered files:
+and the Compose stack runs with the secrets dir pointed at the delivered files (the tunnel token is one of
+those files — cloudflared reads it via `TUNNEL_TOKEN_FILE`, so no token is exported into the process env):
 
 ```bash
 export ARGUS_SECRETS_DIR=/run/argus/secrets
-export TUNNEL_TOKEN="$(cat /run/argus/secrets/tunnel_token)"
 docker compose -f /opt/argus/compose.prod.yaml up -d
 ```
 

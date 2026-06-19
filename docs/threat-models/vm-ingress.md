@@ -57,9 +57,9 @@ the API are crypto-blind (server stores/forwards ciphertext only; invariant #1).
   `S3_SECRET_ACCESS_KEY_FILE`, `REDIS_URL_FILE`) — never the value in env (a password in container env would
   surface via `docker inspect` / the daemon's at-rest config). The redis `requirepass` rides a deploy-generated
   `redis.conf` (also a file), and the redis healthcheck reads its password from the mounted `redis_password`
-  file too — no Redis credential touches env. The cloudflared `TUNNEL_TOKEN` is a
-  **runtime-fetched value** (the image has no shell/`--token-file`), injected from the deploy environment, not
-  an on-disk env file. All are populated out-of-band (Slice 3: Key Vault via Managed Identity).
+  file too — no Redis credential touches env. The cloudflared tunnel token is a
+  **mounted credential file** read via `TUNNEL_TOKEN_FILE` (cloudflared >=2025.4.0) — never an env var, so it
+  never surfaces in `docker inspect`. All are populated out-of-band (Slice 3: Key Vault via Managed Identity).
   `.env.prod.example` carries placeholders only. Non-secret config (B2 access-key-**id**, region, bucket,
   issuer URL, public origin) may ride env per invariant #5. Logs carry IDs/metadata only (invariant #2); the
   tunnel token is never logged.
