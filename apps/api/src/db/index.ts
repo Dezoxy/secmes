@@ -64,11 +64,9 @@ export function asTenantId(value: string): TenantId {
  * pg_has_role self-member), dev connects as the superuser and this drops it to the non-bypass
  * role. Both the var and the role reset at COMMIT/ROLLBACK, so nothing leaks across the pool.
  *
- * `tenantId` MUST come from the verified session (the request-scoped tenant guard), never from
- * raw client input — see docs/threat-models/rls-tenant-isolation.md. The ONE sanctioned exception is the
- * Stripe webhook (`@Public`): there tenantId derives from the signature-authenticated, argus-written
- * `metadata.tenantId`, and that path UUID-validates it + cross-checks it against the Stripe Customer before
- * calling withTenant (see billing.service.ts + docs/threat-models/billing-plan-gating.md §3).
+ * `tenantId` MUST come from the verified session (the request-scoped tenant guard) or a fixed
+ * server constant (`DEFAULT_TENANT_ID` for breakglass/passkey bootstrap), never from raw client
+ * input — see docs/threat-models/rls-tenant-isolation.md. There are NO client-derived exceptions.
  */
 export async function withTenant<T>(tenantId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
   const tid = asTenantId(tenantId); // fail fast before opening a transaction
