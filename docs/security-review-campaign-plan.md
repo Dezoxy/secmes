@@ -72,11 +72,19 @@ Each slice is one PR and follows the same loop:
 
 ### Slice 1 — Crypto core & key lifecycle  *(reviewer: `crypto-reviewer`)*
 The heart of "private." Scope: `packages/crypto` (`seal`, `device-proof`, `device-codec`), the message
-**envelope** in `@argus/contracts`, `key-directory` (publish/claim/revoke of key packages), **key backup &
-recovery** (Argon2id + unique salt), device/session key handling, and `mls-integration` status.
-Proves invariants **1, 4**. Adversarial questions: can any plaintext or key material reach a log or the wire in
-clear? is there any `Math.random` in a security path (CSPRNG-only)? does key backup use a unique salt every
-time? can a claimed key package be substituted (key-substitution / MITM)? Cross-check against
+**envelope** in `@argus/contracts`, `key-directory` (publish/claim/revoke of key packages), the **live
+at-rest key-sealing flow** — the WebAuthn-PRF keystore (`apps/web/src/lib/keystore.ts`, `lib/prf.ts`,
+`packages/crypto importUnlockKey`): device key material is sealed in IndexedDB as AES-256-GCM under a per-passkey
+PRF-derived unlock key, **no passphrase, no Argon2, and deliberately no recovery** (a lost passkey = fresh
+start; the old passphrase-sealed `key_backups` table was dropped in migration `0040_drop_key_backups.sql`) —
+device/session key handling, and `mls-integration` status. Proves invariants **1, 4**. Adversarial questions:
+can any plaintext or key material reach a log or the wire in clear? is there any `Math.random` in a security
+path (CSPRNG-only)? is the PRF unlock key truly non-extractable, and is there genuinely **no server-side
+recoverable secret** (verify 0040 left nothing equivalent behind)? does the same unlock key correctly seal every
+store (device, KeyPackage pool, per-conversation group state)? can a claimed key package be substituted
+(key-substitution / MITM)? **Note for the executor:** AGENTS.md's crypto review criteria still says "key backup
+uses Argon2id + unique salt" — that describes the *retired* flow; flag this doc drift for a follow-up (and pick
+it up in Slice 7). Cross-check against
 `docs/threat-models/{key-model,key-directory,device-keystore,prf-keystore-unlock,csprng-audit,mls-integration}.md`.
 
 ### Slice 2 — Server boundary: crypto-blindness, RLS, authz, logging  *(reviewer: `security-boundary-auditor`)*
