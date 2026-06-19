@@ -26,6 +26,19 @@ rules:
     patterns:
       - pattern-regex: \b(crypto\.subtle|createCipheriv|createDecipheriv|createHmac|pbkdf2Sync?|scryptSync?|tweetnacl|libsodium)\b
 
+  - id: argus-no-vetted-crypto-libs-outside-boundary
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >
+      Direct cryptographic library imports (@noble/*, @hpke/*) belong only in packages/crypto (the MLS
+      wrapper) or apps/api/src/auth (the pre-cleared Argon2id/Ed25519 server-auth exceptions; see
+      docs/threat-models/breakglass-admin.md). Building protocol crypto from raw primitives elsewhere is
+      forbidden — route it through packages/crypto.
+    paths:
+      exclude: ['packages/crypto/**', 'apps/api/src/auth/**', '**/*.spec.ts', '**/*.test.ts']
+    patterns:
+      - pattern-regex: from\s+['"]@(noble|hpke)/
+
   - id: argus-no-secret-logging
     languages: [typescript, javascript]
     severity: ERROR
