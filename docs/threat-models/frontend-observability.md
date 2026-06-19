@@ -41,8 +41,9 @@ the VM/static edge layer. It does not add a telemetry transport and does not cha
 - **Tampering / injection — XSS expands into token/content exfiltration.** If an injected script runs, it can
   read browser state and decrypted runtime content. → Target static hosting must send a restrictive CSP:
   `default-src 'self'`, `script-src 'self'`, `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`,
-  and narrowly scoped `connect-src` entries for the API/WebSocket origin, Zitadel, and required attachment
-  origins. CSP is defense-in-depth; React escaping and no plaintext server path remain required.
+  and narrowly scoped `connect-src` entries for the same-origin API/WebSocket plus the single B2 attachment
+  bucket host. (Auth is passkey-only — Zitadel/OIDC was decommissioned, #223 — so there is no IdP origin in
+  `connect-src`.) CSP is defense-in-depth; React escaping and no plaintext server path remain required.
 - **Information disclosure — referrers leak callback or attachment URLs.** Auth callback parameters and
   presigned URLs can contain sensitive material. → Target header: `Referrer-Policy: no-referrer`.
 - **Clickjacking / embedding.** An attacker could frame the app and trick users into sensitive actions. →
@@ -79,13 +80,14 @@ the VM/static edge layer. It does not add a telemetry transport and does not cha
   clean, smoke-test the CSP against the live app at arming:
   - `Content-Security-Policy` with restrictive defaults — `script-src 'self'` (no inline scripts; ts-mls is
     pure JS so no `wasm-eval`), `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`, and
-    `connect-src` scoped to same-origin (REST/WS) + the Zitadel issuer + the B2 presigned-URL bucket subdomain
-    (`*.s3.<region>.backblazeb2.com`, virtual-host style); `img-src 'self' data: blob:` for generated avatars +
+    `connect-src` scoped to same-origin (REST/WS) + the B2 presigned-URL bucket subdomain
+    (`*.s3.<region>.backblazeb2.com`, virtual-host style) — no IdP origin, since passkey auth replaced Zitadel
+    (#223); `img-src 'self' data: blob:` for generated avatars +
     decrypted attachment object URLs.
   - `Referrer-Policy: no-referrer` (tightened from `strict-origin-when-cross-origin`).
   - `Permissions-Policy` denying unused sensor/hardware capabilities.
   - `X-Content-Type-Options: nosniff` + `X-Frame-Options: DENY` (defense-in-depth alongside `frame-ancestors`).
-  - Optional COOP/COEP later only after checking Zitadel, service-worker, and attachment-origin behavior.
+  - Optional COOP/COEP later only after checking service-worker and attachment-origin behavior.
   - **#43 (frontend build) DONE:** SRI on the built bundles (`vite-plugin-sri3`), service-worker pinning (Caddy
     `no-cache`/`immutable` cache policy), and a published bundle hash (`bundle-manifest.json`) — see
     `code-delivery-integrity.md`.
@@ -97,10 +99,11 @@ the VM/static edge layer. It does not add a telemetry transport and does not cha
 - **Headers are wired (#43) but the CSP isn't runtime-verified yet.** They are served by Caddy
   (`infra/stack/caddy/Caddyfile`, `caddy validate` clean), but nothing has loaded the app *through* Caddy with the
   CSP enforced — smoke-test against the live app at arming and watch the browser console for violations
-  (eyeball the B2 presigned upload/download + the silent-renew XHR specifically). The other #43 frontend-build
+  (eyeball the B2 presigned upload/download + the same-origin REST/WS calls specifically). The other #43 frontend-build
   items (SRI, service-worker pinning, published bundle hash) have since shipped — see `code-delivery-integrity.md`.
-- **CSP `connect-src` is pinned to the single-origin VM topology.** Zitadel + B2 are pinned; same-origin
-  REST/WS rely on `'self'`. A **split deployment** (`VITE_API_URL`/`VITE_WS_URL` on a different host) would
+- **CSP `connect-src` is pinned to the single-origin VM topology.** Only the B2 bucket host is pinned;
+  same-origin REST/WS rely on `'self'` (no IdP origin — Zitadel was decommissioned, #223). A **split
+  deployment** (`VITE_API_URL`/`VITE_WS_URL` on a different host) would
   silently break live delivery until `connect-src` is extended with that explicit origin — a too-wide
   `connect-src` would also weaken the protection.
 - **No telemetry sender exists yet.** When one is added, it needs a separate PR and threat-model update that

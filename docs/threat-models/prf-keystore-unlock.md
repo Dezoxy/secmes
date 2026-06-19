@@ -25,7 +25,7 @@ new device), and the no-restore rule.
   sets `extensions.prf.eval.first` to a `Uint8Array` right before the ceremony; the server's `prf: {}` is only
   the enable signal.
 - **Sealing.** The 32-byte PRF output (a native `ArrayBuffer`) is imported via `importUnlockKey`
-  (`packages/crypto/src/key-backup.ts`) as a **non-extractable** AES-256-GCM key with `encrypt`/`decrypt`
+  (`packages/crypto/src/seal.ts:50-53`) as a **non-extractable** AES-256-GCM key with `encrypt`/`decrypt`
   usage. That one key seals the device, the one-time KeyPackage pool, and every per-conversation group
   state / message log / pending commit, via the existing `sealWithKey`/`openWithKey` (random 96-bit IV per
   seal; domain-separated AAD per store: `device`, `key-package-pool`, `group-state:<id>`,
@@ -77,7 +77,9 @@ admin has no keystore and no content path.
 
 ## Residual / follow-ups
 
-- The dead recovery-file + `key_backups` **server** surface (the `key-backup` module, the GDPR export field,
-  the inert table) is removed in the follow-up PR-2; PR-1 removed the client surface.
+- The dead recovery-file + `key_backups` **server** surface has been removed: PR-1 removed the client surface,
+  and the `packages/crypto/src/key-backup.ts` module, the GDPR export field, and the table were dropped in
+  PR #233 (migration `0040_drop_key_backups.sql`). `importUnlockKey` and the seal/open helpers now live in
+  `packages/crypto/src/seal.ts`.
 - Multi-device (B2) under PRF: each device derives its own keystore key from its own passkey PRF; unchanged by
   this model (no cross-device key sharing — a new device starts fresh).

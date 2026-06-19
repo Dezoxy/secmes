@@ -12,7 +12,8 @@ Every randomness source in `apps/` + `packages/` (excluding `node_modules`, buil
 
 | Where | Use | Source | CSPRNG? |
 |---|---|---|---|
-| `packages/crypto/src/key-backup.ts:109–110` | backup **salt** (16 B) + **IV** (12 B) | `crypto.getRandomValues` (WebCrypto) | ✅ |
+| `packages/crypto/src/seal.ts:64` | seal **IV** (12 B) | `crypto.getRandomValues` (WebCrypto) | ✅ |
+| `packages/crypto/src/seal.ts:121–122` | attachment **key** (32 B) + **IV** (12 B) | `crypto.getRandomValues` (WebCrypto) | ✅ |
 | `packages/crypto` (via `ts-mls`) | MLS signature/HPKE key generation, KeyPackages | `@noble/*` → WebCrypto | ✅ |
 | `apps/web/src/lib/auth.ts:20` | PKCE code **verifier** (32 B) | `crypto.getRandomValues` | ✅ |
 | `apps/web/src/lib/auth.ts:37` | OAuth **state** | `crypto.randomUUID()` (WebCrypto) | ✅ |
