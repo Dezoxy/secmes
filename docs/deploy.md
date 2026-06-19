@@ -168,8 +168,9 @@ value in env). Compose's secret sources point at `${ARGUS_SECRETS_DIR}` (`/run/a
 - `secrets/zitadel_db_password` → `zitadel-db` reads it via `POSTGRES_PASSWORD_FILE`; `zitadel` reads the
   **same value** as the runtime `${ZITADEL_DB_PASSWORD}` (Zitadel has no `_FILE` env form for it).
 
-The runtime-value secrets (the same exception as above) — `TUNNEL_TOKEN` (cloudflared has no shell /
-`--token-file`), and Zitadel's `ZITADEL_DB_PASSWORD` + the first-init-only `ZITADEL_ADMIN_PASSWORD` — are
+The cloudflared tunnel token is also a mounted credential **file** (`tunnel_token`); cloudflared reads it via
+`TUNNEL_TOKEN_FILE` (>=2025.4.0), so no token enters the `compose up` env or container config. The remaining
+runtime-value secrets — Zitadel's `ZITADEL_DB_PASSWORD` + the first-init-only `ZITADEL_ADMIN_PASSWORD` — are
 injected from the delivered Key Vault files by `deploy.sh` on `up` (`environment:` interpolation), never an
 on-disk env file. Invariant #5 permits a runtime-fetched value alongside a mounted file.
 

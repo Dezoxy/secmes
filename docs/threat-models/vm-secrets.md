@@ -18,7 +18,7 @@ boot ─▶ argus-secrets.service (oneshot, root)
    stack (compose) + backup/cleanup units  (Requires=/After= argus-secrets.service)
      - postgres   ← POSTGRES_PASSWORD_FILE        (Docker secret file)
      - api        ← DATABASE_URL_FILE, S3_SECRET_ACCESS_KEY_FILE
-     - cloudflared← TUNNEL_TOKEN  (stack launcher reads the file → env, runtime value)
+     - cloudflared← TUNNEL_TOKEN_FILE  (Docker secret file mount — never env)
      - backup     ← LoadCredential: backup-db-password (argus_backup) + b2-app-key
      - cleanup    ← LoadCredential: cleanup-db-password (argus_cleanup) + b2-app-key
 ```

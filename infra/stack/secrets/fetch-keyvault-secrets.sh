@@ -41,8 +41,8 @@ VAULT_URL="https://${ARGUS_KEY_VAULT}.vault.azure.net"
 
 # Key Vault secret name -> local credential filename (in $SECRETS_DIR). KV names are kebab-case (Key Vault
 # disallows underscores); local filenames match what each consumer expects:
-#   compose Docker secrets: postgres_password, database_url, s3_secret_access_key, redis_password
-#   cloudflared runtime value (stack launcher reads it): tunnel_token
+#   compose Docker secrets: postgres_password, database_url, s3_secret_access_key, redis_password, tunnel_token
+#     (cloudflared reads tunnel_token via TUNNEL_TOKEN_FILE — a file-secret mount, not an env var)
 #   backup/cleanup LoadCredential source: b2-app-key
 SECRETS=(
   "argus-postgres-owner-password=postgres_password"

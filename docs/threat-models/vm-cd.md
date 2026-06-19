@@ -51,7 +51,8 @@ every secret is fetched **on the VM** via the Managed Identity. No message conte
   and dropped: the GHCR token goes to `docker login --password-stdin` (never argv) and the owner DSN is
   written `0400` to a tmpfs file, mounted read-only into the one-off migrate container, and **`shred`-ed**
   immediately after. The owner DSN is **never** part of the persistent `/run/argus/secrets` set the running
-  stack holds (least privilege). `TUNNEL_TOKEN` is a runtime value only for `compose up`.
+  stack holds (least privilege). The cloudflared tunnel token is a mounted file-secret (`TUNNEL_TOKEN_FILE`),
+  never in the `compose up` env.
 - **Elevation — migrate runs as owner.** A breaking migration could serve ahead of (or behind) its schema, or
   the owner connection could be misused. → **Migrate-before-serve**: data services come up, the **old api is
   stopped** (so on a redeploy old code can't hit the new schema mid-migration), migrations run to completion
@@ -94,10 +95,11 @@ vars/secrets exist.
   reviewers is the pre-prod tightening.
 - **Single VM / no staging gate here.** Staging + prod environments (roadmap 8a) and a blue/green or
   health-gated rollout are later; today it's a single in-place `compose up -d`.
-- **`TUNNEL_TOKEN` transits the `compose up` process env.** `deploy.sh` reads the delivered file into
-  `TUNNEL_TOKEN` for the `docker compose up` invocation, so it's briefly in that process's `/proc/<pid>/environ`
-  (root / same-uid only). This is the documented cloudflared exception (no `--token-file`); the exposure
-  window is the compose CLI's lifetime. Accepted.
+- **Tunnel token no longer transits any process env (INF-4, resolved 2026-06).** cloudflared reads the token
+  from its mounted file-secret via `TUNNEL_TOKEN_FILE` (>=2025.4.0; we pin 2025.6.1), so `deploy.sh` no longer
+  reads the file into a `TUNNEL_TOKEN` env var for `compose up`. The token is now file-backed end-to-end like
+  every other data-plane secret — never in `/proc/<pid>/environ`, never in the daemon's at-rest container
+  config (`docker inspect`). This removed the last env-delivered secret, flipping invariants 2 & 5 to clean.
 - **`shred` on tmpfs is best-effort.** The transient owner-DSN file is `0400` on RAM-backed tmpfs and `rm`-ed
   immediately; the `shred` is defense-in-depth only (overwrite-in-place doesn't apply to tmpfs). The real
   protection is the tmpfs + `0400` + prompt removal.

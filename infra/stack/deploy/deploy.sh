@@ -435,13 +435,15 @@ if ! docker compose -f "$COMPOSE" exec -T postgres \
 fi
 log "backup DB connectivity OK — nightly backup + daily cleanup timers armed"
 
-# --- 6. Bring up the full stack. cloudflared's TUNNEL_TOKEN is a RUNTIME value read from the delivered Key
-#        Vault file (the accepted env exception — never a committed/on-disk env file; the cloudflared image
-#        has no --token-file form). ---
+# --- 6. Bring up the full stack. cloudflared's token is delivered as a mounted credential FILE
+#        (TUNNEL_TOKEN_FILE → /run/secrets/tunnel_token; cloudflared >=2025.4.0), NOT a TUNNEL_TOKEN env var —
+#        so no secret reaches a container via env / `docker inspect`. The compose `tunnel_token` secret mounts
+#        $SECRETS_DIR/tunnel_token. ---
 log "starting api + caddy + cloudflared"
-# Guard: this runtime-value file must exist + be non-empty before we `cat` it into the `up` env — else
-# `set -e` aborts on a bare `cat: No such file` instead of a legible FATAL. fetch-keyvault-secrets.sh (same
-# bundled SHA) already fails closed first, so this is belt-and-suspenders for a stale/partial secret set.
+# Guard: the tunnel_token file must exist + be non-empty before `up`, else the cloudflared file-secret mount
+# resolves to an empty/absent token and the tunnel — the only ingress — silently fails to come up. A legible
+# FATAL here beats debugging a crash-looping cloudflared. fetch-keyvault-secrets.sh (same bundled SHA) already
+# fails closed first, so this is belt-and-suspenders for a stale/partial secret set.
 for _f in tunnel_token; do
   [ -s "$SECRETS_DIR/$_f" ] || {
     log "FATAL: missing/empty runtime secret file: $_f"
@@ -459,8 +461,9 @@ else
   STACK_SERVICES=""
 fi
 # shellcheck disable=SC2086 # intentional word-splitting: empty STACK_SERVICES = all services; else the explicit set
-TUNNEL_TOKEN="$(cat "$SECRETS_DIR/tunnel_token")" \
-  docker compose -f "$COMPOSE" up -d $STACK_SERVICES
+# No TUNNEL_TOKEN env: cloudflared reads the token from its mounted file-secret (TUNNEL_TOKEN_FILE), so the
+# value never enters the compose/up environment or container config.
+docker compose -f "$COMPOSE" up -d $STACK_SERVICES
 # The api reads REDIS_URL_FILE ONCE at module construction and holds a persistent ioredis connection. On a
 # redis password ROTATION the `up -d` above won't recreate the api when the image/config is unchanged (a
 # same-IMAGE_TAG/secret-only redeploy) — it would keep authenticating with the OLD password against the
