@@ -19,7 +19,7 @@ claim (19)     peer fetches one PUBLIC KeyPackage one-time-use (atomic FOR UPDAT
 (no backup)    there is NO server-side key backup and NO recovery — a lost passkey / wiped keystore is a fresh start
 ```
 
-The server stores/forwards **public KeyPackages** only — it never sees a private key or plaintext, and (since the `key_backups` removal) holds **no sealed key ciphertext** at all. It *is* the introducer (it chooses which KeyPackage a caller receives) — the one piece of trust we must not require, addressed in §3.
+The server stores/forwards **public KeyPackages** plus opaque MLS transport ciphertext — message wire bytes and, for offline delivery, the **Welcome** + `ratchet_tree` blobs in `conversation_welcomes` (each HPKE-sealed to the recipient device's KeyPackage, opaque to the server, FORCE-RLS tenant-scoped). It never sees a private key or plaintext, and (since the `key_backups` removal) holds **no server-stored device-key backup/escrow**. It *is* the introducer (it chooses which KeyPackage a caller receives) — the one piece of trust we must not require, addressed in §3.
 
 ## 2. Assets & trust boundaries
 
@@ -35,9 +35,9 @@ The server stores/forwards **public KeyPackages** only — it never sees a priva
 
 ## 4. Invariant check
 
-- **#1 crypto-blind server** — upheld: only public KeyPackages cross the boundary; the server holds no sealed key ciphertext (the `key_backups` surface was removed) and never parses/decrypts key material. Substitution (§3) is made *client-detectable* via safety-number verification, not merely policy.
+- **#1 crypto-blind server** — upheld: public KeyPackages and opaque MLS ciphertext (incl. the Welcome/`ratchet_tree` blobs, HPKE-sealed to recipients) cross the boundary; the server holds **no device-key backup/escrow** (the `key_backups` surface was removed) and never parses/decrypts key material. Substitution (§3) is made *client-detectable* via safety-number verification, not merely policy.
 - **#2 no secret logging** — upheld: zero `console`/logger in the crypto package and keystore; audit rows carry `eventType` + `actorSub` + bounded UA only; no key/ciphertext/token/Authorization/presigned-URL in any log.
-- **#3 RLS on every tenant table** — upheld: `devices` and `key_packages` each have `tenant_id` + ENABLE+FORCE RLS + WITH CHECK + leading-`tenant_id` index; runtime role `argus_app` is non-bypass; tenant context comes only from the verified token claim. *(The former `key_backups` table was dropped in `0040_drop_key_backups.sql`; no key-ciphertext table remains to attest.)*
+- **#3 RLS on every tenant table** — upheld: `devices` and `key_packages` each have `tenant_id` + ENABLE+FORCE RLS + WITH CHECK + leading-`tenant_id` index; runtime role `argus_app` is non-bypass; tenant context comes only from the verified token claim. The `conversation_welcomes` table (opaque sealed Welcome/`ratchet_tree`) is likewise `tenant_id` + FORCE-RLS. *(The former `key_backups` device-key-backup table was dropped in `0040_drop_key_backups.sql`.)*
 - **#4 no hand-rolled crypto** — upheld: MLS via `ts-mls`, device proofs via `@noble` Ed25519, at-rest sealing via WebCrypto AES-256-GCM under the PRF unlock key. **No Argon2 in the key/keystore path** — the PRF output is already uniformly-random 256 bits, so a memory-hard KDF buys nothing (`seal.ts:1`). Argon2id remains only on the unrelated breakglass-admin password surface (a pre-cleared invariant-#4 exception), not in the E2EE key model. No `Math.random` in any security path.
 - **#5 secrets via Key Vault** — N/A to this surface (no new cloud secrets).
 - **#6 no admin path to content** — upheld: key surfaces expose IDs/metadata only; the breakglass admin has no MLS device and no keystore.
