@@ -13,7 +13,7 @@
 | # | Claim | Verdict |
 |---|---|---|
 | crypto-blindness | Server stores/forwards ciphertext only; never decrypts/inspects/infers from content; content columns are opaque. | ✅ PROVEN |
-| rls-tenant-isolation | Every tenant table has `tenant_id` + an enforced (`FORCE`) RLS policy; tenant context comes from verified auth only and reverts per tx; no cross-tenant read path. | ✅ PROVEN |
+| rls-tenant-isolation | Every tenant table has `tenant_id` + an enforced (`FORCE`) RLS policy; tenant context comes only from verified auth, a fixed server constant (`DEFAULT_TENANT_ID`, for passkey/breakglass bootstrap), or a server-derived row (e.g. the `auth_sessions` row matched by refresh-token hash on `@Public` refresh) — never client input — and reverts per tx; no cross-tenant read path. | ✅ PROVEN |
 | authz-idor | Every object reached by a client-supplied id is authz'd (ownership/membership) before use; not-found and not-authorized are a uniform response. | ✅ PROVEN |
 | safe-logging | No log/error emits content, keys, passphrases, tokens, full `Authorization`, or presigned URLs — IDs/metadata only. | ✅ PROVEN |
 | ws-gateway | `/ws` + the realtime bus enforce the same tenant + membership authz as HTTP, despite the global JWT guard skipping the `ws` context. | ✅ PROVEN |
