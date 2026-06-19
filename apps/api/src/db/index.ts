@@ -64,9 +64,12 @@ export function asTenantId(value: string): TenantId {
  * pg_has_role self-member), dev connects as the superuser and this drops it to the non-bypass
  * role. Both the var and the role reset at COMMIT/ROLLBACK, so nothing leaks across the pool.
  *
- * `tenantId` MUST come from the verified session (the request-scoped tenant guard) or a fixed
- * server constant (`DEFAULT_TENANT_ID` for breakglass/passkey bootstrap), never from raw client
- * input — see docs/threat-models/rls-tenant-isolation.md. There are NO client-derived exceptions.
+ * `tenantId` MUST come from one of three server-controlled sources, never raw client input:
+ * (1) the verified session (the request-scoped tenant guard); (2) a fixed server constant
+ * (`DEFAULT_TENANT_ID`, for passkey/breakglass bootstrap); or (3) a server-derived row — e.g. the
+ * `auth_sessions` row matched by refresh-token hash on the `@Public` refresh path, whose own
+ * `tenant_id` is then used. There are NO client-derived exceptions —
+ * see docs/threat-models/rls-tenant-isolation.md.
  */
 export async function withTenant<T>(tenantId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
   const tid = asTenantId(tenantId); // fail fast before opening a transaction
