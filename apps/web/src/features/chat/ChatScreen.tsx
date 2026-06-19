@@ -9,6 +9,7 @@ import {
   acceptFriendRequest,
   declineFriendRequest,
   cancelFriendRequest,
+  unfriend,
 } from '../../lib/api';
 import {
   ConversationManager,
@@ -424,6 +425,20 @@ export default function ChatScreen() {
     [refreshFriends],
   );
 
+  const handleUnfriend = useCallback(
+    async (userId: string) => {
+      if (inFlightRequestIds.current.has(userId)) return;
+      inFlightRequestIds.current.add(userId);
+      try {
+        await unfriend(userId);
+        await refreshFriends();
+      } finally {
+        inFlightRequestIds.current.delete(userId);
+      }
+    },
+    [refreshFriends],
+  );
+
   // ─────────────────────────────────────────────────────────────────────────────
 
   // instead of creating a duplicate). Matches on the REAL peer user id, which creator-made conversations
@@ -672,6 +687,7 @@ export default function ChatScreen() {
             onAcceptRequest={manager ? handleAcceptRequest : undefined}
             onDeclineRequest={manager ? handleDeclineRequest : undefined}
             onCancelRequest={manager ? handleCancelRequest : undefined}
+            onUnfriend={manager ? handleUnfriend : undefined}
           />
         </aside>
 
