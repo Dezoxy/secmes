@@ -60,6 +60,14 @@ export function reflectRouteMeta(ControllerClass: Type, methodName: string): Rou
   const targets: [typeof fn, Type] = [fn, ControllerClass];
   const explicitCode = Reflect.getMetadata(HTTP_CODE_METADATA, fn) as number | undefined;
   const verb = Reflect.getMetadata(METHOD_METADATA, fn) as RequestMethod | undefined;
+  // No route decorator (@Get/@Post/…) means this is not a mapped route — or a route lost its verb.
+  // Fail loudly rather than silently deriving a misleading default status. (RequestMethod.GET === 0,
+  // so test against undefined, not falsiness.)
+  if (verb === undefined) {
+    throw new Error(
+      `reflectRouteMeta: ${ControllerClass.name}.${methodName} has no HTTP route decorator (@Get/@Post/…)`,
+    );
+  }
   return {
     isPublic: reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, targets) ?? false,
     isAllowUnbound: reflector.getAllAndOverride<boolean>(IS_ALLOW_UNBOUND_KEY, targets) ?? false,

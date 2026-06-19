@@ -32,6 +32,9 @@ class FixtureController {
   // A POST with no @HttpCode — pins the verb-derived default (201).
   @Post('made')
   made(): void {}
+
+  // A plain method with NO route decorator — reflectRouteMeta must reject it, not invent a status.
+  notARoute(): void {}
 }
 
 describe('reflectRouteMeta', () => {
@@ -64,5 +67,11 @@ describe('reflectRouteMeta', () => {
 
   it('throws on a missing method so a renamed handler fails loudly', () => {
     expect(() => reflectRouteMeta(FixtureController, 'nope')).toThrow(/no method "nope"/);
+  });
+
+  it('throws when the method has no HTTP route decorator (not a mapped route)', () => {
+    expect(() => reflectRouteMeta(FixtureController, 'notARoute')).toThrow(
+      /no HTTP route decorator/,
+    );
   });
 });
