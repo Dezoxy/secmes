@@ -117,8 +117,11 @@ served bundle integrity-checked? Cross-check `docs/threat-models/{device-keystor
 delivery-integrity,frontend-observability,web-push}.md`.
 
 ### Slice 6 — Infra, secrets, deploy & supply chain  *(reviewer: `infra-reviewer`)*
-Proves the runtime doesn't undo the app's guarantees. Scope: `infra/{aws,azure,stack,b2,backup,vm}`,
-`compose.yaml`, `.github/workflows/`, Dockerfiles. Proves invariants **2, 5**. Adversarial questions: any secret
+Proves the runtime doesn't undo the app's guarantees. Scope: **all of `infra/**`** (aws, azure, stack, b2,
+backup, vm, **cleanup**, **notify**, terraform) — note `infra/cleanup` and `infra/notify` are production
+systemd workers that handle DB/B2 credentials and failure notifications, so they carry secret-delivery risk and
+must be in scope; **`compose.prod.yaml`** (the actual production runtime — `compose.yaml` is explicitly local-dev
+only, audited only for the dev-vs-prod delta); `.github/workflows/`; Dockerfiles. Proves invariants **2, 5**. Adversarial questions: any secret
 in code/env (vs Key Vault credential files via Managed Identity)? containers non-root + read-only FS + dropped
 caps + limits? data services truly private (no public endpoint)? CI uses OIDC and never interpolates untrusted
 event input into `run:`? backups encrypted, EU-pinned, restorable? Cross-check `docs/threat-models/{vm-secrets,
