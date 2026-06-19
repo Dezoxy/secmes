@@ -11,10 +11,13 @@
 -- Canonical pair ordering: user_low_id = LEAST(a, b), user_high_id = GREATEST(a, b).
 -- The UNIQUE constraint on (tenant_id, user_low_id, user_high_id) enforces one row per pair.
 --
--- FORCE RLS: the caller-is-a-member predicate (status + member check) will be added as a second
--- policy in Slice D once the API layer is in place. The tenant-isolation policy here is the base layer;
--- FORCE RLS ensures it fires even for the table owner. Slice D's security-boundary-auditor pass must
--- assert the app-layer predicate before any endpoint goes live.
+-- FORCE RLS: tenant isolation is the DB-level guarantee here, and FORCE RLS ensures it fires even for
+-- the table owner. The caller-is-a-member predicate (a user only sees friendships they are a party to)
+-- is enforced unconditionally at the APPLICATION layer — every FriendsService query appends a WHERE
+-- clause requiring the caller to be user_low_id or user_high_id. By deliberate decision it is NOT a
+-- second RLS policy (adequate under the single-tenant DEFAULT_TENANT_ID model where all access funnels
+-- through the audited service). The Slice D security-boundary-auditor pass asserted that app-layer
+-- predicate; friendships-rls.spec.ts covers the DB-level tenant isolation + cleanup posture.
 --
 -- down: DROP TABLE IF EXISTS friendships CASCADE;
 
@@ -55,8 +58,8 @@ CREATE INDEX IF NOT EXISTS idx_friendships_tenant_high ON friendships (tenant_id
 ALTER TABLE friendships ENABLE ROW LEVEL SECURITY;
 ALTER TABLE friendships FORCE ROW LEVEL SECURITY;
 
--- Base tenant-isolation policy. Slice D will add a second policy restricting reads/writes to rows
--- where the caller is a party to the friendship (the caller-is-a-member predicate).
+-- Tenant-isolation policy (the only app-role policy on this table). The caller-is-a-member predicate
+-- lives in the FriendsService WHERE clauses, not in RLS — see the header note above.
 -- nullif guard: handles '' → NULL on pooled connections (GUC reverts to '' on txn end), consistent
 -- with auth_sessions_isolation (0031) and other policies in this repo.
 CREATE POLICY friendships_tenant_isolation ON friendships
