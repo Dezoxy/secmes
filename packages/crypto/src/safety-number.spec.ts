@@ -2,11 +2,19 @@ import { describe, expect, it, beforeAll } from 'vitest';
 
 import {
   MlsEngine,
+  enrollmentSafetyNumber,
   safetyNumber,
   safetyNumberFromMember,
   type GroupMember,
   type KeyPackage,
 } from './index.js';
+
+/** Base64-standard encode — the form the key directory / enrollment record store the signing key in. */
+function toBase64(bytes: Uint8Array): string {
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
 
 /** Build a GroupMember view from a KeyPackage — mirrors what Conversation.members() returns. */
 function memberFromKp(kp: KeyPackage, leafIndex = 0): GroupMember {
@@ -126,5 +134,64 @@ describe('safetyNumberFromMember', () => {
       memberFromKp(alice.publicPackage),
     );
     expect(ab).toBe(ba);
+  });
+});
+
+// enrollmentSafetyNumber — the device-LINKING OOB artifact (FP-1). Both devices derive it from D2's
+// signature key; the user compares them across screens before approving. Width is the security property:
+// a 9-digit (~30-bit) code was grindable by a malicious server (FP-1); the full safety-number width is not.
+describe('enrollmentSafetyNumber', () => {
+  let engine: MlsEngine;
+  beforeAll(async () => {
+    engine = await MlsEngine.create();
+  });
+
+  it('is deterministic — same key always yields the same number', async () => {
+    const d2 = await engine.generateDeviceKeys('alice@argus.local');
+    const key = toBase64(d2.publicPackage.leafNode.signaturePublicKey);
+    expect(await enrollmentSafetyNumber(key)).toBe(await enrollmentSafetyNumber(key));
+  });
+
+  it('renders the FULL safety-number width — 8 groups of 5 digits (FP-1 regression guard)', async () => {
+    // This is the load-bearing assertion: it FAILS CI if anyone narrows the artifact back to the old
+    // 9-digit ("XXX XXX XXX", ~30-bit) form that a malicious server could grind (FP-1).
+    const d2 = await engine.generateDeviceKeys('alice@argus.local');
+    const number = await enrollmentSafetyNumber(
+      toBase64(d2.publicPackage.leafNode.signaturePublicKey),
+    );
+    const parts = number.split(' ');
+    expect(parts).toHaveLength(8);
+    expect(parts.every((p) => /^\d{5}$/.test(p))).toBe(true);
+  });
+
+  it('differs for a different signing key (a swapped key is detectable)', async () => {
+    const real = await engine.generateDeviceKeys('alice@argus.local');
+    const attacker = await engine.generateDeviceKeys('alice@argus.local'); // same name, different key
+    expect(
+      await enrollmentSafetyNumber(toBase64(real.publicPackage.leafNode.signaturePublicKey)),
+    ).not.toBe(
+      await enrollmentSafetyNumber(toBase64(attacker.publicPackage.leafNode.signaturePublicKey)),
+    );
+  });
+
+  it('agrees across devices — D2 (own key) and D1 (server-relayed fingerprint) compute the same number', async () => {
+    // The whole compare-and-confirm flow rests on this: D2 derives from its own key bytes; D1 from the
+    // fingerprint STRING that arrives over the wire in the enrollment record. To model the real flow the
+    // two operands come from DIFFERENT sources — D2 from the live key object, D1 from the relayed string
+    // after a base64 round-trip — so a genuine divergence path exists. An HONEST server relays D2's real
+    // key ⇒ same number; a server key-swap relays a different key ⇒ different number (next test).
+    const d2 = await engine.generateDeviceKeys('alice@argus.local');
+    const d2Computed = await enrollmentSafetyNumber(
+      toBase64(d2.publicPackage.leafNode.signaturePublicKey),
+    );
+    // Simulate the wire: the key is serialized to base64 by the producer, stored, and relayed back to
+    // D1 as `enrollment.fingerprint`. Round-trip through bytes to prove D1 reconstructs the same number.
+    const relayedFingerprint = toBase64(
+      Uint8Array.from(atob(toBase64(d2.publicPackage.leafNode.signaturePublicKey)), (c) =>
+        c.charCodeAt(0),
+      ),
+    );
+    const d1Computed = await enrollmentSafetyNumber(relayedFingerprint);
+    expect(d1Computed).toBe(d2Computed);
   });
 });

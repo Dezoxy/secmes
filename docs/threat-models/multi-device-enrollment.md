@@ -16,12 +16,14 @@ D2 (new device)                       Server (crypto-blind transport)          D
 3. D2 publishes KeyPackage pool          → devices + key_packages rows
 4. D2 registers enrollment request       → device_enrollments row (status='pending')
    body: { fingerprint }                    emits DeviceEnrollmentPendingEvent → D1
-5. D2 displays fingerprint (QR + code)
-   and waits.
+5. D2 displays its full-width safety
+   number (8×5 digits) and waits.
                                          ──nudge──>  6. D1 receives WS nudge
-                                                     7. User verifies code on D1:
+                                                     7. User compares the number on D1:
                                                         claim D2's package (claim-all selfUser)
-                                                        verify fingerprint == scanned  ← MITM gate
+                                                        D1 derives the number from the relayed
+                                                        fingerprint; user confirms it matches
+                                                        what D2 shows  ← MITM gate
                                                      8. D1 calls POST /devices/enrollments/:id/approve
                                                         body: { approvingDeviceId, proof }
                                                         proof = Ed25519(D1.privKey, 'argus-enroll:v1\n${D1id}\n${enrollId}')
@@ -61,9 +63,9 @@ For **new conversations created after D2 is enrolled**: D1's `confirmCreate`/`co
 ### T2 — Server key-swap of D2's package (self-add MITM)
 **Threat:** A malicious server returns an attacker's KeyPackage when D1 calls `claimAllKeyPackages(selfUserId)` to claim D2's package. D1 adds the attacker's device instead of D2.
 
-**Mitigation:** D1 verifies the fingerprint of the claimed package against the value D2 displayed out-of-band (step 7 in the flow). A swapped package shifts the fingerprint → mismatch → D1 refuses to approve. This is the **exact reused `#20` defense** (`safetyNumber`/`deviceFingerprint` in `packages/crypto/src/index.ts:146`), now applied to self-user device linking.
+**Mitigation:** D1 and D2 each display a **full-width safety number** (`enrollmentSafetyNumber`, `packages/crypto/src/index.ts`) — 8 groups of 5 digits (~133-bit), the same rendering as the two-party `safetyNumber`, derived from D2's signature key. D2 computes it from its **own** key; D1 computes it from the server-relayed fingerprint of the claimed package. The user compares the two screens out-of-band and approves only if every group matches (step 7). A swapped package shifts D1's number → mismatch → the user refuses. **Width is the security property (closes FP-1):** the old artifact was a 9-digit (~30-bit) *typed* code, which a malicious server could grind (~10⁹ Ed25519 keygens) to manufacture a colliding number and inject its device — the exact MITM this gate exists to stop. At ~133 bits the second-preimage cost is ≥2⁶⁴, infeasible. (Closes **FP-1**, `docs/reviews/03-auth-identity.md`.)
 
-**Residual:** TOFU — if the server swaps the package on the very first connection before any fingerprint is established, a user who doesn't check could approve a wrong key. The OOB fingerprint display makes this detectable; skipping the comparison (user negligence) is the residual. Matches the existing MITM residual for peer-adds.
+**Residual:** TOFU / human negligence — the 30-bit grind is now closed, so the only remaining gap is a user who taps **Approve** without actually comparing the numbers. This is the irreducible floor of any out-of-band check (Signal's "they match" button has the identical residual); the UI keeps the compare prominent and the "do not approve if the numbers don't match" warning in view, but cannot force the comparison. Matches the existing #20 residual for peer-adds — accepted. **Future hardening (deferred):** QR-scan verification (camera, two devices co-present) would remove the manual-compare step entirely; not built in this phase.
 
 ### T3 — Identity-collision (two leaves with identical MLS credential bytes)
 **Threat:** Two devices for the same user produce the same identity string → `Conversation.members()` is ambiguous; safety-number naming breaks; ts-mls may deduplicate or reject.
@@ -110,7 +112,7 @@ For **new conversations created after D2 is enrolled**: D1's `confirmCreate`/`co
 
 ## 5. Residual risk (recorded; carried forward)
 
-1. **TOFU on first fingerprint display (T2).** A user who skips the fingerprint check can approve a swapped key. The UI should make the comparison prominent, but cannot force it. Matches the existing #20 residual for peer-adds — accepted.
+1. **TOFU on first safety-number display (T2).** A user who skips the comparison can approve a swapped key. The artifact is now the full-width safety number (~133-bit), so a malicious server can no longer *grind* a colliding number (the closed FP-1 hole) — this residual is reduced to pure human negligence, the irreducible floor of any OOB check. The UI keeps the comparison prominent but cannot force it. Matches the existing #20 residual for peer-adds — accepted.
 2. **D1 offline at enrollment time.** D2 can register and display its code, but must wait for D1 to come online to approve and issue add-commits. This is the Signal model ("waiting for your other device"). UI must communicate the dependency explicitly.
 3. **Fan-out window.** Between D1 approving and D1 finishing all add-commits, D2 is partially enrolled (some conversations joined, some not). Messages in the unfinished conversations arrive before D2 is a leaf — they're undecryptable and silently skipped (existing join logic). Bounded by the number of conversations and 409-rebase retries; eventually consistent. Documented, accepted.
 4. **No history.** Pre-join messages are intentionally inaccessible on D2 (forward secrecy). The opt-in "sealed history transfer" sub-project from `key-backup.md §4` remains deferred; it requires a separate threat model and explicit FS-weakening user acceptance.
