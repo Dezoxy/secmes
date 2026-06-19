@@ -1,6 +1,6 @@
 # Threat model: MLS integration (`packages/crypto`)
 
-> Status: **DRAFT for ratification.** Covers roadmap checkpoints 16a (headless 2-device harness) + 17 (MLS wrapper). This is the **only** place cryptography lives. Pairs with `mls-library-selection.md` (why ts-mls), `key-directory.md`, and `key-backup.md`. The formal independent crypto review is checkpoint 20 + GA gate G4 — this note covers the initial integration.
+> Status: **DRAFT for ratification.** Covers roadmap checkpoints 16a (headless 2-device harness) + 17 (MLS wrapper). This is the **only** place cryptography lives. Pairs with `mls-library-selection.md` (why ts-mls), `key-directory.md`, and `prf-keystore-unlock.md` (at-rest sealing). The formal independent crypto review is checkpoint 20 + GA gate G4 — this note covers the initial integration.
 
 ## 1. Feature & data flow
 
@@ -23,7 +23,7 @@
 4. **Ciphersuite downgrade / wrong suite (Tampering).** → Suite is a pinned constant (`MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`); no client-driven negotiation in v1. The published `KeyPackage` advertises **only** the pinned suite (not ts-mls's default of all 21), so a peer that creates a group and adds us cannot select a weaker one.
 8. **Concurrent ops on one conversation (Tampering — nonce/key reuse).** Two `encrypt`/`decrypt` calls racing on the same `Conversation` (a double-click, `Promise.all`) would both read the same ratchet generation before either advances state → AEAD nonce/key reuse. → A **per-conversation operation lock** serializes all stateful ops so each observes the previous op's resulting state.
 7. **Spent ratchet secrets retained (forward secrecy).** ts-mls returns `consumed` (spent secrets) from each op; the wrapper **overwrites them with zeros (`wipe`)** after `encrypt`/`decrypt`/`addMember` and never copies them into long-lived structures. JS cannot guarantee the engine kept no internal copies, so erasure is best-effort — a known, accepted limitation of a JS/WASM client.
-5. **Group state at rest (Info-disclosure, deferred).** → `ClientState` is currently in-memory. Persisting it to IndexedDB **must** be encrypted under the passphrase-derived key (checkpoints 18–22 / `key-backup.md`); flagged, not yet implemented.
+5. **Group state at rest (Info-disclosure).** → `ClientState` is persisted to IndexedDB **sealed under the per-passkey PRF unlock key** (AES-256-GCM; `prf-keystore-unlock.md`, `live-messaging.md`) — no passphrase, no Argon2. Shipped in Slice 5.
 6. **Library/supply-chain trust.** → ts-mls is MIT (vendor-forkable if the single maintainer stalls), version-pinned; RFC 9420 interop test vectors are a planned gate; `@hpke/*`/post-quantum peers are unused by the classic suite (lazy-loaded) and intentionally not installed. `@noble/{curves,ciphers,hashes}` are listed only because ts-mls **requires them as peer dependencies** (not for our direct use) — direct imports of primitive libraries are forbidden by the "only ts-mls" rule and the crypto-reviewer gate.
 
 ## 4. Invariant check
@@ -43,6 +43,6 @@
 ## 6. Residual risk
 
 - **ts-mls maturity / single maintainer** — accepted with the MIT fork escape hatch + planned interop-vector verification.
-- **No encrypted state-at-rest yet** — acceptable while state is in-memory (no persistence path exists); blocks the device-keys/recovery checkpoints (18–22), which must land it before any real message history persists.
+- **Encrypted state-at-rest shipped (Slice 5)** — `ClientState`, the device keys, the KeyPackage pool, and the message log are persisted to IndexedDB sealed under the per-passkey PRF unlock key (AES-256-GCM; `prf-keystore-unlock.md`). No passphrase, no Argon2, no server backup.
 - **2-party only** — `addMember` desyncs 3+ members without commit fan-out; group chat is deferred (B1) and gated on the handshake path above.
 - **No formal crypto review yet** — this is initial integration; checkpoint 20 + G4 are the gates, scheduled separately.

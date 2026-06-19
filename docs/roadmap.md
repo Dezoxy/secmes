@@ -11,7 +11,7 @@ Living checklist. Check items off as they land. Each checkpoint states its **don
 - This is a genuine multi-month solo effort. That's expected — the list just makes it honest.
 - **Front-load the unknowns** (spikes S1–S2 below): the hardest thing (MLS) and the longest-lead-time thing (paid audits) start _now_, not in sequence.
 - This roadmap is **canonical** for phasing; `secure_messaging_platform_plan.md` §17 is an earlier, looser cut — defer to this file when they disagree.
-- Each phase is gated by its `docs/threat-models/*.md` note (rls-tenant-isolation, key-directory, key-backup, attachments) — ratify the note before the code.
+- Each phase is gated by its `docs/threat-models/*.md` note (rls-tenant-isolation, key-directory, prf-keystore-unlock, attachments) — ratify the note before the code.
 
 Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (route through the matching reviewer).
 
@@ -63,9 +63,10 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (ro
 - [x] 18. **Device keys** generated client-side, stored in IndexedDB (sealed at rest)
 - [x] 19. **Key directory** — `devices` + `key_packages` tables (RLS); publish/fetch public KeyPackages 🔒
 - [x] 20. **Crypto review #1** — crypto-reviewer pass + threat-model note for the key model 🔒
-- [x] 21. **Passphrase backup** — Argon2id-derived key encrypts private material client-side 🔒
-- [x] 22. **Backup storage** — `key_backups` table (ciphertext only) + backup/restore API 🔒
-- [x] 23. **Recovery proven** — fresh browser → passphrase → restore → recovered identity works for MLS (past message history intentionally not recoverable — forward secrecy)
+- [x] 21. **Passphrase backup** — Argon2id-derived key encrypts private material client-side 🔒 — **SUPERSEDED & REMOVED (2026-06, migration `0040`)**
+- [x] 22. **Backup storage** — `key_backups` table (ciphertext only) + backup/restore API 🔒 — **SUPERSEDED & REMOVED (2026-06, migration `0040`)**
+- [x] 23. **Recovery proven** — fresh browser → passphrase → restore → recovered identity works for MLS — **SUPERSEDED (2026-06)**
+  > Checkpoints 21–23 (passphrase / Argon2id / server-stored `key_backups` backup + recovery) were **dropped**. The keystore is now sealed under a per-passkey **WebAuthn-PRF** key with **no server backup and no recovery** — a lost passkey is a fresh start. See `docs/threat-models/prf-keystore-unlock.md` + `key-model.md`.
 - [x] 24. **CSPRNG audit** — no `Math.random` in security paths; Semgrep rule green 🔒
 
 ## Phase 3 — 1:1 encrypted text
@@ -100,7 +101,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (ro
 - [~] 39. **Installable PWA** — manifest + service worker + offline shell; Lighthouse PWA pass — _residual: iOS installed-PWA proof (S1, USER)._
 - [x] 40. **Web Push** — content-free VAPID notifications; iOS installed-PWA path verified
 - [~] 41. **Core UX** — conversation list, composer, image, delivery states — _live loop complete (41a); the seed/demo path is retained alongside it._
-- [x] 42. **Key-loss UX** — backup prompt + recovery built into the UI
+- [x] 42. **Key-loss UX** — fresh-start message + new-registration-code flow (no backup/recovery by design) — **revised (2026-06)**
 - [x] 41a. **Live client message loop** — chat wired to the real server (device provisioning → start 1:1 → join → live send/fetch/receive + sealed message-history persistence), replacing the seed/loopback
 - [x] 43. **Code-delivery hardening** — CSP + SRI + service-worker pinning; published bundle hash 🔒
 - [x] 44. **A11y + responsive** — WCAG AA pass; mobile/desktop layouts
