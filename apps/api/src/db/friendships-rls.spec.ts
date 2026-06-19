@@ -190,8 +190,11 @@ describe.skipIf(!DB_URL)('friendships schema RLS + cleanup posture', () => {
 
   it('argus_cleanup is reap-only: it cannot INSERT or UPDATE friendships', async () => {
     const id = await makeFriendship(tenantA, a1, a2, 'pending', -1);
+    // Use an otherwise-VALID update (a pending row keeping a non-null expiry satisfies every CHECK
+    // constraint) so the ONLY reason this throws is the missing UPDATE grant — not a constraint
+    // violation that would mask the privilege boundary we are actually testing.
     await expect(
-      asCleanup((tx) => tx`update friendships set status = 'accepted' where id = ${id}`),
+      asCleanup((tx) => tx`update friendships set expires_at = now() where id = ${id}`),
     ).rejects.toThrow();
     await expect(
       asCleanup(
