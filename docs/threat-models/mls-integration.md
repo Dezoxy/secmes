@@ -37,7 +37,7 @@
 
 - `packages/crypto` is the **sole** crypto home; pinned suite; **no logging of any kind** in the package.
 - **Reviewer:** `crypto-reviewer` (mandatory for this and every change here). **Tests:** smoke encrypt/decrypt, multi-message ratchet, unicode, malformed-input rejection (17); headless 2-device harness with a **server-blind assertion** (16a).
-- Follow-ups gated before GA: RFC 9420 interop vectors; encrypted `ClientState`-at-rest; independent crypto review (checkpoint 20 + G4).
+- Follow-ups gated before GA: RFC 9420 interop vectors; independent crypto review (checkpoint 20 + G4). (Encrypted `ClientState`-at-rest shipped in Slice 5 — see §3 threat 5, §6, and `prf-keystore-unlock.md`.)
 - **Group / PCS handshake processing** — `addMember` is **2-party-scoped** (the adder applies the commit locally). Before group chat (backlog **B1**) or post-compromise-security self-updates ship, the wrapper must surface `commit.commit` for fan-out to existing members and add a `processHandshake()` path that applies received commits/proposals. `decrypt()` deliberately handles application messages only and does **not** mutate state on a non-application message.
 
 ## 6. Residual risk

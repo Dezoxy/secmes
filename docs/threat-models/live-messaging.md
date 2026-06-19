@@ -125,7 +125,8 @@ ciphertext** — never plaintext, never keys. All MLS work is client-side.
   ratchet — older ciphertext is at an already-consumed generation and is skipped (undecryptable). Own sent
   messages are never re-derivable from MLS state at all (the sending secret is consumed on `encrypt`), so
   back-fill skips self; they appear via local echo only for the session that sent them. A local **sealed
-  message log** (plaintext at rest under the PRF unlock key) is the follow-up that makes history durable.
+  message log** (plaintext at rest under the PRF unlock key) now makes history durable — shipped in Slice 5
+  (see `message-history.md`).
 - **Reconnect catch-up cost (5C):** live messages now arrive over the WebSocket push; on (re)connect the
   client catches up with a **per-conversation** back-fill (one keyset fetch per live conversation). A device
   in many conversations makes N calls; the server's cross-conversation `GET /sync` (single paginated stream)
