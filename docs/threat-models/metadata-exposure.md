@@ -18,12 +18,27 @@ communication is visible to the server.
 
 What the crypto-blind server (and therefore an operator, or a DB/infra compromise) can infer:
 
-- **Social graph** — `conversation_members` maps which users share which conversations, per tenant.
+- **Social graph (in-conversation)** — `conversation_members` maps which users share which conversations, per
+  tenant.
+- **Pre-conversation social graph + direction** — `friendships` records who is connected to whom *before* any
+  conversation exists, and `friendships.requested_by` reveals which side initiated (`schema.ts:282-292`).
+- **Conversation kind** — `conversations.is_direct` (`schema.ts:76`) classifies each conversation as 1:1 vs
+  group, sharpening social-graph inference.
 - **Who-talks-to-whom and when** — `messages.sender_user_id` + `conversation_id` + `created_at`.
+- **Read-receipt timing** — `conversation_receipts.delivered_at` / `read_at` + high-water message ids
+  (`schema.ts:105-118`): second-precise "who read what, when," per member.
 - **Volume & rough message size** — row counts and ciphertext length (no padding; see §6).
 - **Device topology** — `devices` / `device_enrollments`: how many devices a user has and when they linked.
 - **Presence / online activity** — live WebSocket connection state and subscription set.
 - **Attachment existence, size, and timing** — blob object keys + B2 object sizes (content encrypted).
+- **Lookup / discovery history (incl. hit/miss)** — `audit_events.metadata` records the argus-id each user
+  probed via `users.lookup` and `friends.request_created` (`schema.ts:237-246`; `users.controller.ts:70-73`,
+  `friends.controller.ts:142-144`). For `users.lookup` the metadata is `{ targetArgusId, found }`, so it records
+  not just *who searched for whom* but whether the probed id **exists** — a durable hit/miss discovery record,
+  and the GDPR self-export returns this `metadata` verbatim (`gdpr.service.ts:286-291`). Retained in the live DB
+  and in every backup. ⚠️ The promised 90-day prune for `audit_events` is **not yet implemented**, so this
+  history currently accumulates unbounded — tracked as a Must-fix in `docs/reviews/04-metadata-privacy.md`
+  (F1/AR-1).
 - **Pseudonymous identity** — display handle + email hint on invite; the IdP real-name is deliberately dropped
   (`pseudonymous-identity.md`).
 
@@ -63,9 +78,12 @@ Ship with the metadata trade made **explicit and honest** (same trade Signal mak
   hint persist.
 - Logs are **IDs/metadata only**, never content (invariant #2).
 - RLS confines every metadata read to one tenant.
-- Sales/DPA copy must state plainly: *"We cannot read your messages. We can see who is in a conversation and
-  when messages flow — the same delivery metadata every non-mixnet messenger has."* Do not claim metadata
-  privacy the architecture does not provide.
+- Sales/DPA copy must state plainly: *"We cannot read your messages. We can see communication metadata: who is
+  connected to whom (your contacts/friendships and conversation membership), when messages flow, read-receipt
+  timing, and which user IDs you look up in the directory — including whether a looked-up ID exists — the same
+  class of delivery/discovery metadata every non-mixnet messenger has."* Do not claim metadata privacy the
+  architecture does not provide. (The lookup/discovery history is currently retained unbounded — see the F1/AR-1
+  Must-fix in `docs/reviews/04-metadata-privacy.md`.)
 
 ## 6. Residual risk
 
