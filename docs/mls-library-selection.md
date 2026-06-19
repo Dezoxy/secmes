@@ -33,7 +33,7 @@ Time-box 2–3 days on a laptop, no cluster:
 2. **Run the official MLS interop test vectors** against ts-mls for the ciphersuite we'll use (start: `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`).
 3. **Bundle size**: measure the gzipped client cost of importing ts-mls (it should beat any wasm option).
 4. **iOS Safari PWA**: run the 2-party flow in an installed PWA on a real iPhone — the single most important de-risking step.
-5. **Minimal IndexedDB keystore**: store/load a client's private MLS state; confirm it survives reload (and design for the iOS eviction case → ties to `key-backup.md`).
+5. **Minimal IndexedDB keystore**: store/load a client's private MLS state; confirm it survives reload (the iOS eviction case is **no recovery by design** — an evicted store is a fresh start under the PRF keystore, `prf-keystore-unlock.md`).
 
 ## Spike result — Node portion VERIFIED (2026-06-05)
 
