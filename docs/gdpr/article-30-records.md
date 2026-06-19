@@ -2,7 +2,7 @@
 
 **Controller**: Argus Secure Messaging (operator entity — fill in legal name)  
 **DPO contact**: dpo@[operator-domain] (fill in)  
-**Last updated**: 2026-06-12  
+**Last updated**: 2026-06-19  
 **Regulation**: GDPR Art. 30(1)
 
 ---
@@ -45,7 +45,6 @@
 | Devices | Users | Device UUID, public signature key, creation timestamp | Low |
 | Messages | Users | Ciphertext blob (opaque), conversation ID, sender UUID, timestamp, epoch | Content: not accessible to server |
 | Attachments | Users | Object key, byte size, conversation ID, timestamps | Content: not accessible to server |
-| Key backup | Users | Encrypted backup blob (opaque), timestamps | Content: not accessible to server |
 | Audit events | Users | Actor sub, event type, IDs in metadata, timestamp | Low |
 | Push subscriptions | Users | Endpoint URL (capability URL — access-granting), p256dh public key, auth secret | Medium |
 | Invites | Users | Invitee email, tokens (hashed at rest), timestamps | Low |
@@ -75,9 +74,9 @@ No personal data is transferred to third countries outside the EU/EEA.
 | Messages (ciphertext) | Indefinite until sender exercises erasure (then pseudonymized — sender_user_id → NULL) | Art. 6(1)(b) |
 | Attachment blobs | 7 days from creation (Backblaze lifecycle rule) | Proportionality |
 | Attachment metadata rows | Until uploader exercises erasure | Art. 6(1)(b) |
-| Audit events | 90 days (rolling window, enforced by cleanup worker) | Proportionality + Art. 6(1)(f) |
+| Audit events | 90 days from event creation (rolling window, enforced by the `argus-audit-prune` systemd-timer worker; see `docs/threat-models/audit-logging.md`) | Proportionality + Art. 6(1)(f) |
+| Auth sessions | 30 days past expiry (rolling window, same prune worker) | Proportionality + Art. 6(1)(f) |
 | Push subscriptions | Until device deletion or account deletion | Art. 6(1)(b) |
-| Key backup | Until account deletion | Art. 6(1)(b) |
 | Error tracking events | 30 days (GlitchTip default) | Proportionality |
 | Backups (encrypted DB snapshots) | 30 days (Backblaze backup bucket lifecycle) | Operational necessity |
 
@@ -91,6 +90,6 @@ No personal data is transferred to third countries outside the EU/EEA.
 - **Access control**: per-tenant PostgreSQL Row-Level Security enforced for all tenant-scoped tables. No cross-tenant query path exists.
 - **Secrets management**: secrets delivered from Azure Key Vault via Managed Identity as credential files — never in environment variables or source code.
 - **Authentication**: OIDC via self-hosted Zitadel; JWTs verified on every request.
-- **Audit logging**: security-relevant events (login, device registration, key backup, invite actions, admin actions) are logged with actor sub, event type, and IDs — never content.
+- **Audit logging**: security-relevant events (login, device registration, invite actions, admin actions) are logged with actor sub, event type, and IDs — never content. Retention is bounded to 90 days and enforced by the `argus-audit-prune` worker.
 - **Vulnerability management**: automated scanning via Semgrep, OSV, Trivy, Checkov, gitleaks, 42Crunch, CodeQL on every PR; nightly DAST.
 - **Erasure**: self-service account deletion (Art. 17) available via `DELETE /me`; messages are pseudonymized (sender → NULL), blobs deleted best-effort.
