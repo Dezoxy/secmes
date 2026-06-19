@@ -31,6 +31,12 @@ What the crypto-blind server (and therefore an operator, or a DB/infra compromis
 - **Device topology** — `devices` / `device_enrollments`: how many devices a user has and when they linked.
 - **Presence / online activity** — live WebSocket connection state and subscription set.
 - **Attachment existence, size, and timing** — blob object keys + B2 object sizes (content encrypted).
+- **Lookup / discovery history** — `audit_events.metadata` records the argus-id each user probed via
+  `users.lookup` and `friends.request_created` (`schema.ts:237-246`; `users.controller.ts:71-73`,
+  `friends.controller.ts:142-144`). This is a durable record of *who searched for whom*, retained in the live DB
+  and in every backup. ⚠️ The promised 90-day prune for `audit_events` is **not yet implemented**, so this
+  history currently accumulates unbounded — tracked as a Must-fix in `docs/reviews/04-metadata-privacy.md`
+  (F1/AR-1).
 - **Pseudonymous identity** — display handle + email hint on invite; the IdP real-name is deliberately dropped
   (`pseudonymous-identity.md`).
 
