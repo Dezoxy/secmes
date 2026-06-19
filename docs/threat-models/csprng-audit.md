@@ -15,8 +15,8 @@ Every randomness source in `apps/` + `packages/` (excluding `node_modules`, buil
 | `packages/crypto/src/seal.ts:64` | seal **IV** (12 B) | `crypto.getRandomValues` (WebCrypto) | ✅ |
 | `packages/crypto/src/seal.ts:121–122` | attachment **key** (32 B) + **IV** (12 B) | `crypto.getRandomValues` (WebCrypto) | ✅ |
 | `packages/crypto` (via `ts-mls`) | MLS signature/HPKE key generation, KeyPackages | `@noble/*` → WebCrypto | ✅ |
-| `apps/web/src/lib/auth.ts:20` | PKCE code **verifier** (32 B) | `crypto.getRandomValues` | ✅ |
-| `apps/web/src/lib/auth.ts:37` | OAuth **state** | `crypto.randomUUID()` (WebCrypto) | ✅ |
+| `apps/web/src/lib/ws.ts:255` | reconnect backoff **jitter** | `crypto.getRandomValues` (WebCrypto) | ✅ |
+| `apps/web/src/**` (`useMessageSending.ts`, `lib/messaging.ts`, `lib/conversations.ts`, `lib/enroll.ts`, `features/device/DeviceContext.tsx`, `features/settings/argus-profile.ts`) | non-secret client **correlation IDs** (message/attachment/conversation/commit/profile) | `crypto.randomUUID()` (WebCrypto) | ✅ |
 | `apps/api` DB primary keys (`schema.ts` `defaultRandom()`, migrations `gen_random_uuid()`) | row IDs incl. tenant/device/key-package/backup IDs | PostgreSQL `pgcrypto` `gen_random_uuid()` | ✅ |
 
 **Findings:** no `Math.random`, no `nanoid`/`uuid` userland generators, no Node `crypto.pseudoRandomBytes`, no `new Date()`/timestamp used as entropy. All key/nonce/salt/IV/ID/token material comes from a CSPRNG (WebCrypto, `@noble`, or pgcrypto). **Audit result: PASS.**
@@ -33,7 +33,7 @@ A complementary rule, `argus-crypto-only-in-crypto-package`, keeps cryptographic
 
 ## 4. Invariant check
 
-Upholds invariant **#4 (no hand-rolled crypto / CSPRNG only)**. No tension with the other five. The one `crypto.subtle` use outside `packages/crypto` (`apps/web/src/lib/auth.ts`, PKCE S256) is OAuth transport plumbing, not E2EE protocol crypto, and is CSPRNG-based — acceptable and annotated.
+Upholds invariant **#4 (no hand-rolled crypto / CSPRNG only)**. No tension with the other five. Since the OIDC/PKCE path was decommissioned (#223, passkey-only auth), there is no longer any `crypto.subtle` use outside `packages/crypto`; the remaining web randomness is CSPRNG-based correlation IDs and reconnect jitter (non-secret), and all key/nonce/IV material lives in `packages/crypto`.
 
 ## 5. Decision & mitigations
 
