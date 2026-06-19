@@ -81,6 +81,7 @@ total_reaped=0
 total_failed=0
 rounds=0
 db_unreachable=0
+stalled=0
 
 # Drain expired rows in batches. Terminates on: no rows left, a batch with zero progress (e.g. B2
 # unreachable — avoids spinning on the same rows), or a safety round cap.
@@ -124,7 +125,11 @@ while :; do
 
   total_reaped=$((total_reaped + batch_reaped))
   [[ "$batch_reaped" -eq 0 ]] && {
-    log "batch made no progress — stopping (will retry on the next timer run)"
+    # Rows were due for reaping but NONE succeeded — every delete in the batch failed (B2 unreachable, no
+    # deleteFiles permission on the attachment key, or a persistent error). Stop and FAIL the unit so
+    # OnFailure= alerts; the timer retries next run. A healthy run reaps > 0 and never reaches this.
+    log "batch made no progress despite expired rows — stopping; will fail the unit so OnFailure alerts"
+    stalled=1
     break
   }
   [[ "$rounds" -ge "${CLEANUP_MAX_ROUNDS:-50}" ]] && {
@@ -134,8 +139,11 @@ while :; do
 done
 
 log "done reaped=${total_reaped} failed=${total_failed} rounds=${rounds}"
-# Exit non-zero if we couldn't reach the DB, so the unit's OnFailure= notifier fires (a silent exit-0 on an
-# unreachable DB is exactly the kind of gap BKP-1 was about). Per-item blob/row failures (total_failed) are
-# transient + retried next run, so they don't fail the unit.
-[ "$db_unreachable" = 1 ] && exit 1
+# Fail the unit (so OnFailure= alerts) if we couldn't reach the DB, or a batch fully stalled despite having
+# expired rows to reap (B2 unreachable / missing deleteFiles / persistent error) — a silent exit-0 on those
+# is exactly the kind of gap BKP-1 was about. Per-item blob/row failures (total_failed) are transient and
+# retried next run, so they alone don't fail the unit.
+if [ "$db_unreachable" = 1 ] || [ "$stalled" = 1 ]; then
+  exit 1
+fi
 exit 0

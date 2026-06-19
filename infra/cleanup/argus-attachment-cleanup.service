@@ -42,20 +42,20 @@ Environment=S3_REGION=eu-central-003
 # The attachment bucket — templated per deploy from the SAME S3_BUCKET the api uses (cleanup reaps the api's
 # own expired attachments), so the worker always targets the configured environment's bucket.
 Environment=S3_BUCKET=REPLACE_WITH_ATTACHMENT_BUCKET
-# This worker DELETEs from the attachment bucket, so it needs a credential with deleteFiles there. It uses the
-# broad `argus-b2-app-key` (key-id = B2_APP_KEY_ID, same as the backup worker) — which spans BOTH buckets with
-# delete on both (the BKP-2 over-broad key). It deliberately does NOT use the api's attachment key
-# (`argus-s3-secret-access-key`/S3_ACCESS_KEY_ID): that one mints presigned PUT/GET URLs and need not carry
-# deleteFiles, so pairing it here would risk a silent 403 on delete. When BKP-2 splits the keys into
-# least-privilege bucket-scoped keys, give this worker a credential scoped to the attachment bucket WITH
-# delete, and re-point both the key-id and the LoadCredential source below.
-Environment=S3_ACCESS_KEY_ID=REPLACE_WITH_B2_KEY_ID
+# This worker DELETEs from the ATTACHMENT bucket, so it uses the ATTACHMENT-bucket credential — the same key
+# the api manages attachments with (`argus-s3-secret-access-key` / key-id S3_ACCESS_KEY_ID, templated per
+# deploy). That is the least-privilege match (the worker only touches the attachment bucket) and does NOT
+# depend on the over-broad cross-bucket key (BKP-2). The attachment key must carry deleteFiles on this bucket;
+# if a persistent delete failure stalls a run, the worker now exits non-zero so OnFailure= alerts rather than
+# silently leaving expired blobs (see cleanup-attachments.sh).
+Environment=S3_ACCESS_KEY_ID=REPLACE_WITH_ATTACHMENT_KEY_ID
 
-# --- Secret: the B2 application key, delivered as a credential FILE, never in env/Helm at rest (invariant
-#     #5). The source path is populated from Azure Key Vault by the Managed Identity at boot (a separate fetch
-#     step). systemd copies it into $CREDENTIALS_DIRECTORY (mode 0400, tmpfs), referenced as %d below. (No DB
-#     password: the DB connection runs in-container over the local-trust socket — see cleanup-attachments.sh.) ---
-LoadCredential=b2-secret:/run/argus/secrets/b2-app-key
+# --- Secret: the B2 attachment-bucket secret key, delivered as a credential FILE, never in env/Helm at rest
+#     (invariant #5). The source path is populated from Azure Key Vault by the Managed Identity at boot (a
+#     separate fetch step). systemd copies it into $CREDENTIALS_DIRECTORY (mode 0400, tmpfs), referenced as %d
+#     below. (No DB password: the DB connection runs in-container over the local-trust socket — see
+#     cleanup-attachments.sh.) ---
+LoadCredential=b2-secret:/run/argus/secrets/s3_secret_access_key
 Environment=S3_SECRET_ACCESS_KEY_FILE=%d/b2-secret
 
 # AWS CLI v2 wants a writable HOME/cache, but ProtectHome + ProtectSystem make the FS read-only.

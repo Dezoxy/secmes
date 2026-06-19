@@ -28,6 +28,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 : "${BACKUP_AGE_RECIPIENT:?BACKUP_AGE_RECIPIENT (age public key) required — refuses to upload an unencrypted dump}"
 : "${BACKUP_S3_BUCKET:?BACKUP_S3_BUCKET required (the private db-backups bucket)}"
 : "${S3_BUCKET:?S3_BUCKET required (the attachment bucket — cleanup worker target)}"
+: "${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID required (attachment B2 key-id — the cleanup worker credential)}"
 
 APP_DIR=/opt/argus
 SECRETS_DIR=/run/argus/secrets
@@ -404,11 +405,12 @@ install -m 0644 "$REPO_ROOT/infra/backup/argus-db-backup.timer" /etc/systemd/sys
 install -m 0644 "$REPO_ROOT/infra/cleanup/argus-attachment-cleanup.service" /etc/systemd/system/argus-attachment-cleanup.service
 install -m 0644 "$REPO_ROOT/infra/cleanup/argus-attachment-cleanup.timer" /etc/systemd/system/argus-attachment-cleanup.timer
 install -m 0644 "$REPO_ROOT/infra/notify/argus-notify-failure@.service" /etc/systemd/system/argus-notify-failure@.service
-# Both workers use the broad `argus-b2-app-key` (key-id B2_APP_KEY_ID): backup writes the db-backups bucket;
-# cleanup deletes from the attachment bucket via the same over-broad key (which has delete on both — BKP-2).
-# See the cleanup unit's comment for why it does NOT use the api's attachment key. BKP-2 will split these.
-sed -i "s|REPLACE_WITH_B2_KEY_ID|${B2_APP_KEY_ID}|" \
-  /etc/systemd/system/argus-db-backup.service /etc/systemd/system/argus-attachment-cleanup.service
+# Per-worker B2 credentials, each scoped to the bucket it touches (least-privilege; no reliance on the
+# over-broad cross-bucket key — BKP-2): the backup worker → the db-backups key (B2_APP_KEY_ID + the
+# argus-b2-app-key secret it LoadCredentials); the cleanup worker → the attachment key (S3_ACCESS_KEY_ID + the
+# argus-s3-secret-access-key secret), the same key the api manages attachments with.
+sed -i "s|REPLACE_WITH_B2_KEY_ID|${B2_APP_KEY_ID}|" /etc/systemd/system/argus-db-backup.service
+sed -i "s|REPLACE_WITH_ATTACHMENT_KEY_ID|${S3_ACCESS_KEY_ID}|" /etc/systemd/system/argus-attachment-cleanup.service
 sed -i "s|REPLACE_WITH_AGE_PUBLIC_KEY|${BACKUP_AGE_RECIPIENT}|" /etc/systemd/system/argus-db-backup.service
 # Bucket names per deploy: backup → the db-backups bucket; cleanup → the same attachment bucket the api uses.
 sed -i "s|REPLACE_WITH_BACKUP_BUCKET|${BACKUP_S3_BUCKET}|" /etc/systemd/system/argus-db-backup.service

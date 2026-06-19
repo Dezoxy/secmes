@@ -46,8 +46,9 @@ ALTER ROLE argus_cleanup LOGIN;
 sudo install -d /opt/argus/cleanup
 sudo install -m 0755 cleanup-attachments.sh /opt/argus/cleanup/
 sudo cp argus-attachment-cleanup.{service,timer} /etc/systemd/system/
-# Edit the .service: set S3_BUCKET + S3_ACCESS_KEY_ID (the db-backups `argus-b2-app-key` key-id; deploy.sh
-# fills this from the B2_APP_KEY_ID var). The DB is reached in-container via `docker compose
+# Edit the .service: set S3_BUCKET + S3_ACCESS_KEY_ID (the ATTACHMENT-bucket key-id — same key the api manages
+# attachments with; deploy.sh fills both from the S3_BUCKET / S3_ACCESS_KEY_ID vars). The DB is reached
+# in-container via `docker compose
 # exec` (COMPOSE_FILE/COMPOSE_PROJECT_NAME, no PGHOST), so the user running the timer must be in the `docker`
 # group (argus already is). `psql` runs inside the postgres container; AWS CLI v2 runs on the host.
 sudo systemctl daemon-reload
