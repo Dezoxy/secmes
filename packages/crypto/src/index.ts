@@ -229,27 +229,26 @@ export async function safetyNumberFromMember(
 }
 
 /**
- * Nine-digit numeric display code shown on D2 during enrollment so D1 can verify the device fingerprint
- * out-of-band. Derived as `SHA-256(signaturePublicKey)[0..8] as uint64 % 1_000_000_000`, formatted
- * "XXX XXX XXX". Using 8 bytes (64 bits) of SHA-256 gives 10^9 possible codes — brute-forcing a matching
- * key requires ~10^9 Ed25519 key generations (~1000× harder than a 6-digit code).
+ * The full-width SAFETY NUMBER shown on D2 during device enrollment so D1 can verify D2's signing key
+ * out-of-band before approving the link. Derived as `renderSafetyNumber(SHA-256(signaturePublicKey))` —
+ * 8 groups of 5 digits (~133-bit), the SAME rendering as the two-party {@link safetyNumber}, but over a
+ * single device's signature key (the only material the enrollment record carries to D1).
+ *
+ * Width is the security property (closes FP-1): at ~133 bits a malicious server cannot grind a second
+ * Ed25519 key whose number collides with real D2's — the cost is ≥2^64, versus the ~10^9 (~30-bit) of the
+ * old 9-digit code, which a server *could* grind to inject its own device. The artifact is COMPARED
+ * visually across the two devices, never typed.
  *
  * Both D2 (computing from its own key) and D1 (computing from the server-stored fingerprint) must use
- * this function — matching algorithms is required for the codes to agree.
+ * this function — matching algorithms is required for the numbers to agree; a key swap shifts the number.
  *
  * Accepts the key as a base64-standard string (what the key directory and enrollment API store).
  */
-export async function enrollmentDisplayCode(signaturePublicKeyB64: string): Promise<string> {
+export async function enrollmentSafetyNumber(signaturePublicKeyB64: string): Promise<string> {
   const bin = atob(signaturePublicKeyB64);
   const raw = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i);
-  const hash = await sha256(raw);
-  const v = new DataView(hash.buffer);
-  const hi = BigInt(v.getUint32(0));
-  const lo = BigInt(v.getUint32(4));
-  const n = Number(((hi << 32n) | lo) % 1_000_000_000n);
-  const d = n.toString().padStart(9, '0');
-  return `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
+  return renderSafetyNumber(await sha256(raw));
 }
 
 /**

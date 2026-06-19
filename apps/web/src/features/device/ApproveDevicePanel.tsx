@@ -1,10 +1,11 @@
-// D1 side of B2 multi-device linking. Fetches the pending enrollment, shows the derived
-// fingerprint code for out-of-band verification, and — when the user confirms — signs an
-// enroll-approval proof, calls the approve endpoint, then fans D2 out into live conversations.
+// D1 side of B2 multi-device linking. Fetches the pending enrollment, shows the derived full-width
+// safety number for out-of-band visual comparison against the number D2 displays, and — when the user
+// confirms they match — signs an enroll-approval proof, calls the approve endpoint, then fans D2 out
+// into live conversations.
 import { useEffect, useState } from 'react';
 import { ShieldCheck, X } from 'lucide-react';
 import type { Conversation as MlsGroup } from '@argus/crypto';
-import { deviceSignatureSeed, enrollmentDisplayCode } from '@argus/crypto';
+import { deviceSignatureSeed, enrollmentSafetyNumber } from '@argus/crypto';
 import { signEnrollApproval } from '@argus/crypto/device-proof';
 import {
   approveEnrollment,
@@ -46,9 +47,7 @@ export function ApproveDevicePanel({
   const { device, deviceId } = useDevice();
   const [state, setState] = useState<ApproveState>('loading');
   const [enrollment, setEnrollment] = useState<Enrollment | null>(null);
-  const [expectedCode, setExpectedCode] = useState<string | null>(null);
-  const [input, setInput] = useState('');
-  const [mismatch, setMismatch] = useState(false);
+  const [safetyNumber, setSafetyNumber] = useState<string | null>(null);
   const [err, setErr] = useState<unknown>(null);
 
   useEffect(() => {
@@ -63,10 +62,12 @@ export function ApproveDevicePanel({
           setState('error');
           return;
         }
-        const code = await enrollmentDisplayCode(found.fingerprint);
+        // Derived from the server-relayed fingerprint: if the server swapped D2's key, this number
+        // diverges from the one D2 shows (computed from its own key) and the human compare catches it.
+        const number = await enrollmentSafetyNumber(found.fingerprint);
         if (!active) return;
         setEnrollment(found);
-        setExpectedCode(code);
+        setSafetyNumber(number);
         setState('ready');
       } catch (e) {
         if (!active) return;
@@ -79,18 +80,11 @@ export function ApproveDevicePanel({
     };
   }, [enrollmentId]);
 
-  const normalizedInput = input.replace(/\s/g, '');
-
+  // Approve IS the human assertion that the two displayed safety numbers match — there is no typed
+  // entry to compare, so the user must have eyeballed all 8 groups before pressing it.
   const handleApprove = async () => {
-    if (!device || !deviceId || !enrollment || !messagingDeps) return;
+    if (!device || !deviceId || !enrollment || !messagingDeps || !safetyNumber) return;
 
-    const normalized = input.replace(/\s/g, '');
-    const expected = (expectedCode ?? '').replace(/\s/g, '');
-    if (normalized !== expected) {
-      setMismatch(true);
-      return;
-    }
-    setMismatch(false);
     setState('approving');
 
     try {
@@ -122,11 +116,6 @@ export function ApproveDevicePanel({
     }
   };
 
-  const handleInputChange = (value: string) => {
-    setInput(value);
-    if (mismatch) setMismatch(false);
-  };
-
   return (
     <Modal
       ariaLabel="Approve new device"
@@ -150,36 +139,31 @@ export function ApproveDevicePanel({
       {(state === 'ready' || state === 'approving') && (
         <div className="space-y-5">
           <p className="text-sm leading-relaxed text-white/55">
-            A new device wants to join your account. Enter the 9-digit code shown on that device to
-            confirm it is yours.
+            A new device wants to join your account. Compare this safety number with the one shown
+            on that device — approve only if every group matches.
           </p>
-          <div>
-            <label
-              htmlFor="approve-device-code"
-              className="mb-2 block text-sm font-medium text-white/70"
+          {safetyNumber ? (
+            <div
+              className="grid grid-cols-4 gap-2 rounded-2xl bg-[#0f0f16] p-4"
+              aria-label={`Safety number: ${safetyNumber}`}
             >
-              Code shown on new device
-            </label>
-            <input
-              id="approve-device-code"
-              type="text"
-              value={input}
-              onChange={(e) => handleInputChange(e.target.value)}
-              placeholder="123 456 789"
-              maxLength={11}
-              autoComplete="off"
-              spellCheck={false}
-              inputMode="numeric"
-              aria-invalid={mismatch}
-              aria-describedby={mismatch ? 'approve-code-error' : undefined}
-              className="w-full rounded-xl border border-white/10 bg-[#0f0f16] px-4 py-3 text-center font-mono text-lg tracking-[0.25em] text-white placeholder-white/25 focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/50"
-            />
-            {mismatch && (
-              <p id="approve-code-error" role="alert" className="mt-2 text-sm text-rose-400">
-                Code doesn&apos;t match — do not approve if this isn&apos;t your device.
-              </p>
-            )}
-          </div>
+              {safetyNumber.split(' ').map((g, i) => (
+                <span
+                  key={i}
+                  className="text-center font-mono text-base tracking-widest text-white/90 tabular-nums"
+                >
+                  {g}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-[#0f0f16] p-4 text-center text-sm text-white/60">
+              Computing safety number…
+            </div>
+          )}
+          <p role="note" className="text-sm text-rose-400/90">
+            Do not approve if this isn&apos;t your device or the numbers don&apos;t match.
+          </p>
           <div className="flex gap-3">
             <Button
               variant="ghost"
@@ -197,7 +181,7 @@ export function ApproveDevicePanel({
               variant="primary"
               size="lg"
               onClick={() => void handleApprove()}
-              disabled={normalizedInput.length < 9 || state === 'approving'}
+              disabled={!safetyNumber || state === 'approving'}
               loading={state === 'approving'}
               loadingLabel="Approving…"
               className="flex-1"

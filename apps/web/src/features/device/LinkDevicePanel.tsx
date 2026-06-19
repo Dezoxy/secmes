@@ -1,8 +1,9 @@
-// D2 side of B2 multi-device linking. Displays the device fingerprint as a 9-digit code,
-// registers an enrollment request, and polls until the other device approves.
+// D2 side of B2 multi-device linking. Displays the device's full-width safety number (derived from
+// D2's OWN signing key — never anything server-returned, so a server key-swap shifts it and D1 sees
+// the mismatch), registers an enrollment request, and polls until the other device approves.
 import { useEffect, useState } from 'react';
 import { CheckCircle, Link2, X } from 'lucide-react';
-import { enrollmentDisplayCode } from '@argus/crypto';
+import { enrollmentSafetyNumber } from '@argus/crypto';
 import { listEnrollments, registerEnrollment, type Enrollment } from '../../lib/api';
 import { toBase64 } from '../../lib/base64';
 import { Button, ErrorState, IconButton, LoadingState, Modal } from '../ui';
@@ -17,11 +18,11 @@ interface LinkDevicePanelProps {
 export function LinkDevicePanel({ onClose }: LinkDevicePanelProps) {
   const { device, deviceId } = useDevice();
   const [state, setState] = useState<LinkState>('registering');
-  const [code, setCode] = useState<string | null>(null);
+  const [safetyNumber, setSafetyNumber] = useState<string | null>(null);
   const [enrollmentId, setEnrollmentId] = useState<string | null>(null);
   const [err, setErr] = useState<unknown>(null);
 
-  // Register enrollment on mount and derive display code.
+  // Register enrollment on mount and derive the safety number from D2's own signing key.
   useEffect(() => {
     if (!device || !deviceId) {
       setErr(new Error('Device not ready. Unlock your device first.'));
@@ -32,9 +33,9 @@ export function LinkDevicePanel({ onClose }: LinkDevicePanelProps) {
     let active = true;
     void (async () => {
       try {
-        const c = await enrollmentDisplayCode(fingerprint);
+        const n = await enrollmentSafetyNumber(fingerprint);
         if (!active) return;
-        setCode(c);
+        setSafetyNumber(n);
         const enrollment = await registerEnrollment(deviceId, fingerprint);
         if (!active) return;
         setEnrollmentId(enrollment.id);
@@ -88,24 +89,38 @@ export function LinkDevicePanel({ onClose }: LinkDevicePanelProps) {
         </IconButton>
       </div>
 
-      {state === 'registering' && <LoadingState title="Preparing device code" />}
+      {state === 'registering' && <LoadingState title="Preparing your safety number" />}
 
       {state === 'awaiting' && (
         <>
           <p className="mb-5 text-sm leading-relaxed text-white/55">
             On your already-linked device, open{' '}
-            <strong className="text-white/80">Settings → Devices</strong> and enter this code when
-            prompted.
+            <strong className="text-white/80">Settings → Devices</strong> and compare this safety
+            number — approve only if every group matches.
           </p>
-          <div
-            className="mb-5 flex items-center justify-center rounded-2xl bg-[#0f0f16] py-8"
-            aria-live="polite"
-            aria-label={`Device code: ${code ?? ''}`}
-          >
-            <span className="font-mono text-4xl font-bold tracking-[0.3em] text-white">
-              {code ?? '--- --- ---'}
-            </span>
-          </div>
+          {safetyNumber ? (
+            <div
+              className="mb-5 grid grid-cols-4 gap-2 rounded-2xl bg-[#0f0f16] p-4"
+              aria-live="polite"
+              aria-label={`Safety number: ${safetyNumber}`}
+            >
+              {safetyNumber.split(' ').map((g, i) => (
+                <span
+                  key={i}
+                  className="text-center font-mono text-base tracking-widest text-white/90 tabular-nums"
+                >
+                  {g}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div
+              className="mb-5 rounded-2xl bg-[#0f0f16] p-4 text-center text-sm text-white/60"
+              aria-live="polite"
+            >
+              Computing safety number…
+            </div>
+          )}
           <p className="flex items-center justify-center gap-2 text-sm text-white/40">
             <span
               className="inline-block h-2 w-2 animate-pulse rounded-full bg-purple-400"
