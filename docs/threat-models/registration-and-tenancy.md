@@ -97,7 +97,7 @@ The challenge sits in `webauthn_challenges` indefinitely and could be replayed l
 OIDC multi-tenant isolation.
 
 **Mitigations:**
-- `DEFAULT_TENANT_ID` is a fixed UUID constant (`00000000-0000-0000-0000-000000000001`), inserted into
+- `DEFAULT_TENANT_ID` is a fixed UUID constant (`00000000-0000-4000-8000-000000000001`), inserted into
   `tenants` idempotently on migration.
 - All FORCE RLS policies remain in force; the single shared tenant is just one tenant whose RLS predicate
   is satisfied by `app.tenant_id = DEFAULT_TENANT_ID`.
