@@ -1,6 +1,7 @@
 import {
   cleanupOutdatedCaches,
   createHandlerBoundToURL,
+  matchPrecache,
   precacheAndRoute,
 } from 'workbox-precaching';
 import { NavigationRoute, registerRoute } from 'workbox-routing';
@@ -28,8 +29,9 @@ const INTEGRITY_MANIFEST: Record<string, string> = JSON.parse(
 // crypto chunks from Cache Storage WITHOUT the integrity check, defeating CDI-1. Only matches paths in the
 // inlined manifest; unknown paths (api/ws/attachments/future-build chunks) don't match → fall through to the
 // precache/network untouched, so a mid-deploy version skew never bricks the app. It re-hashes the bytes
-// actually received (network OR HTTP cache, so a cache-poisoned immutable asset is still caught) and fails
-// closed on a mismatch. It writes nothing to Cache Storage — the SW caches only the precache shell.
+// actually served and fails closed on a mismatch. Source: the Workbox precache FIRST (preserves offline —
+// these assets are precached — and still verifies the precached copy, so a chunk poisoned at install time is
+// also caught), then the network. It writes nothing to Cache Storage — the SW caches only the precache shell.
 registerRoute(
   ({ request, url }) =>
     request.method === 'GET' &&
@@ -37,7 +39,7 @@ registerRoute(
     expectedHashFor(url.pathname, INTEGRITY_MANIFEST) !== undefined,
   async ({ request, url }) => {
     const expected = expectedHashFor(url.pathname, INTEGRITY_MANIFEST);
-    const response = await fetch(request);
+    const response = (await matchPrecache(request)) ?? (await fetch(request));
     const buffer = await response.clone().arrayBuffer();
     const decision = await checkAssetIntegrity(expected, buffer);
     if (!decision.ok) {
