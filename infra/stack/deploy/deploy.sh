@@ -389,6 +389,17 @@ log "deploying + arming backup/cleanup workers"
   log "FATAL: BACKUP_AGE_RECIPIENT (age public key) required — refusing to arm a backup that would upload unencrypted"
   exit 1
 }
+# Bucket names are templated per deploy so the AWS experiment can't target the production buckets: the backup
+# worker writes BACKUP_S3_BUCKET (the db-backups bucket); the cleanup worker reaps the api's own attachments,
+# so it reuses S3_BUCKET (the attachment bucket the api is configured with). Both required, fail-closed.
+[ -n "${BACKUP_S3_BUCKET:-}" ] || {
+  log "FATAL: BACKUP_S3_BUCKET required (the private db-backups bucket) to arm the backup worker"
+  exit 1
+}
+[ -n "${S3_BUCKET:-}" ] || {
+  log "FATAL: S3_BUCKET required (the attachment bucket) to arm the cleanup worker"
+  exit 1
+}
 # Stage the worker + notifier scripts where the units' ExecStart points (/opt/argus/{backup,cleanup,notify}).
 install -d -m 0755 "$APP_DIR/backup" "$APP_DIR/cleanup" "$APP_DIR/notify"
 install -m 0755 "$REPO_ROOT/infra/backup/backup-db.sh" "$APP_DIR/backup/backup-db.sh"
@@ -409,6 +420,9 @@ install -m 0644 "$REPO_ROOT/infra/notify/argus-notify-failure@.service" /etc/sys
 sed -i "s|REPLACE_WITH_B2_KEY_ID|${B2_APP_KEY_ID}|" \
   /etc/systemd/system/argus-db-backup.service /etc/systemd/system/argus-attachment-cleanup.service
 sed -i "s|REPLACE_WITH_AGE_PUBLIC_KEY|${BACKUP_AGE_RECIPIENT}|" /etc/systemd/system/argus-db-backup.service
+# Bucket names per deploy: backup → the db-backups bucket; cleanup → the same attachment bucket the api uses.
+sed -i "s|REPLACE_WITH_BACKUP_BUCKET|${BACKUP_S3_BUCKET}|" /etc/systemd/system/argus-db-backup.service
+sed -i "s|REPLACE_WITH_ATTACHMENT_BUCKET|${S3_BUCKET}|" /etc/systemd/system/argus-attachment-cleanup.service
 systemctl daemon-reload
 systemctl enable --now argus-db-backup.timer argus-attachment-cleanup.timer >/dev/null 2>&1 || {
   log "FATAL: could not enable the backup/cleanup timers"

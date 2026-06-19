@@ -6,7 +6,8 @@
 # Auth: `gh auth login` (with repo admin) + `terraform apply` already run in infra/aws/terraform.
 # Idempotent: `gh variable/secret set` and the environment PUT all overwrite.
 #
-# Operator-supplied values via env (no sane default → required): S3_BUCKET, S3_ACCESS_KEY_ID.
+# Operator-supplied values via env (no sane default → required): S3_BUCKET, S3_ACCESS_KEY_ID,
+#   BACKUP_S3_BUCKET, B2_APP_KEY_ID, BACKUP_AGE_RECIPIENT (the last three arm the nightly DB backup — BKP-1).
 # Optional via env: X42C_API_TOKEN (42Crunch), GHCR_USER (default = repo owner), S3_ENDPOINT / S3_REGION
 #   (default B2 eu-central-003), B2_CORS_KEY_ID (non-secret keyId for converge-on-deploy attachment CORS — leave
 #   unset until you've minted the bucket-restricted CORS key; deploy.sh skips CORS convergence while it's unset),
@@ -63,6 +64,9 @@ prompt_var() { # $1 = var name ; $2 = human prompt
 }
 prompt_var S3_BUCKET "B2 attachments bucket name"
 prompt_var S3_ACCESS_KEY_ID "B2 attachments key ID (non-secret)"
+prompt_var BACKUP_S3_BUCKET "B2 db-backups bucket name (private; SEPARATE from attachments)"
+prompt_var B2_APP_KEY_ID "B2 db-backups app key ID (non-secret; matches argus-b2-app-key in Key Vault)"
+prompt_var BACKUP_AGE_RECIPIENT "age PUBLIC recipient key for DB backups (age1...; private key stays in Key Vault)"
 
 setvar() {
   gh variable set "$1" --repo "$REPO" --body "$2" >/dev/null
@@ -79,6 +83,10 @@ setvar S3_ENDPOINT "$S3_ENDPOINT"
 setvar S3_REGION "$S3_REGION"
 setvar S3_BUCKET "$S3_BUCKET"
 setvar S3_ACCESS_KEY_ID "$S3_ACCESS_KEY_ID" # non-secret (rides in every presigned URL); secret is in Key Vault
+# Backup-worker config (deploy.sh fails closed without these once the workers are armed — BKP-1):
+setvar BACKUP_S3_BUCKET "$BACKUP_S3_BUCKET"        # private db-backups bucket (separate from attachments)
+setvar B2_APP_KEY_ID "$B2_APP_KEY_ID"              # non-secret db-backups key-id; matches argus-b2-app-key
+setvar BACKUP_AGE_RECIPIENT "$BACKUP_AGE_RECIPIENT" # age PUBLIC recipient; private key is Key-Vault-only
 # B2 CORS app-key ID — non-secret keyId for converge-on-deploy attachment CORS (the secret half is
 # argus-b2-cors-app-key in Key Vault). OPTIONAL: only set once you've minted the bucket-restricted CORS key;
 # while the repo var is unset/empty, deploy.sh skips CORS convergence (opt-in, non-breaking).

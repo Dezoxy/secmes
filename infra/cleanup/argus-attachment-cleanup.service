@@ -34,7 +34,9 @@ Environment=PGUSER=argus_cleanup
 Environment=PGDATABASE=argus
 Environment=S3_ENDPOINT=https://s3.eu-central-003.backblazeb2.com
 Environment=S3_REGION=eu-central-003
-Environment=S3_BUCKET=attachment-r8xq4m7z2p9n6k3v
+# The attachment bucket — templated per deploy from the SAME S3_BUCKET the api uses (cleanup reaps the api's
+# own expired attachments), so the worker always targets the configured environment's bucket.
+Environment=S3_BUCKET=REPLACE_WITH_ATTACHMENT_BUCKET
 # This worker DELETEs from the attachment bucket, so it needs a credential with deleteFiles there. It uses the
 # broad `argus-b2-app-key` (key-id = B2_APP_KEY_ID, same as the backup worker) — which spans BOTH buckets with
 # delete on both (the BKP-2 over-broad key). It deliberately does NOT use the api's attachment key

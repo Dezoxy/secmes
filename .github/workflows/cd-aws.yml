@@ -152,6 +152,9 @@ jobs:
           # Non-secret keyId for the db-backups B2 app key (argus-b2-app-key) — a SEPARATE key from
           # S3_ACCESS_KEY_ID. REQUIRED — deploy.sh fails closed without it. See cd.yml.
           B2_APP_KEY_ID: ${{ vars.B2_APP_KEY_ID }}
+          # Private db-backups bucket (separate from the attachment S3_BUCKET). REQUIRED — fails closed. The
+          # experiment MUST set its own bucket here so its dumps don't land in the production backup bucket.
+          BACKUP_S3_BUCKET: ${{ vars.BACKUP_S3_BUCKET }}
         run: |
           set -euo pipefail
           # Bundle what deploy.sh reads from the unpacked tree: compose + the secret-fetch unit + deploy.sh, PLUS
@@ -173,8 +176,8 @@ jobs:
             echo 'export ARGUS_TOKEN_SOURCE=arc ARGUS_SKIP_GLITCHTIP=1 ARGUS_COSIGN_WORKFLOW=.github/workflows/cd-aws.yml'
             printf 'export ARGUS_KEY_VAULT=%q IMAGE_TAG=%q GHCR_REGISTRY=%q GHCR_USER=%q GH_REPO=%q\n' \
               "$KEY_VAULT" "$IMAGE_TAG" "$GHCR_REGISTRY" "$GHCR_USER" "$GH_REPO"
-            printf 'export S3_ENDPOINT=%q S3_REGION=%q S3_BUCKET=%q S3_ACCESS_KEY_ID=%q B2_CORS_KEY_ID=%q BACKUP_AGE_RECIPIENT=%q B2_APP_KEY_ID=%q\n' \
-              "$S3_ENDPOINT" "$S3_REGION" "$S3_BUCKET" "$S3_ACCESS_KEY_ID" "$B2_CORS_KEY_ID" "$BACKUP_AGE_RECIPIENT" "$B2_APP_KEY_ID"
+            printf 'export S3_ENDPOINT=%q S3_REGION=%q S3_BUCKET=%q S3_ACCESS_KEY_ID=%q B2_CORS_KEY_ID=%q BACKUP_AGE_RECIPIENT=%q B2_APP_KEY_ID=%q BACKUP_S3_BUCKET=%q\n' \
+              "$S3_ENDPOINT" "$S3_REGION" "$S3_BUCKET" "$S3_ACCESS_KEY_ID" "$B2_CORS_KEY_ID" "$BACKUP_AGE_RECIPIENT" "$B2_APP_KEY_ID" "$BACKUP_S3_BUCKET"
             echo 'bash "$WORK/infra/stack/deploy/deploy.sh"'
             echo 'rm -rf "$WORK"'
           } >runcmd.sh

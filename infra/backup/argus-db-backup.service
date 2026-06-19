@@ -38,8 +38,9 @@ Environment=PGUSER=argus_backup
 Environment=PGDATABASE=argus
 Environment=S3_ENDPOINT=https://s3.eu-central-003.backblazeb2.com
 Environment=S3_REGION=eu-central-003
-# The PRIVATE backup bucket — separate from the attachment bucket, never public.
-Environment=S3_BUCKET=db-q7m2z9x4v6n8p3k1
+# The PRIVATE db-backups bucket — separate from the attachment bucket, never public. Templated per deploy
+# from BACKUP_S3_BUCKET so the AWS experiment can't write its dumps into the production backup bucket.
+Environment=S3_BUCKET=REPLACE_WITH_BACKUP_BUCKET
 Environment=S3_ACCESS_KEY_ID=REPLACE_WITH_B2_KEY_ID
 # age PUBLIC recipient key (age1...). The matching PRIVATE key is NOT here — it lives in Key Vault and is
 # fetched only at restore time, so this host cannot decrypt the backups it writes.
