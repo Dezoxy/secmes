@@ -58,13 +58,29 @@ create policy audit_events_prune_delete on audit_events
 -- of a past-window row. DELETE stays table-level (still RLS-gated to the 90-day window by the policy above).
 grant select (id, created_at), delete on audit_events to argus_prune;
 
--- 3. auth_sessions. NO re-scope of auth_sessions_isolation here: unlike audit_events, 0031 wrote it with
---    the nullif(current_setting('app.tenant_id', true), '') missing_ok form, which for argus_prune
---    returns NULL → `tenant_id = NULL` is UNKNOWN → no rows (fail-closed, never throws). So the PUBLIC
---    isolation policy is harmless to argus_prune and we leave it untouched (tighter diff, no risk to the
---    auth path). The PUBLIC auth_sessions_refresh_lookup carve-out is likewise inert for argus_prune
---    (gated on app.session_refresh_hash, which the worker never sets). argus_prune's effective visibility
---    is therefore exactly the expired-window rows below.
+-- 3. auth_sessions. Re-scope BOTH existing 0031 policies TO argus_app — REQUIRED, not cosmetic. They are
+--    PUBLIC: `auth_sessions_isolation` is FOR ALL on `tenant_id = nullif(current_setting('app.tenant_id',
+--    true),'')::uuid`. With the GUC unset (the worker's normal state) that is NULL → no rows, so it *looks*
+--    inert for argus_prune — but RLS permissive policies OR together, and argus_prune CAN issue
+--    `set_config('app.tenant_id', <any tenant>)`. If it does, the isolation policy's USING becomes TRUE for
+--    that tenant's rows and ORs with the expired-only prune policy below → argus_prune could then
+--    SELECT/DELETE that tenant's LIVE sessions, revoking active logins and defeating the retention-only
+--    boundary. Scoping both policies TO argus_app removes them from argus_prune entirely, so its ONLY
+--    applicable policies are the expired-window prune policies — setting app.tenant_id then buys nothing.
+--    This is the same fix applied to audit_events above (and what 0013 did for attachments). It is
+--    transparent for argus_app (the only role that uses these policies; the refresh endpoint runs as
+--    argus_app and sets app.session_refresh_hash) and for argus_backup (BYPASSRLS) / the owner.
+drop policy if exists auth_sessions_isolation on auth_sessions;
+create policy auth_sessions_isolation on auth_sessions
+  to argus_app
+  using      (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid)
+  with check (tenant_id = nullif(current_setting('app.tenant_id', true), '')::uuid);
+drop policy if exists auth_sessions_refresh_lookup on auth_sessions;
+create policy auth_sessions_refresh_lookup on auth_sessions
+  as permissive for select
+  to argus_app
+  using (refresh_token_hash = current_setting('app.session_refresh_hash', true));
+
 drop policy if exists auth_sessions_prune_select on auth_sessions;
 create policy auth_sessions_prune_select on auth_sessions
   for select

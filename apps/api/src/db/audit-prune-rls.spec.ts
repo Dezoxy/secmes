@@ -42,6 +42,17 @@ describe.skipIf(!DB_URL)('audit/session retention prune (argus_prune) — F1/AR-
     }) as Promise<unknown>;
   }
 
+  // Adversarial posture: argus_prune that ALSO sets app.tenant_id to a real tenant. A leaked/misused prune
+  // credential could do this; the isolation policies must NOT then OR-in and expose that tenant's in-window
+  // rows (the bypass closed by scoping 0031/0002 isolation policies TO argus_app in 0043).
+  function asPruneWithTenant(tenantId: string, fn: (tx: typeof sql) => unknown): Promise<unknown> {
+    return sql.begin(async (tx) => {
+      await tx`set local role argus_prune`;
+      await tx`select set_config('app.tenant_id', ${tenantId}, true)`;
+      return fn(tx as unknown as typeof sql);
+    }) as Promise<unknown>;
+  }
+
   // Owner inserts (bypass RLS). `ageDays` > 0 means created that many days in the PAST.
   function mkAudit(tenant: string, ageDays: number): Promise<string> {
     return sql`insert into audit_events (tenant_id, event_type, created_at)
@@ -132,6 +143,34 @@ describe.skipIf(!DB_URL)('audit/session retention prune (argus_prune) — F1/AR-
     expect(await countSession(staleB)).toBe(0);
     expect(await countSession(recentlyExpired)).toBe(1); // within the 30-day reuse-detection buffer
     expect(await countSession(live)).toBe(1);
+  });
+
+  it('argus_prune setting app.tenant_id CANNOT reach a tenant’s live sessions or in-window audit rows', async () => {
+    // The bypass this guards: if the isolation policies were still PUBLIC/FOR ALL, an argus_prune session
+    // that sets app.tenant_id would OR the isolation predicate in and expose that tenant's LIVE rows. After
+    // scoping those policies TO argus_app (0043), the isolation policies don't apply to argus_prune at all —
+    // only the expired-window prune policies do — so setting app.tenant_id buys nothing.
+    const liveSession = await mkSession(tenantA, userA, 5); // live → must stay invisible/undeletable
+    const recentAudit = await mkAudit(tenantA, 10); // in-window → must stay invisible/undeletable
+
+    // Even WITH a valid tenant context, the prune role sees only past-window rows of that tenant.
+    const sessionsSeen = (await asPruneWithTenant(
+      tenantA,
+      (tx) => tx`select id from auth_sessions`,
+    )) as Array<{ id: string }>;
+    expect(sessionsSeen.map((r) => r.id)).not.toContain(liveSession);
+
+    await asPruneWithTenant(
+      tenantA,
+      (tx) => tx`delete from auth_sessions where id = ${liveSession}`,
+    );
+    await asPruneWithTenant(
+      tenantA,
+      (tx) => tx`delete from audit_events where id = ${recentAudit}`,
+    );
+
+    expect(await countSession(liveSession)).toBe(1); // live session survived — no bypass
+    expect(await countAudit(recentAudit)).toBe(1); // in-window audit row survived — no bypass
   });
 
   it('argus_app tenant isolation on audit_events is unchanged by the policy re-scope', async () => {
