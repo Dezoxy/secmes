@@ -71,6 +71,9 @@ jobs:
 
       - run: pnpm -r build
 
+      - name: Assert SW SRI manifest is fully inlined (CDI-1/CDI-4)
+        run: pnpm --filter @argus/web check:sw-integrity
+
       - name: Generate OpenAPI spec
         run: pnpm --filter @argus/api openapi
 
@@ -135,6 +138,8 @@ jobs:
             exit 1
           fi
           echo "compose.prod.yaml: no published host ports OK"
+      - name: Assert CSP connect-src pins the prod B2 bucket (CSP-1)
+        run: bash scripts/check-csp-connect-src.sh
 
   dockerignore-guard:
     runs-on: ubuntu-latest

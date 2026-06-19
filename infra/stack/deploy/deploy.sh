@@ -30,6 +30,24 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 : "${S3_BUCKET:?S3_BUCKET required (the attachment bucket — cleanup worker target)}"
 : "${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID required (attachment B2 key-id — the cleanup worker credential)}"
 
+# CSP-1 binding (the part CI cannot check), validated PRE-ROLLOUT alongside the other required-var guards so a
+# misconfig aborts cleanly with the running stack untouched (not after the api is already serving the wrong
+# bucket). The PWA's Content-Security-Policy connect-src pins the attachment bucket's virtual-host subdomain;
+# the API presigns against $S3_BUCKET (a deploy-time GitHub repo variable CI can't see). If they diverge, every
+# attachment upload/download is silently CSP-blocked in the browser while CI stays green. Bind them here, at the
+# one place $S3_BUCKET is known, and FAIL CLOSED. ATTACHMENT_BUCKET (defined once here) is also reused by the
+# B2 CORS-key restriction check below, so that check now validates the bucket the API actually presigns against.
+# This constant MUST match the host pinned in infra/stack/caddy/Caddyfile — scripts/check-csp-connect-src.sh
+# fails CI if the two literals drift.
+ATTACHMENT_BUCKET="attachment-r8xq4m7z2p9n6k3v"
+if [ "$S3_BUCKET" != "$ATTACHMENT_BUCKET" ]; then
+  echo "FATAL: S3_BUCKET ('$S3_BUCKET') != the CSP-pinned attachment bucket ('$ATTACHMENT_BUCKET'). The PWA's" >&2
+  echo "       Content-Security-Policy connect-src only allows ${ATTACHMENT_BUCKET}.s3.<region>.backblazeb2.com," >&2
+  echo "       so attachments would be blocked in the browser. Set vars.S3_BUCKET to '$ATTACHMENT_BUCKET' or" >&2
+  echo "       update infra/stack/caddy/Caddyfile + this constant together. Refusing to deploy." >&2
+  exit 1
+fi
+
 APP_DIR=/opt/argus
 SECRETS_DIR=/run/argus/secrets
 COMPOSE="$APP_DIR/compose.prod.yaml"
@@ -584,7 +602,8 @@ fi
 #         (unset ⇒ feature not provisioned yet ⇒ skip with a log, mirroring the SKIP_* knobs — NOT a silent
 #         apply failure). See docs/threat-models/b2-cors-convergence.md. ---
 B2_CORS_KEY_ID="${B2_CORS_KEY_ID:-}"
-ATTACHMENT_BUCKET="attachment-r8xq4m7z2p9n6k3v"
+# ATTACHMENT_BUCKET is defined and bound to $S3_BUCKET pre-rollout near the top of this script (CSP-1) — by the
+# time the CORS-key restriction check below runs, it equals the bucket the API actually presigns against.
 B2_AUTH_URL="https://api.backblazeb2.com/b2api/v3/b2_authorize_account"
 # B2 canonicalizes CORS header NAMES to lowercase on storage (e.g. "ETag" -> "etag"). Lowercase the header
 # arrays on BOTH sides before comparing so a casing-only difference isn't mistaken for drift — otherwise the

@@ -49,9 +49,10 @@ and ciphertext.
   shipped `dist/sw.js`, which carries zero integrity fields): with `revision:null` Workbox treats the
   content-hashed `/assets/*` filename as the cache key, so a new build's hashed name busts the old entry — but it
   does **not** verify that the fetched bytes match any hash. SRI on the `<script>`/`<link>` tags is the actual
-  byte-integrity control here. Strict CSP `script-src 'self'` blocks foreign/inline script regardless. **Caveat:** SRI
-  attributes cover the entry + statically-referenced chunks + CSS, **not** dynamically-`import()`ed chunks (lazy
-  routes + ts-mls's internal crypto chunks) — a browser-platform gap — see §6.
+  byte-integrity control for those, and the **service worker's SRI fetch handler** (CDI-1, see §6) is the
+  byte-integrity control for the dynamically-`import()`ed chunks the SRI attributes can't reach. Strict CSP
+  `script-src 'self'` blocks foreign/inline script regardless. **Resolved (CDI-1):** the dynamic-`import()` gap
+  (lazy routes + ts-mls's internal crypto chunks) is now closed by the SW handler — see §6.
 - **Tampering — swapped `index.html`** (the SRI bootstrap itself). `index.html` carries the integrity attrs, so
   a swapped `index.html` could strip them — SRI cannot self-protect the document that declares it. → Mitigated
   by edge TLS (HTTPS), CSP `base-uri 'none'` / `frame-ancestors 'none'`, and the SW: an installed client
@@ -116,20 +117,35 @@ revision consistent; manifest sha384 == SRI integrity).
   updates, the SW pinning a known-good `index.html` for returning/installed users, and the published bundle hash
   as a detective control. Accepted for this phase; a signed-SW / signed-index transparency scheme and the G7
   security page surfacing the bundle hash are the next step.
-- **SRI covers the entry script + CSS, not dynamically-`import()`ed chunks.** The `integrity` attribute lives on
-  the `<script>`/`<link>` tags in `index.html`, so it robustly protects the entry bundle and stylesheet. The lazy
-  route chunks (`React.lazy` → Settings / Security / **Recovery** / Devices) and ts-mls's internal crypto chunks
-  load via native dynamic `import()`, which **cannot carry an integrity attribute** — a browser-platform gap, not
-  a config miss. (The spec's fix is import-map `integrity`, shipped only in recent Chrome/Safari — not Firefox —
-  and an inline import map collides with our `script-src 'self'` CSP.) So a same-origin/edge **cache-poisoning
-  swap of a route or crypto chunk** would execute unverified. Partially mitigated: `script-src 'self'` blocks
-  foreign script; immutable content-hashed filenames + the SW precache narrow the window for installed users; and
-  the published `bundle-manifest.json` is the detective control (an auditor / the G7 page can diff served chunk
-  hashes against it). **Decision (2026-06-09, with the maintainer): accept this residual** rather than (a)
-  `inlineDynamicImports` into one SRI-covered entry — which reverts the deliberate route/crypto code-splitting
-  and bloats the unauthenticated load — or (b) import-map integrity (partial browser support + a build↔Caddy-CSP
-  coupling). Revisit when import-map integrity is broadly supported, or fold it into the G7 signed-transparency
-  work. (Codex #152 P1.)
+- **CLOSED (CDI-1, 2026-06-19) — dynamically-`import()`ed chunks are now SRI-verified by the service worker.**
+  The `integrity` attribute on the `<script>`/`<link>` tags in `index.html` protects the entry bundle + stylesheet
+  but **cannot** cover the lazy route chunks (`React.lazy`) or ts-mls's internal crypto chunks (`nist-*`, `ed448-*`,
+  `chacha-*`, `ml-dsa-*`, `ml-kem-*`, …), which load via native dynamic `import()` — a browser-platform gap (the
+  spec's import-map `integrity` is not in Firefox and an inline import map collides with `script-src 'self'`). That
+  gap is now closed at a different layer: the SW carries a build-time-**inlined** map of every asset's sha384 (the
+  same values `bundle-manifest.json` / SRI carry — inlined by the `inline-sw-integrity` post-build step, never
+  fetched at runtime, so an attacker who swaps a chunk cannot also serve a matching manifest), and its `fetch`
+  handler re-hashes the bytes actually received for any manifest-known `/assets/*` and **fails closed** (502 → the
+  `import()` rejects, the crypto op errors out) on a mismatch. Unknown paths pass through untouched, so a
+  mid-deploy version skew never bricks the app. Implemented in `apps/web/src/sw.ts` + `src/lib/sw-integrity.ts`;
+  the `check:sw-integrity` build-output guard (CDI-4) fails CI if the inlining is ever dropped or a chunk is left
+  uncovered. The earlier decision (2026-06-09) to *accept* this residual rather than `inlineDynamicImports` (which
+  would revert code-splitting) or import-map integrity (partial browser support) is **superseded** — the SW
+  handler closes it without either downside. (Codex #152 P1 → resolved.)
+
+  **Residual — first-load-before-SW-control (the irreducible TOFU floor).** A service worker cannot intercept
+  the requests of the very first navigation that bootstraps it (it installs/activates *during* that load), so a
+  dynamic `import()` that fires before the SW takes control is unverified on a first-ever visit. This is bounded
+  three ways and accepted: (a) the entry bundle + statically-referenced chunks + CSS *are* SRI-protected on first
+  load via the `index.html` `integrity=` attrs — only native dynamic-`import()` chunks are outside SRI; (b) those
+  chunks (the ts-mls crypto chunks, lazy routes) load **lazily** — the crypto chunks only when the user first
+  performs crypto (sends/receives a message), which in the real flow is well after the SW has activated, so they
+  *are* verified even on a first visit; (c) forcing earlier control via `skipWaiting()`/`clientsClaim()` is
+  **deliberately not done** — it would let a new SW activate without user consent, defeating the `registerType:
+  'prompt'` no-silent-swap mitigation for the malicious-SW threat (§3). This is the same first-load TOFU floor
+  every PWA (incl. Signal) carries; the G7 signed-SW / signed-index transparency scheme is the GA path. (Codex
+  PR #261 P2 → accepted residual.) The other residual is a same-origin SW/origin compromise (first bullet),
+  bounded by prompt-mode updates + Caddy `no-cache` on `sw.js`.
 - **The bundle manifest is detective, not preventive** — it lets an auditor or the future security page detect a
   divergent build but does not itself block a tampered load. Acceptable: it pairs with SRI (the preventive
   control) on the assets that *can* carry integrity.
