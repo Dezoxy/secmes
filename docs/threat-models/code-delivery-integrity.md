@@ -131,9 +131,21 @@ revision consistent; manifest sha384 == SRI integrity).
   the `check:sw-integrity` build-output guard (CDI-4) fails CI if the inlining is ever dropped or a chunk is left
   uncovered. The earlier decision (2026-06-09) to *accept* this residual rather than `inlineDynamicImports` (which
   would revert code-splitting) or import-map integrity (partial browser support) is **superseded** — the SW
-  handler closes it without either downside. (Codex #152 P1 → resolved.) Residual now: only a same-origin SW/origin
-  compromise (first bullet) or the SW-update first-load window — bounded by prompt-mode updates + Caddy `no-cache`
-  on `sw.js`; the G7 signed-transparency scheme is the next hardening step.
+  handler closes it without either downside. (Codex #152 P1 → resolved.)
+
+  **Residual — first-load-before-SW-control (the irreducible TOFU floor).** A service worker cannot intercept
+  the requests of the very first navigation that bootstraps it (it installs/activates *during* that load), so a
+  dynamic `import()` that fires before the SW takes control is unverified on a first-ever visit. This is bounded
+  three ways and accepted: (a) the entry bundle + statically-referenced chunks + CSS *are* SRI-protected on first
+  load via the `index.html` `integrity=` attrs — only native dynamic-`import()` chunks are outside SRI; (b) those
+  chunks (the ts-mls crypto chunks, lazy routes) load **lazily** — the crypto chunks only when the user first
+  performs crypto (sends/receives a message), which in the real flow is well after the SW has activated, so they
+  *are* verified even on a first visit; (c) forcing earlier control via `skipWaiting()`/`clientsClaim()` is
+  **deliberately not done** — it would let a new SW activate without user consent, defeating the `registerType:
+  'prompt'` no-silent-swap mitigation for the malicious-SW threat (§3). This is the same first-load TOFU floor
+  every PWA (incl. Signal) carries; the G7 signed-SW / signed-index transparency scheme is the GA path. (Codex
+  PR #261 P2 → accepted residual.) The other residual is a same-origin SW/origin compromise (first bullet),
+  bounded by prompt-mode updates + Caddy `no-cache` on `sw.js`.
 - **The bundle manifest is detective, not preventive** — it lets an auditor or the future security page detect a
   divergent build but does not itself block a tampered load. Acceptable: it pairs with SRI (the preventive
   control) on the assets that *can* carry integrity.
