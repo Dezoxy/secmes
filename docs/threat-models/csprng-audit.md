@@ -39,7 +39,7 @@ A complementary rule, `argus-crypto-only-in-crypto-package`, keeps cryptographic
 
 ## 4. Invariant check
 
-Upholds invariant **#4 (no hand-rolled crypto / CSPRNG only)**. No tension with the other five. Since the OIDC/PKCE path was decommissioned (#223, passkey-only auth), there is no longer any `crypto.subtle` use outside `packages/crypto`; the remaining web randomness is CSPRNG-based correlation IDs and reconnect jitter (non-secret), and all key/nonce/IV material lives in `packages/crypto`.
+Upholds invariant **#4 (no hand-rolled crypto / CSPRNG only)**. No tension with the other five. Since the OIDC/PKCE path was decommissioned (#223, passkey-only auth), there is no longer any `crypto.subtle` use in **production** code outside `packages/crypto` (the one remaining `crypto.subtle.generateKey` is a test fixture, `apps/web/src/lib/messaging.spec.ts:156`, which the `argus-crypto-only-in-crypto-package` Semgrep rule excludes by design); the remaining web randomness is CSPRNG-based correlation IDs and reconnect jitter (non-secret), and all key/nonce/IV material lives in `packages/crypto`.
 
 ## 5. Decision & mitigations
 
