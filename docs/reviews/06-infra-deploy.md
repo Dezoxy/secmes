@@ -1,0 +1,131 @@
+# Slice 6 — Infra, Deploy & Supply Chain (Evidence Note)
+
+**Scope:** Adversarial review of the argus E2EE messenger infrastructure — `compose.{yaml,prod.yaml}`, `infra/{aws,stack,b2,backup,cleanup,notify}`, both Dockerfiles, and all seven `.github/workflows`. Proves Invariants 2 (no secret logging/persistence) and 5 (secrets as Key-Vault files, never env). Judges the *documented* Azure-VM design against the *shipped* AWS-EC2 first deploy (`infra/aws`).
+
+**Headline verdict: 4 PROVEN / 2 PARTIAL — 8 surviving findings (1 P1, 1 P2, 6 P3/INFO).** Invariant 5 PASS; Invariant 2 PASS. The two PARTIALs are container hardening (3 documented P3 residuals) and backups (a P1 deployment gap on the shipped target + a P2 shared-key blast-radius issue). No public data service, no wildcard IAM role, no secret in code.
+
+---
+
+## Verdict by claim
+
+| Claim | Verdict | Surviving findings |
+|---|---|---|
+| `secrets-never-env` — secrets as files via MI/Key Vault, never env or committed (Inv 5) | **PROVEN** | none |
+| `no-secret-logging` — deploy/runtime/CI never logs secrets, tokens, presigned URLs (Inv 2) | **PROVEN** | none |
+| `containers-hardened` — non-root, read-only FS, dropped caps, limits, no priv-esc | **PARTIAL** | INF-1 (P3), INF-2 (P3), INF-3 (P3) |
+| `data-services-private` — no public ports; ingress only via Cloudflare Tunnel | **PROVEN** | INFO-1, INFO-2 |
+| `ci-supply-chain` — OIDC, SHA-pinned actions, no untrusted input in `run:` | **PROVEN** | none |
+| `backups-restorable` — encrypted, EU-pinned, separate private bucket, restorable | **PARTIAL** | BKP-1 (P1), BKP-2 (P2), BKP-3 (INFO) |
+
+---
+
+## 1. `secrets-never-env` — PROVEN
+
+Invariant 5 holds clean across every infra surface. Secrets are minted from a platform machine identity with **no static credential** — IMDS on the Azure VM or the Azure Arc HIMDS challenge-handshake on EC2 (`infra/stack/secrets/fetch-keyvault-secrets.sh:38,92-120,132-140`) — and written **atomically to tmpfs `0444` root files, never exported to env** (`fetch-keyvault-secrets.sh:24-25,181-184`). The bearer token is passed via `curl --config` on STDIN, never argv (`:164-167`), so it can't be read from `/proc/<pid>/cmdline`. The fetch unit is fully hardened and carries only the non-secret Key-Vault *name* in `Environment=` (`argus-secrets.service:36,43-74`).
+
+`compose.prod.yaml` carries only `*_FILE` pointers and file-based Docker secrets (`:141-152,528-591`); no secret *value* appears in any `environment:` block. The two env exceptions are both legitimate runtime-injected values, neither committed nor at rest: `cloudflared TUNNEL_TOKEN` injected at deploy time from the KV-delivered file (`compose.prod.yaml:235`, `deploy.sh:402`), and the GlitchTip entrypoint wrapper that `cat`s three secret files into env then `exec`s because Django has no `_FILE` support (`infra/stack/glitchtip/docker-entrypoint.sh:6-8`).
+
+The **shipped AWS Terraform** has **no `aws_iam_access_key`, no `aws_iam_user`** — verified directly. EC2 uses an instance profile; the GitHub deploy role uses OIDC federation (`infra/aws/terraform/iam.tf:96`, `sts:AssumeRoleWithWebIdentity`). The one `Resource="*"` on `kms:Decrypt` is condition-scoped to `kms:ViaService=ssm.<region>` (`iam.tf:48-50`). Seeded Key-Vault values are `random_password` dummies gated on `var.seed_dummy_secrets`; `*.tfvars` is gitignored. Workflows authenticate via OIDC (identifiers, not credentials); the only `secrets.*` in `run:`/`with:` is `GITHUB_TOKEN` (the ephemeral per-run token).
+
+The allowed exception is honored exactly: `S3_ACCESS_KEY_ID` (the key-**id** that rides in every presigned URL) in env; the matching `S3_SECRET_ACCESS_KEY` via `_FILE`.
+
+*Refuted false-positive:* INFO-1 — the dummy seed DSN at `infra/aws/terraform/keyvault.tf:96` embeds the redis password instead of an app password. Dismissed: it's a freshly generated `random_password`, dummy-only and gated, self-consistent with `deploy.sh:337-341,363`, and the real seed path (`infra/aws/scripts/populate-keyvault.sh:155-157`) is correct. A cosmetic copy-paste nit, not an Invariant-5 break.
+
+## 2. `no-secret-logging` — PROVEN
+
+Invariant 2 holds clean. Every script's `log()` helper emits names/status only by construction, each self-documented (`deploy.sh:39`, `fetch-keyvault-secrets.sh:82`, `backup-db.sh:23,95`, `cleanup-attachments.sh:15,78`, `populate-keyvault.sh:61`). **No `set -x` anywhere** in `infra/` (grep clean), so no debug trace can dump a secret-bearing command line. Every credential-bearing `curl` uses `--config -` (stdin heredoc), never `-H` on argv and never `-v`/`--trace` (grep clean) — so no token reaches the process table or a verbose trace. No env dumps (`printenv`/`declare -p`/`env | sort` grep clean); the only `GITHUB_ENV` writes are non-secret image refs.
+
+The exfil-prone paths are clean: **notify forwards no error body** — `infra/notify/notify-failure.sh:59` posts a fixed JSON payload of event-id/timestamp/level/unit-name only (unit name validated `:22`); it never reads the failing unit's stderr. **Migration DSN is protected** — `migrate.ts:61-62` logs only `err.message` with an explicit no-full-error-object comment. CI surfaces deploy output (`cd.yml:193-194`, `cd-aws.yml:220-227`) but `deploy.sh` stdout/stderr is name/status-only, so nothing secret is surfaced.
+
+Defense-in-depth before Loki persists: `alloy/config.alloy` scrubs Bearer tokens, JWT `eyJ`-shaped strings, S3 signature params, and 40+ char token runs (`:67-85`); Loki retention is capped at 7 days (`loki-config.yml:36`); Alertmanager has no external receiver wired (`alertmanager.yml:16`).
+
+*Refuted false-positive:* INFO-1 — the Arc onboarding SP secret is passed on `azcmagent` argv (`infra/aws/terraform/cloud-init.yaml:83`), briefly visible in `/proc/<pid>/cmdline`. Dismissed *as an Invariant-2 finding*: no log sink receives it (`log()` at `:63` prints status + resource name only), no persistence, no `set -x`, blanked after use (`:90`). It is a process-table / Invariant-5-adjacent transient concern, self-flagged (`:72-74`) and accepted in `docs/threat-models/cross-cloud-secret-fetch.md:100-102` — outside the log/persist scope of Invariant 2.
+
+## 3. `containers-hardened` — PARTIAL
+
+Hardening is genuinely strong and consistent. **Universal across all 13 prod services:** `security_opt: [no-new-privileges:true]`, `cap_drop: [ALL]` (only the two Postgres services add back a minimal justified set), `deploy.resources.limits` with both `memory` and `cpus`, **no `privileged`**, no host network/PID/IPC namespace sharing, and **no published host ports** (verified — see claim 4). Both Dockerfiles are clean: `apps/api/Dockerfile` is multi-stage with `USER node` (`:31`); `infra/stack/caddy/Dockerfile` creates uid-10001 `caddyapp`, `setcap -r`s the binary so `cap_drop:[ALL]` can exec, and binds `:8080` (`:38-45`). No secrets baked.
+
+The verdict is **PARTIAL** because the literal "all" claim breaks on three controls, each a documented residual with no public surface:
+
+**[INF-1] (P3) alloy runs as root (`user: '0:0'`) — sole root container** — `compose.prod.yaml:374` — the only explicit user override in the stack; every other service uses its image's non-root default. **Impact:** a container-escape or supply-chain compromise of `grafana/alloy:v1.16.3` executes as uid 0. Bounded by strong compensating controls: `cap_drop:[ALL]` (`:387-388`), `no-new-privileges` (`:385-386`), `read_only` root FS (`:382`), host-log mount is `:ro` (`:377`), and **no docker socket anywhere** (grep clean) — so the daemon-root escape vector is absent. Internal network only. **Fix:** run alloy as a non-root uid in the group owning `/var/lib/docker/containers/*-json.log` via `group_add:`, or ship logs via the journald/OTLP receiver instead of tailing root-owned files. If uid 0 stays, keep it documented (it is, in `docs/threat-models/centralized-logs.md:95-98`) and digest-pin the image (INF-3).
+
+**[INF-2] (P3) postgres and glitchtip-db run without `read_only` root FS** — `compose.prod.yaml:46` (postgres, no `read_only:` key) and the `glitchtip-db` service `:406-437` (no `read_only:`). 11/13 services set `read_only:true`. **Impact:** a writable root FS gives an attacker with in-container code execution a place to drop persistence. Bounded: `cap_drop:[ALL]` + minimal cap-add (`:48-55`/`:420-427`), `no-new-privileges`, dedicated named volume, internal network, no published port. **Fix:** the "impractical for Postgres" excuse is overstated — the analogous redis service runs `read_only:true` + `tmpfs:[/tmp]` (`:78-80`). Add `read_only:true` plus explicit `tmpfs:` for `/var/run/postgresql` and `/tmp`; data dir stays a named volume. Apply to glitchtip-db too. **Note:** the inline comment claims this is "documented residual in vm-ingress.md," but that file's residual register (`:109-123`) does *not* itemize a read-only-FS residual; glitchtip-db's is undocumented anywhere — the doc claim is partially false.
+
+**[INF-3] (P3) No prod image is pinned by digest (`@sha256`)** — `compose.prod.yaml:226` — all third-party images are tag-pinned and mutable: `cloudflared:2025.6.1`, `prom/prometheus:v3.6.0`, `prom/alertmanager:v0.29.0`, `grafana/grafana:12.1.1`, `grafana/loki:3.5.0`, `grafana/alloy:v1.16.3`, `glitchtip:6.1.8`, `postgres:16-alpine`, `redis:8-alpine`. **Impact:** a tag can be re-pushed (registry mutation / upstream account compromise), so tag-pinning gives no tamper-evident pin. The first-party api/caddy images *are* effectively digest-pinned — CD resolves them to RepoDigests and `cosign verify`s them (`deploy.sh:156-165`) — so the gap is third-party only. No `:latest` in prod (the only `:latest` are dev-fenced in `compose.yaml:37,51`). **Fix:** pin each third-party image by digest (`image: grafana/grafana:12.1.1@sha256:<digest>`). **Note:** the proposed-fix premise that "Dependabot already tracks these" is wrong — the two docker Dependabot entries point at `/apps/api` and `/infra/stack/caddy` (`dependabot.yml:48,58`), i.e. Dockerfile base layers, **not** `compose.prod.yaml`, so the third-party compose tags are tracked by nothing today.
+
+## 4. `data-services-private` — PROVEN
+
+The data plane is fully private on the shipped stack. **Zero host-published ports** in `compose.prod.yaml` — `ports:`/`expose:` grep clean; the only `N:N`-looking token is `user: '0:0'` (a UID, `:374`). No `network_mode: host`, no `0.0.0.0` bind. No top-level `networks:` key → every service sits on the default project bridge, reachable only intra-stack. Postgres, Redis, GlitchTip, and all observability services are internal-only; the API forbids publishing its `:9090` metrics port (`:104-107`).
+
+**Ingress is outbound-only:** `cloudflared` dials out (`command: tunnel … run`, `:222-228`); Caddy listens on plain HTTP `:8080` only (`Caddyfile:3-9,45`) and is reached by cloudflared over the internal Docker network — no `:443`/`:80` host bind. This is **mechanically enforced** in CI: `ci.yml:119-137`'s `compose-guard` parses `compose.prod.yaml config` and `exit 1`s if any service publishes a port.
+
+The **shipped AWS SG** confirms the same posture: the instance SG has **no ingress rule by default** (`network.tf:58-63`); the break-glass SSH rule is `count = var.admin_cidr == null ? 0 : 1` with a validation block rejecting `0.0.0.0/0` and `::/0` (`network.tf:66-73`, `variables.tf:38-42`); the default SG is neutered to deny-all (`network.tf:17-20`). The dev `compose.yaml` publishes 5432/6379/9000/9001/3000 (`:15,25,45,94`) but is labelled local-only with throwaway creds and is shipped by **no** deploy path (grep for `compose.yaml` in `deploy.sh`/`cd.yml`/`cd-aws.yml` returns nothing).
+
+**[INFO-1] Break-glass SSH `admin_cidr` value unverifiable from `real.tfvars`** — `infra/aws/terraform/network.tf:66-74` — the secret-file guard blocks reading the deployed value, so it can't be positively confirmed `null`/`/32`. The validation guarantees it can never be world-open; the worst undetectable case is a broad-but-not-world-open operator CIDR opening port 22 — a control-plane SSH exposure, **not** a public data service (no 5432/6379 ingress rule exists anywhere). **Fix:** keep `admin_cidr=null` in prod (deploys ride SSM); optionally add an OPA/CI check that it is `null` or a `/32`.
+
+**[INFO-2] Egress SG rule is fully open (`0.0.0.0/0`, all protocols)** — `infra/aws/terraform/network.tf:79-83` — needed for cloudflared/Key Vault/Arc/B2/GHCR/apt; self-documented with prefix-list tightening as an enterprise follow-up. SGs are stateful, so open *egress* creates no externally-initiated inbound reachability — orthogonal to the inbound claim. IMDSv2 with `http_put_response_hop_limit = 1` (`ec2.tf`) keeps the instance role unreachable from a container/SSRF even with open egress. **Fix (optional):** restrict egress to required FQDNs/prefix lists.
+
+## 5. `ci-supply-chain` — PROVEN
+
+All five adversarial sub-tests pass across all seven workflows.
+
+**(a) OIDC, no static keys.** Azure auth is pure OIDC (`azure/login` consuming client/tenant/subscription *identifiers*, no `client-secret`/`creds:` blob — grep clean). AWS auth is OIDC role-assumption (`configure-aws-credentials` with `role-to-assume=${{ vars.AWS_DEPLOY_ROLE_ARN }}`, `cd-aws.yml:133`; no `aws-secret-access-key`). `id-token: write` granted only where federation occurs (`cd.yml:14`, `cd-aws.yml:16`, `claude.yml:23`). No AKIA, no `AWS_SECRET`, no `client_secret`. The two `password:` refs (`cd.yml:64`, `cd-aws.yml:66`) are `secrets.GITHUB_TOKEN` for GHCR push.
+
+**(b) No untrusted event input in `run:`.** The only `${{ }}` inside a `run:` body is `matrix.name` (`cd.yml:110`, `cd-aws.yml:109`), a static matrix literal — not event-derived. Every attacker-controllable field (`github.event.comment.body`/`.review.body`/`.issue.body`/`.issue.title`) appears exclusively inside the `if:` `contains()` guard (`claude.yml:39-42`), never shelled. The one event value reaching a shell, `PR_NUMBER = github.event.issue.number`, is an integer passed via `env:` and quoted (`claude.yml:59,61`). `github.ref_name` reaches the release-notes generator only via `env: RELEASE_TAG` consumed by `execFileSync('git', [...args])` (argument-array, no shell).
+
+**(c) Actions SHA-pinned.** All `uses:` lines carry a full 40-hex commit SHA with a trailing `# vX` comment. Zero floating tags.
+
+**(d) Least-privilege permissions.** Every workflow has an explicit top-level `permissions:` block; none use `write-all`/`read-all`. Notably `claude.yml` adds pull-requests/issues:write but **deliberately no `contents:write`** (`:16-23`) — it cannot push commits.
+
+**(e) No `pull_request_target`/`workflow_run` misuse.** Neither trigger exists. `claude.yml` checks out PR-head code only after a `github.actor == github.repository_owner` gate evaluated *before* checkout (`:38,60-63`).
+
+*One INFO-level note (not a finding):* the `cd-aws` `images` job runs before the environment-approval gate (self-flagged `cd-aws.yml:31-33`), but it holds no AWS OIDC role and only keyless-signs + pushes to GHCR — defense-in-depth, not an OIDC/pinning/injection break.
+
+## 6. `backups-restorable` — PARTIAL
+
+The backup *design* is strong and three of four sub-claims hold on their own terms, but the aggregate is **PARTIAL** because on the shipped EC2 target backups are never produced.
+
+What holds: **(a) Encrypted** — client-side `age` asymmetric encryption *before* upload (`backup-db.sh:107`), fail-closed on a missing recipient (`:38`); the age private key is Key-Vault-only, never on the box. **(b) Separate private EU bucket** — backup target `db-q7m2z9x4v6n8p3k1` (`argus-db-backup.service:41`) is distinct from the attachment bucket `attachment-r8xq4m7z2p9n6k3v` (`argus-attachment-cleanup.service:36`); endpoint/region EU-pinned (`argus-db-backup.service:38-39`). **(d) Restore runbook** — full paired-timestamp restore procedure with the PG16 `pg_read_all_data` gotcha, integrity verification via PIPESTATUS + size floor, day-granular retention, and a dated restore drill (`infra/backup/README.md:101-152,169`; `backup-db.sh:111-172`).
+
+**[BKP-1] (P1) Nightly DB backup is never deployed on the shipped target (EC2)** — `.github/workflows/cd-aws.yml:154` — **verified directly:** the deploy bundle is `tar czf deploy-bundle.tgz compose.prod.yaml infra/stack/secrets infra/stack/deploy infra/stack/observability infra/stack/glitchtip infra/b2` — `infra/backup` and `infra/cleanup` are **not** in the tar, so the script/units never reach the box. `deploy.sh` enables **only** `argus-secrets.service` (`deploy.sh:134`, verified) and provisions the `argus_backup` role login (`:329-376`) but never copies or `systemctl enable`s `argus-db-backup.{service,timer}` (grep clean). cloud-init installs host tooling only (`cloud-init.yaml:3,102`). The only install path is hand-run (`infra/backup/README.md:80-99`). **The live Azure `cd.yml:162` bundle excludes them identically**, so the gap exists on both tracks. **Impact:** on the actual first deploy target, no nightly backup runs and no encrypted objects are ever written — "restorable" is vacuously false. A disk failure, `docker volume rm`, instance termination, or ransomware before an operator manually arms the timer means total, unrecoverable loss of accounts, membership, audit logs, public device keys, and ciphertext bodies. **Fix:** add `infra/backup` + `infra/cleanup` to both tar bundles; extend `deploy.sh` to install the script/units, template the env (mirroring the `REPLACE_WITH_KEY_VAULT_NAME` sed at `deploy.sh:118`), and `systemctl enable --now argus-db-backup.timer`; add a post-deploy assertion that `systemctl is-enabled argus-db-backup.timer` succeeds (fail the deploy otherwise). Until then, do not treat backups as existing for the EC2 beta. *Calibration:* the finding's citation of `docs/reviews/04-metadata-privacy.md:92` is misattributed (that line concerns the audit-retention prune job and assumes the backup runs) — but the four primary sources (cd-aws.yml:154, the deploy.sh grep, cloud-init.yaml, README:80-99) independently and decisively establish the gap.
+
+**[BKP-2] (P2) One B2 application key spans both buckets and carries delete on both; db bucket has no Object Lock** — `infra/stack/secrets/README.md:37` — **verified directly:** both units `LoadCredential=b2-secret:/run/argus/secrets/b2-app-key` (`argus-db-backup.service:52`, `argus-attachment-cleanup.service:43`), so the single key is authorized on the db-backup bucket **and** the attachment bucket, and both workers delete (`backup-db.sh:113,125,150,163`; `cleanup-attachments.sh:103`). This contradicts the project's own stated control that "the bucket restriction… keeps the key away from the db-… backup bucket" (`infra/b2/README.md:70-71`), and Object Lock is OFF on the db bucket (`infra/b2/README.md:120-124`). **Impact:** the blast radius of one leaked/compromised key is both buckets — a host compromise reading `/run/argus/secrets/b2-app-key` can permanently erase every backup (no WORM) and delete live attachment blobs. Confidentiality is still covered by client-side `age` (why this is P2, not P1), but *recoverability* is not. **Fix:** mint two bucket-scoped B2 keys (`argus-b2-backup-key`, `argus-b2-cleanup-key`), store as distinct KV secrets, point each unit's `LoadCredential` at its own file; prefer write/list-only for the backup key and move pruning to a B2 lifecycle rule (`infra/backup/README.md:77-78`); enable Object Lock on the db bucket per the repo's own TODO.
+
+**[BKP-3] (INFO) Backup posture is DRAFT/build-only with manual steps; no off-cloud copy; age key is a SPOF** — `docs/threat-models/db-backup.md:3` — threat model self-labels "DRAFT for ratification"; residuals acknowledged: ~24h RPO (logical, not PITR), single bucket/region (no 3-2-1), age private-key loss bricks every backup (`db-backup.md:100-111`). **Impact:** even once BKP-1 is fixed, recovery is beta-grade. **Fix (GA):** second-region/provider copy; age private-key escrow + rotation; WAL-archiving PITR; ratify the model and re-run the drill against real prod objects. *Minor imprecision:* the role login is actually provisioned at deploy time (`deploy.sh:329-375`), not manually — but in the restore-onto-fresh-cluster context the finding cites (`README.md:141-147`), passwords genuinely are re-applied by hand, so the point is defensible.
+
+---
+
+## Invariant attestation
+
+**Invariant 2 (never log/persist plaintext, keys, passphrases, tokens, full Authorization headers, presigned URLs): PASS.** Controlling evidence: every `log()` helper is name/status-only by construction (`deploy.sh:39`, `fetch-keyvault-secrets.sh:82`, `backup-db.sh:23`, `cleanup-attachments.sh:15`, `populate-keyvault.sh:61`); **no `set -x` and no `curl -v`/`--trace` anywhere in `infra/`** (grep clean); credential-bearing curls use `--config -` stdin not argv (`fetch-keyvault-secrets.sh:164-167`, `deploy.sh:88-93`); notify forwards a fixed metadata payload, never an error body (`notify-failure.sh:59`); migrate logs `err.message` only (`migrate.ts:61-62`); Loki has Bearer/JWT/S3-sig/long-token scrub stages (`config.alloy:67-85`). The one residual (Arc SP secret on `azcmagent` argv, `cloud-init.yaml:83`) is a process-table concern, **not** a log/persist break — Invariant 2 is not violated.
+
+**Invariant 5 (secrets from Key Vault via Managed Identity, delivered as files, never long-lived cloud creds in env): PASS.** Controlling evidence: secrets minted from IMDS/Arc-HIMDS machine identity with no static credential (`fetch-keyvault-secrets.sh:38,92-120`) and written to tmpfs `0444` files, explicitly never env (`:24-25,181-184`); `compose.prod.yaml` carries only `*_FILE` pointers (`:141-152`); systemd workers use `LoadCredential` (`argus-db-backup.service:51-52`, `argus-attachment-cleanup.service:42-43`) and refuse to export `PGPASSWORD`/`AWS_SECRET` (`backup-db.sh:57`, `cleanup-attachments.sh:33`); **no `aws_iam_access_key`/`aws_iam_user` in Terraform** (verified), only OIDC federation (`iam.tf:96`); workflows use OIDC with the only `secrets.*` in `run:` being `GITHUB_TOKEN`. The allowed exception (non-secret `S3_ACCESS_KEY_ID` in env; secret via `_FILE`) is honored exactly. Note BKP-2 is a least-privilege *scope* break (one key, two buckets), not an env/at-rest exposure — Invariant 5's delivery mechanism holds.
+
+---
+
+## Doc-vs-reality (documented Azure-VM design vs shipped `infra/aws`)
+
+1. **Deploy target.** Older docs narrate an Azure-VM + Docker-Compose deploy; the shipped first target is **AWS EC2** (`infra/aws`, `cd-aws.yml`), using **Azure only for Key Vault via Azure Arc**. The secret-fetch script handles both (`fetch-keyvault-secrets.sh:38` IMDS vs `:92` Arc HIMDS), so this is a dual-path reality, not a contradiction — but reviewers should read `infra/aws` as authoritative for what ships.
+2. **Backups documented as a deployed control, shipped as a manual one.** AGENTS.md lists "backups encrypted, EU-pinned, restorable" as an infra bar, and `infra/backup/README.md` reads as an operational runbook — but **neither CD bundle ships `infra/backup` and `deploy.sh` never enables the timer** (BKP-1). The control is hand-operated, not deployed, on both tracks.
+3. **`read_only` residual doc gap.** `compose.prod.yaml:46` claims the postgres read-only-FS residual is "documented in vm-ingress.md," but that file's residual register does not itemize it, and glitchtip-db's is undocumented anywhere (INF-2).
+4. **B2 key separation — doc vs wiring.** `infra/aws/terraform/README.md:48` and `populate-keyvault.sh:191` describe `argus-b2-app-key` as "a separate key" for db-backups, but the wiring also hands it to the attachment-cleanup worker that deletes from the attachment bucket (BKP-2) — so the intended separation does not exist in the runtime config.
+
+---
+
+## Residual risk & spun-off work
+
+**Behaviour-touching — warrant their own fix PR:**
+- **BKP-1 (P1)** — wire `infra/backup`/`infra/cleanup` into both CD bundles + `deploy.sh` enable + a post-deploy `is-enabled` assertion. **Highest priority: a beta onboarding any real user inherits silent total data loss.**
+- **BKP-2 (P2)** — split the B2 key into two bucket-scoped keys, move pruning to a lifecycle rule, enable Object Lock on the db bucket.
+- **INF-3 (P3)** — digest-pin the third-party compose images and extend Dependabot to `compose.prod.yaml` (currently tracked by nothing).
+- **INF-2 (P3)** — add `read_only:true` + `tmpfs:` to postgres and glitchtip-db.
+- **INF-1 (P3)** — move alloy off uid 0 (`group_add` or journald/OTLP receiver), or formally keep the documented residual + digest-pin.
+
+**In-doc honesty fixes (no behaviour change):**
+- Correct or remove the `compose.prod.yaml:46` "documented in vm-ingress.md" claim and add the glitchtip-db residual (INF-2).
+- Reconcile the "separate key" docs (`infra/aws/terraform/README.md:48`, `populate-keyvault.sh:191`) with the shared-key wiring, or fix the wiring (BKP-2) so the docs become true.
+- Track BKP-3 GA items (3-2-1, age-key escrow/rotation, PITR, ratify the threat model, drill against real objects).
+
+**Accepted residuals (documented, no action required for beta):**
+- INFO-1 / INFO-2 (SSH `admin_cidr` unverifiable but validation-bounded; egress open on a deny-all-inbound box).
+- Arc SP secret on `azcmagent` argv — transient onboarding credential, single-tenant root box, swaps to an auto-rotating cert post-connect; accepted in `docs/threat-models/cross-cloud-secret-fetch.md`.
