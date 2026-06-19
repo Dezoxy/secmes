@@ -104,11 +104,16 @@ during an incident, an operator with direct DB access (owner connection) can unl
 
 ```sql
 -- Run via the owner connection (bypasses RLS / argus_app restrictions).
--- Confirm the tenant_id matches DEFAULT_TENANT_ID before executing.
+-- DEFAULT_TENANT_ID is a v4-shaped UUID (version nibble 4, variant 8) — see
+-- breakglass.service.ts. Confirm the row exists FIRST so a wrong id doesn't
+-- silently report "UPDATE 0" and leave the operator locked out mid-incident:
+SELECT tenant_id, locked_until, failed_attempts FROM admin_credentials
+WHERE tenant_id = '00000000-0000-4000-8000-000000000001';
+-- Then unlock:
 UPDATE admin_credentials
 SET locked_until = NULL,
     failed_attempts = 0
-WHERE tenant_id = '00000000-0000-0000-0000-000000000001';
+WHERE tenant_id = '00000000-0000-4000-8000-000000000001';
 ```
 
 ---
