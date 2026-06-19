@@ -18,8 +18,15 @@ communication is visible to the server.
 
 What the crypto-blind server (and therefore an operator, or a DB/infra compromise) can infer:
 
-- **Social graph** — `conversation_members` maps which users share which conversations, per tenant.
+- **Social graph (in-conversation)** — `conversation_members` maps which users share which conversations, per
+  tenant.
+- **Pre-conversation social graph + direction** — `friendships` records who is connected to whom *before* any
+  conversation exists, and `friendships.requested_by` reveals which side initiated (`schema.ts:282-292`).
+- **Conversation kind** — `conversations.is_direct` (`schema.ts:76`) classifies each conversation as 1:1 vs
+  group, sharpening social-graph inference.
 - **Who-talks-to-whom and when** — `messages.sender_user_id` + `conversation_id` + `created_at`.
+- **Read-receipt timing** — `conversation_receipts.delivered_at` / `read_at` + high-water message ids
+  (`schema.ts:105-118`): second-precise "who read what, when," per member.
 - **Volume & rough message size** — row counts and ciphertext length (no padding; see §6).
 - **Device topology** — `devices` / `device_enrollments`: how many devices a user has and when they linked.
 - **Presence / online activity** — live WebSocket connection state and subscription set.

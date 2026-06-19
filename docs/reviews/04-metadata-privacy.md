@@ -1,0 +1,139 @@
+# Review 04 — Metadata exposure & privacy-at-rest
+
+_Threat model: an honest-but-curious server operator, an admin, the centralized logs / error-tracking sink, or a thief holding a full DB dump or backup. Message bodies are already established as ciphertext (Slices 1-2); this slice attacks everything else — metadata, social graph, logs/observability, GDPR export/erasure, and what is recoverable at rest._
+
+Reviewed against `main` post-#253, 2026-06-19. Read-only adversarial pass: each claim is PROVEN only where a break was attempted and failed.
+
+## Claims
+
+| # | Claim | Verdict |
+|---|-------|---------|
+| 1 | `db-dump-social-graph` — a full DB dump yields no content, no orphaned identifiers post-erasure, and only the metadata the docs concede | **PARTIAL** |
+| 2 | `logs-no-content` — app logs / metrics carry IDs and metadata only; no content, keys, tokens, full `Authorization`, or presigned URLs | **PROVEN** |
+| 3 | `error-tracking-clean` — the error sink is default-deny; no content/keys/tokens/cookies/PII reach it | **PROVEN** |
+| 4 | `gdpr-export-isolation` — export/erasure are bound to the verified subject, tenant-isolated, and erasure is complete on the live DB | **PROVEN** |
+| 5 | `admin-metadata-only` — the admin surface exposes metadata only; no path to content, attachment bytes/URLs, or key material (invariant #6) | **PROVEN** |
+| 6 | `at-rest-privacy` — backups/blobs hold only ciphertext + bounded metadata, and retention does not silently hoard recoverable plaintext | **PARTIAL** |
+
+Two PARTIALs share one root cause: **audit/session retention is prose, not code** — the 90-day prune the docs promise does not exist, so per-actor PII grows unbounded in the live DB and in every backup. Everything else in those two claims (no-content, no-orphan, complete live-DB erasure, encrypted backups, ciphertext blobs) held under a hard break attempt.
+
+## Per-claim evidence
+
+### 1. db-dump-social-graph — PARTIAL
+
+**No content reachable at rest.** Every content-bearing column is ciphertext only: `messages.ciphertext` (`schema.ts:97`), `conversation_commits.commit`, `conversation_welcomes.welcome`/`ratchetTree`. A repo-wide grep for any controller/service returning those confirms only the member-only, proof-gated messaging paths return ciphertext — no admin/ops surface joins to it. The admin device view caps the key at `left(signature_public_key, 12)` (`admin.service.ts:59`) and the admin audit view deliberately omits the `metadata` jsonb (`admin.service.ts:101-108`). Invariant #6 holds.
+
+**Live-DB erasure is complete.** All 17 user-referencing columns reconcile: CASCADE-cleaned (`auth_sessions` 0032, `webauthn_credentials` 0034, `device_enrollments` 0024, `conversation_receipts` via `conversation_members` 0010, `key_packages`/`push_subscriptions`/`conversation_members`/`friendships`), or explicitly handled before the user delete (messages/commits/`conversations.created_by` pseudonymized, `gdpr.service.ts:367-412`; `audit_events` deleted by actor, `:435-445`; `admin_credentials` RESTRICT + breakglass sentinel guard, `:346-348`). The recon's "likely orphans" are all closed.
+
+**Backups never ship plaintext.** `AGE_RECIPIENT` is mandatory and fails closed (`backup-db.sh:38`), the dump is streamed `gen | age | aws` with no plaintext-to-disk (`:107`), `PIPESTATUS` aborts and deletes partial uploads on any stage failure (`:111-115`), `--no-role-passwords` (`:141`); the age private key is Key-Vault-only (`db-backup.md:23`).
+
+**Logs/metrics carry IDs only.** Metric labels use `req.route.path` templates, never `req.url` (`metrics.ts:33-45`); error scrub is recursive default-deny (`error-tracking.ts:112-145`); tags are opaque subs (`error-tracking.interceptor.ts:42-43`). Invariant #2 holds.
+
+**No cross-user GDPR leak.** Export is filtered by `actorSub ∈ {own subs}` (`gdpr.service.ts:170-176`); RLS confines to one tenant.
+
+**Why PARTIAL.** The conceded metadata (ciphertext length, epoch, `created_at`, `sender_user_id`) is honestly documented (`metadata-exposure.md` §1 line 16, §6). But the "documented" half fails on two counts: audit retention is **unbounded** (F1, P2 — the durable, ever-growing record of which argus-ids each user probed sits in every backup), and the canonical exposure page that gates external privacy claims **omits three real metadata sources** (F2, P3).
+
+### 2. logs-no-content — PROVEN
+
+Every log/metric/capture emission in `apps/api` + the gateway was traced.
+
+- **Metrics:** only `httpRequestsTotal`/`httpRequestDuration` (`metrics.ts:17-31`), labelled `{method,route,status}`, emitted once on `res` close (`metrics.middleware.ts:21-30`). `routeLabel` reads the Express **template**, never `req.url`, and collapses unmatched paths to `'unmatched'` (`metrics.ts:41`). All ~70 route templates use named params (`:conversationId`, `:userId`, …) — no wildcard, no id-bearing literal — so cardinality is bounded and no per-user/tenant/conversation label exists. Served on internal `:9090`, not proxied by Caddy.
+- **App logs:** all log sites reviewed emit an ID, an error class via `(err as Error).name`, or the client IP — never a token/body/ciphertext/header/presigned URL. Push fan-out logs row id + status, explicitly not `endpoint`/`p256dh`/`auth` (`push.service.ts:211-214`); session rotation logs `row.userId` not the token (`session-token.service.ts:121-123,180-182`); GDPR logs `externalId` + object key, never a presigned URL (`gdpr.service.ts:478,491`); blob-config logs only the credential-file **path** (`blob-config.ts:52`).
+- **WS gateway:** token-verify failure is never logged (`realtime.gateway.ts:115-119`); the `send()` catch is content-free (`:307-311`).
+- **Validation:** `ZodValidationPipe` maps only path + schema message, never the received value (`zod-validation.pipe.ts:14-16`) — a malformed ciphertext body is not echoed.
+- **Edge:** Caddy strips the query string and redacts `Authorization`/`Cookie` (`Caddyfile:18-26`); Alloy adds a defense-in-depth Bearer/JWT/presigned + 40-char scrub before Loki, with a bounded container label and 7-day retention (`config.alloy:24-31,67-85`, `loki-config.yml:36`).
+
+No working leak of content/key/token/full-`Authorization`/presigned-URL or a high-cardinality fingerprinting label could be constructed on any path. Three P3 hygiene/defense-in-depth residuals remain (OBS-1/2/3).
+
+### 3. error-tracking-clean — PROVEN
+
+The server path is genuinely default-deny and could not be broken into leaking content/keys/tokens/cookies/PII.
+
+- **DSN-gated no-op by default** (`error-tracking.ts:42-44`, spec `:242-245`); `sendDefaultPii:false` + `tracesSampleRate:0` (`:49-51`) suppress auto IP/cookies and all request/trace capture.
+- **`scrubEvent` (beforeSend, `:112-145`)** deletes `request.data`/`query_string`/`cookies`/`url`, allowlists only 4 non-secret headers (so `Authorization`/`Cookie` drop), deletes `server_name`+`modules`, reduces `event.user` to `{id}`, drops `frame.vars` and http/fetch breadcrumbs, then `redactDeep` walks the **entire** event: a sensitive **key** drops the whole subtree, every string **value** is shape-scrubbed against presigned-URL/Bearer/JWT regexes.
+- **Interceptor** attaches only opaque tags (method, route template, `tenantId`, `auth.sub`) and captures only 5xx/unhandled (`error-tracking.interceptor.ts:36-45,54-57`). `auth.sub` is the pseudonymous `externalIdentityId`/`argusid:<argusId>`, not an email.
+- **Web side:** `telemetry.ts` is a default-deny allowlist builder with **no transport at all** — `createTelemetryEvent` is referenced only by its own spec, and there is no `@sentry/*` anywhere. Web egress is zero.
+
+All 12 spec tests pass. Three P3 forward-compat/defense-in-depth residuals remain (ET-1/2/3), all conceded in `error-tracking.md` §6.
+
+### 4. gdpr-export-isolation — PROVEN
+
+- **Subject binding is server-side, not client input.** `auth.tenantId` resolves from `user_tenant_index` keyed by the verified JWT `sub` (`auth.service.ts:67-78`), never a header/claim. `auth.userId` comes from the `uid` claim of a server-EdDSA-signed token (`session-token.service.ts:248-258`, verified `jose`, EdDSA-only blocks alg-confusion, `auth.service.ts:31,47-52`). The global guard 403s unbound callers (`jwt-auth.guard.ts:48-53`); both GDPR routes are `isPublic:false` (`gdpr.controller.spec.ts:33,43`).
+- **Export isolation.** All 9 parallel queries filter on `auth.tenantId` + `resolveUserId` inside `withTenant()`, so RLS blocks cross-tenant reads (`gdpr.service.ts:33-228`). The only counterparty identifiers are the subject's **own** data: `friendships.otherUserId` (own social edge, Art. 20) and `auditEvents.metadata.targetArgusId` (an argus-id the subject themselves typed). The audit export filters `actorSub ∈ {subject's two subs}` (`:171-176`) — **actor only** — so a third party's lookup _of_ the subject is correctly excluded.
+- **Erasure completeness.** All 17 user-referencing columns reconciled (CASCADE or explicit handling); `admin_credentials` RESTRICT is breakglass-sentinel-guarded and a RESTRICT throw rolls back the whole tx (no partial delete). `key_backups` was dropped in 0040, so the doc entry is stale, not an orphan.
+
+No query returns another user's row. The four findings here (GDPR-DOC-1/2, F3, F4) are all **doc-staleness/precision only** — the code is more complete and more correct than the docs.
+
+### 5. admin-metadata-only — PROVEN
+
+Six concrete break paths were attempted against the no-content claim; none reached content, attachment bytes/URLs, or key material.
+
+- **Route fields.** The entire admin surface is 3 routes (`admin.controller.ts`). `GET /admin/devices` returns `signaturePublicKeyPrefix = left(signature_public_key, 12)` (`admin.service.ts:59`) — ~9 bytes of a 32-byte Ed25519 key, non-reversible — plus `userId`/`displayName`/`createdAt`. `GET /admin/audit` (`:101-108`) selects id/eventType/actorSub/actorDisplayName/ip/createdAt and **omits** the `metadata` jsonb; the DTO (`admin.controller.ts:44-51`) and `AuditEventSummarySchema` (`contracts:567-574`) also have no metadata field — triple-confirmed. `DELETE /admin/devices/:id` returns 204.
+- **No alternate route.** All 18 controllers enumerated; only `admin.controller.ts` is admin-gated, no debug/dump/raw/decrypt route, metrics on a separate unproxied `:9090`.
+- **Admin-via-GDPR pivot blocked.** Both GDPR routes key entirely on `@CurrentAuth()` with no target-user param and no admin override — an admin gets only their own data.
+- **Breakglass** returns only a metadata access token (`breakglass.controller.ts:121`).
+- **Cross-tenant blocked.** `auth.tenantId` is server-derived (`auth.service.ts:71-78`), with `withTenant` + FORCE RLS as the second layer. State-changing admin actions are audited (`admin.service.ts:91`; breakglass `:360-390,514-525`). Both guards (`CfAccessGuard` then `AdminGuard`) wrap all 3 routes (`admin.controller.spec.ts:50-55`).
+
+The only residual is that the audit write is not transactionally bundled with the mutation (ADMIN-1) and is not regression-pinned (ADMIN-2) — both fail toward "unlogged," never "content leaked." P3.
+
+### 6. at-rest-privacy — PARTIAL
+
+**Encryption/confidentiality half — PROVEN.** Backup encryption could not be broken: `AGE_RECIPIENT` mandatory and fails closed (`backup-db.sh:38`), no plaintext-to-disk path (`:107`), `PIPESTATUS` deletes partial uploads (`:108-115`), secrets stay file-backed end-to-end (`:57-93`), private EU bucket + Key-Vault-only age private key (`argus-db-backup.service:38-45`). Attachment blobs are E2EE ciphertext with **no** server-side content or content-key column (`schema.ts:123-132`; content key lives only in the MLS envelope, `encrypted-attachments.md:24`). Live-DB erasure is complete (same reconciliation as claim 1); the audit-erasure DELETE grant chain is sound across the role rename (0001 → `0009:9` → 0021).
+
+**Retention half — BROKEN.** The claim's "retention does not silently hoard recoverable plaintext" clause is false: the 90-day audit prune is prose only (`0002_audit_events.sql:22-23`) with **no job anywhere** in `infra/` or `apps/`. `audit_events` PII (`actor_sub`, `ip`, `user_agent`, `metadata` jsonb) accumulates forever in the live DB and in every nightly backup (AR-1, P2). Separately, an erased user's pre-erasure cleartext metadata survives in encrypted backups for the 30-day retention window, reconciled in the Art. 30 record but not cross-referenced in `gdpr.md`/`db-backup.md` §6 (AR-2, downgraded to Low). Three further P3 residuals (AR-3 no IaC on the B2 buckets, AR-4 single age recipient SPOF, AR-5 stale cascade doc) are conceded or doc-only.
+
+## Findings (confirmed / downgraded)
+
+| ID | Sev | Claim | File | Note |
+|----|-----|-------|------|------|
+| F1 / AR-1 | **P2** | 1, 6 | `apps/api/src/db/migrations/0002_audit_events.sql:22-23` | **Same defect, counted once.** 90-day audit prune is prose only — no `@Cron`/`ScheduleModule`/`pg_cron`/systemd timer exists (only `argus-attachment-cleanup` + `argus-db-backup` timers). `audit_events` (actor_sub, ip inet, user_agent, metadata jsonb at `schema.ts:237-246`) grows unbounded. For `users.lookup`/`friends.request_created` the jsonb holds `targetArgusId` (`users.controller.ts:70-73`, `friends.controller.ts:141-145`) — a durable, ever-growing record of which argus-ids each user probed, captured in every nightly dump (`db-backup.md:20-21`). `0032` makes the same unbuilt promise for `auth_sessions`. **`article-30-records.md:78` formally attests "ENFORCED BY CLEANUP WORKER" — a written Art. 5(1)(e) compliance misstatement for a control that does not exist.** |
+| F2 | P3 | 1 | `docs/threat-models/metadata-exposure.md:19-29,70-79` | Canonical exposure page (gates DPA / sales / GA per `:5-7`) omits three real schema metadata sources: `conversation_receipts.deliveredAt`/`readAt` + high-water ids (`schema.ts:105-118`, second-precise "who read what when"), `friendships` pre-conversation graph incl. `requestedBy` direction (`schema.ts:282-292`), and `conversations.isDirect` 1:1-vs-group classifier (`schema.ts:76`). Each is owned in its origin note, so nothing is undisclosed in aggregate — but the one page a buyer/pen-tester/DPA reads is stale (last edited before 0041/0042 landed). **Fixed in this PR** (added all three to §1). |
+| F3 | P3 | 1, 4 | `docs/threat-models/gdpr.md:15,17,58,61` | Cascade map lists phantom `key_backups` (dropped in `0040`) and omits four tables the live path handles (`auth_sessions`, `webauthn_credentials`, `device_enrollments`, `conversation_commits`); documents audit filter as `actor_sub = auth.sub` when code filters dual-sub (`gdpr.service.ts:441-444`); claims `email` is exported when `exportAccount` selects none (`:35-44`); omits `friendships` as an export category. Code is more complete/correct than the doc — no leak. **Spun off** (gdpr.md regeneration, security-architect doc pass). |
+| F4 | P3 | 1, 4 | `apps/api/src/users/gdpr.service.ts:286-291` + `audit.service.ts:24-33` | Own-activity audit export returns `metadata` jsonb verbatim, which can name a `targetArgusId` the subject themselves probed. Not a third-party leak (row filtered by actor = caller; deliberate no-oracle design omits the `found` flag for friend requests). `gdpr.md:22` ("IDs + metadata only") doesn't note metadata may name a probed argus-id — one-line doc gap. **Spun off** (with gdpr.md regeneration). |
+| GDPR-DOC-1 | P3 | 4 | `docs/threat-models/gdpr.md:17,24-27,61` | _Same artifact as F3, GDPR-pack lens._ Export table still lists dropped `key_backups`; never lists `friendships` (returned at `gdpr.service.ts:204-228,300-318`). Refresh from current migrations + `gdpr.service.ts`. **Spun off.** |
+| GDPR-DOC-2 | P3 | 4 | `docs/threat-models/gdpr.md:45,58,74-86` | Doc describes single-sub audit scoping and a dead Zitadel-console erasure runbook; code does dual-sub deletes (`gdpr.service.ts:441-443,467-474`) and OIDC was decommissioned (`auth.service.ts:40-42`, `phase-6-decommission.md`). Rewrite §6 runbook + scoping lines to the self-minted-token model. **Spun off** (security-sensitive runbook — own PR with security-architect pass). |
+| OBS-1 | P3 | 2 | `apps/api/src/auth/session-token.controller.ts:116` | `logger.debug(\`session refreshed from ${ip}\`)` emits raw client IP. IP is metadata, not a secret — invariant #2 holds. But the finding's premises were **confirmed**: there is no `LOG_LEVEL`/`useLogger` anywhere (NestJS 11 default `ConsoleLogger` includes `debug`), so this **does** emit in prod by default on every refresh; and the refresh path writes **no** audit row, so this is the sole record of refresh-source IP, landing in Loki (7d) not the RLS/GDPR-erasable audit table. EU data-minimization concern. **Spun off** (one-line code change: drop the IP or guard it). |
+| OBS-2 | P3 | 2 | `infra/stack/observability/alloy/config.alloy:67-85` | Alloy `stage.replace` scrub is the sole **mechanical** runtime net for the centralized store; it mirrors `error-tracking.ts` SENSITIVE_VALUE regexes in RE2 with **no test** (Semgrep is TS/JS-only and can't parse `.alloy`). The TS scrubber has spec coverage; the mirror doesn't — a typo or `stage.output` reorder silently disables masking. Defense-in-depth gap. **Spun off** (golden-line test, infra-reviewer). |
+| OBS-3 | P3 | 2 | `apps/api/src/observability/error-tracking.ts:133-144` | `scrubEvent` redacts `exception.values[].value` via the final `redactDeep` (which does walk it — verified + spec-pinned at `error-tracking.spec.ts:118-127`). An email/short-base64 in a thrown message would survive shape-scrubbing. No current throw interpolates client PII. Forward-looking hardening only. **Spun off** (observability hardening PR). |
+| ET-1 | P3 | 3 | `apps/api/src/observability/error-tracking.ts:66-82` | `redactDeep` drops values wholesale only on a sensitive **key**; otherwise shape-only. A non-JWT token / raw base64 key / email / displayName under a benign key (`detail`, `note`, `body`) survives. Conceded residual (`error-tracking.md` §6); no current throw/log/`extra` carries such a value. **Spun off** (observability hardening PR). |
+| ET-2 | P3 | 3 | `apps/api/src/observability/error-tracking.ts:45-54` | `Sentry.init` doesn't pin `defaultIntegrations:false`/an allowlist, so a future SDK bump could add a new top-level event field that `redactDeep` only shape-scrubs. Every current default integration is neutralised by `scrubEvent`; DSN unset by default. Conceded residual #1 in `error-tracking.md:126-131`. **Spun off** (observability hardening PR). |
+| ET-3 | P3 | 3 | `apps/api/src/observability/error-tracking.ts:148-153` | NestJS `Logger` → `console.*` → Sentry `console`-category breadcrumb; `scrubBreadcrumb` drops only http/fetch, so a console breadcrumb survives with shape-only redaction. Couples the whole app-log stream to the error sink under best-effort redaction (amplifies ET-1). Nothing sensitive ships today; DSN-gated. **Spun off** (observability hardening PR). |
+| ADMIN-1 | P3 | 5 | `apps/api/src/admin/admin.service.ts:84-91` | `device.revoked` audit row is written in a **separate** `withTenant` tx from the DELETE (`db/index.ts:74-81` opens a fresh tx per call). A crash/audit-insert failure between the committed DELETE (cascades `key_packages`) and the audit write leaves a hard-deleted device unaudited — unrecoverable (no outbox). Fails safe (action-without-log), invariant #6 untouched. Matches the codebase-wide audit-after-commit pattern. **Spun off** (`audit.record(tx, …)` overload for high-privilege mutations). |
+| ADMIN-2 | P3 | 5 | `apps/api/src/admin/admin.controller.spec.ts:19-26` | No behaviour-tier spec instantiates `AdminService` with a faked `AuditService` to assert `revokeDevice` calls `audit.record({eventType:'device.revoked'})` on success / not on 404. The controller spec mocks the service away; a refactor dropping `admin.service.ts:91` would pass CI. The content half of invariant #6 _is_ pinned; the audit half is enforced only by code reading. **Spun off** (AdminService behaviour spec). |
+| AR-2 | **Low** | 6 | `infra/backup/backup-db.sh:45` | Logical nightly backups (30-day retention) retain an erased user's pre-erasure metadata until the dumps age out. Mechanism is real, but **not** "reconciled nowhere": `article-30-records.md:82` + `data-residency.md:33` document the 30-day encrypted-backup retention + legal basis. Backup stays age-encrypted, EU-resident, Key-Vault-gated — same trust boundary already conceded; no new attacker capability. Downgraded from P2 to a one-sentence cross-reference gap in `gdpr.md`/`db-backup.md` §6. **Spun off** (with gdpr.md regeneration). _Out-of-scope sibling worth tracking: the DR restore runbook (`infra/backup/README.md:101-168`) has no step to re-apply post-dump erasures — erased-user resurrection on restore._ |
+| AR-3 | P3 | 6 | `docs/threat-models/encrypted-attachments.md:56` | Neither B2 data bucket (attachments, backups) has IaC; Private/EU/lifecycle posture is manual and asserted nowhere in code/CI. `deploy.sh:584` already reads bucket state back but extracts only `corsRules` (`:589`) — `bucketType`/`lifecycleRules` are ignored. App-layer encryption (not the bucket ACL) holds the privacy claim, so a public bucket leaks only ciphertext + bounded metadata + an integrity/DoS surface. **Spun off** (extend the readback to assert `bucketType == allPrivate` + lifecycle, fail closed; infra-reviewer). |
+| AR-4 | P3 | 6 | `docs/threat-models/db-backup.md:105-107` | Single age recipient (`backup-db.sh:107`) is a key-management SPOF for all historical backups: lose the Key-Vault private key = total DR loss; leak it = total confidentiality loss. Correctly conceded. **Tracked residual** (pre-beta): add a second offline break-glass `-r` recipient + rotation runbook (infra-reviewer + crypto-reviewer). |
+| AR-5 | P3 | 6 | `docs/threat-models/gdpr.md:61` | _Same stale-doc class as F3/GDPR-DOC-1._ `gdpr.md:17,61` still list dropped `key_backups`; `key-model.md:38` still asserts `key_backups` has tenant_id + RLS. **`key-model.md:38` fixed in this PR**; `gdpr.md` lines folded into the gdpr.md regeneration spin-off. |
+
+### Refuted by the skeptic pass
+
+None. Every finding surfaced in the per-claim passes was **CONFIRMED** or **DOWNGRADED**; none was refuted. (OBS-1, OBS-3, ET-2 were downgraded in _rationale_ — real but mischaracterized by the finder — while AR-2 was downgraded in _severity_ from P2 to Low. All remain valid defects.)
+
+## Fix routing
+
+**P2 — own fix PR:**
+- **F1 / AR-1 (the only P2, one defect counted under two claims)** → spin off as its own PR. Two parts: (a) implement the audit-retention prune — a maintenance role with `DELETE FROM audit_events WHERE created_at < now() - interval '90 days'` driven by a systemd timer mirroring `argus-attachment-cleanup.{service,timer}` (or `pg_cron`), tenant-by-tenant; do the same for the `auth_sessions` prune `0032` promises; (b) **immediately** correct `article-30-records.md:78` and `audit-logging.md` either to match the shipped prune or to state retention is currently unbounded and re-clear it with the GDPR owner. Security gate: `security-boundary-auditor` (RLS scoping of the prune role + DELETE grant) and `infra-reviewer` (systemd timer hardening, least-privilege role); add a DB-integration test asserting rows older than the window are deleted and tenant isolation holds.
+
+**Fixed in this PR (doc-only, zero behaviour):**
+- **F2** — added the three omitted metadata sources (receipts timing, friendships graph + direction, `is_direct`) to the canonical `metadata-exposure.md` §1.
+- **AR-5 (key-model.md half)** — dropped the stale `key_backups` RLS assertion at `key-model.md:38`.
+
+**Spun off (each its own verified PR):** F1/AR-1 (P2, priority) · gdpr.md regeneration (F3, F4, GDPR-DOC-1, GDPR-DOC-2, AR-2, AR-5-gdpr — security-architect doc pass, includes the security-sensitive erasure runbook rewrite) · OBS-1 (refresh-IP log) · observability default-deny hardening (OBS-2, OBS-3, ET-1, ET-2, ET-3) · ADMIN-1 + ADMIN-2 (transactional admin audit + spec) · AR-3 (B2 bucket-posture readback) · AR-4 (second age recipient + rotation runbook, pre-beta).
+
+## Guards added / not added
+
+**Added (in-PR, cheap):** the two doc-honesty fixes above that make the canonical metadata inventory honest again — closing the gap between what the docs promise and what the schema actually stores.
+
+**Not added (deferred to spun-off PRs):** the audit/session retention prune (F1/AR-1) and its Art. 30 correction; the gdpr.md regeneration; the Alloy golden-line test (OBS-2); the error-tracking integration/breadcrumb hardening (OBS-3/ET-1/2/3); the transactional admin audit + its behaviour spec (ADMIN-1/ADMIN-2); the B2 bucket-posture readback (AR-3); the second age recipient + rotation runbook (AR-4).
+
+## Residual risk
+
+- **Unbounded audit/session PII at rest until F1 ships.** Until the prune exists, `audit_events` (and `auth_sessions`) grow forever in the live DB and in all 30 days of backups — a durable per-user record of probed argus-ids. Bounded in _kind_ (pseudonymous metadata, never content/keys — invariants #2/#3 hold) but **not in time**, and the Art. 30 record currently overstates the control.
+- **Defense-in-depth nets that ship data only under future mistakes:** the error sink's shape-only value redaction (ET-1) plus unpinned integrations/breadcrumbs (ET-2/ET-3) and the untested Alloy mirror (OBS-2) all hold today but would silently degrade on a careless future edit or dep bump. DSN is unset by default, so server egress is currently zero.
+- **Operational completeness, not confidentiality:** the admin audit write can be lost in a crash window (ADMIN-1) and isn't regression-pinned (ADMIN-2) — fails toward unlogged, never toward content exposure.
+- **At-rest blast radius hinges on two manual/centralized controls:** the B2 buckets' Private/EU/lifecycle posture is unverified by the toolchain (AR-3) and all historical backup confidentiality reduces to one age private key (AR-4). Both are conceded; neither breaks the "stolen backup/blob yields only ciphertext" claim.
+- **Erased-user resurrection on full restore** (out-of-scope sibling of AR-2): the DR runbook has no post-restore erasure-replay step.
+
+## BOTTOM LINE
+
+Beyond message bodies, a curious server / admin / log / DB-dump learns only pseudonymous metadata — who messaged whom and when (epoch, `created_at`, `sender_user_id`, ciphertext length), the friendship graph, 1:1-vs-group, read-receipt timing, and which argus-ids each user probed — never content, keys, tokens, or presigned URLs (invariants #2/#6 hold across logs, admin, and backups); that exposure is bounded in **kind** and tenant-isolated, but **not yet bounded in time** (the promised 90-day audit/session prune does not exist, so per-actor PII accumulates unbounded in the live DB and every backup, and the Art. 30 record overstates a control that isn't built — the one P2, F1/AR-1), and the canonical exposure/erasure docs were stale enough that "documented" was aspirational until the in-PR doc fixes (and the spun-off gdpr.md regeneration) land.

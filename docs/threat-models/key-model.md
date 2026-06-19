@@ -35,7 +35,7 @@ The server stores/forwards **public KeyPackages** and **opaque sealed ciphertext
 
 - **#1 crypto-blind server** — upheld: only public KeyPackages + opaque ciphertext cross the boundary; no server-side parse/decrypt of key material. Substitution (§3.1) is the one place the invariant must be made *client-detectable*, not merely policy — tracked, not yet shipped.
 - **#2 no secret logging** — upheld: zero `console`/logger in the crypto package and keystore; audit rows carry `eventType` + `actorSub` + bounded UA only; no key/ciphertext/token/Authorization/presigned-URL in any log.
-- **#3 RLS on every tenant table** — upheld: `devices`, `key_packages`, `key_backups` each have `tenant_id` + ENABLE+FORCE RLS + WITH CHECK + leading-`tenant_id` index; runtime role `argus_app` is non-bypass; tenant context comes only from the verified token claim.
+- **#3 RLS on every tenant table** — upheld: `devices` and `key_packages` each have `tenant_id` + ENABLE+FORCE RLS + WITH CHECK + leading-`tenant_id` index; runtime role `argus_app` is non-bypass; tenant context comes only from the verified token claim. (`key_backups` was dropped in migration 0040 — the keystore is now WebAuthn-PRF-sealed with no server-side recoverable backup; see `device-keystore.md`.)
 - **#4 no hand-rolled crypto** — upheld: all primitives via `ts-mls` + `@noble/hashes` Argon2id + WebCrypto AES-GCM; no `Math.random` in any security path (the one `crypto.subtle` outside the package is PKCE S256 OAuth plumbing, not E2EE).
 - **#5 secrets via Key Vault** — N/A to this surface (no new cloud secrets).
 - **#6 no admin path to content** — upheld: key/backup surfaces expose IDs/metadata only.
