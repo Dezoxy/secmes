@@ -7,8 +7,8 @@
 ## 1. Feature & data flow
 
 The web app is a Vite-built PWA served as static assets. The browser talks to the API/WebSocket gateway for
-metadata and ciphertext envelopes, to Zitadel for authentication, and to S3-compatible B2 presigned URLs for
-attachments. Decrypted message content exists only in the browser runtime after the client-side crypto path
+metadata and ciphertext envelopes, authenticates same-origin via passkeys (WebAuthn — Zitadel/OIDC was
+decommissioned, #223), and fetches S3-compatible B2 presigned URLs for attachments. Decrypted message content exists only in the browser runtime after the client-side crypto path
 opens it; it must never enter telemetry, service-worker runtime caches, logs, or hosting diagnostics.
 
 Step 14A made Workbox explicit and static-only: generated JS/CSS/HTML/icons/images are precached, while
@@ -22,11 +22,12 @@ the VM/static edge layer. It does not add a telemetry transport and does not cha
 
 ## 2. Assets & trust boundaries
 
-- **Assets:** decrypted message content in browser memory; auth/session tokens; passkey/Zitadel state;
+- **Assets:** decrypted message content in browser memory; auth/session tokens; passkey/WebAuthn state;
   local encrypted message cache; service-worker cache; presigned attachment URLs; telemetry metadata; static
   JS bundles that contain client behavior and crypto glue.
-- **Boundaries:** browser runtime ↔ service worker/cache; browser ↔ API/WebSocket; browser ↔ Zitadel;
-  browser ↔ B2 presigned attachment URL; static host/edge ↔ user browser; future telemetry sink ↔ app.
+- **Boundaries:** browser runtime ↔ service worker/cache; browser ↔ API/WebSocket (passkey auth is
+  same-origin over this boundary, no separate IdP); browser ↔ B2 presigned attachment URL; static host/edge ↔
+  user browser; future telemetry sink ↔ app.
 
 ## 3. Threats (STRIDE-lite)
 
