@@ -26,6 +26,48 @@ rules:
     patterns:
       - pattern-regex: \b(crypto\.subtle|createCipheriv|createDecipheriv|createHmac|pbkdf2Sync?|scryptSync?|tweetnacl|libsodium)\b
 
+  - id: argus-no-vetted-crypto-libs-outside-boundary
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >
+      Vetted crypto libraries (any @noble/* — curves, hashes, ciphers, post-quantum — and @hpke/*) belong only
+      in packages/crypto (the MLS wrapper). Building protocol crypto from raw primitives anywhere else is
+      forbidden; route it through packages/crypto. (The ONLY exception outside packages/crypto is @noble/hashes
+      Argon2id in apps/api/src/auth, governed by argus-auth-crypto-argon2id-only.)
+    # Matches the quoted module specifier itself, not a `from` clause, so static import, `export ... from`,
+    # dynamic `import('@noble/...')` and `require('@noble/...')` are all caught (auth handled by the rule below).
+    paths:
+      exclude: ['packages/crypto/**', 'apps/api/src/auth/**', '**/*.spec.ts', '**/*.test.ts']
+    patterns:
+      - pattern-regex: '[''"]@(noble|hpke)/'
+
+  - id: argus-auth-crypto-argon2id-only
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >
+      In apps/api/src/auth the ONLY sanctioned vetted-crypto module is @noble/hashes/argon2 (the breakglass
+      admin-password hash; see docs/threat-models/breakglass-admin.md §invariant-4). Any other @noble/* or
+      @hpke/* import here is hand-rolled crypto — route it through packages/crypto.
+    paths:
+      include: ['apps/api/src/auth/**']
+      exclude: ['**/*.spec.ts', '**/*.test.ts']
+    patterns:
+      - pattern-regex: '[''"]@(noble|hpke)/'
+      - pattern-not-regex: '[''"]@noble/hashes/argon2(\.js)?[''"]'
+
+  - id: argus-no-weak-argon2-variants
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >
+      Only Argon2id is sanctioned (the memory-hard, side-channel-resistant variant). The weaker Argon2d /
+      Argon2i symbols must not be used anywhere outside packages/crypto. This matches the symbol token, so it
+      catches the variant regardless of import style (static, dynamic, re-export) or a mixed-symbol import.
+    paths:
+      exclude: ['packages/crypto/**', '**/*.spec.ts', '**/*.test.ts']
+    patterns:
+      # argon2d / argon2i followed by a non-`d` char or end-of-token; argon2id (argon2 + i + d) never matches.
+      - pattern-regex: \bargon2[di]([^d]|$)
+
   - id: argus-no-secret-logging
     languages: [typescript, javascript]
     severity: ERROR

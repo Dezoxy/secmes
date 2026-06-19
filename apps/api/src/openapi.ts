@@ -27,7 +27,7 @@ const UUID_RE = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0
 const ISO_DATETIME_RE =
   '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$';
 const EMAIL_RE = '^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$';
-const BASE64_RE = '^[A-Za-z0-9+/]+={0,2}$'; // opaque MLS/crypto blobs (ciphertext, key packages, backups)
+const BASE64_RE = '^[A-Za-z0-9+/]+={0,2}$'; // opaque MLS/crypto blobs (ciphertext, key packages)
 const BASE64URL_RE = '^[A-Za-z0-9_-]+$'; // opaque keyset cursors
 const TAG_RE = '^[A-Za-z0-9._-]{1,64}$'; // short version/algorithm tags, e.g. "MLS_1.0"
 // Opaque / free-form text: control chars excluded, length bounded by `maxLength` (NOT a `{0,N}`
@@ -41,8 +41,8 @@ type MutableSchema = Record<string, unknown>;
 /** A real (non-loose) pattern for an opaque/structured string, inferred from its property name. */
 function patternForName(name: string): string | undefined {
   const n = name.toLowerCase();
-  // Only fields that are ALWAYS base64 — NOT `backup` (the sealed recovery artifact is `JSON.stringify`d
-  // and starts with `{`) or other opaque blobs, which fall through to the bounded-text fallback.
+  // Only fields that are ALWAYS base64. Other opaque blobs (e.g. a JSON-structured payload that starts
+  // with `{`) are not base64 and fall through to the bounded-text fallback.
   if (/cipher|keypackage|publickey|signature/.test(n)) return BASE64_RE;
   if (/cursor|after/.test(n)) return BASE64URL_RE;
   if (n === 'alg') return TAG_RE;
