@@ -39,7 +39,10 @@ services:
       - postgres_password
     volumes:
       - pgdata:/var/lib/postgresql/data
-    # No published ports — reachable only by the api on the internal network.
+    # NO published host ports (compose-guard enforces zero ports on every service — invariant #3). The api
+    # reaches PG by service name on the internal network; the host-side backup/cleanup systemd workers reach
+    # it via `docker compose exec -T postgres …` over the container's local socket (BKP-1 — see
+    # db-backup.md §7), NOT a published port. So PG never leaves the internal Docker network.
     security_opt:
       - no-new-privileges:true
     # Drop all caps, then add back only what the alpine postgres entrypoint needs to chown the data dir and

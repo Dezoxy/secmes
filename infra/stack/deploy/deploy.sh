@@ -20,6 +20,15 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 : "${GHCR_REGISTRY:?GHCR_REGISTRY required (e.g. ghcr.io/owner)}"
 : "${GHCR_USER:?GHCR_USER required}"
 : "${GH_REPO:?GH_REPO required (owner/repo, for the cosign signing identity)}"
+# Backup-worker config (BKP-1) — validate UP FRONT, before any destructive step (stopping the old api,
+# migrating). These are non-secret (key-id/bucket ride in presigned URLs; the age recipient is public) and
+# required to arm the nightly backup; failing here means a misconfig aborts cleanly with the running stack
+# untouched, rather than at step 5c after the api has already been stopped.
+: "${B2_APP_KEY_ID:?B2_APP_KEY_ID required (key-id matching the argus-b2-app-key secret) — arms the DB backup}"
+: "${BACKUP_AGE_RECIPIENT:?BACKUP_AGE_RECIPIENT (age public key) required — refuses to upload an unencrypted dump}"
+: "${BACKUP_S3_BUCKET:?BACKUP_S3_BUCKET required (the private db-backups bucket)}"
+: "${S3_BUCKET:?S3_BUCKET required (the attachment bucket — cleanup worker target)}"
+: "${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID required (attachment B2 key-id — the cleanup worker credential)}"
 
 APP_DIR=/opt/argus
 SECRETS_DIR=/run/argus/secrets
@@ -326,54 +335,105 @@ shred -u "$_migfile" 2>/dev/null || rm -f "$_migfile" # best-effort on tmpfs; th
 #         the owner over the postgres container's LOCAL socket (the official image trusts local), so no
 #         connection password is passed anywhere; if local trust is ever disabled, psql fails and `set -e`
 #         aborts the deploy (fail-closed, never serve half-provisioned). Idempotent (ALTER ROLE). ---
-log "provisioning runtime role logins (argus_app/argus_cleanup/argus_backup)"
-# Existence prechecks — legible FATAL on a stale/partial secret set (matches the step-3b/step-6 convention).
-for _f in database_url cleanup-db-password backup-db-password; do
-  [ -s "$SECRETS_DIR/$_f" ] || {
-    log "FATAL: missing/empty secret file for role-login provisioning: $_f"
-    exit 1
-  }
-done
-# argus_app's password is embedded in the app DSN; cleanup/backup read their own delivered files.
+log "provisioning runtime role logins (argus_app password; argus_cleanup/argus_backup login-only)"
+# Only argus_app needs a PASSWORD: the api connects over TCP on the internal network. The backup/cleanup
+# workers connect IN-CONTAINER over the local-trust socket (docker compose exec — invariant #3, no published
+# port), so they get LOGIN with `PASSWORD NULL` — which also CLEARS any stale password left from a prior
+# deploy's old TCP+password flow, so the retired credential can't still authenticate over a password path
+# (their backup-db-password/cleanup-db-password Key Vault entries are now vestigial — retire in a follow-up).
+# Existence precheck → legible FATAL on a stale secret set.
+[ -s "$SECRETS_DIR/database_url" ] || {
+  log "FATAL: missing/empty secret file for role-login provisioning: database_url"
+  exit 1
+}
+# argus_app's password is embedded in the app DSN.
 _dburl="$(cat "$SECRETS_DIR/database_url")"
 _app_pw="${_dburl#*://argus_app:}"
 _app_pw="${_app_pw%%@*}"
 _dburl=""
-_cleanup_pw="$(cat "$SECRETS_DIR/cleanup-db-password")"
-_backup_pw="$(cat "$SECRETS_DIR/backup-db-password")"
-# ENFORCE the URL-unreserved charset (the same contract the redis/glitchtip steps enforce) BEFORE building any
-# SQL. This (a) closes any single-quote -> psql syntax-error path that could echo a password fragment on
-# stderr, and (b) catches a misconfigured database_url — e.g. accidentally the OWNER DSN (no `argus_app:`
-# segment): the unstripped value would still contain `://` and fail here, rather than setting argus_app to a
-# junk password. Logs name the roles only, never a value.
-for _pw in "$_app_pw" "$_cleanup_pw" "$_backup_pw"; do
-  case "$_pw" in
-  '' | *[!A-Za-z0-9._~-]*)
-    log "FATAL: a runtime role password is missing or contains a non-URL-safe character"
-    exit 1
-    ;;
-  esac
-done
-_pw=""
+# ENFORCE the URL-unreserved charset BEFORE building any SQL. This (a) closes any single-quote -> psql
+# syntax-error path that could echo a password fragment on stderr, and (b) catches a misconfigured
+# database_url — e.g. accidentally the OWNER DSN (no `argus_app:` segment): the unstripped value would still
+# contain `://` and fail here, rather than setting argus_app to a junk password. Logs name the role only.
+case "$_app_pw" in
+'' | *[!A-Za-z0-9._~-]*)
+  log "FATAL: the argus_app password is missing or contains a non-URL-safe character"
+  exit 1
+  ;;
+esac
 # Feed the SQL on STDIN (never argv/-v) so no password reaches /proc/<pid>/cmdline; psql echoes nothing of the
 # value. The owner connects over the postgres container's local socket (official-image trust) — no connection
 # secret is passed; if local trust is ever disabled, psql fails and `set -e` aborts (fail-closed).
 if ! docker compose -f "$COMPOSE" exec -T postgres \
   psql -U argus -d argus -v ON_ERROR_STOP=1 -q >/dev/null <<SQL; then
 ALTER ROLE argus_app     WITH LOGIN PASSWORD '${_app_pw}';
-ALTER ROLE argus_cleanup WITH LOGIN PASSWORD '${_cleanup_pw}';
-ALTER ROLE argus_backup  WITH LOGIN PASSWORD '${_backup_pw}';
+ALTER ROLE argus_cleanup WITH LOGIN PASSWORD NULL;
+ALTER ROLE argus_backup  WITH LOGIN PASSWORD NULL;
 SQL
   _app_pw=""
-  _cleanup_pw=""
-  _backup_pw=""
   log "FATAL: failed to provision runtime role logins"
   exit 1
 fi
 _app_pw=""
-_cleanup_pw=""
-_backup_pw=""
 log "runtime role logins provisioned"
+
+# --- 5c. Deploy + ARM the host backup/cleanup workers + their failure notifier (BKP-1). The units + scripts
+#         ride in the deploy tar; stage them, wire the NON-secret deployment config (B2 key-id + the age
+#         PUBLIC recipient — the matching secrets still arrive as LoadCredential files), install the
+#         OnFailure notifier (without it a nightly failure is silent), enable the daily timers, then PROVE
+#         the connectivity the finding flagged. BKP-1 was a backup bundled nowhere, enabled never, and (even
+#         if armed) aimed at a host TCP port that doesn't exist (PG publishes none — invariant #3), so it
+#         silently never ran. The workers now reach PG IN-CONTAINER via `docker compose exec` (argus is in the
+#         docker group; role logins exist from 5b), so they can finally connect — with no published port. ---
+log "deploying + arming backup/cleanup workers"
+# Config invariants for these workers (validated UP FRONT, before the destructive steps — see the top of the
+# script): B2_APP_KEY_ID is the key-id of the db-backups `argus-b2-app-key` secret (a SEPARATE key from the
+# api's attachment key — pairing S3_ACCESS_KEY_ID here would 403 and silently break the backup); the buckets
+# are templated per deploy (backup → BACKUP_S3_BUCKET; cleanup → the api's S3_BUCKET) so a non-prod deploy
+# can't target the production buckets; the age recipient is PUBLIC.
+# Stage the worker + notifier scripts where the units' ExecStart points (/opt/argus/{backup,cleanup,notify}).
+install -d -m 0755 "$APP_DIR/backup" "$APP_DIR/cleanup" "$APP_DIR/notify"
+install -m 0755 "$REPO_ROOT/infra/backup/backup-db.sh" "$APP_DIR/backup/backup-db.sh"
+install -m 0755 "$REPO_ROOT/infra/cleanup/cleanup-attachments.sh" "$APP_DIR/cleanup/cleanup-attachments.sh"
+install -m 0755 "$REPO_ROOT/infra/notify/notify-failure.sh" "$APP_DIR/notify/notify-failure.sh"
+# Install the units, then substitute the REPLACE_WITH_* placeholders on the INSTALLED copies (same idiom as
+# the argus-secrets KV-name substitution in step 1). `|` delimiter: age keys + B2 key-ids contain no `|`.
+# argus-notify-failure@.service is the OnFailure= target both workers reference — no `enable` (the template
+# is started on demand), just installed so a nightly failure raises a GlitchTip alert instead of vanishing.
+install -m 0644 "$REPO_ROOT/infra/backup/argus-db-backup.service" /etc/systemd/system/argus-db-backup.service
+install -m 0644 "$REPO_ROOT/infra/backup/argus-db-backup.timer" /etc/systemd/system/argus-db-backup.timer
+install -m 0644 "$REPO_ROOT/infra/cleanup/argus-attachment-cleanup.service" /etc/systemd/system/argus-attachment-cleanup.service
+install -m 0644 "$REPO_ROOT/infra/cleanup/argus-attachment-cleanup.timer" /etc/systemd/system/argus-attachment-cleanup.timer
+install -m 0644 "$REPO_ROOT/infra/notify/argus-notify-failure@.service" /etc/systemd/system/argus-notify-failure@.service
+# Per-worker B2 credentials, each scoped to the bucket it touches (least-privilege; no reliance on the
+# over-broad cross-bucket key — BKP-2): the backup worker → the db-backups key (B2_APP_KEY_ID + the
+# argus-b2-app-key secret it LoadCredentials); the cleanup worker → the attachment key (S3_ACCESS_KEY_ID + the
+# argus-s3-secret-access-key secret), the same key the api manages attachments with.
+sed -i "s|REPLACE_WITH_B2_KEY_ID|${B2_APP_KEY_ID}|" /etc/systemd/system/argus-db-backup.service
+sed -i "s|REPLACE_WITH_ATTACHMENT_KEY_ID|${S3_ACCESS_KEY_ID}|" /etc/systemd/system/argus-attachment-cleanup.service
+sed -i "s|REPLACE_WITH_AGE_PUBLIC_KEY|${BACKUP_AGE_RECIPIENT}|" /etc/systemd/system/argus-db-backup.service
+# Bucket names per deploy: backup → the db-backups bucket; cleanup → the same attachment bucket the api uses.
+sed -i "s|REPLACE_WITH_BACKUP_BUCKET|${BACKUP_S3_BUCKET}|" /etc/systemd/system/argus-db-backup.service
+sed -i "s|REPLACE_WITH_ATTACHMENT_BUCKET|${S3_BUCKET}|" /etc/systemd/system/argus-attachment-cleanup.service
+systemctl daemon-reload
+systemctl enable --now argus-db-backup.timer argus-attachment-cleanup.timer >/dev/null 2>&1 || {
+  log "FATAL: could not enable the backup/cleanup timers"
+  exit 1
+}
+# PROVE the connectivity the BKP-1 finding flagged as broken — via the SAME path the nightly worker now uses:
+# argus_backup connecting IN-CONTAINER over the local-trust socket (docker compose exec). We gate the deploy
+# on DB REACHABILITY (the novel blocker), NOT a full encrypt+upload — gating app rollout on a B2 round-trip
+# would couple releases to backup-bucket IAM and a transient B2 outage. The full chain (pg_dump → age → B2 →
+# retention prune) runs on the nightly timer and alerts via OnFailure=argus-notify-failure if it ever fails.
+# (This probe runs as root, so it confirms the DB path; the sandboxed argus-user unit's docker access is
+# exercised on the first nightly run, with OnFailure alerting if it regresses.) Logs status only.
+log "probing backup DB connectivity (argus_backup, in-container)"
+if ! docker compose -f "$COMPOSE" exec -T postgres \
+  psql -U argus_backup -d argus -tAc 'select 1' >/dev/null 2>&1; then
+  log "FATAL: argus_backup cannot connect to Postgres — the backup worker would never run (BKP-1)"
+  exit 1
+fi
+log "backup DB connectivity OK — nightly backup + daily cleanup timers armed"
 
 # --- 6. Bring up the full stack. cloudflared's TUNNEL_TOKEN is a RUNTIME value read from the delivered Key
 #        Vault file (the accepted env exception — never a committed/on-disk env file; the cloudflared image

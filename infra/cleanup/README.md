@@ -12,34 +12,45 @@ after the 7-day retention window. Runs natively on the VM via a **systemd timer*
    the row for the next run (no orphan blobs, no orphan rows either way).
 3. Logs IDs / object-keys / counts only — never a secret.
 
+> **Connection model (BKP-1 remediation, 2026-06).** Postgres publishes **no host port** (invariant #3). The
+> worker reaches the DB **in-container** via `docker compose exec -T postgres psql …` over the container's
+> local-trust socket — not a host TCP port. So there is **no DB password** (the role needs only `LOGIN`),
+> `deploy.sh` **auto-installs and arms** the unit, and `MemoryDenyWriteExecute` is dropped (AWS CLI v2). See
+> `docs/threat-models/db-backup.md` §7.
+
 ## Secrets (invariant #5)
 
-The DB password and the B2 application key are **never** in the unit/env at rest. They are delivered as
-credential **files** via systemd `LoadCredential=`, populated from **Azure Key Vault** by the VM's
-**Managed Identity** at boot. The worker reads them from `$CREDENTIALS_DIRECTORY`. The DB connection uses
-libpq `PG*` env vars (no connstring on argv), so the password never appears in `ps`.
+The **B2 application key** is **never** in the unit/env at rest. It is delivered as a credential **file** via
+systemd `LoadCredential=`, populated from **Azure Key Vault** by the VM's **Managed Identity** at boot. The
+worker reads it from `$CREDENTIALS_DIRECTORY`. There is **no DB password** on the host: the DB connection runs
+in-container over the local-trust socket (see the callout above).
 
 ## Prerequisite — provision the cleanup role login
 
-Migration `0013` creates `argus_cleanup` as **NOLOGIN** (its privileges are migration-controlled, and the
-RLS tests assume the role via `SET ROLE`). The systemd unit connects directly as `PGUSER=argus_cleanup`, so
-**before the worker can run** you must grant the role LOGIN + a password out-of-band — the password lives in
-Key Vault and is delivered to the unit via `LoadCredential` (see below). Run once as a superuser/owner:
+Migration `0013` creates `argus_cleanup` as **NOLOGIN**. The worker connects **in-container over local
+trust**, so it needs **LOGIN but no password**. `deploy.sh` step 5b does this automatically
+(`ALTER ROLE argus_cleanup WITH LOGIN;`). For a manual/dev run, as a superuser/owner:
 
 ```sql
--- NOT in a tracked migration (the password is environment-specific):
-ALTER ROLE argus_cleanup LOGIN PASSWORD '<from-key-vault>';
+-- NOT in a tracked migration:
+ALTER ROLE argus_cleanup LOGIN;
 ```
 
-This mirrors how `argus_app` is provisioned (NOLOGIN in the migration; LOGIN + a Key Vault password at deploy).
-
 ## Install (on the VM)
+
+> On the real deploy this is **automatic** — `deploy.sh` step 5c stages the script, installs the units + the
+> notifier, substitutes `S3_ACCESS_KEY_ID`, and `enable --now`s the timer. The steps below are for a
+> **manual/dev** run.
 
 ```bash
 sudo install -d /opt/argus/cleanup
 sudo install -m 0755 cleanup-attachments.sh /opt/argus/cleanup/
 sudo cp argus-attachment-cleanup.{service,timer} /etc/systemd/system/
-# Edit the .service: set PGHOST/.../S3_BUCKET + S3_ACCESS_KEY_ID, and the LoadCredential source paths.
+# Edit the .service: set S3_BUCKET + S3_ACCESS_KEY_ID (the ATTACHMENT-bucket key-id — same key the api manages
+# attachments with; deploy.sh fills both from the S3_BUCKET / S3_ACCESS_KEY_ID vars). The DB is reached
+# in-container via `docker compose
+# exec` (COMPOSE_FILE/COMPOSE_PROJECT_NAME, no PGHOST), so the user running the timer must be in the `docker`
+# group (argus already is). `psql` runs inside the postgres container; AWS CLI v2 runs on the host.
 sudo systemctl daemon-reload
 sudo systemctl enable --now argus-attachment-cleanup.timer
 # One-off run + logs:
@@ -60,13 +71,16 @@ web app origin(s) + `s3_put`/`s3_get` + the `content-type` header (see the threa
 ## Deploy verification & tuning
 
 - **Dry-run before enabling the timer:** `systemctl start argus-attachment-cleanup`, then check
-  `journalctl -u argus-attachment-cleanup`. Confirm your **AWS CLI v2** build runs under the unit's
-  hardening (especially `MemoryDenyWriteExecute=true`); relax that one knob if the CLI needs W^X memory.
+  `journalctl -u argus-attachment-cleanup`. `MemoryDenyWriteExecute` is already **dropped** from this unit
+  (AWS CLI v2 is a PyInstaller bundle that needs W^X memory). Confirm the `docker compose exec` path works
+  under the unit's sandbox as `User=argus` (docker-group) on the VM — that's the one part not exercisable
+  off-box.
 - **Throughput ceiling:** one run reaps up to `CLEANUP_BATCH × CLEANUP_MAX_ROUNDS` (default 1000 × 50 =
   50k) rows. With a daily timer + 7-day retention that is ample; under heavy load tighten `OnCalendar` or
   raise the caps.
-- **Remote Postgres:** loopback uses `PGSSLMODE=prefer`. If `PGHOST` ever points off-box, set
-  `PGSSLMODE=verify-full` + a CA bundle so the connection can't silently fall back to plaintext.
-- **Alerting (follow-up):** the worker logs `done reaped=N failed=M`. Wire an `OnFailure=` unit or a journal
-  scrape so a persistently failing reap (B2 outage / expired key) pages someone — the 14-day B2 lifecycle
-  rule is only a backstop, not primary cleanup.
+- **Off-box Postgres:** the worker reaches PG **in-container** via `docker compose exec` (local trust). If PG
+  ever moves off-box, switch to a TCP client with `PGSSLMODE=verify-full` + a CA bundle + a scoped login
+  credential — the local-trust shortcut only holds while PG is a co-located container with no published port.
+- **Alerting:** the worker logs `done reaped=N failed=M` and, on a non-zero exit, fires
+  `OnFailure=argus-notify-failure@` (installed by `deploy.sh` — posts a GlitchTip event). The 14-day B2
+  lifecycle rule remains a backstop, not primary cleanup.

@@ -31,34 +31,40 @@ encrypt it with **`age` to a public recipient key** so B2 only ever stores ciphe
 **private** key is **not on the VM** — it lives in Key Vault and is fetched only at restore time, so a
 compromised backup host can read neither the live secrets nor any past backup it wrote.
 
+> **Connection model (BKP-1 remediation, 2026-06).** Postgres publishes **no host port** (invariant #3;
+> `compose-guard` enforces it). The worker therefore reaches the DB **in-container** via
+> `docker compose exec -T postgres pg_dump …` over the container's local-trust socket — **not** a host TCP
+> port + libpq passfile. Consequences reflected below: there is **no DB password** on the host (`argus_backup`
+> connects via local trust, so it needs only `LOGIN`, no password); `deploy.sh` **auto-stages, installs, and
+> arms** the units (the manual steps below are for a dev/manual run); and `MemoryDenyWriteExecute` is dropped
+> from this unit (AWS CLI v2 PyInstaller). See `docs/threat-models/db-backup.md` §7 for the rationale.
+
 ## Secrets (invariant #5)
 
-The DB password and the B2 application key are **never** in the unit/env at rest. They are delivered as
-credential **files** via systemd `LoadCredential=`, populated from **Azure Key Vault** by the VM's **Managed
-Identity** at boot. The worker reads them from `$CREDENTIALS_DIRECTORY` and keeps them **file-backed
-end-to-end**: it writes a libpq passfile + an AWS credentials file in a service-private tmpfs work dir under
-the systemd `RuntimeDirectory` (0600 — no host-disk backing, unlike `PrivateTmp`'s `/tmp`) and
-points the CLIs at them by path (`PGPASSFILE` / `AWS_SHARED_CREDENTIALS_FILE`), so the secret **values** are
-never exported into the process environment (hence not in `/proc/<pid>/environ`, not inherited by children)
-nor on argv/`ps`. The work dir is removed on exit. The age **public** key is not a secret and rides in the
+The **B2 application key** is **never** in the unit/env at rest. It is delivered as a credential **file** via
+systemd `LoadCredential=`, populated from **Azure Key Vault** by the VM's **Managed Identity** at boot. The
+worker reads it from `$CREDENTIALS_DIRECTORY` and keeps it **file-backed**: it writes an AWS credentials file
+in a service-private tmpfs work dir under the systemd `RuntimeDirectory` (0600 — no host-disk backing, unlike
+`PrivateTmp`'s `/tmp`) and points `aws` at it by path (`AWS_SHARED_CREDENTIALS_FILE`), so the secret **value**
+is never exported into the process environment (hence not in `/proc/<pid>/environ`, not inherited by children)
+nor on argv/`ps`. The work dir is removed on exit. There is **no DB password** on the host (the DB connection
+is in-container local-trust — see the callout above). The age **public** key is not a secret and rides in the
 unit's `Environment=`.
 
 ## Prerequisites
 
 ### 1. Provision the backup role login
 
-Migration `0015` creates `argus_backup` as **NOLOGIN** (no password in source). Grant it LOGIN + a password
-out-of-band — the password lives in Key Vault and is delivered to the unit via `LoadCredential`. Run once as
-a superuser/owner:
+Migration `0015` creates `argus_backup` as **NOLOGIN** (no password in source). The worker connects
+**in-container over local trust**, so it needs **LOGIN but no password**. `deploy.sh` step 5b does this
+automatically (`ALTER ROLE argus_backup WITH LOGIN;`). For a manual/dev run, as a superuser/owner:
 
 ```sql
--- NOT in a tracked migration (the password is environment-specific):
-ALTER ROLE argus_backup LOGIN PASSWORD '<from-key-vault>';
+-- NOT in a tracked migration:
+ALTER ROLE argus_backup LOGIN;
 ```
 
-This mirrors how `argus_app` / `argus_cleanup` are provisioned (NOLOGIN in the migration; LOGIN + a Key Vault
-password at deploy). The role is read-only + BYPASSRLS — see the migration header for why that is necessary
-and acceptable.
+The role is read-only + BYPASSRLS — see the migration header for why that is necessary and acceptable.
 
 ### 2. Generate the age keypair (once)
 
@@ -79,6 +85,10 @@ ever skipped (defence-in-depth, like the attachment bucket).
 
 ## Install (on the VM)
 
+> On the real deploy this is **automatic** — `deploy.sh` step 5c stages these scripts, installs the units +
+> the notifier, substitutes `S3_ACCESS_KEY_ID`/`AGE_RECIPIENT`, `enable --now`s the timer, and runs a
+> connectivity probe. The steps below are for a **manual/dev** run.
+
 ```bash
 # Failure notifier (shared with the cleanup worker — install once for both)
 sudo install -d /opt/argus/notify
@@ -89,8 +99,12 @@ sudo cp ../notify/argus-notify-failure@.service /etc/systemd/system/
 sudo install -d /opt/argus/backup
 sudo install -m 0755 backup-db.sh /opt/argus/backup/
 sudo cp argus-db-backup.{service,timer} /etc/systemd/system/
-# Edit argus-db-backup.service: set PGHOST/.../S3_BUCKET, S3_ACCESS_KEY_ID, AGE_RECIPIENT, RETENTION_DAYS,
-# and the LoadCredential source paths. Ensure `age`, `pg_dump` (postgresql-client), and AWS CLI v2 are installed.
+# Edit argus-db-backup.service: set S3_BUCKET, S3_ACCESS_KEY_ID (the key-id of the db-backups `argus-b2-app-key`
+# — a SEPARATE key from the attachment key; deploy.sh fills this from the B2_APP_KEY_ID var), AGE_RECIPIENT,
+# RETENTION_DAYS. The DB is
+# reached in-container via `docker compose exec` (COMPOSE_FILE/COMPOSE_PROJECT_NAME, no PGHOST), so the
+# user running the timer must be in the `docker` group (argus already is). Ensure `age` and AWS CLI v2 are
+# installed on the host; `pg_dump` runs inside the postgres container.
 sudo systemctl daemon-reload
 sudo systemctl enable --now argus-db-backup.timer
 # One-off run + logs:
@@ -103,7 +117,8 @@ journalctl -u argus-db-backup.service
 Each nightly run writes **two** encrypted objects: `argus-globals-<ts>.sql.age` (cluster ROLES — definitions
 + memberships, **no passwords**) and `argus-db-<ts>.dump.age` (the database, custom format). A restore onto a
 **fresh cluster** must recreate the roles **first** (the schema's RLS policies + grants reference
-`argus_app`/`argus_cleanup`/`argus_backup`), then restore the DB, then re-apply role passwords from Key Vault.
+`argus_app`/`argus_cleanup`/`argus_backup`), then restore the DB, then re-apply role logins (argus_app's
+password from Key Vault; argus_backup/argus_cleanup LOGIN-only — they use in-container local trust).
 
 On a trusted host (NOT the backup VM — it must NOT hold the age private key):
 
@@ -138,12 +153,13 @@ age -d -i age.key backup.dump.age > backup.dump
 createdb argus_restore
 pg_restore --dbname argus_restore backup.dump   # NOT --no-owner/--no-privileges — roles exist, so keep them
 
-# 4. Re-apply role login passwords from Key Vault (the backup deliberately omits them), AND re-grant
-#    argus_backup's full-read membership (the globals GRANT can fail across superusers — see step 2). Run as
-#    the restore superuser; `grant` is idempotent if already a member:
+# 4. Re-apply role logins (the backup deliberately omits passwords), AND re-grant argus_backup's full-read
+#    membership (the globals GRANT can fail across superusers — see step 2). Run as the restore superuser;
+#    `grant` is idempotent if already a member. Only argus_app needs a PASSWORD (it connects over TCP); the
+#    backup/cleanup workers connect in-container over local trust, so LOGIN with no password suffices:
 #    ALTER ROLE argus_app     LOGIN PASSWORD '<from-key-vault>';
-#    ALTER ROLE argus_cleanup LOGIN PASSWORD '<from-key-vault>';
-#    ALTER ROLE argus_backup  LOGIN PASSWORD '<from-key-vault>';
+#    ALTER ROLE argus_cleanup LOGIN;   -- in-container local-trust: no password
+#    ALTER ROLE argus_backup  LOGIN;   -- in-container local-trust: no password
 #    GRANT pg_read_all_data TO argus_backup;   -- restores full-DB read for the next backup (BYPASSRLS survives)
 #    -- verify: `\du argus_backup` must show BOTH "Bypass RLS" and membership of pg_read_all_data
 
@@ -159,17 +175,21 @@ shred -u age.key backup.dump
 ## Deploy verification & tuning
 
 - **Dry-run is a hard gate before trusting the timer:** `systemctl start argus-db-backup`, then check
-  `journalctl -u argus-db-backup`. **AWS CLI v2 is a PyInstaller bundle that can segfault under
-  `MemoryDenyWriteExecute=true`** on some glibc builds — this can't be validated off the VM. If the dry-run
-  segfaults, drop `MemoryDenyWriteExecute=true` from the unit (the one knob known to bite the CLI). Confirm
-  the dry-run completes a **real** multipart upload (a full dump), not just a connection.
+  `journalctl -u argus-db-backup`. `MemoryDenyWriteExecute` is already **dropped** from this unit — AWS CLI v2
+  is a PyInstaller bundle that maps memory W+X and segfaults under MDWE; the deploy's connectivity probe
+  doesn't exercise the CLI, so the first real dry-run on the VM is where an AWS-CLI/sandbox issue would
+  surface (caught by `OnFailure=` thereafter). Confirm the dry-run completes a **real** multipart upload (a
+  full dump), not just a connection — and that the `docker compose exec` path works under the unit's sandbox
+  as `User=argus` (docker-group).
 - **Do a real restore drill** (above) on day one and on a schedule — checkpoint 49 is "backups **+ a tested
   restore**", not just backups. _Drilled 2026-06-14 against PG16 (dump → fresh-cluster restore): data, schema,
   all RLS policies and per-role grants restore correctly and RLS enforces under a real `argus_app` login. The
   drill surfaced the `pg_read_all_data` / `GRANTED BY` gap now handled in steps 2 and 4 — re-run the drill
   against the actual prod backup objects before GA._
-- **Remote Postgres:** loopback uses `PGSSLMODE=prefer`. If `PGHOST` ever points off-box, set
-  `PGSSLMODE=verify-full` + a CA bundle so the connection can't silently fall back to plaintext.
+- **Off-box Postgres:** the worker reaches PG **in-container** via `docker compose exec` (local trust). If PG
+  ever moves off-box (managed/remote), this worker must switch to a TCP client with `PGSSLMODE=verify-full` +
+  a CA bundle + a scoped login credential — the local-trust shortcut only holds while PG is a co-located
+  container with no published port.
 - **Alerting:** `OnFailure=argus-notify-failure@%p.service` is wired in the unit. When the backup fails,
   systemd starts `argus-notify-failure@argus-db-backup.service`, which posts a `fatal`-level Sentry event to
   GlitchTip (if `sentry_dsn` is provisioned) or logs to the journal only (graceful no-op until armed). Install
