@@ -81,9 +81,11 @@ the VM/static edge layer. It does not add a telemetry transport and does not cha
   clean, smoke-test the CSP against the live app at arming:
   - `Content-Security-Policy` with restrictive defaults — `script-src 'self'` (no inline scripts; ts-mls is
     pure JS so no `wasm-eval`), `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`, and
-    `connect-src` scoped to same-origin (REST/WS) + the B2 presigned-URL bucket subdomain
-    (`*.s3.<region>.backblazeb2.com`, virtual-host style) — no IdP origin, since passkey auth replaced Zitadel
-    (#223); `img-src 'self' data: blob:` for generated avatars +
+    `connect-src` scoped to same-origin (REST/WS) + the **exact** B2 presigned-URL bucket host
+    (`<bucket>.s3.<region>.backblazeb2.com`, virtual-host style — the live wildcard `*.s3…` and the bare
+    path-style `s3.<region>.backblazeb2.com` endpoint are both over-broad and are tightened to the single
+    bucket host by CSP-1 in `docs/reviews/05-client-pwa.md`) — no IdP origin, since passkey auth replaced
+    Zitadel (#223); `img-src 'self' data: blob:` for generated avatars +
     decrypted attachment object URLs.
   - `Referrer-Policy: no-referrer` (tightened from `strict-origin-when-cross-origin`).
   - `Permissions-Policy` denying unused sensor/hardware capabilities.
