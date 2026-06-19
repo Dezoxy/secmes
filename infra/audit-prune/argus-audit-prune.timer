@@ -1,0 +1,12 @@
+# argus — daily timer for the audit/session retention prune worker. The windows are 90 days (audit) and
+# 30 days post-expiry (sessions), so a daily sweep keeps the per-run backlog tiny.
+[Unit]
+Description=argus — daily audit/session retention prune
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target

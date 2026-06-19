@@ -444,6 +444,28 @@ export class GdprService {
           ),
         );
 
+      // 1g-bis. ER-1: scrub the erased user's argus-id from OTHER actors' lookup/friend-request audit
+      //         rows where the erased user was the TARGET. Step 1g only deletes rows where they were the
+      //         ACTOR; a `users.lookup`/`friends.request_created` row recording that a DIFFERENT user
+      //         looked them up survives with their argus-id inside metadata.targetArgusId. Deleting that
+      //         row would destroy the other user's legitimate audit history, so we surgically remove just
+      //         the target identifier (jsonb `-` drops the key) — the same anonymize-in-place approach as
+      //         steps 1b/1d. Needs the column-scoped `update (metadata)` grant from migration 0043 (the
+      //         append-only design withheld UPDATE; the grant is limited to metadata, so event_type,
+      //         actor_sub, ip and created_at stay immutable). targetArgusId is stored as the BARE argus-id
+      //         (users.controller.ts / friends.controller.ts), so match on user.argusId — NOT the
+      //         `argusid:`-prefixed actor form used in 1g. Tenant-scoped like every other step: a row
+      //         written under another tenant (same argus-id probed elsewhere) is out of scope by design.
+      await tx
+        .update(schema.auditEvents)
+        .set({ metadata: sql`${schema.auditEvents.metadata} - 'targetArgusId'` })
+        .where(
+          and(
+            eq(schema.auditEvents.tenantId, auth.tenantId),
+            sql`${schema.auditEvents.metadata}->>'targetArgusId' = ${user.argusId}`,
+          ),
+        );
+
       // 1h. Delete the user row — cascades:
       //     • devices → key_packages (cascade), push_subscriptions (cascade)
       //     • auth_sessions (cascade) — migration 0032

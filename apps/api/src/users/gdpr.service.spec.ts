@@ -30,6 +30,8 @@ describe.skipIf(!DB_URL)('GdprService', () => {
   let attachmentObjectKey: string;
   let welcomeId: string;
   let inviteId: string;
+  let aliceArgusId: string;
+  let bobLookupAuditId: string; // ER-1: a row where alice is the lookup TARGET, bob the actor
 
   const blob = new FakeBlobStore();
   const svc = new GdprService(blob);
@@ -118,6 +120,17 @@ describe.skipIf(!DB_URL)('GdprService', () => {
     await sql`
       insert into audit_events (tenant_id, actor_sub, event_type, metadata)
       values (${tenantA}, ${aliceSub}, 'device.registered', '{"deviceId":"fake-id"}'::jsonb)`;
+
+    // ER-1 fixture: a lookup audit row where BOB is the actor and ALICE is the TARGET (her argus-id sits in
+    // metadata.targetArgusId, exactly as users.controller.ts records it). This survives the actor-scoped
+    // erasure (1g) — bob is a different, non-erased user — so 1g-bis must scrub just the targetArgusId while
+    // preserving bob's legitimate lookup event.
+    [{ argus_id: aliceArgusId }] = await sql`select argus_id from users where id = ${aliceId}`;
+    [{ id: bobLookupAuditId }] = await sql`
+      insert into audit_events (tenant_id, actor_sub, event_type, metadata)
+      values (${tenantA}, ${bobSub}, 'users.lookup',
+              ${JSON.stringify({ targetArgusId: aliceArgusId, found: true })}::jsonb)
+      returning id`;
 
     // Invite created by alice
     [{ id: inviteId }] = await sql`
@@ -260,6 +273,20 @@ describe.skipIf(!DB_URL)('GdprService', () => {
       const [evt] =
         await sql`select id from audit_events where actor_sub = ${aliceSub} and tenant_id = ${tenantA}`;
       expect(evt).toBeUndefined();
+    });
+
+    it('ER-1: scrubs alice argus-id from another actor lookup row but keeps the event intact', async () => {
+      const [row] = (await sql`
+        select actor_sub, event_type, metadata from audit_events where id = ${bobLookupAuditId}`) as Array<{
+        actor_sub: string;
+        event_type: string;
+        metadata: Record<string, unknown> | null;
+      }>;
+      expect(row).toBeDefined(); // bob's legitimate lookup event survived (not deleted)
+      expect(row!.actor_sub).toBe(bobAuth.sub); // actor identity intact
+      expect(row!.event_type).toBe('users.lookup'); // event type intact
+      expect(row!.metadata?.targetArgusId).toBeUndefined(); // alice's argus-id scrubbed (ER-1)
+      expect(row!.metadata?.found).toBe(true); // other metadata keys preserved
     });
 
     it('removes alice from the routing index (user_tenant_index)', async () => {
