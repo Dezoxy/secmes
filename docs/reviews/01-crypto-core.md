@@ -75,9 +75,13 @@
   all client trust uses the embedded key, so the absent check is the mandated design, not a gap.
 
 ## Guards added (this PR)
-- **Semgrep `argus-no-vetted-crypto-libs-outside-boundary`** — bans `@noble`/`@hpke` imports outside
-  `packages/crypto/**` and `apps/api/src/auth/**` (the two sanctioned locations), turning the prose allowlist into
-  an enforced rule. Closes the highest-value part of F5; runs in pre-commit + CI like the other `.semgrep/` rules.
+Two Semgrep rules turn the prose allowlist into enforced, module-precise rules (closing the high-value part of
+F5; both run in pre-commit + CI like the other `.semgrep/` rules, verified 0 findings on current source):
+- **`argus-no-vetted-crypto-libs-outside-boundary`** — bans `@noble/curves` / `@hpke/*` anywhere outside
+  `packages/crypto/**`. Deliberately does **not** exempt `apps/api/src/auth` — a stray protocol-crypto import
+  there must still trip (per Codex review of this PR).
+- **`argus-argon2id-only-in-auth`** — confines `@noble/hashes` (the Argon2id breakglass exception) to
+  `packages/crypto/**` + `apps/api/src/auth/**`; banned everywhere else.
 
 ## Residual risk (accepted for this phase)
 - **F2** nonce budget: accepted — unreachable at single-user/multi-tab scale; flagged for re-evaluation when
