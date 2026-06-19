@@ -101,10 +101,12 @@ the VM/static edge layer. It does not add a telemetry transport and does not cha
   CSP enforced — smoke-test against the live app at arming and watch the browser console for violations
   (eyeball the B2 presigned upload/download + the same-origin REST/WS calls specifically). The other #43 frontend-build
   items (SRI, service-worker pinning, published bundle hash) have since shipped — see `code-delivery-integrity.md`.
-- **CSP `connect-src` is pinned to the single-origin VM topology.** Only the B2 bucket host is pinned;
-  same-origin REST/WS rely on `'self'` (no IdP origin — Zitadel was decommissioned, #223). A **split
-  deployment** (`VITE_API_URL`/`VITE_WS_URL` on a different host) would
-  silently break live delivery until `connect-src` is extended with that explicit origin — a too-wide
+- **CSP `connect-src` is scoped to the single-origin VM topology.** Same-origin REST/WS rely on `'self'`
+  (no IdP origin — Zitadel was decommissioned, #223). The B2 attachment egress is **currently a wildcard**
+  (`https://*.s3.eu-central-003.backblazeb2.com`, virtual-host style) — which over-permits into a shared-tenant
+  region namespace; pinning it to the exact bucket host is tracked as CSP-1 in
+  `docs/reviews/05-client-pwa.md`. A **split deployment** (`VITE_API_URL`/`VITE_WS_URL` on a different host)
+  would silently break live delivery until `connect-src` is extended with that explicit origin — a too-wide
   `connect-src` would also weaken the protection.
 - **No telemetry sender exists yet.** When one is added, it needs a separate PR and threat-model update that
   covers retention, EU data residency, opt-in/default behavior, and failure handling.
