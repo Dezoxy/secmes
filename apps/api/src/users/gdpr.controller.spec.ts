@@ -33,7 +33,7 @@ describe('GdprController route contract', () => {
         isPublic: false,
         isAllowUnbound: false,
         hasPublicRateLimit: false,
-        httpCode: undefined,
+        httpCode: 200,
         guards: [],
       },
     ],

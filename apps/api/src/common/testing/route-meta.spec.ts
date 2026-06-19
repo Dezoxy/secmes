@@ -28,6 +28,10 @@ class FixtureController {
   @Get('guarded')
   @UseGuards(FixtureGuard)
   guarded(): void {}
+
+  // A POST with no @HttpCode — pins the verb-derived default (201).
+  @Post('made')
+  made(): void {}
 }
 
 describe('reflectRouteMeta', () => {
@@ -41,13 +45,20 @@ describe('reflectRouteMeta', () => {
     });
   });
 
-  it('reads guards and reports default (undefined httpCode, not public) for a protected route', () => {
+  it('reads guards and derives the GET default status (200) for a protected route', () => {
     expect(reflectRouteMeta(FixtureController, 'guarded')).toEqual({
       isPublic: false,
       isAllowUnbound: false,
       hasPublicRateLimit: false,
-      httpCode: undefined,
+      httpCode: 200,
       guards: [FixtureGuard],
+    });
+  });
+
+  it('derives the POST default status (201) when no @HttpCode override is present', () => {
+    expect(reflectRouteMeta(FixtureController, 'made')).toMatchObject({
+      httpCode: 201,
+      guards: [],
     });
   });
 

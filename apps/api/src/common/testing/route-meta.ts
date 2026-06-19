@@ -1,4 +1,4 @@
-import type { Type } from '@nestjs/common';
+import { RequestMethod, type Type } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 
 import { IS_ALLOW_UNBOUND_KEY } from '../../auth/allow-unbound.decorator.js';
@@ -10,6 +10,7 @@ import { PUBLIC_RATE_LIMIT_KEY } from '../../rate-limit/public-rate-limit.decora
 // stable and asserted by route-meta.spec.ts against real @HttpCode/@UseGuards decorators.
 const HTTP_CODE_METADATA = '__httpCode__';
 const GUARDS_METADATA = '__guards__';
+const METHOD_METADATA = 'method';
 
 /**
  * The security-relevant decorator contract of a single controller route, read straight off its
@@ -30,8 +31,13 @@ export interface RouteMeta {
   isAllowUnbound: boolean;
   /** @PublicRateLimit() — opts a @Public route back into the IP-keyed throttler. */
   hasPublicRateLimit: boolean;
-  /** @HttpCode(n) value, or undefined when the route uses Nest's verb default. */
-  httpCode: number | undefined;
+  /**
+   * The EFFECTIVE success status the route returns: the @HttpCode(n) override if present, otherwise
+   * Nest's verb default (POST → 201, every other verb → 200). Resolving the default here — rather than
+   * reporting `undefined` — means the spec pins the real returned code, so changing a route's verb or
+   * adding/removing @HttpCode is caught.
+   */
+  httpCode: number;
   /**
    * Guard classes from @UseGuards on the method AND class, merged — Nest runs both tiers, so a
    * method-level guard does not hide a class-level one. Order is not significant; assert membership.
@@ -52,12 +58,14 @@ export function reflectRouteMeta(ControllerClass: Type, methodName: string): Rou
   }
   const fn = handler as (...args: unknown[]) => unknown;
   const targets: [typeof fn, Type] = [fn, ControllerClass];
+  const explicitCode = Reflect.getMetadata(HTTP_CODE_METADATA, fn) as number | undefined;
+  const verb = Reflect.getMetadata(METHOD_METADATA, fn) as RequestMethod | undefined;
   return {
     isPublic: reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, targets) ?? false,
     isAllowUnbound: reflector.getAllAndOverride<boolean>(IS_ALLOW_UNBOUND_KEY, targets) ?? false,
     hasPublicRateLimit:
       reflector.getAllAndOverride<boolean>(PUBLIC_RATE_LIMIT_KEY, targets) ?? false,
-    httpCode: (Reflect.getMetadata(HTTP_CODE_METADATA, fn) as number | undefined) ?? undefined,
+    httpCode: explicitCode ?? (verb === RequestMethod.POST ? 201 : 200),
     guards: reflector.getAllAndMerge<Type[]>(GUARDS_METADATA, targets) ?? [],
   };
 }

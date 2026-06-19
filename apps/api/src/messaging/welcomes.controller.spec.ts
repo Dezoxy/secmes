@@ -29,11 +29,11 @@ function makeController() {
 }
 
 describe('WelcomesController route contract', () => {
-  const ROUTES: ReadonlyArray<[string, number | undefined]> = [
-    ['deliver', undefined], // @Post default 201
-    ['list', undefined], // @Get default 200
-    ['material', undefined],
-    ['consume', 204],
+  const ROUTES: ReadonlyArray<[string, number]> = [
+    ['deliver', 201], // @Post verb default
+    ['list', 200], // @Get verb default
+    ['material', 200],
+    ['consume', 204], // @HttpCode(204)
   ];
 
   it.each(ROUTES)('%s is authenticated with the expected status code', (method, httpCode) => {

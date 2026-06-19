@@ -31,13 +31,13 @@ function makeController() {
 }
 
 describe('MessagingController route contract', () => {
-  const ROUTES: ReadonlyArray<[string, number | undefined]> = [
-    ['createConversation', undefined], // @Post default 201
-    ['sendMessage', 200],
-    ['postCommit', 200],
-    ['listCommits', undefined],
-    ['listMessages', undefined],
-    ['listConversationMembers', undefined],
+  const ROUTES: ReadonlyArray<[string, number]> = [
+    ['createConversation', 201], // @Post verb default
+    ['sendMessage', 200], // @HttpCode(200) — idempotent send
+    ['postCommit', 200], // @HttpCode(200) — epoch-slot win/retry
+    ['listCommits', 200],
+    ['listMessages', 200],
+    ['listConversationMembers', 200],
   ];
 
   it.each(ROUTES)('%s is authenticated with the expected status code', (method, httpCode) => {

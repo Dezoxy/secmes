@@ -31,10 +31,10 @@ const guardNames = (method: string) =>
     .sort();
 
 describe('AdminController route contract', () => {
-  const ROUTES: ReadonlyArray<[string, number | undefined]> = [
-    ['listDevices', undefined],
+  const ROUTES: ReadonlyArray<[string, number]> = [
+    ['listDevices', 200],
     ['revokeDevice', 204],
-    ['listAudit', undefined],
+    ['listAudit', 200],
   ];
 
   it.each(ROUTES)('%s is non-public with the expected status code', (method, httpCode) => {
