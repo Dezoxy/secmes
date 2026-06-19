@@ -80,8 +80,11 @@ start; the old passphrase-sealed `key_backups` table was dropped in migration `0
 device/session key handling, and `mls-integration` status. Proves invariants **1, 4**. Adversarial questions:
 can any plaintext or key material reach a log or the wire in clear? is there any `Math.random` in a security
 path (CSPRNG-only)? is the PRF unlock key truly non-extractable, and is there genuinely **no server-side
-recoverable secret** (verify 0040 left nothing equivalent behind)? does the same unlock key correctly seal every
-store (device, KeyPackage pool, per-conversation group state)? can a claimed key package be substituted
+recoverable secret** (verify 0040 left nothing equivalent behind)? does the same unlock key correctly seal **every**
+secret store — all of `SECRET_STORES` (`apps/web/src/lib/keystore.ts`): device, KeyPackage pool, per-conversation
+group state, **`message-log` (the decrypted message-history store reopened by `loadMessageLog` — the critical
+at-rest-plaintext privacy claim)**, pending commits, and verified-peers — with none persisted unsealed (Slice 5
+cross-checks the plaintext-history store from the client-endpoint angle)? can a claimed key package be substituted
 (key-substitution / MITM)? **Note for the executor:** AGENTS.md's crypto review criteria still says "key backup
 uses Argon2id + unique salt" — that describes the *retired* flow; flag this doc drift for a follow-up (and pick
 it up in Slice 7). Cross-check against
