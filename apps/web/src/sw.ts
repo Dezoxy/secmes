@@ -5,17 +5,22 @@ import {
 } from 'workbox-precaching';
 import { NavigationRoute, registerRoute } from 'workbox-routing';
 import { pwaNavigateFallback, pwaNavigateFallbackDenylist } from './lib/pwa-cache-policy';
-import { checkAssetIntegrity, integrityManifestKey } from './lib/sw-integrity';
+import {
+  buildVerifiedResponse,
+  checkAssetIntegrity,
+  integrityManifestKey,
+} from './lib/sw-integrity';
 
 declare let self: ServiceWorkerGlobalScope & typeof globalThis;
 
 // Build-time subresource-integrity manifest (CDI-1): { "assets/<file>": "<sha384-base64>" } for every built
-// JS/CSS asset. INLINED into this file by the argus-sw-integrity-manifest Vite plugin AFTER vite-plugin-pwa
-// emits sw.js — it reuses the exact hashes already written to bundle-manifest.json (one source of truth,
-// byte-identical to the SRI integrity= attrs). It MUST be inlined here, never fetched at runtime: a runtime
-// fetch would let an attacker who swapped a chunk also serve a matching manifest (the CDI-3 self-defeat).
-// The placeholder string below is replaced at build with the real JSON; if it is ever left unreplaced,
-// JSON.parse throws on SW load (fail-closed) and the build-output guard fails CI.
+// JS/CSS asset. INLINED into the emitted dist/sw.js by the scripts/inline-sw-integrity.mjs post-build step
+// (run from the build script, after vite-plugin-pwa emits sw.js) — it reuses the exact hashes already written
+// to bundle-manifest.json (one source of truth, byte-identical to the SRI integrity= attrs). It MUST be
+// inlined here, never fetched at runtime: a runtime fetch would let an attacker who swapped a chunk also serve
+// a matching manifest (the CDI-3 self-defeat). The placeholder string below is replaced at build with the real
+// JSON; if it is ever left unreplaced, JSON.parse throws on SW load (fail-closed) and the build-output guard
+// (scripts/check-sw-integrity.mjs) fails CI.
 const INTEGRITY_MANIFEST: Record<string, string> = JSON.parse(
   '__SW_INTEGRITY_MANIFEST_JSON__',
 ) as Record<string, string>;
@@ -49,11 +54,9 @@ self.addEventListener('fetch', (event: FetchEvent) => {
         return new Response(null, { status: 502, statusText: 'Asset integrity check failed' });
       }
       // Re-emit the verified bytes (the original body stream was consumed by clone().arrayBuffer()).
-      return new Response(buffer, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: response.headers,
-      });
+      // buildVerifiedResponse drops the now-stale Content-Encoding/Content-Length (fetch already decoded the
+      // body) so the browser doesn't double-decode the chunk. See sw-integrity.ts.
+      return buildVerifiedResponse(buffer, response);
     })(),
   );
 });

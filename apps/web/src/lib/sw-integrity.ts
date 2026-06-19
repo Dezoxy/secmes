@@ -61,3 +61,23 @@ export async function checkAssetIntegrity(
   const actual = await sha384Base64(bytes);
   return { guarded: true, ok: actual === expected };
 }
+
+/**
+ * Build the response to serve for a verified asset from its buffered bytes + the original response.
+ *
+ * `fetch()` transparently DECODES any `Content-Encoding` (gzip/br) before the body is read, so the buffered
+ * bytes are the decoded form. The original `Content-Encoding`/`Content-Length` headers describe the
+ * *compressed* response — re-emitting them would make the browser try to inflate already-inflated bytes and
+ * the chunk would fail to load whenever the origin serves `/assets/*` compressed. Drop both; keep the rest
+ * (notably `Content-Type`, so the module loads with the correct MIME type).
+ */
+export function buildVerifiedResponse(buffer: ArrayBuffer, original: Response): Response {
+  const headers = new Headers(original.headers);
+  headers.delete('content-encoding');
+  headers.delete('content-length');
+  return new Response(buffer, {
+    status: original.status,
+    statusText: original.statusText,
+    headers,
+  });
+}

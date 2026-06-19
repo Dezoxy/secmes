@@ -588,6 +588,18 @@ B2_CORS_KEY_ID="${B2_CORS_KEY_ID:-}"
 # reach attachment-r8xq4m7z2p9n6k3v.s3.eu-central-003.backblazeb2.com. If this bucket changes, update
 # infra/stack/caddy/Caddyfile too — scripts/check-csp-connect-src.sh fails CI if the two drift.
 ATTACHMENT_BUCKET="attachment-r8xq4m7z2p9n6k3v"
+# CSP-1 binding (the part CI cannot check): the browser's CSP connect-src pins the host above, but the API
+# presigns against $S3_BUCKET (a deploy-time GitHub repo variable CI can't see). If they diverge, every
+# attachment upload/download is silently CSP-blocked in the browser while CI stays green. Bind them here,
+# at the one place $S3_BUCKET is known, and FAIL CLOSED. This also forces the CORS-key check below (which
+# uses ATTACHMENT_BUCKET) to validate the bucket the API actually presigns against.
+if [ "$S3_BUCKET" != "$ATTACHMENT_BUCKET" ]; then
+  log "FATAL: S3_BUCKET ('$S3_BUCKET') != the CSP-pinned attachment bucket ('$ATTACHMENT_BUCKET'). The PWA's"
+  log "       Content-Security-Policy connect-src only allows ${ATTACHMENT_BUCKET}.s3.<region>.backblazeb2.com,"
+  log "       so attachments would be blocked in the browser. Set vars.S3_BUCKET to '$ATTACHMENT_BUCKET' or"
+  log "       update infra/stack/caddy/Caddyfile + this constant together. Refusing to deploy."
+  exit 1
+fi
 B2_AUTH_URL="https://api.backblazeb2.com/b2api/v3/b2_authorize_account"
 # B2 canonicalizes CORS header NAMES to lowercase on storage (e.g. "ETag" -> "etag"). Lowercase the header
 # arrays on BOTH sides before comparing so a casing-only difference isn't mistaken for drift — otherwise the

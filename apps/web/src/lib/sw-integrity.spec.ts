@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { checkAssetIntegrity, integrityManifestKey, sha384Base64 } from './sw-integrity';
+import {
+  buildVerifiedResponse,
+  checkAssetIntegrity,
+  integrityManifestKey,
+  sha384Base64,
+} from './sw-integrity';
 
 const bytes = (s: string) => new TextEncoder().encode(s).buffer as ArrayBuffer;
 
@@ -52,6 +57,31 @@ describe('sw-integrity', () => {
         guarded: false,
         ok: true,
       });
+    });
+  });
+
+  describe('buildVerifiedResponse', () => {
+    it('drops stale Content-Encoding/Content-Length but keeps Content-Type', () => {
+      // fetch() already decoded the body before we buffered it, so the compressed-form headers would make
+      // the browser double-decode the chunk. They must be stripped; the MIME type must survive.
+      const original = new Response('compressed-on-the-wire', {
+        status: 200,
+        statusText: 'OK',
+        headers: {
+          'content-type': 'text/javascript',
+          'content-encoding': 'br',
+          'content-length': '42',
+          'cache-control': 'public, max-age=31536000, immutable',
+        },
+      });
+      const decoded = bytes('the decoded crypto chunk');
+      const out = buildVerifiedResponse(decoded, original);
+
+      expect(out.status).toBe(200);
+      expect(out.headers.get('content-encoding')).toBeNull();
+      expect(out.headers.get('content-length')).toBeNull();
+      expect(out.headers.get('content-type')).toBe('text/javascript');
+      expect(out.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
     });
   });
 });

@@ -109,8 +109,11 @@ the VM/static edge layer. It does not add a telemetry transport and does not cha
   2026-06-19) to the single virtual-host bucket** `https://attachment-r8xq4m7z2p9n6k3v.s3.eu-central-003.backblazeb2.com`;
   the former wildcard `*.s3.eu-central-003.backblazeb2.com` and the bare path-style `s3.<region>.backblazeb2.com`
   host are removed (both over-permitted into the shared-tenant region namespace — a CSP source is host-only and
-  cannot restrict the path). The pinned host must stay in sync with `ATTACHMENT_BUCKET` in `deploy.sh`
-  (`scripts/check-csp-connect-src.sh` fails CI on drift). A **split deployment** (`VITE_API_URL`/`VITE_WS_URL`
+  cannot restrict the path). The pin is enforced on two legs: `scripts/check-csp-connect-src.sh` fails CI if the
+  Caddyfile host and `deploy.sh`'s `ATTACHMENT_BUCKET` literal drift (static↔static), and `deploy.sh` fails the
+  deploy **closed** if the runtime `S3_BUCKET` — the bucket the API actually presigns against, a repo variable
+  CI can't see — differs from that host. Together they guarantee the browser's only allowed B2 host equals the
+  presign bucket. A **split deployment** (`VITE_API_URL`/`VITE_WS_URL`
   on a different host) would silently break live delivery until `connect-src` is extended with that explicit
   origin — a too-wide `connect-src` would also weaken the protection.
 - **No telemetry sender exists yet.** When one is added, it needs a separate PR and threat-model update that
