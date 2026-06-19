@@ -81,15 +81,24 @@ time? can a claimed key package be substituted (key-substitution / MITM)? Cross-
 
 ### Slice 2 — Server boundary: crypto-blindness, RLS, authz, logging  *(reviewer: `security-boundary-auditor`)*
 The proof the server *can't* read what it carries. Scope: all 18 controllers + their services + queries +
-migrations. Proves invariants **1, 2, 3, 6**. Adversarial questions: does every tenant-scoped table have an
-*enforced* RLS policy (not just a `tenant_id` column)? is the tenant session var ever set from unverified client
-input? any IDOR (object reached without an ownership/membership check)? any banned log pattern (plaintext,
-token, full `Authorization`, presigned URL)? does any endpoint return content where it should return metadata?
-Lean on the just-completed controller specs as a baseline; this slice goes one layer deeper into the service +
-SQL. Cross-check `docs/threat-models/{rls-tenant-isolation,auth-tenant-context,metadata-exposure,audit-logging}.md`.
+migrations, **plus the realtime transport** — `realtime.gateway.ts` (`@WebSocketGateway({ path: '/ws' })`) and
+the realtime bus (`in-process-realtime-bus.ts` / `redis-realtime-bus.ts`) that subscribe and fan out ciphertext.
+This path is architecturally separate from HTTP: the global `JwtAuthGuard` **explicitly skips the `ws` context**
+(`jwt-auth.guard.ts` — `if (ctx.getType() === 'ws') return true;`) because the gateway self-authenticates via a
+first-frame token, so its authz/tenant pipeline must be proven independently. Proves invariants **1, 2, 3, 6**.
+Adversarial questions: does every tenant-scoped table have an *enforced* RLS policy (not just a `tenant_id`
+column)? is the tenant session var ever set from unverified client input? **does the WebSocket gateway run the
+same tenant-context + member-authz checks as the HTTP controllers, or can a client subscribe to another tenant's
+/ another conversation's fan-out?** any IDOR (object reached without an ownership/membership check)? any banned
+log pattern (plaintext, token, full `Authorization`, presigned URL) — including in the gateway/bus? does any
+endpoint return content where it should return metadata? Lean on the just-completed controller specs as a
+baseline; this slice goes one layer deeper into the service + SQL + realtime layer. Cross-check
+`docs/threat-models/{rls-tenant-isolation,auth-tenant-context,realtime-delivery,live-messaging,metadata-exposure,audit-logging}.md`.
 
 ### Slice 3 — Auth, identity & device trust  *(reviewers: `security-boundary-auditor` + `crypto-reviewer`)*
-Proves you're talking to who you think, and that the server can't impersonate. Scope: `auth/webauthn`
+Proves you're talking to who you think, and that the server can't impersonate. Proves invariants **1** (device
+trust underpins the crypto-blind guarantee), **2** (session tokens must never be logged), **6** (breakglass
+fencing). Scope: `auth/webauthn`
 (passkey), `auth/session-token`, `auth/breakglass` (admin + Cloudflare Access gating), `argus-id` identity,
 device provisioning / multi-device enrolment, fingerprint verification. Adversarial questions: can a session
 token be forged or replayed? is breakglass truly fenced (CfAccess + AdminGuard + audited)? can a malicious
@@ -108,7 +117,9 @@ does GDPR export leak another user's data? does admin tooling have any content p
 observability,error-tracking,gdpr,frontend-observability}.md`.
 
 ### Slice 5 — Client / PWA security  *(reviewer: `security-architect`, with targeted code-review)*
-The endpoint actually holds plaintext and keys — the strongest crypto is moot if the browser leaks. Scope:
+The endpoint actually holds plaintext and keys — the strongest crypto is moot if the browser leaks. Proves
+invariants **1** (the client is the only place plaintext exists; code-delivery integrity protects that), **2**
+(no keys/content in client telemetry), **4** (no hand-rolled crypto client-side). Scope:
 `apps/web` key handling in-browser, the PRF/keystore unlock, service worker (`sw.ts`), **code-delivery
 integrity** (can a tampered bundle exfiltrate keys?), CSP/headers, XSS surface, and frontend observability (no
 content/keys in client telemetry). Adversarial questions: where do decrypted plaintext and private keys live in
@@ -129,7 +140,10 @@ cross-cloud-secret-fetch,vm-ingress,vm-cd,db-backup,centralized-logs}.md` and `d
 
 ### Slice 7 — Synthesis, threat-model reconciliation & attestation  *(reviewer: `security-architect`)*
 Pull it together. Scope: reconcile every `docs/threat-models/*` note against what slices 1–6 actually found
-(flag any note that overclaims), assemble the **residual-risk register**, and write the top-level
+(flag any note that overclaims), **and flag stale/orphaned notes that describe dropped architecture** (e.g.
+anything referencing the removed Kubernetes/AKS/Helm/Argo CD path — deploy is now a single VM via Docker
+Compose) so the attestation doesn't preserve obsolete claims, assemble the **residual-risk register**, and write
+the top-level
 `docs/reviews/00-attestation.md` — the one-page "here is the privacy/safety posture, proven by these artifacts,
 with these known limits." This is the document you show someone who asks "prove it's safe."
 
@@ -146,8 +160,10 @@ with these known limits." This is the document you show someone who asks "prove 
 
 - **Independent of the AWS deploy track** but complementary: slices 2/6 directly de-risk the first deploy, so if
   deploy timing pressures, pull those two forward.
-- Slices are mostly parallelisable (fresh reviewer context each), but **run 1→2→3 in order** — later slices lean
-  on earlier findings (e.g. Slice 3 trusts Slice 1's key-handling conclusions). 4/5/6 can interleave.
+- Slices are mostly parallelisable (fresh reviewer context each), but **run 1→2→3 in order**: Slice 3 trusts
+  Slice 1's key-handling conclusions, and Slice 2 must precede Slice 3 because auth-layer gaps found at the
+  boundary (e.g. how/where the tenant context and guards are wired, incl. the ws-skip) **reframe what Slice 3
+  needs to check** about session tokens and device-add authz. 4/5/6 can interleave.
 - One slice per PR. Same dual-review flow (Codex + `@claude`), only pause for `gh pr merge`.
 
 ## Out of scope (campaign)
