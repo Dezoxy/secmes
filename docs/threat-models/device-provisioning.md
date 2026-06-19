@@ -104,14 +104,16 @@ authenticator, held in memory only) never leaves.
   device resolved by (caller's verified user + the device's signature key) so a user can only revoke their
   own device (never another user's/device's). **Claimed** packages survive (an in-flight Welcome may be
   HPKE-sealed to one). Migration `0014` adds the `delete on key_packages` grant; RLS is unchanged
-  (tenant-scoped). The client wires this into the **restore path**
-  (`DeviceContext.restore` → `revokeKeyPackages(deviceSignaturePublicKeyB64)` **before** `provisionDevice`):
-  on a pre-restore wipe or a fresh-browser restore, the stable signature key's stale (now-unopenable)
-  packages are revoked before a fresh pool is published. **Best-effort** — a failed revoke only leaves the
-  self-healing residual, never blocks getting the device back. The **account-switch reset**
-  (`resetForNewAccount`) still does NOT revoke (the device is a different user's — no authority). The **account-switch** case is intentionally *not* client-revocable: the abandoned
-  device belongs to a different user and the current session has no authority over it (correct authz);
-  those packages are cleaned when that user next re-provisions. (Codex P2, PR #66 — accepted residual.)
+  (tenant-scoped). The endpoint remains available, but the old client **restore-path** wiring
+  (`DeviceContext.restore` → `revokeKeyPackages` before `provisionDevice`) was **removed with the
+  no-recovery cutover**: there is no restore/recovery flow now, so a fresh browser is a **brand-new device
+  with a fresh signature key** (not a re-provision of the old one). The old device's stale (now-unopenable)
+  packages therefore just age out via the **self-healing** path above — each dead package is consumed on the
+  claim that poisons one initiation attempt. The `revokeKeyPackages` API helper is retained but currently
+  uncalled; re-wire it into device reset / re-provision if proactive cleanup is later wanted. The
+  **account-switch reset** (`resetForNewAccount`) does NOT revoke — the abandoned device belongs to a
+  different user, so the current session has no authority over it (correct authz); those packages are cleaned
+  when that user next re-provisions. (Self-healing + an available server-side revoke — accepted residual.)
 - **Multi-device (B2, shipped PR #191)** — a user may have N devices, each with its own composite
   `userId:deviceUuid` MLS identity and independent KeyPackage pool. A second device (D2) registers a
   pending enrollment; an existing trusted device (D1) verifies D2's fingerprint out-of-band and approves
