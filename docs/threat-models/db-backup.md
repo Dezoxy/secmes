@@ -141,8 +141,10 @@ network DB path, not a published port"). Closed by:
   copies the scripts to `/opt/argus/{backup,cleanup,notify}`, installs the `.service`+`.timer` units **and
   the `argus-notify-failure@.service` template** (the `OnFailure=` target both workers reference — so a
   nightly failure raises a GlitchTip alert instead of vanishing), substitutes the `REPLACE_WITH_*`
-  placeholders on the installed copies from **non-secret** deploy env (the B2 key-id, defaulted from
-  `S3_ACCESS_KEY_ID`; the **public** `BACKUP_AGE_RECIPIENT`), and `enable --now` both timers.
+  placeholders on the installed copies from **non-secret** deploy env (`B2_APP_KEY_ID` — the key-id matching
+  the db-backups `argus-b2-app-key` secret, a **separate** key from the api's attachment key, so it must be
+  its own repo var, never `S3_ACCESS_KEY_ID`; and the **public** `BACKUP_AGE_RECIPIENT`), and `enable --now`
+  both timers.
 - **In-network connectivity (no published port)** — the workers reach PG via `docker compose exec -T postgres
   pg_dump/psql …` over the container's local-trust socket, reusing the pattern `deploy.sh` already uses for
   role provisioning. `argus` is in the `docker` group (cloud-init), so this grants **no new privilege**. PG

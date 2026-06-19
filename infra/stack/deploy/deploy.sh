@@ -329,8 +329,10 @@ shred -u "$_migfile" 2>/dev/null || rm -f "$_migfile" # best-effort on tmpfs; th
 log "provisioning runtime role logins (argus_app password; argus_cleanup/argus_backup login-only)"
 # Only argus_app needs a PASSWORD: the api connects over TCP on the internal network. The backup/cleanup
 # workers connect IN-CONTAINER over the local-trust socket (docker compose exec — invariant #3, no published
-# port), so they need LOGIN but NO password (their backup-db-password/cleanup-db-password Key Vault entries
-# are now vestigial — retire in a follow-up). Existence precheck → legible FATAL on a stale secret set.
+# port), so they get LOGIN with `PASSWORD NULL` — which also CLEARS any stale password left from a prior
+# deploy's old TCP+password flow, so the retired credential can't still authenticate over a password path
+# (their backup-db-password/cleanup-db-password Key Vault entries are now vestigial — retire in a follow-up).
+# Existence precheck → legible FATAL on a stale secret set.
 [ -s "$SECRETS_DIR/database_url" ] || {
   log "FATAL: missing/empty secret file for role-login provisioning: database_url"
   exit 1
@@ -356,8 +358,8 @@ esac
 if ! docker compose -f "$COMPOSE" exec -T postgres \
   psql -U argus -d argus -v ON_ERROR_STOP=1 -q >/dev/null <<SQL; then
 ALTER ROLE argus_app     WITH LOGIN PASSWORD '${_app_pw}';
-ALTER ROLE argus_cleanup WITH LOGIN;
-ALTER ROLE argus_backup  WITH LOGIN;
+ALTER ROLE argus_cleanup WITH LOGIN PASSWORD NULL;
+ALTER ROLE argus_backup  WITH LOGIN PASSWORD NULL;
 SQL
   _app_pw=""
   log "FATAL: failed to provision runtime role logins"
@@ -375,11 +377,12 @@ log "runtime role logins provisioned"
 #         silently never ran. The workers now reach PG IN-CONTAINER via `docker compose exec` (argus is in the
 #         docker group; role logins exist from 5b), so they can finally connect — with no published port. ---
 log "deploying + arming backup/cleanup workers"
-# The B2 app-key ID is shared with the api's attachment key today (one B2 key spans both buckets — BKP-2);
-# default to it, overridable via B2_APP_KEY_ID once the keys are split. The age recipient is a PUBLIC key.
-B2_APP_KEY_ID="${B2_APP_KEY_ID:-${S3_ACCESS_KEY_ID:-}}"
-[ -n "$B2_APP_KEY_ID" ] || {
-  log "FATAL: B2_APP_KEY_ID (or S3_ACCESS_KEY_ID) required to arm the backup/cleanup workers"
+# The workers load the `argus-b2-app-key` secret (the **db-backups** B2 key) — a SEPARATE key from the api's
+# attachment key (`argus-s3-secret-access-key`). Its key-id must be the MATCHING B2_APP_KEY_ID, never
+# S3_ACCESS_KEY_ID: pairing the attachment key-id with the db-backups secret 403s on the first B2 call and
+# silently breaks the backup. Non-secret (rides in presigned URLs); required, fail-closed. age key is PUBLIC.
+[ -n "${B2_APP_KEY_ID:-}" ] || {
+  log "FATAL: B2_APP_KEY_ID required (the key-id matching the argus-b2-app-key secret) to arm the backup/cleanup workers"
   exit 1
 }
 [ -n "${BACKUP_AGE_RECIPIENT:-}" ] || {

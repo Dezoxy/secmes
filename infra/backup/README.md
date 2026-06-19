@@ -99,7 +99,9 @@ sudo cp ../notify/argus-notify-failure@.service /etc/systemd/system/
 sudo install -d /opt/argus/backup
 sudo install -m 0755 backup-db.sh /opt/argus/backup/
 sudo cp argus-db-backup.{service,timer} /etc/systemd/system/
-# Edit argus-db-backup.service: set S3_BUCKET, S3_ACCESS_KEY_ID, AGE_RECIPIENT, RETENTION_DAYS. The DB is
+# Edit argus-db-backup.service: set S3_BUCKET, S3_ACCESS_KEY_ID (the key-id of the db-backups `argus-b2-app-key`
+# — a SEPARATE key from the attachment key; deploy.sh fills this from the B2_APP_KEY_ID var), AGE_RECIPIENT,
+# RETENTION_DAYS. The DB is
 # reached in-container via `docker compose exec` (COMPOSE_FILE/COMPOSE_PROJECT_NAME, no PGHOST), so the
 # user running the timer must be in the `docker` group (argus already is). Ensure `age` and AWS CLI v2 are
 # installed on the host; `pg_dump` runs inside the postgres container.
