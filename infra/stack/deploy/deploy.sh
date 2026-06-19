@@ -20,6 +20,14 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 : "${GHCR_REGISTRY:?GHCR_REGISTRY required (e.g. ghcr.io/owner)}"
 : "${GHCR_USER:?GHCR_USER required}"
 : "${GH_REPO:?GH_REPO required (owner/repo, for the cosign signing identity)}"
+# Backup-worker config (BKP-1) — validate UP FRONT, before any destructive step (stopping the old api,
+# migrating). These are non-secret (key-id/bucket ride in presigned URLs; the age recipient is public) and
+# required to arm the nightly backup; failing here means a misconfig aborts cleanly with the running stack
+# untouched, rather than at step 5c after the api has already been stopped.
+: "${B2_APP_KEY_ID:?B2_APP_KEY_ID required (key-id matching the argus-b2-app-key secret) — arms the DB backup}"
+: "${BACKUP_AGE_RECIPIENT:?BACKUP_AGE_RECIPIENT (age public key) required — refuses to upload an unencrypted dump}"
+: "${BACKUP_S3_BUCKET:?BACKUP_S3_BUCKET required (the private db-backups bucket)}"
+: "${S3_BUCKET:?S3_BUCKET required (the attachment bucket — cleanup worker target)}"
 
 APP_DIR=/opt/argus
 SECRETS_DIR=/run/argus/secrets
@@ -377,29 +385,11 @@ log "runtime role logins provisioned"
 #         silently never ran. The workers now reach PG IN-CONTAINER via `docker compose exec` (argus is in the
 #         docker group; role logins exist from 5b), so they can finally connect — with no published port. ---
 log "deploying + arming backup/cleanup workers"
-# The workers load the `argus-b2-app-key` secret (the **db-backups** B2 key) — a SEPARATE key from the api's
-# attachment key (`argus-s3-secret-access-key`). Its key-id must be the MATCHING B2_APP_KEY_ID, never
-# S3_ACCESS_KEY_ID: pairing the attachment key-id with the db-backups secret 403s on the first B2 call and
-# silently breaks the backup. Non-secret (rides in presigned URLs); required, fail-closed. age key is PUBLIC.
-[ -n "${B2_APP_KEY_ID:-}" ] || {
-  log "FATAL: B2_APP_KEY_ID required (the key-id matching the argus-b2-app-key secret) to arm the backup/cleanup workers"
-  exit 1
-}
-[ -n "${BACKUP_AGE_RECIPIENT:-}" ] || {
-  log "FATAL: BACKUP_AGE_RECIPIENT (age public key) required — refusing to arm a backup that would upload unencrypted"
-  exit 1
-}
-# Bucket names are templated per deploy so the AWS experiment can't target the production buckets: the backup
-# worker writes BACKUP_S3_BUCKET (the db-backups bucket); the cleanup worker reaps the api's own attachments,
-# so it reuses S3_BUCKET (the attachment bucket the api is configured with). Both required, fail-closed.
-[ -n "${BACKUP_S3_BUCKET:-}" ] || {
-  log "FATAL: BACKUP_S3_BUCKET required (the private db-backups bucket) to arm the backup worker"
-  exit 1
-}
-[ -n "${S3_BUCKET:-}" ] || {
-  log "FATAL: S3_BUCKET required (the attachment bucket) to arm the cleanup worker"
-  exit 1
-}
+# Config invariants for these workers (validated UP FRONT, before the destructive steps — see the top of the
+# script): B2_APP_KEY_ID is the key-id of the db-backups `argus-b2-app-key` secret (a SEPARATE key from the
+# api's attachment key — pairing S3_ACCESS_KEY_ID here would 403 and silently break the backup); the buckets
+# are templated per deploy (backup → BACKUP_S3_BUCKET; cleanup → the api's S3_BUCKET) so a non-prod deploy
+# can't target the production buckets; the age recipient is PUBLIC.
 # Stage the worker + notifier scripts where the units' ExecStart points (/opt/argus/{backup,cleanup,notify}).
 install -d -m 0755 "$APP_DIR/backup" "$APP_DIR/cleanup" "$APP_DIR/notify"
 install -m 0755 "$REPO_ROOT/infra/backup/backup-db.sh" "$APP_DIR/backup/backup-db.sh"

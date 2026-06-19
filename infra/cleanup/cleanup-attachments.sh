@@ -80,6 +80,7 @@ log() { printf '[%s] cleanup: %s\n' "$(date -u +%FT%TZ)" "$*"; }
 total_reaped=0
 total_failed=0
 rounds=0
+db_unreachable=0
 
 # Drain expired rows in batches. Terminates on: no rows left, a batch with zero progress (e.g. B2
 # unreachable — avoids spinning on the same rows), or a safety round cap.
@@ -91,7 +92,10 @@ while :; do
   if ! rows="$(pgx psql -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -At -F $'\t' -c \
     "select id, object_key from attachments
      where expires_at is not null and expires_at < now() order by expires_at limit ${BATCH}")"; then
-    log "batch query failed (DB unreachable?) — stopping; retries next run"
+    # DB unreachable / query error: stop and FAIL the unit (non-zero exit below) so OnFailure= alerts —
+    # a cleanup that can't reach the DB must not report success. The timer still retries next run.
+    log "batch query failed (DB unreachable?) — stopping; will fail the unit so OnFailure alerts"
+    db_unreachable=1
     break
   fi
   [[ -z "$rows" ]] && break
@@ -130,3 +134,8 @@ while :; do
 done
 
 log "done reaped=${total_reaped} failed=${total_failed} rounds=${rounds}"
+# Exit non-zero if we couldn't reach the DB, so the unit's OnFailure= notifier fires (a silent exit-0 on an
+# unreachable DB is exactly the kind of gap BKP-1 was about). Per-item blob/row failures (total_failed) are
+# transient + retried next run, so they don't fail the unit.
+[ "$db_unreachable" = 1 ] && exit 1
+exit 0
