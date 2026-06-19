@@ -1,10 +1,12 @@
 # Threat model: client device keystore (IndexedDB)
 
-> Status: **DRAFT for ratification.** Covers roadmap checkpoint 18 — device MLS keys generated client-side and persisted in the browser. Pairs with `mls-integration.md` (key generation) and `key-backup.md` (the at-rest sealing this note defers to).
+> **SUPERSEDED (at-rest sealing + recovery model).** This note originally described a passphrase / Argon2id / server-side-recovery design that has since been **removed**. The authoritative current model is **[`prf-keystore-unlock.md`](prf-keystore-unlock.md)**: the keystore is sealed under a per-passkey **WebAuthn-PRF** secret imported as a non-extractable AES-256-GCM key — **no passphrase, no Argon2id, no server-side recovery** (a lost passkey is a fresh start). The passphrase/`key_backups` surface and `packages/crypto/src/key-backup.ts` were deleted (PR #233, migration `0040_drop_key_backups.sql`). The threat *structure* below (assets, boundaries, server-exfiltration) still holds; every reference to a passphrase, Argon2id, or a server-recoverable backup is obsolete — read `prf-keystore-unlock.md` for the shipped sealing.
+
+> Status: **DRAFT for ratification.** Covers roadmap checkpoint 18 — device MLS keys generated client-side and persisted in the browser. Pairs with `mls-integration.md` (key generation) and `prf-keystore-unlock.md` (the at-rest sealing this note defers to).
 
 ## 1. Feature & data flow
 
-On first use a device generates its MLS key material via `@argus/crypto` (`MlsEngine.generateDeviceKeys`, CSPRNG through WebCrypto — no hand-rolled crypto), and `DeviceKeystore` persists it in **IndexedDB SEALED** under the user's passphrase (`sealBackup`: Argon2id + AES-256-GCM). Unlocking requires the passphrase. The **public** package is later published to the key directory (checkpoint 19); the **private** package never leaves the device unencrypted and is never sent to the server. The server stays crypto-blind.
+On first use a device generates its MLS key material via `@argus/crypto` (`MlsEngine.generateDeviceKeys`, CSPRNG through WebCrypto — no hand-rolled crypto), and the keystore persists it in **IndexedDB SEALED** under a per-passkey WebAuthn-PRF unlock key (a non-extractable AES-256-GCM `CryptoKey`; see `prf-keystore-unlock.md`). Unlocking requires a WebAuthn ceremony with that passkey. The **public** package is later published to the key directory (checkpoint 19); the **private** package never leaves the device unencrypted and is never sent to the server. The server stays crypto-blind.
 
 ## 2. Assets & trust boundaries
 
@@ -13,26 +15,25 @@ On first use a device generates its MLS key material via `@argus/crypto` (`MlsEn
 
 ## 3. Threats (STRIDE-lite)
 
-1. **At-rest disclosure (Information disclosure).** IndexedDB stores **only the passphrase-sealed blob** (Argon2id + AES-256-GCM) — XSS or a local-device compromise reads ciphertext that's useless without the passphrase. The exposure window is now an **unlocked session** (unsealed keys in memory), not data-at-rest; CSP/SRI (checkpoint 43) reduces the in-session XSS surface.
-2. **Eviction / data loss.** iOS Safari can evict IndexedDB. → recovery via passphrase backup (checkpoints 21–23); a lost device re-derives from backup, not from the evicted store.
+1. **At-rest disclosure (Information disclosure).** IndexedDB stores **only the PRF-sealed blob** (AES-256-GCM under the per-passkey unlock key) — XSS or a local-device compromise reads ciphertext that's useless without a WebAuthn ceremony on the passkey. The exposure window is now an **unlocked session** (unsealed keys in memory), not data-at-rest; CSP/SRI (checkpoint 43) reduces the in-session XSS surface.
+2. **Eviction / data loss.** iOS Safari can evict IndexedDB. → **no recovery by design** (`prf-keystore-unlock.md`): a wiped store is a fresh start (the admin mints a new registration code), consistent with forward secrecy — there is no passphrase backup to re-derive from.
 3. **Server exfiltration of private keys.** → structural: only the keystore (client) touches the private package; nothing serializes it toward the server (the key directory publishes the **public** package only).
 
 ## 4. Invariant check
 
 - **#1 crypto-blind / #4 no hand-rolled crypto:** keys come from `@argus/crypto` (ts-mls/WebCrypto); the server never sees private material.
 - **#2 no secret logging:** the keystore logs nothing.
-- No tension. **At-rest encryption (#3.1) is now implemented** — IndexedDB holds only the passphrase-sealed blob.
+- No tension. **At-rest encryption (#3.1) is now implemented** — IndexedDB holds only the PRF-sealed blob.
 
 ## 5. Decision & mitigations
 
-- `DeviceKeystore` (IndexedDB) generates the device key and **persists it SEALED** (`sealBackup`: Argon2id + AES-256-GCM, checkpoint 21) under the user's passphrase. `getOrCreateDevice`/`loadDevice` take the passphrase and unseal. The **server recovery artifact is a SEPARATE, identity-only blob** (`exportRecoveryArtifact`/`importRecoveryArtifact`, checkpoints 22–23): it seals only the signing identity — **not** the full at-rest `DeviceKeys`, so it carries no one-time KeyPackage HPKE private keys. On restore it mints a **fresh** KeyPackage under that identity (re-publish + re-join), preserving forward secrecy per `key-backup.md` §4. The full at-rest blob is never uploaded. IndexedDB schema is **v2**; the v1→v2 upgrade drops the legacy unsealed store. Reviewer: **`crypto-reviewer`**.
-- **Tests:** generate → seal → reload → unseal → the keys still encrypt/decrypt over MLS; wrong passphrase rejected; **identity-only fresh-device recovery** (checkpoint 23) — recovered device shares the signing identity but gets a fresh KeyPackage (the artifact carries no init/hpke private keys); import authenticates before persisting (no stranded bad record), rejects a mismatched identity, and is race-safe; `clearDevice` allows re-import; legacy v1 records are dropped on upgrade.
+- The keystore (IndexedDB) generates the device key and **persists it SEALED** (AES-256-GCM under the per-passkey PRF unlock key — `importUnlockKey` in `packages/crypto/src/seal.ts`; see `prf-keystore-unlock.md`). Unlock is a WebAuthn ceremony, not a passphrase. **There is no server recovery artifact** — the old identity-only `exportRecoveryArtifact`/`importRecoveryArtifact` + `key_backups` path was removed (PR #233, migration `0040_drop_key_backups.sql`); a lost passkey is a fresh start, preserving forward secrecy (nothing sealed to a discarded private leaks). The at-rest blob is never uploaded. IndexedDB `DB_VERSION` is **8**; an upgrade wipes and recreates the secret-bearing stores (old rows are unreadable under the new scheme). Reviewer: **`crypto-reviewer`**.
+- **Tests:** generate → seal → reload → unseal → the keys still encrypt/decrypt over MLS; a different passkey (different PRF output) fails closed (GCM); `unseal` checks the identity embedded in the decrypted KeyPackage against the requested identity; `clearDevice` allows re-create; legacy records are dropped on `DB_VERSION` upgrade.
 - **18's unsealed dev/beta gate is removed** — the keystore is sealed at rest by default.
 
 ## 6. Residual risk
 
 - **Unsealed keys in memory during an active session** — once unlocked, the DeviceKeys live in JS memory and are readable by a successful XSS *while the session is unlocked*. Reduced by CSP/SRI (checkpoint 43); not eliminated in a browser.
-- **Passphrase strength is the weakest link** (shared with `key-backup.md`) — mitigated by Argon2id cost + a strength meter, not eliminated; a lost passphrase is unrecoverable by design.
-- **MUST-WIRE (upload path):** the FS guarantee holds only because the **identity-only** artifact is the sole thing uploaded. When the backup-upload UI lands, it MUST call `exportRecoveryArtifact` and MUST NOT upload the full at-rest `sealed` blob (which still contains one-time HPKE private keys for local use). There is no type/lint guard yet — add one (or a wrapper type) with the upload wiring so a future caller can't pass the at-rest blob to the backup API.
-- **Argon2id UX cost** — the 64 MiB KDF runs on each unlock; derive async (done) and run in a Web Worker (Phase-5 follow-up) so unlock doesn't stall the UI; cache the unsealed keys per session.
+- **No recovery is a deliberate availability trade** (`prf-keystore-unlock.md` T6) — a lost passkey or evicted store is unrecoverable by design; the admin mints a new registration code and the device starts fresh. This is the cost of having no server-recoverable backup (and no passphrase) to leak.
+- **Unlock depends on the authenticator's PRF (hmac-secret) support** — an authenticator without PRF cannot open the keystore (no silent fallback); the gate shows a fresh-start message. See `prf-keystore-unlock.md` T6.
 - **Shared browser profile reused by another identity** — `getOrCreateDevice`/`loadDevice` are identity-checked and **throw** rather than hand one identity another's keys; the complete fix is **logout clearing the keystore** (tracked with the session work).

@@ -7,8 +7,8 @@
 ## 1. Feature & data flow
 
 The web app is a Vite-built PWA served as static assets. The browser talks to the API/WebSocket gateway for
-metadata and ciphertext envelopes, to Zitadel for authentication, and to S3-compatible B2 presigned URLs for
-attachments. Decrypted message content exists only in the browser runtime after the client-side crypto path
+metadata and ciphertext envelopes, authenticates same-origin via passkeys (WebAuthn — Zitadel/OIDC was
+decommissioned, #223), and fetches S3-compatible B2 presigned URLs for attachments. Decrypted message content exists only in the browser runtime after the client-side crypto path
 opens it; it must never enter telemetry, service-worker runtime caches, logs, or hosting diagnostics.
 
 Step 14A made Workbox explicit and static-only: generated JS/CSS/HTML/icons/images are precached, while
@@ -22,11 +22,12 @@ the VM/static edge layer. It does not add a telemetry transport and does not cha
 
 ## 2. Assets & trust boundaries
 
-- **Assets:** decrypted message content in browser memory; auth/session tokens; passkey/Zitadel state;
+- **Assets:** decrypted message content in browser memory; auth/session tokens; passkey/WebAuthn state;
   local encrypted message cache; service-worker cache; presigned attachment URLs; telemetry metadata; static
   JS bundles that contain client behavior and crypto glue.
-- **Boundaries:** browser runtime ↔ service worker/cache; browser ↔ API/WebSocket; browser ↔ Zitadel;
-  browser ↔ B2 presigned attachment URL; static host/edge ↔ user browser; future telemetry sink ↔ app.
+- **Boundaries:** browser runtime ↔ service worker/cache; browser ↔ API/WebSocket (passkey auth is
+  same-origin over this boundary, no separate IdP); browser ↔ B2 presigned attachment URL; static host/edge ↔
+  user browser; future telemetry sink ↔ app.
 
 ## 3. Threats (STRIDE-lite)
 
@@ -41,8 +42,9 @@ the VM/static edge layer. It does not add a telemetry transport and does not cha
 - **Tampering / injection — XSS expands into token/content exfiltration.** If an injected script runs, it can
   read browser state and decrypted runtime content. → Target static hosting must send a restrictive CSP:
   `default-src 'self'`, `script-src 'self'`, `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`,
-  and narrowly scoped `connect-src` entries for the API/WebSocket origin, Zitadel, and required attachment
-  origins. CSP is defense-in-depth; React escaping and no plaintext server path remain required.
+  and narrowly scoped `connect-src` entries for the same-origin API/WebSocket plus the single B2 attachment
+  bucket host. (Auth is passkey-only — Zitadel/OIDC was decommissioned, #223 — so there is no IdP origin in
+  `connect-src`.) CSP is defense-in-depth; React escaping and no plaintext server path remain required.
 - **Information disclosure — referrers leak callback or attachment URLs.** Auth callback parameters and
   presigned URLs can contain sensitive material. → Target header: `Referrer-Policy: no-referrer`.
 - **Clickjacking / embedding.** An attacker could frame the app and trick users into sensitive actions. →
@@ -79,13 +81,16 @@ the VM/static edge layer. It does not add a telemetry transport and does not cha
   clean, smoke-test the CSP against the live app at arming:
   - `Content-Security-Policy` with restrictive defaults — `script-src 'self'` (no inline scripts; ts-mls is
     pure JS so no `wasm-eval`), `object-src 'none'`, `base-uri 'none'`, `frame-ancestors 'none'`, and
-    `connect-src` scoped to same-origin (REST/WS) + the Zitadel issuer + the B2 presigned-URL bucket subdomain
-    (`*.s3.<region>.backblazeb2.com`, virtual-host style); `img-src 'self' data: blob:` for generated avatars +
+    `connect-src` scoped to same-origin (REST/WS) + the **exact** B2 presigned-URL bucket host
+    (`<bucket>.s3.<region>.backblazeb2.com`, virtual-host style — the live wildcard `*.s3…` and the bare
+    path-style `s3.<region>.backblazeb2.com` endpoint are both over-broad and are tightened to the single
+    bucket host by CSP-1 in `docs/reviews/05-client-pwa.md`) — no IdP origin, since passkey auth replaced
+    Zitadel (#223); `img-src 'self' data: blob:` for generated avatars +
     decrypted attachment object URLs.
   - `Referrer-Policy: no-referrer` (tightened from `strict-origin-when-cross-origin`).
   - `Permissions-Policy` denying unused sensor/hardware capabilities.
   - `X-Content-Type-Options: nosniff` + `X-Frame-Options: DENY` (defense-in-depth alongside `frame-ancestors`).
-  - Optional COOP/COEP later only after checking Zitadel, service-worker, and attachment-origin behavior.
+  - Optional COOP/COEP later only after checking service-worker and attachment-origin behavior.
   - **#43 (frontend build) DONE:** SRI on the built bundles (`vite-plugin-sri3`), service-worker pinning (Caddy
     `no-cache`/`immutable` cache policy), and a published bundle hash (`bundle-manifest.json`) — see
     `code-delivery-integrity.md`.
@@ -97,11 +102,14 @@ the VM/static edge layer. It does not add a telemetry transport and does not cha
 - **Headers are wired (#43) but the CSP isn't runtime-verified yet.** They are served by Caddy
   (`infra/stack/caddy/Caddyfile`, `caddy validate` clean), but nothing has loaded the app *through* Caddy with the
   CSP enforced — smoke-test against the live app at arming and watch the browser console for violations
-  (eyeball the B2 presigned upload/download + the silent-renew XHR specifically). The other #43 frontend-build
+  (eyeball the B2 presigned upload/download + the same-origin REST/WS calls specifically). The other #43 frontend-build
   items (SRI, service-worker pinning, published bundle hash) have since shipped — see `code-delivery-integrity.md`.
-- **CSP `connect-src` is pinned to the single-origin VM topology.** Zitadel + B2 are pinned; same-origin
-  REST/WS rely on `'self'`. A **split deployment** (`VITE_API_URL`/`VITE_WS_URL` on a different host) would
-  silently break live delivery until `connect-src` is extended with that explicit origin — a too-wide
+- **CSP `connect-src` is scoped to the single-origin VM topology.** Same-origin REST/WS rely on `'self'`
+  (no IdP origin — Zitadel was decommissioned, #223). The B2 attachment egress is **currently a wildcard**
+  (`https://*.s3.eu-central-003.backblazeb2.com`, virtual-host style) — which over-permits into a shared-tenant
+  region namespace; pinning it to the exact bucket host is tracked as CSP-1 in
+  `docs/reviews/05-client-pwa.md`. A **split deployment** (`VITE_API_URL`/`VITE_WS_URL` on a different host)
+  would silently break live delivery until `connect-src` is extended with that explicit origin — a too-wide
   `connect-src` would also weaken the protection.
 - **No telemetry sender exists yet.** When one is added, it needs a separate PR and threat-model update that
   covers retention, EU data residency, opt-in/default behavior, and failure handling.

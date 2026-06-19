@@ -9,7 +9,8 @@
 
 The web app is a Vite-built PWA served as static files by Caddy (`/srv`) behind the Cloudflare edge. The browser
 loads `index.html`, which boots the JS/CSS bundles (including the `@argus/crypto` glue), then talks to the
-API/WebSocket for ciphertext + metadata, to Zitadel for auth, and to B2 presigned URLs for attachments.
+API/WebSocket for ciphertext + metadata (passkey auth is same-origin — Zitadel/OIDC was decommissioned, #223),
+and to B2 presigned URLs for attachments.
 
 The executable client is the most security-sensitive static artifact: it runs in the same origin that holds
 decrypted message content and key material in memory. If an attacker can substitute a tampered bundle, every
@@ -43,9 +44,12 @@ and ciphertext.
 
 - **Tampering — swapped/altered JS or CSS bundle** (compromised edge cache, MITM beneath TLS, malicious origin
   write). → sha384 SRI on the entry `<script>` + every `modulepreload`/stylesheet `<link>` in `index.html`; the
-  browser rejects mismatched bytes. Workbox precache revisions are a second check for cached assets (verified:
-  content-hashed `/assets/*` precache with `revision:null`, so Workbox refuses bytes that don't match the
-  filename hash). Strict CSP `script-src 'self'` blocks foreign/inline script regardless. **Caveat:** SRI
+  browser rejects mismatched bytes. Workbox precache revisions provide **cache-busting / freshness only, not
+  content-hash integrity** (verified against Workbox 7.4.1 `createCacheKey.ts` + `PrecacheController.ts`, and the
+  shipped `dist/sw.js`, which carries zero integrity fields): with `revision:null` Workbox treats the
+  content-hashed `/assets/*` filename as the cache key, so a new build's hashed name busts the old entry — but it
+  does **not** verify that the fetched bytes match any hash. SRI on the `<script>`/`<link>` tags is the actual
+  byte-integrity control here. Strict CSP `script-src 'self'` blocks foreign/inline script regardless. **Caveat:** SRI
   attributes cover the entry + statically-referenced chunks + CSS, **not** dynamically-`import()`ed chunks (lazy
   routes + ts-mls's internal crypto chunks) — a browser-platform gap — see §6.
 - **Tampering — swapped `index.html`** (the SRI bootstrap itself). `index.html` carries the integrity attrs, so
