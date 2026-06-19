@@ -76,12 +76,12 @@
 
 ## Guards added (this PR)
 Two Semgrep rules turn the prose allowlist into enforced, module-precise rules (closing the high-value part of
-F5; both run in pre-commit + CI like the other `.semgrep/` rules, verified 0 findings on current source):
-- **`argus-no-vetted-crypto-libs-outside-boundary`** — bans `@noble/curves` / `@hpke/*` anywhere outside
-  `packages/crypto/**`. Deliberately does **not** exempt `apps/api/src/auth` — a stray protocol-crypto import
-  there must still trip (per Codex review of this PR).
-- **`argus-argon2id-only-in-auth`** — confines `@noble/hashes` (the Argon2id breakglass exception) to
-  `packages/crypto/**` + `apps/api/src/auth/**`; banned everywhere else.
+F5; both run in pre-commit + CI like the other `.semgrep/` rules, verified 0 findings on current source + a
+positive matrix test — per Codex review of this PR):
+- **`argus-no-vetted-crypto-libs-outside-boundary`** — bans **any** `@noble/*` (curves, hashes, ciphers,
+  post-quantum) and `@hpke/*` import outside `packages/crypto/**` and `apps/api/src/auth/**`.
+- **`argus-auth-crypto-argon2id-only`** — `include`-scoped to `apps/api/src/auth/**`: allows **only**
+  `@noble/hashes/argon2` (the breakglass Argon2id exception) and trips on any other `@noble/*` / `@hpke/*` there.
 
 ## Residual risk (accepted for this phase)
 - **F2** nonce budget: accepted — unreachable at single-user/multi-tab scale; flagged for re-evaluation when

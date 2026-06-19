@@ -30,28 +30,30 @@ rules:
     languages: [typescript, javascript]
     severity: ERROR
     message: >
-      Protocol crypto libraries (@noble/curves, @hpke/*) belong only in packages/crypto (the MLS wrapper).
-      Building protocol crypto from raw primitives elsewhere — including in apps/api/src/auth — is forbidden;
-      route it through packages/crypto. (The ONLY auth exception is @noble/hashes Argon2id, governed by the
-      separate argus-argon2id-only-in-auth rule.)
-    # Deliberately NOT excluding apps/api/src/auth: only @noble/hashes (Argon2id) is sanctioned there, so a
-    # stray @noble/curves or @hpke import in an auth file must still trip this guard.
-    paths:
-      exclude: ['packages/crypto/**', '**/*.spec.ts', '**/*.test.ts']
-    patterns:
-      - pattern-regex: from\s+['"](@hpke/|@noble/curves)
-
-  - id: argus-argon2id-only-in-auth
-    languages: [typescript, javascript]
-    severity: ERROR
-    message: >
-      @noble/hashes (Argon2id) is a pre-cleared invariant-#4 exception allowed ONLY in apps/api/src/auth (the
-      breakglass admin-password hash; see docs/threat-models/breakglass-admin.md) and packages/crypto. Anywhere
-      else it is hand-rolled crypto — forbidden.
+      Vetted crypto libraries (any @noble/* — curves, hashes, ciphers, post-quantum — and @hpke/*) belong only
+      in packages/crypto (the MLS wrapper). Building protocol crypto from raw primitives anywhere else is
+      forbidden; route it through packages/crypto. (The ONLY exception outside packages/crypto is @noble/hashes
+      Argon2id in apps/api/src/auth, governed by argus-auth-crypto-argon2id-only.)
+    # auth is excluded here and handled by the include-scoped rule below, so its sole Argon2id exception is
+    # allowed while every other @noble/* or @hpke/* import (incl. @noble/ciphers) still trips somewhere.
     paths:
       exclude: ['packages/crypto/**', 'apps/api/src/auth/**', '**/*.spec.ts', '**/*.test.ts']
     patterns:
-      - pattern-regex: from\s+['"]@noble/hashes
+      - pattern-regex: from\s+['"]@(noble|hpke)/
+
+  - id: argus-auth-crypto-argon2id-only
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >
+      In apps/api/src/auth the ONLY sanctioned vetted-crypto import is @noble/hashes/argon2 (the breakglass
+      admin-password hash; see docs/threat-models/breakglass-admin.md §invariant-4). Any other @noble/* or
+      @hpke/* import here is hand-rolled crypto — route it through packages/crypto.
+    paths:
+      include: ['apps/api/src/auth/**']
+      exclude: ['**/*.spec.ts', '**/*.test.ts']
+    patterns:
+      - pattern-regex: from\s+['"]@(noble|hpke)/
+      - pattern-not-regex: from\s+['"]@noble/hashes/argon2
 
   - id: argus-no-secret-logging
     languages: [typescript, javascript]
