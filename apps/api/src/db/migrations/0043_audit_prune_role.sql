@@ -80,6 +80,16 @@ create policy auth_sessions_prune_delete on auth_sessions
 -- refresh_token_hash or sub even of an expired row. DELETE stays table-level (RLS-gated to the 30-day window).
 grant select (id, expires_at), delete on auth_sessions to argus_prune;
 
+-- 3b. Prune-oriented indexes. The prune scans cross-tenant and age-ordered with NO tenant_id predicate
+--     (`where created_at < cutoff order by created_at limit N`, same for expires_at). The existing
+--     audit_events index is tenant-LEADING (`tenant_id, created_at desc`) so it can't serve that scan, and
+--     auth_sessions has no expires_at index at all — so on a large historical backlog each batch would
+--     seq-scan + sort the table, risking a daily-unit timeout / heavy read pressure instead of cheap
+--     retention. These plain btree indexes back the range scan + ordering directly. created_at/expires_at are
+--     ~monotonic, so inserts append to the right of the btree (no bloat, negligible write cost).
+create index if not exists audit_events_created_at_idx on audit_events (created_at);
+create index if not exists auth_sessions_expires_at_idx on auth_sessions (expires_at);
+
 -- 4. ER-1: column-scoped UPDATE grant for GDPR Art. 17 erasure.
 --    The erasure flow (gdpr.service.ts) deletes audit rows where the erased user was the ACTOR, but a
 --    lookup/friend-request row where they were the TARGET keeps metadata.targetArgusId = their argus-id
