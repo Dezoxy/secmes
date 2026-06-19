@@ -24,13 +24,13 @@
 8. **Concurrent ops on one conversation (Tampering — nonce/key reuse).** Two `encrypt`/`decrypt` calls racing on the same `Conversation` (a double-click, `Promise.all`) would both read the same ratchet generation before either advances state → AEAD nonce/key reuse. → A **per-conversation operation lock** serializes all stateful ops so each observes the previous op's resulting state.
 7. **Spent ratchet secrets retained (forward secrecy).** ts-mls returns `consumed` (spent secrets) from each op; the wrapper **overwrites them with zeros (`wipe`)** after `encrypt`/`decrypt`/`addMember` and never copies them into long-lived structures. JS cannot guarantee the engine kept no internal copies, so erasure is best-effort — a known, accepted limitation of a JS/WASM client.
 5. **Group state at rest (Info-disclosure).** → `ClientState` is persisted to IndexedDB **sealed under the per-passkey PRF unlock key** (AES-256-GCM; `prf-keystore-unlock.md`, `live-messaging.md`) — no passphrase, no Argon2. Shipped in Slice 5.
-6. **Library/supply-chain trust.** → ts-mls is MIT (vendor-forkable if the single maintainer stalls), version-pinned; RFC 9420 interop test vectors are a planned gate; `@hpke/*`/post-quantum peers are unused by the classic suite (lazy-loaded) and intentionally not installed. `@noble/{curves,ciphers,hashes}` are listed only because ts-mls **requires them as peer dependencies** (not for our direct use) — direct imports of primitive libraries are forbidden by the "only ts-mls" rule and the crypto-reviewer gate.
+6. **Library/supply-chain trust.** → ts-mls is MIT (vendor-forkable if the single maintainer stalls), version-pinned; RFC 9420 interop test vectors are a planned gate; `@hpke/*`/post-quantum peers are unused by the classic suite (lazy-loaded) and intentionally not installed. `@noble/{curves,ciphers,hashes}` are primarily ts-mls peer dependencies; the **one** cleared in-package direct use is `device-proof.ts` (Ed25519 via `@noble/curves`) for multi-device enrollment (§3 threat 1). Any other direct import of a primitive library — and all MLS message crypto — remains forbidden outside ts-mls by the "MLS-only" rule and the crypto-reviewer gate.
 
 ## 4. Invariant check
 
 - **#1 crypto-blind server / #6 no admin content:** upheld — only ciphertext crosses the boundary.
 - **#2 no secret logging:** the package logs nothing; keys/state never serialized for the server.
-- **#4 no hand-rolled crypto:** all via ts-mls; primitives appear nowhere in our code. CSPRNG only.
+- **#4 no hand-rolled crypto:** all MLS message crypto via ts-mls; the only non-MLS primitives are the two cleared exceptions named in §3 threat 1 — AES-GCM at-rest sealing (`seal.ts`) and Ed25519 device proofs (`device-proof.ts`), both WebCrypto/`@noble`. CSPRNG only.
 - **#3 RLS / #5 Key Vault:** N/A to this client package (no DB, no cloud secrets). No tension with any invariant.
 
 ## 5. Decision & mitigations
