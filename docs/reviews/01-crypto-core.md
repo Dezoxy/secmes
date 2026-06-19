@@ -75,13 +75,18 @@
   all client trust uses the embedded key, so the absent check is the mandated design, not a gap.
 
 ## Guards added (this PR)
-Two Semgrep rules turn the prose allowlist into enforced, module-precise rules (closing the high-value part of
-F5; both run in pre-commit + CI like the other `.semgrep/` rules, verified 0 findings on current source + a
-positive matrix test — per Codex review of this PR):
+Three Semgrep rules turn the prose allowlist into enforced, module-precise rules (closing the high-value part of
+F5; all run in pre-commit + CI like the other `.semgrep/` rules; verified 0 findings on current source + a
+positive matrix test covering static / dynamic-`import()` / `require()` / `export…from` loader forms and the
+Argon2 variants — per Codex review of this PR):
 - **`argus-no-vetted-crypto-libs-outside-boundary`** — bans **any** `@noble/*` (curves, hashes, ciphers,
-  post-quantum) and `@hpke/*` import outside `packages/crypto/**` and `apps/api/src/auth/**`.
-- **`argus-auth-crypto-argon2id-only`** — `include`-scoped to `apps/api/src/auth/**`: allows **only**
-  `@noble/hashes/argon2` (the breakglass Argon2id exception) and trips on any other `@noble/*` / `@hpke/*` there.
+  post-quantum) and `@hpke/*` outside `packages/crypto/**` + `apps/api/src/auth/**`. Matches the quoted module
+  specifier itself, so every loader form is caught, not just `import … from`.
+- **`argus-auth-crypto-argon2id-only`** — `include`-scoped to `apps/api/src/auth/**`: allows **only** the
+  `@noble/hashes/argon2` module and trips on any other `@noble/*` / `@hpke/*` there.
+- **`argus-no-weak-argon2-variants`** — bans the weaker `argon2d` / `argon2i` **symbols** anywhere outside
+  `packages/crypto/**` (matches the token, so it holds regardless of import style or a mixed-symbol import);
+  `argon2id` never matches. Together with the rule above this enforces "auth may use Argon2id only."
 
 ## Residual risk (accepted for this phase)
 - **F2** nonce budget: accepted — unreachable at single-user/multi-tab scale; flagged for re-evaluation when
