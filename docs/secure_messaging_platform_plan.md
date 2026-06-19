@@ -73,9 +73,9 @@ The backend manages: authentication, authorization, tenant isolation, the public
 
 ## 3. Security Model
 
-### 3.1 What "E2EE, single device" means in v1
-- Each user has **one client/device**. Their MLS private keys live in **IndexedDB** (via WebCrypto-managed key material).
-- "New phone / new browser" is a **fresh start** — re-enroll via a new registration code (§3.4); there is no key recovery and no live multi-device sync in v1. This sidesteps the multi-device problem entirely for v1.
+### 3.1 What "E2EE" means here (device-local keys)
+- One client/device was the v1 baseline; **multi-device enrollment (B2) has since shipped** — a user may have N devices, each added by **approval from an existing trusted device** after an out-of-band fingerprint check (`multi-device-enrollment.md`). MLS private keys live in **IndexedDB**, sealed under the per-passkey PRF unlock key.
+- There is **no key backup/recovery**: every new device is provisioned **fresh** (no prior history — forward secrecy), either via B2 enrollment from an existing device or, for a user with **no** remaining enrolled device, via a new registration code (§3.4). "New phone / new browser" is therefore always a fresh device, never a restore of old keys.
 
 ### 3.2 The honest PWA caveat (read this twice)
 A web app delivers the encryption code on every load, so a **fully compromised server could ship malicious JavaScript** and capture plaintext. Native apps avoid this; a pure PWA cannot fully escape it. You can only narrow it:
