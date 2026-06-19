@@ -64,8 +64,10 @@ http://glitchtip.4rgus.com:8080 {
 		# attachment-r8xq4m7z2p9n6k3v.s3.eu-central-003.backblazeb2.com. The old wildcard
 		# `*.s3.eu-central-003.backblazeb2.com` + bare path-style `s3.eu-central-003.backblazeb2.com` host were
 		# removed: a CSP source is host-only (it cannot restrict the path), so the bare host permitted a
-		# path-style POST to ANY bucket in the shared region namespace — an attacker exfil egress. The bucket
-		# host MUST stay in sync with ATTACHMENT_BUCKET in infra/stack/deploy/deploy.sh (CI grep enforces this).
+		# path-style POST to ANY bucket in the shared region namespace — an attacker exfil egress. This host is
+		# bound two ways: scripts/check-csp-connect-src.sh fails CI if it drifts from deploy.sh's
+		# ATTACHMENT_BUCKET literal, and deploy.sh fails the deploy closed if the runtime S3_BUCKET (the bucket
+		# the API actually presigns against) differs — together they guarantee this is the real presign host.
 		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' wss://4rgus.com https://attachment-r8xq4m7z2p9n6k3v.s3.eu-central-003.backblazeb2.com; worker-src 'self' blob:; manifest-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests"
 		Permissions-Policy "accelerometer=(), autoplay=(), bluetooth=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=()"
 		Referrer-Policy no-referrer
