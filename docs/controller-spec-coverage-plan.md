@@ -91,14 +91,17 @@ Branch: `test/controller-specs-slice-b`.
 - [ ] Specs for the **moderate 6**: `key-directory`, `devices`, `attachments`, `tenants`, `receipts`,
       `sync`. Contract tier on every route + targeted behaviour where the method does real mapping.
 
-### Slice C — remaining controllers + CI enforcement guard
+### Slice C — remaining controllers + CI enforcement guard ✅ shipped
 Branch: `test/controller-specs-slice-c`. The guard goes **last** so it flips green exactly when coverage is
 complete (adding it earlier would red-fail CI until every spec exists).
-- [ ] Specs for the **thin 4**: `users`, `push`; extend `me` and `app` to the contract tier.
-- [ ] **CI sibling-spec guard**: a check (script in `scripts/` wired into the `ci` job, or a Semgrep/jest
-      rule) asserting every `*.controller.ts` has a sibling `*.controller.spec.ts`. With all 18 covered it
-      passes on landing and the gap can never silently reopen.
-- [ ] Add the guard to the `ci` workflow and confirm it's green.
+- [x] Specs for the **thin 4**: `users`, `push` (new); extend `me` and `app` to the contract tier.
+- [x] **Coverage guard**: implemented as a **vitest meta-test**
+      (`apps/api/src/common/testing/controller-spec-coverage.spec.ts`) — not a `scripts/` step or Semgrep
+      rule — asserting every `*.controller.ts` has a sibling `*.controller.spec.ts` (self-checks that the
+      glob found controllers, so it can't pass vacuously). With all 18 covered it passes on landing and the
+      gap can never silently reopen.
+- [x] No new CI workflow wiring: the guard runs inside the existing `pnpm -r test` step (the CI `build-test`
+      job **and** the local pre-push gate), so it gates merges and gives developers a fast local red.
 
 ## Docs to adjust
 

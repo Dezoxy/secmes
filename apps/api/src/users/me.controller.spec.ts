@@ -1,10 +1,37 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
+import { reflectRouteMeta } from '../common/testing/route-meta.js';
 import { getDb } from '../db/index.js';
 import { AuditService } from '../audit/audit.service.js';
 import { MeController } from './me.controller.js';
 import { UserService } from './user.service.js';
+
+// Contract tier (DB-free): both routes are authenticated 'users' endpoints with no extra guards. The
+// load-bearing distinction is @AllowUnbound — `me` is callable by an authenticated-but-not-yet-bound user
+// (it returns { bound: false }), but `updateMe` is NOT, so a profile write always requires a bound tenant.
+// `updateMe` is @HttpCode(204); `me` is a 200 GET.
+describe('MeController route contract', () => {
+  it('me is authenticated, allow-unbound, 200 GET, no guards', () => {
+    expect(reflectRouteMeta(MeController, 'me')).toEqual({
+      isPublic: false,
+      isAllowUnbound: true,
+      hasPublicRateLimit: false,
+      httpCode: 200,
+      guards: [],
+    });
+  });
+
+  it('updateMe is authenticated, NOT allow-unbound, 204, no guards', () => {
+    expect(reflectRouteMeta(MeController, 'updateMe')).toEqual({
+      isPublic: false,
+      isAllowUnbound: false,
+      hasPublicRateLimit: false,
+      httpCode: 204,
+      guards: [],
+    });
+  });
+});
 
 // Integration — proves /me resolves the user inside the verified tenant's RLS context (13–14 → 15).
 // Needs a live Postgres with migrations applied; auto-skips without DATABASE_URL.
