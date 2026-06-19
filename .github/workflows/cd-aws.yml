@@ -160,7 +160,7 @@ jobs:
           # Bundle what deploy.sh reads from the unpacked tree: compose + the secret-fetch unit + deploy.sh, PLUS
           # the observability config tree + the glitchtip entrypoint (deploy.sh step 1 cp's both even when the
           # GlitchTip tier is skipped at runtime) + the B2 CORS source-of-truth (deploy.sh step 6c reads it).
-          tar czf deploy-bundle.tgz compose.prod.yaml infra/stack/secrets infra/stack/deploy infra/stack/observability infra/stack/glitchtip infra/b2 infra/backup infra/cleanup infra/notify
+          tar czf deploy-bundle.tgz compose.prod.yaml infra/stack/secrets infra/stack/deploy infra/stack/observability infra/stack/glitchtip infra/b2 infra/backup infra/cleanup infra/audit-prune infra/notify
           B64="$(base64 -w0 deploy-bundle.tgz)"
           GHCR_REGISTRY="ghcr.io/$(echo "$GHCR_OWNER" | tr '[:upper:]' '[:lower:]')"
           # single-quoted echos write LITERAL shell to runcmd.sh ($WORK expands on the box, not in the runner).
