@@ -78,9 +78,12 @@ Ship with the metadata trade made **explicit and honest** (same trade Signal mak
   hint persist.
 - Logs are **IDs/metadata only**, never content (invariant #2).
 - RLS confines every metadata read to one tenant.
-- Sales/DPA copy must state plainly: *"We cannot read your messages. We can see who is in a conversation and
-  when messages flow — the same delivery metadata every non-mixnet messenger has."* Do not claim metadata
-  privacy the architecture does not provide.
+- Sales/DPA copy must state plainly: *"We cannot read your messages. We can see communication metadata: who is
+  connected to whom (your contacts/friendships and conversation membership), when messages flow, read-receipt
+  timing, and which user IDs you look up in the directory — including whether a looked-up ID exists — the same
+  class of delivery/discovery metadata every non-mixnet messenger has."* Do not claim metadata privacy the
+  architecture does not provide. (The lookup/discovery history is currently retained unbounded — see the F1/AR-1
+  Must-fix in `docs/reviews/04-metadata-privacy.md`.)
 
 ## 6. Residual risk
 
