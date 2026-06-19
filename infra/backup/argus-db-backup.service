@@ -1,10 +1,12 @@
 # argus — nightly logical DB backup (pg_dump → age → Backblaze B2). Triggered by the .timer (daily).
 # Install: copy this dir to /opt/argus/backup, place the units in /etc/systemd/system, then
 #   systemctl daemon-reload && systemctl enable --now argus-db-backup.timer
-# Before trusting the timer, do a dry run + check the journal:  systemctl start argus-db-backup
-# (verify the hardening below — esp. MemoryDenyWriteExecute — doesn't trip your AWS CLI v2 build).
-# Prerequisites: the argus_backup role provisioned LOGIN + password (see README), and an age keypair whose
-# PUBLIC key is set in AGE_RECIPIENT below (the PRIVATE key stays in Key Vault, used only at restore).
+# On the real deploy, deploy.sh step 5c stages + installs + arms this automatically. Manual dry run:
+#   systemctl start argus-db-backup  (then check `journalctl -u argus-db-backup`)
+# (verify the AWS CLI v2 build + the `docker compose exec` path work under the sandbox as User=argus; MDWE is
+# already dropped below — see README's "Deploy verification").
+# Prerequisites: the argus_backup role provisioned LOGIN (no password — in-container local trust; see README),
+# and an age keypair whose PUBLIC key is set in AGE_RECIPIENT below (the PRIVATE key stays in Key Vault).
 [Unit]
 Description=argus — nightly encrypted DB backup (pg_dump → age → B2)
 Documentation=https://github.com/Dezoxy/secmes/blob/main/infra/backup/README.md
@@ -27,14 +29,13 @@ TimeoutStartSec=3600
 
 # --- Non-secret config (edit for your deployment). The access-key-id is NOT a secret (it rides in every
 #     presigned URL); the bucket/endpoint/region and the age PUBLIC recipient key are public. ---
-Environment=PGHOST=127.0.0.1
-Environment=PGPORT=5432
+# The DB is reached IN-CONTAINER via `docker compose exec` — PG has no published host port (invariant #3),
+# so there is no PGHOST/PGPORT/PGPASSFILE. COMPOSE_FILE + COMPOSE_PROJECT_NAME let `docker compose` attach to
+# the deployed stack from this timer; PGUSER/PGDATABASE are the role/db the in-container client connects as.
+Environment=COMPOSE_FILE=/opt/argus/compose.prod.yaml
+Environment=COMPOSE_PROJECT_NAME=argus-prod
 Environment=PGUSER=argus_backup
 Environment=PGDATABASE=argus
-Environment=PGCONNECT_TIMEOUT=10
-# Loopback Postgres on the VM → plaintext is acceptable. If PGHOST is ever a REMOTE Postgres, set
-# PGSSLMODE=verify-full + a CA bundle so this never silently falls back to an unencrypted connection.
-Environment=PGSSLMODE=prefer
 Environment=S3_ENDPOINT=https://s3.eu-central-003.backblazeb2.com
 Environment=S3_REGION=eu-central-003
 # The PRIVATE backup bucket — separate from the attachment bucket, never public.
@@ -45,27 +46,32 @@ Environment=S3_ACCESS_KEY_ID=REPLACE_WITH_B2_KEY_ID
 Environment=AGE_RECIPIENT=REPLACE_WITH_AGE_PUBLIC_KEY
 Environment=RETENTION_DAYS=30
 
-# --- Secrets: delivered as credential FILES, never in env/Helm at rest (invariant #5). On the VM the two
-#     source paths are populated from Azure Key Vault by the Managed Identity at boot (a separate fetch
-#     step). systemd copies them into $CREDENTIALS_DIRECTORY (mode 0400, tmpfs), referenced as %d below. ---
-LoadCredential=db-password:/run/argus/secrets/backup-db-password
+# --- Secret: the B2 application key, delivered as a credential FILE, never in env/Helm at rest (invariant
+#     #5). The source path is populated from Azure Key Vault by the Managed Identity at boot (a separate fetch
+#     step). systemd copies it into $CREDENTIALS_DIRECTORY (mode 0400, tmpfs), referenced as %d below. (No DB
+#     password: the DB connection runs in-container over the local-trust socket — see backup-db.sh.) ---
 LoadCredential=b2-secret:/run/argus/secrets/b2-app-key
-Environment=BACKUP_DB_PASSWORD_FILE=%d/db-password
 Environment=S3_SECRET_ACCESS_KEY_FILE=%d/b2-secret
 
-# AWS CLI v2 wants a writable HOME/cache, but ProtectHome + ProtectSystem=strict make the FS read-only.
+# AWS CLI v2 wants a writable HOME/cache, but ProtectHome + ProtectSystem make the FS read-only.
 # Give it a private tmpfs runtime dir as HOME so it never touches the real home.
 RuntimeDirectory=argus-db-backup
-# 0700 (not the 0755 default): the worker materialises the libpq passfile + AWS credentials file here, on
-# this service-private tmpfs (no host-disk backing) — so other users can't even list it.
+# 0700 (not the 0755 default): the worker materialises the AWS credentials file here, on this
+# service-private tmpfs (no host-disk backing) — so other users can't even list it.
 RuntimeDirectoryMode=0700
 Environment=HOME=%t/argus-db-backup
+# `docker compose` needs the staged compose tree + a HOME to resolve from; run from the app dir.
+WorkingDirectory=/opt/argus
 
 ExecStart=/opt/argus/backup/backup-db.sh
 
-# --- Hardening: least-privilege oneshot that needs only egress + the two credential files. ---
+# --- Hardening: least-privilege oneshot that reaches the docker socket (to exec pg_dump in-container) + B2
+#     egress. `argus` is already in the docker group (cloud-init), so this grants no NEW privilege. ---
 NoNewPrivileges=true
-ProtectSystem=strict
+# ProtectSystem=full (not strict): the docker client must reach /run/docker.sock; strict would make /run
+# read-only and block the connect. full still keeps /usr,/boot,/etc read-only. The privileged work is the
+# daemon's, not this unit's (its CapabilityBoundingSet stays empty).
+ProtectSystem=full
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true
@@ -82,6 +88,8 @@ RestrictRealtime=true
 RestrictSUIDSGID=true
 CapabilityBoundingSet=
 LockPersonality=true
-MemoryDenyWriteExecute=true
+# MemoryDenyWriteExecute is deliberately NOT set: AWS CLI v2 ships as a PyInstaller bundle whose bootloader
+# maps embedded modules W+X, which MDWE kills — the worker would segfault and the backup silently fail
+# (BKP-1). The README documents this as the one knob that bites the CLI; the other ~18 directives still apply.
 SystemCallArchitectures=native
 UMask=0077

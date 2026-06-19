@@ -8,27 +8,34 @@
 #     exposes ONLY rows whose retention has lapsed — never a live row, never any other tenant data.
 #   - Deletes the B2 OBJECT FIRST, then the DB row: a crash leaves the row for the next run (idempotent),
 #     never an orphan blob. S3/B2 DeleteObject is idempotent (deleting a missing key still succeeds).
-#   - Secrets (DB password, B2 application key) are read from FILES delivered by systemd LoadCredential,
-#     populated from Azure Key Vault via the VM's Managed Identity — never committed, never in env at rest
-#     (invariant #5). The DB connection uses libpq PG* env vars (no connstring on argv), so the password
-#     never appears in `ps`/argv.
+#   - The DB is reached IN-CONTAINER via `docker compose exec -T postgres psql …` over the container's local
+#     socket (PG has NO published host port — invariant #3). The official image trusts local connections, so
+#     the worker assumes `argus_cleanup` with NO password; its RLS policy (which exposes only expired rows)
+#     bounds it regardless of auth method — so there is NO DB password on the host at all.
+#   - The B2 application key is read from a FILE delivered by systemd LoadCredential, populated from Azure Key
+#     Vault via the VM's Managed Identity — never committed, never in env at rest (invariant #5).
 #   - Logs IDs / object-keys / counts ONLY — never a secret (invariant #2). There are no presigned URLs here.
 #
-# Requires: psql (libpq), aws (AWS CLI v2, used against the B2 S3-compatible endpoint).
+# Requires: docker compose (reaches the postgres container; `argus` is in the docker group), aws (AWS CLI v2,
+# used against the B2 S3-compatible endpoint). psql runs INSIDE the postgres container.
 set -euo pipefail
 
 BATCH="${CLEANUP_BATCH:-1000}"
 
-# --- Non-secret config (libpq + S3). Provided by the systemd unit's Environment=. ---
-: "${PGHOST:?PGHOST required}"
+# --- Non-secret config. Provided by the systemd unit's Environment=. No PGHOST/PGPORT/PGPASSFILE: the DB is
+#     reached in-container via `docker compose exec` (below), not over a host TCP port (invariant #3). ---
 : "${PGUSER:?PGUSER required (argus_cleanup)}"
 : "${PGDATABASE:?PGDATABASE required}"
 : "${S3_ENDPOINT:?S3_ENDPOINT required}"
 : "${S3_BUCKET:?S3_BUCKET required}"
 : "${S3_ACCESS_KEY_ID:?S3_ACCESS_KEY_ID required}"
-export PGHOST PGUSER PGDATABASE
-export PGPORT="${PGPORT:-5432}"
 export AWS_REGION="${S3_REGION:-eu-central-003}" # EU default (B2 ignores it for routing; the host carries it)
+
+# Run psql INSIDE the running postgres container — PG has no published port (invariant #3), and the official
+# image trusts local-socket connections, so `-U "$PGUSER"` (argus_cleanup) assumes the least-privilege role
+# with NO password. Its RLS policy still exposes only expired rows. COMPOSE_FILE + COMPOSE_PROJECT_NAME (set
+# by the unit) attach to the deployed stack; `-T` forwards stdin (for the heredoc'd DELETE) without a TTY.
+pgx() { docker compose exec -T postgres "$@"; }
 
 # --- Secrets stay FILE-BACKED end-to-end. We do NOT `export PGPASSWORD` / `AWS_SECRET_ACCESS_KEY`: an
 #     exported secret is readable via /proc/<pid>/environ (root + same-UID) and is inherited by EVERY child
@@ -54,15 +61,8 @@ secbase="${secbase%%:*}" # first path if systemd gave a colon-separated list
 WORKDIR="$(mktemp -d "${secbase:-${TMPDIR:-/tmp}}/argus-cleanup.XXXXXXXX")"
 trap 'rm -rf -- "$WORKDIR"' EXIT
 
-# libpq passfile (hostname:port:database:username:password). The password's `\` and `:` are escaped per the
-# .pgpass format. psql reads PGPASSFILE — the password never enters the environment or argv.
-_db_pw="$(read_secret_file "${CLEANUP_DB_PASSWORD_FILE:?CLEANUP_DB_PASSWORD_FILE required}")"
-_esc_pw="$(printf '%s' "$_db_pw" | sed -e 's/\\/\\\\/g' -e 's/:/\\:/g')"
-PGPASSFILE="$WORKDIR/pgpass"
-printf '*:*:*:%s:%s\n' "$PGUSER" "$_esc_pw" >"$PGPASSFILE"
-chmod 600 "$PGPASSFILE"
-export PGPASSFILE
-unset _db_pw _esc_pw
+# No libpq passfile: the DB connection runs in-container over the local-trust socket (see pgx() above), so no
+# DB password is materialised on the host at all.
 
 # AWS shared-credentials file. The access-key-id is NOT a secret; the secret key rides only in this 0600 file.
 AWS_SHARED_CREDENTIALS_FILE="$WORKDIR/aws-credentials"
@@ -88,7 +88,7 @@ while :; do
   # The argus_cleanup RLS policy already restricts visibility to expired rows; the explicit predicate +
   # ORDER/LIMIT just bound the batch deterministically. Output: id<TAB>object_key per line. A failed query
   # (DB blip) is a logged no-op + stop — never a crash mid-batch, never a truncated partial read.
-  if ! rows="$(psql -v ON_ERROR_STOP=1 -At -F $'\t' -c \
+  if ! rows="$(pgx psql -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -At -F $'\t' -c \
     "select id, object_key from attachments
      where expires_at is not null and expires_at < now() order by expires_at limit ${BATCH}")"; then
     log "batch query failed (DB unreachable?) — stopping; retries next run"
@@ -106,7 +106,7 @@ while :; do
       # fed via STDIN, where the lexer interpolates the quoted `:'id'` (no injection; still RLS-gated).
       # ON_ERROR_STOP=1 so a SQL error EXITS non-zero (psql otherwise exits 0 on errors → false success).
       if printf '%s' "delete from attachments where id = :'id'" |
-        psql -q -v ON_ERROR_STOP=1 -v id="$id" >/dev/null 2>&1; then
+        pgx psql -U "$PGUSER" -d "$PGDATABASE" -q -v ON_ERROR_STOP=1 -v id="$id" >/dev/null 2>&1; then
         batch_reaped=$((batch_reaped + 1))
       else
         total_failed=$((total_failed + 1))

@@ -1,8 +1,10 @@
 # argus — reap expired encrypted attachments (Backblaze B2 + DB). Triggered by the .timer (daily).
 # Install: copy this dir to /opt/argus/cleanup, place the units in /etc/systemd/system, then
 #   systemctl daemon-reload && systemctl enable --now argus-attachment-cleanup.timer
-# Before trusting the timer, do a dry run + check the journal:  systemctl start argus-attachment-cleanup
-# (verify the hardening below — esp. MemoryDenyWriteExecute — doesn't trip your AWS CLI v2 build).
+# On the real deploy, deploy.sh step 5c stages + installs + arms this automatically. Manual dry run:
+#   systemctl start argus-attachment-cleanup  (then check `journalctl -u argus-attachment-cleanup`)
+# (verify the AWS CLI v2 build + the `docker compose exec` path work under the sandbox as User=argus; MDWE is
+# already dropped below.)
 [Unit]
 Description=argus — reap expired encrypted attachments (Backblaze B2 + DB)
 Documentation=https://github.com/Dezoxy/secmes/blob/main/docs/threat-models/encrypted-attachments.md
@@ -23,40 +25,43 @@ TimeoutStartSec=900
 
 # --- Non-secret config (edit for your deployment). The access-key-id is NOT a secret (it rides in every
 #     presigned URL); the bucket/endpoint/region are public. ---
-Environment=PGHOST=127.0.0.1
-Environment=PGPORT=5432
+# The DB is reached IN-CONTAINER via `docker compose exec` — PG has no published host port (invariant #3),
+# so there is no PGHOST/PGPORT/PGPASSFILE. COMPOSE_FILE + COMPOSE_PROJECT_NAME let `docker compose` attach to
+# the deployed stack from this timer; PGUSER/PGDATABASE are the role/db the in-container client connects as.
+Environment=COMPOSE_FILE=/opt/argus/compose.prod.yaml
+Environment=COMPOSE_PROJECT_NAME=argus-prod
 Environment=PGUSER=argus_cleanup
 Environment=PGDATABASE=argus
-Environment=PGCONNECT_TIMEOUT=10
-# Loopback Postgres on the VM → plaintext is acceptable. If PGHOST is ever a REMOTE Postgres, set
-# PGSSLMODE=verify-full + a CA bundle so this never silently falls back to an unencrypted connection.
-Environment=PGSSLMODE=prefer
 Environment=S3_ENDPOINT=https://s3.eu-central-003.backblazeb2.com
 Environment=S3_REGION=eu-central-003
 Environment=S3_BUCKET=attachment-r8xq4m7z2p9n6k3v
 Environment=S3_ACCESS_KEY_ID=REPLACE_WITH_B2_KEY_ID
 
-# --- Secrets: delivered as credential FILES, never in env/Helm at rest (invariant #5). On the VM the two
-#     source paths are populated from Azure Key Vault by the Managed Identity at boot (a separate fetch
-#     step). systemd copies them into $CREDENTIALS_DIRECTORY (mode 0400, tmpfs), referenced as %d below. ---
-LoadCredential=db-password:/run/argus/secrets/cleanup-db-password
+# --- Secret: the B2 application key, delivered as a credential FILE, never in env/Helm at rest (invariant
+#     #5). The source path is populated from Azure Key Vault by the Managed Identity at boot (a separate fetch
+#     step). systemd copies it into $CREDENTIALS_DIRECTORY (mode 0400, tmpfs), referenced as %d below. (No DB
+#     password: the DB connection runs in-container over the local-trust socket — see cleanup-attachments.sh.) ---
 LoadCredential=b2-secret:/run/argus/secrets/b2-app-key
-Environment=CLEANUP_DB_PASSWORD_FILE=%d/db-password
 Environment=S3_SECRET_ACCESS_KEY_FILE=%d/b2-secret
 
-# AWS CLI v2 wants a writable HOME/cache, but ProtectHome + ProtectSystem=strict make the FS read-only.
+# AWS CLI v2 wants a writable HOME/cache, but ProtectHome + ProtectSystem make the FS read-only.
 # Give it a private tmpfs runtime dir as HOME so it never touches the real home.
 RuntimeDirectory=argus-cleanup
-# 0700 (not the 0755 default): the worker now materialises the libpq passfile + AWS credentials file here, on
-# this service-private tmpfs (no host-disk backing) — so other users can't even list it.
+# 0700 (not the 0755 default): the worker materialises the AWS credentials file here, on this
+# service-private tmpfs (no host-disk backing) — so other users can't even list it.
 RuntimeDirectoryMode=0700
 Environment=HOME=%t/argus-cleanup
+# `docker compose` needs the staged compose tree + a HOME to resolve from; run from the app dir.
+WorkingDirectory=/opt/argus
 
 ExecStart=/opt/argus/cleanup/cleanup-attachments.sh
 
-# --- Hardening: least-privilege oneshot that needs only egress + the two credential files. ---
+# --- Hardening: least-privilege oneshot that reaches the docker socket (to exec psql in-container) + B2
+#     egress. `argus` is already in the docker group (cloud-init), so this grants no NEW privilege. ---
 NoNewPrivileges=true
-ProtectSystem=strict
+# ProtectSystem=full (not strict): the docker client must reach /run/docker.sock; strict would make /run
+# read-only and block the connect. full still keeps /usr,/boot,/etc read-only; CapabilityBoundingSet stays empty.
+ProtectSystem=full
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true
@@ -73,6 +78,8 @@ RestrictRealtime=true
 RestrictSUIDSGID=true
 CapabilityBoundingSet=
 LockPersonality=true
-MemoryDenyWriteExecute=true
+# MemoryDenyWriteExecute is deliberately NOT set: this worker runs AWS CLI v2 (a PyInstaller bundle that maps
+# memory W+X), which MDWE would kill — see argus-db-backup.service for the full rationale. ~18 other
+# hardening directives still apply.
 SystemCallArchitectures=native
 UMask=0077

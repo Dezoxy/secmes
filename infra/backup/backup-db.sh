@@ -15,19 +15,23 @@
 #     the box, so B2 only ever stores ciphertext (the DB holds cleartext METADATA: emails, names, membership;
 #     message bodies are already MLS ciphertext). The age PRIVATE key is NOT on the VM — it lives in Key Vault
 #     and is fetched only at RESTORE time, so a compromised backup host cannot read past dumps.
-#   - Secrets (DB password, B2 secret key) are read from FILES delivered by systemd LoadCredential, populated
-#     from Azure Key Vault via the VM's Managed Identity — never committed, never in env at rest (invariant
-#     #5). They stay FILE-BACKED end-to-end: the script writes a libpq passfile + an AWS credentials file in a
-#     private tmpfs dir (0600) and points the CLIs at them by PATH — the secret VALUES never enter the process
-#     environment (so they're not in /proc/<pid>/environ, not inherited by children) nor argv/`ps`.
+#   - The DB is reached IN-CONTAINER via `docker compose exec -T postgres pg_dump …` over the container's
+#     local socket (PG has NO published host port — invariant #3). The official image trusts local-socket
+#     connections, so the worker assumes `argus_backup` with NO password; its read-only/BYPASSRLS scope
+#     (above) bounds the connection regardless of auth method — so there is NO DB password on the host at all.
+#   - The B2 secret key is read from a FILE delivered by systemd LoadCredential, populated from Azure Key
+#     Vault via the VM's Managed Identity — never committed, never in env at rest (invariant #5): the script
+#     writes an AWS credentials file in a private tmpfs dir (0600) and points `aws` at it by PATH — the secret
+#     VALUE never enters the process environment (so not in /proc/<pid>/environ, not inherited) nor argv/`ps`.
 #   - Logs object keys / sizes / counts ONLY — never a secret, never a presigned URL, never plaintext.
 #
-# Requires: pg_dump + pg_dumpall (libpq client), age (https://age-encryption.org — asymmetric file
-# encryption; the host holds only the public key), aws (AWS CLI v2, against the B2 S3 endpoint), GNU date.
+# Requires: docker compose (reaches the postgres container; `argus` is in the docker group), age
+# (https://age-encryption.org — asymmetric file encryption; the host holds only the public key), aws (AWS CLI
+# v2, against the B2 S3 endpoint), GNU date. pg_dump/pg_dumpall run INSIDE the postgres container.
 set -euo pipefail
 
-# --- Non-secret config (provided by the systemd unit's Environment=). ---
-: "${PGHOST:?PGHOST required}"
+# --- Non-secret config (provided by the systemd unit's Environment=). No PGHOST/PGPORT/PGPASSFILE: the DB is
+#     reached in-container via `docker compose exec` (below), not over a host TCP port (invariant #3). ---
 : "${PGUSER:?PGUSER required (argus_backup)}"
 : "${PGDATABASE:?PGDATABASE required}"
 : "${S3_ENDPOINT:?S3_ENDPOINT required}"
@@ -37,10 +41,14 @@ set -euo pipefail
 # uploaded in the clear by misconfiguration.
 : "${AGE_RECIPIENT:?AGE_RECIPIENT required (age public key) — refusing to upload an unencrypted dump}"
 
-export PGHOST PGUSER PGDATABASE
-export PGPORT="${PGPORT:-5432}"
-export PGCONNECT_TIMEOUT="${PGCONNECT_TIMEOUT:-10}"
 export AWS_REGION="${S3_REGION:-eu-central-003}" # EU default (B2 ignores it for routing; the host carries it)
+
+# Run a Postgres client INSIDE the running postgres container — PG has no published port (invariant #3), and
+# the official image trusts local-socket connections, so `-U "$PGUSER"` (argus_backup) assumes the
+# least-privilege role with NO password. `-T` keeps stdout a clean binary stream for the custom-format dump.
+# COMPOSE_FILE + COMPOSE_PROJECT_NAME (set by the unit) attach to the deployed stack regardless of cwd. The
+# in-container exit code propagates through `exec -T`, so the dump_upload PIPESTATUS checks still hold.
+pgx() { docker compose exec -T postgres "$@"; }
 
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
 BACKUP_PREFIX="${BACKUP_PREFIX:-argus}" # common root → both objects share it so one prune covers them
@@ -71,15 +79,8 @@ secbase="${secbase%%:*}" # first path if systemd gave a colon-separated list
 WORKDIR="$(mktemp -d "${secbase:-${TMPDIR:-/tmp}}/argus-db-backup.XXXXXXXX")"
 trap 'rm -rf -- "$WORKDIR"' EXIT
 
-# libpq passfile (hostname:port:database:username:password). Wildcards are safe in a private 0600 file used
-# only by this unit. The password's `\` and `:` are escaped per the .pgpass format.
-_db_pw="$(read_secret_file "${BACKUP_DB_PASSWORD_FILE:?BACKUP_DB_PASSWORD_FILE required}")"
-_esc_pw="$(printf '%s' "$_db_pw" | sed -e 's/\\/\\\\/g' -e 's/:/\\:/g')"
-PGPASSFILE="$WORKDIR/pgpass"
-printf '*:*:*:%s:%s\n' "$PGUSER" "$_esc_pw" >"$PGPASSFILE"
-chmod 600 "$PGPASSFILE"
-export PGPASSFILE
-unset _db_pw _esc_pw
+# No libpq passfile: the DB connection runs in-container over the local-trust socket (see pgx() above), so no
+# DB password is materialised on the host at all.
 
 # AWS shared-credentials file. The access-key-id is NOT a secret; the secret key rides only in this 0600 file.
 AWS_SHARED_CREDENTIALS_FILE="$WORKDIR/aws-credentials"
@@ -138,14 +139,14 @@ db_key="${BACKUP_PREFIX}-db-${stamp}.dump.age"
 # 1) Cluster ROLES first (tiny). Definitions + memberships, NO passwords. Without this a restore onto a fresh
 #    cluster fails: the schema's role-scoped RLS policies + grants reference argus_app/argus_cleanup/etc.
 dump_upload "roles (globals)" "$globals_key" 64 -- \
-  pg_dumpall --database="$PGDATABASE" --no-password --roles-only --no-role-passwords || exit 1
+  pgx pg_dumpall -U "$PGUSER" --database="$PGDATABASE" --no-password --roles-only --no-role-passwords || exit 1
 
 # 2) The database (custom format → compact, supports selective/parallel restore). A run is ALL-OR-NOTHING:
 #    if the DB dump fails, delete the roles object we just wrote so no orphaned `globals` is left to be paired
 #    with an OLDER db at restore (which, after a role/grant-affecting migration, would restore mismatched
 #    ACL/policy state). Either both of this run's objects land, or neither.
 if ! dump_upload "db dump" "$db_key" 1024 -- \
-  pg_dump --format=custom --no-password "$PGDATABASE"; then
+  pgx pg_dump -U "$PGUSER" --format=custom --no-password "$PGDATABASE"; then
   log "db dump failed — removing the now-orphaned roles object ${globals_key} (keep the run atomic)"
   aws s3api delete-object --endpoint-url "$S3_ENDPOINT" --bucket "$S3_BUCKET" --key "$globals_key" >/dev/null 2>&1 || true
   exit 1
