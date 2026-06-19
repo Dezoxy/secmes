@@ -34,6 +34,7 @@ Hard rules. A change that violates one is wrong even if it "works".
 - `pnpm -r typecheck && pnpm -r test && pnpm lint && pnpm format:check` pass.
 - User-visible web change: Playwright E2E suite passes (`pnpm --filter @argus/web test:e2e`); new user-facing flows get an E2E test; **removed or renamed UI interactions must have their E2E assertions updated in the same commit** — grep `apps/web/e2e/` for the changed label/text/role before pushing. The `e2e` CI job gates merges on this.
 - New API endpoints: in the OpenAPI spec with auth + typed schemas (refresh the spec, run the 42Crunch audit).
+- New/changed controller: a controller spec asserting the route's auth posture (`@Public` vs guarded) and status/error contract via the metadata-reflection helper (`apps/api/src/common/testing/route-meta.ts`), plus any handler-owned behaviour (uniform-202 / 404-no-oracle / metadata-only / audit-field sanitisation). Services are faked — no DB.
 - New tables: `tenant_id` + RLS policy.
 - Security-relevant change: a short threat-model note under `docs/threat-models/`.
 - No secrets; no banned log patterns.
@@ -60,7 +61,7 @@ Hard rules. A change that violates one is wrong even if it "works".
 
 **Crypto** (`packages/crypto`, keys, envelope): no hand-rolled crypto; server stays crypto-blind; keys never logged/transmitted in clear; key backup uses Argon2id + unique salt; CSPRNG only (no `Math.random`).
 
-**Server boundary** (`apps/api`, queries, endpoints): no plaintext on the server; `tenant_id` + RLS on every tenant table; tenant context not set from unverified client input; no secrets/tokens/content in logs; authz on every path (no IDOR); Zod-validated I/O; every route documented in the spec.
+**Server boundary** (`apps/api`, queries, endpoints): no plaintext on the server; `tenant_id` + RLS on every tenant table; tenant context not set from unverified client input; no secrets/tokens/content in logs; authz on every path (no IDOR); Zod-validated I/O; every route documented in the spec; every controller has a spec pinning its guard + status contract.
 
 **Infra** (`infra/`, workflows, Dockerfiles, `compose.yaml`): no secrets in code; containers non-root + read-only FS + dropped caps + limits; data services private (no public endpoints); least-privilege roles + **Managed Identity** (VM); secrets delivered from **Key Vault** as files, never in env; CI uses OIDC and never interpolates untrusted event input into `run:`; EU region pinned.
 
@@ -68,7 +69,7 @@ Hard rules. A change that violates one is wrong even if it "works".
 
 - **New DB table** → `tenant_id` + RLS policy + leading-`tenant_id` index. Content columns store ciphertext only.
 - **Security-relevant feature** → write the threat-model note *before* coding; verify against the 6 invariants.
-- **New/changed endpoint** → annotate with OpenAPI/Swagger (auth + tight typed schema), regenerate `apps/api/openapi.json`, run the 42Crunch audit.
+- **New/changed endpoint** → annotate with OpenAPI/Swagger (auth + tight typed schema), regenerate `apps/api/openapi.json`, run the 42Crunch audit. Add/extend the controller spec (two tiers: contract via `reflectRouteMeta`, behaviour via direct instantiation with faked services) so the route's `@Public`/guard posture and status contract are pinned.
 
 ## Enforcement is tool-agnostic
 
