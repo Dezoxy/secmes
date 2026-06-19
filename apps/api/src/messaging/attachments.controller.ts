@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, HttpCode, Post } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -102,6 +102,7 @@ export class AttachmentsController {
   }
 
   @Post('download-url')
+  @HttpCode(200) // Nest defaults POST to 201; this returns 200 (mints a grant for an existing object — no resource created) to match @ApiOkResponse
   @Throttle(perMinute(SENSITIVE_LIMITS.downloadGrant))
   @ApiOperation({
     summary: 'Mint a download grant for an encrypted attachment (member-only)',
