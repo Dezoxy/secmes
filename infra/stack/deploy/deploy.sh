@@ -139,8 +139,23 @@ systemctl daemon-reload
 
 # --- 2. Fetch the persistent runtime secret set (fail closed: a failure here aborts the deploy). ---
 log "fetching runtime secrets via Managed Identity"
+# Hash the CURRENT tunnel token (if any) BEFORE the fetch overwrites it, so step 6 can detect a Key-Vault
+# rotation. cloudflared reads TUNNEL_TOKEN_FILE only at startup and `up -d` won't recreate it when just a
+# mounted secret FILE's content changed (only a config/image change does) — the same gotcha handled for redis
+# in step 3b/4. We hash (never hold/log the token value); empty when the file doesn't exist yet (first deploy).
+_tunnel_token_old_sha=""
+[ -f "$SECRETS_DIR/tunnel_token" ] && _tunnel_token_old_sha="$(sha256sum "$SECRETS_DIR/tunnel_token" | cut -d' ' -f1)"
 systemctl restart argus-secrets.service
 systemctl enable argus-secrets.service >/dev/null 2>&1 || true
+# TUNNEL_TOKEN_CHANGED=1 unless the freshly-fetched token byte-matches the pre-fetch one. =1 on a first deploy
+# (old hash empty) — harmless, cloudflared is created anyway. =0 on a routine unchanged deploy so the tunnel
+# (the only ingress) isn't needlessly bounced. Drives the force-recreate in step 6.
+TUNNEL_TOKEN_CHANGED=1
+if [ -n "$_tunnel_token_old_sha" ] && [ -f "$SECRETS_DIR/tunnel_token" ] &&
+  [ "$_tunnel_token_old_sha" = "$(sha256sum "$SECRETS_DIR/tunnel_token" | cut -d' ' -f1)" ]; then
+  TUNNEL_TOKEN_CHANGED=0
+fi
+_tunnel_token_old_sha=""
 
 # --- 3. GHCR login (token from Key Vault, transient) + pull the signed images. ---
 log "pulling images ${IMAGE_TAG} from ${GHCR_REGISTRY}"
@@ -473,6 +488,16 @@ docker compose -f "$COMPOSE" up -d $STACK_SERVICES
 if [ "${REDIS_CONF_CHANGED:-1}" = 1 ]; then
   log "redis conf is new/changed — force-recreating api so it reconnects with the current password"
   docker compose -f "$COMPOSE" up -d --force-recreate --no-deps api
+fi
+# cloudflared reads TUNNEL_TOKEN_FILE ONCE at startup. On a token ROTATION the file content changed but the
+# `up -d` above won't recreate the already-running cloudflared (only a config/image change triggers that, not a
+# mounted secret's new content), so it would keep the tunnel on the OLD/revoked token until someone restarts it
+# by hand. Force-recreate cloudflared when the token changed (step 2 — also true on a first deploy, where it
+# just creates the container); a routine unchanged deploy leaves the running tunnel alone so the only ingress
+# isn't needlessly bounced. Symmetric with the redis/api recreate above.
+if [ "${TUNNEL_TOKEN_CHANGED:-1}" = 1 ]; then
+  log "tunnel token is new/changed — force-recreating cloudflared so it picks up the current token"
+  docker compose -f "$COMPOSE" up -d --force-recreate --no-deps cloudflared
 fi
 
 # --- 6b. Gate on the new app containers becoming HEALTHY — `up -d` returns before they're ready, so without
