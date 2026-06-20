@@ -93,29 +93,37 @@ ARGUS_KEY_VAULT=argus-exp-kv-4ad322 ./infra/aws/scripts/populate-keyvault.sh # g
 # The list above checks NAMES only. Terraform SEEDS external secrets with "REPLACE-…" placeholders, and
 # populate.sh skips an existing name without --rotate — so a placeholder (e.g. the GHCR token) looks "present"
 # but breaks `docker login` for the now-private images. Find any placeholder/empty external cred by VALUE:
-for s in argus-ghcr-token argus-b2-app-key argus-s3-secret-access-key argus-tunnel-token; do
+for s in argus-ghcr-token argus-b2-app-key argus-s3-secret-access-key argus-tunnel-token \
+         argus-session-signing-key argus-backup-signing-key; do
   v=$(az keyvault secret show --vault-name argus-exp-kv-4ad322 --name "$s" --query value -o tsv --only-show-errors 2>/dev/null)
-  case "$v" in REPLACE*|"") echo "  placeholder/empty: $s — re-enter it below";; esac
+  case "$v" in REPLACE*|"") echo "  placeholder/empty: $s — must be replaced before tagging";; esac
 done
 # Re-enter any placeholder external cred (incl. the GHCR read:packages PAT) the SAFE way — populate --rotate
 # re-prompts (read -rsp) and writes via a 0600 temp file + --file, never on argv or in shell history. On a
 # FIRST deploy nothing is running yet so --rotate is harmless; post-deploy it needs a redeploy to take effect.
 ARGUS_KEY_VAULT=argus-exp-kv-4ad322 ./infra/aws/scripts/populate-keyvault.sh --rotate # gitleaks:allow — vault NAME, not a secret
 
+# CAUTION — set-once signing keys: argus-backup-signing-key is SET-ONCE; populate SKIPS it even under --rotate
+# (rotating it would orphan the git-pinned verifier infra/backup/backup-verify.pub). If the scan flagged it as a
+# "REPLACE-…" placeholder, argus-secrets.service still succeeds (value is non-empty) but the nightly backup
+# preflight rejects the unusable key → NO signed backups. A dummy-seeded set-once secret can't be promoted in
+# place: provision it together with its matching backup-verify.pub per the signed-backups setup (infra/backup/),
+# or recreate the vault (bump var.prefix). Same applies to a placeholder argus-session-signing-key (API won't boot).
+
 # The age key is NOT created by populate.sh — set it explicitly from the keypair generated in blocker 1,
 # or restore is impossible. (age.key holds the AGE-SECRET-KEY line; restore writes it back and runs `age -i`.)
 # `-o none --only-show-errors`: `az keyvault secret set` echoes the secret VALUE by default (Azure CLI
 # #20858), which would print the age private key to your terminal scrollback / run logs — suppress it.
-az keyvault secret set --vault-name argus-exp-kv-4ad322 --name argus-backup-age-key --file age.key --only-show-errors -o none
-
-# VERIFY the key is really in Key Vault before deleting the local copy — shredding age.key after a failed
-# upload would destroy the only key that can decrypt your backups. (grep -q reads the value over a pipe and
-# prints nothing.) Keep an offline copy in your password manager if you want a break-glass beyond Key Vault.
-if az keyvault secret show --vault-name argus-exp-kv-4ad322 --name argus-backup-age-key \
-     --query value -o tsv --only-show-errors | grep -q 'AGE-SECRET-KEY'; then
-  shred -u age.key 2>/dev/null || rm -P age.key   # verified in KV → remove local copy (rm -P = BSD/macOS overwrite-delete)
+# Upload the private key, then VERIFY it before deleting the local copy. The shred is gated on BOTH the upload
+# succeeding AND a read-back showing a usable age key — shredding age.key after a failed/partial upload would
+# destroy the only key that can decrypt your backups. grep -q reads the value over a pipe and prints nothing;
+# `-o none` keeps the set from echoing the key. Keep an offline password-manager copy as a break-glass if you like.
+if az keyvault secret set --vault-name argus-exp-kv-4ad322 --name argus-backup-age-key --file age.key --only-show-errors -o none \
+   && az keyvault secret show --vault-name argus-exp-kv-4ad322 --name argus-backup-age-key \
+        --query value -o tsv --only-show-errors | grep -q 'AGE-SECRET-KEY'; then
+  shred -u age.key 2>/dev/null || rm -P age.key   # uploaded AND read back OK → remove local copy (rm -P = BSD/macOS overwrite-delete)
 else
-  echo "FATAL: argus-backup-age-key not retrievable from Key Vault — KEEP age.key and retry the upload"
+  echo "FATAL: argus-backup-age-key upload/verify failed — KEEP age.key and retry before deleting it"
 fi
 
 az keyvault network-rule remove --name argus-exp-kv-4ad322 --ip-address "$MYIP"   # re-tighten when done
