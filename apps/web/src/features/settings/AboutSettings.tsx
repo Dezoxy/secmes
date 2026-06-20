@@ -198,13 +198,25 @@ export function AboutSettings() {
                   <p className="text-xs font-medium text-white/65">{note.version}</p>
                   <p className="truncate text-xs text-white/60">{note.title}</p>
                 </div>
-                <ul className="space-y-1 pl-4 text-xs leading-5 text-white/60">
-                  {note.items.map((item) => (
-                    <li key={item} className="list-disc">
-                      {item}
-                    </li>
+                <div className="space-y-2">
+                  {note.groups.map((group) => (
+                    <div key={group.label} className="space-y-1">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-white/45">
+                        {group.label}
+                      </p>
+                      <ul className="space-y-1 pl-4 text-xs leading-5 text-white/60">
+                        {group.items.map((item) => (
+                          <li key={item} className="list-disc">
+                            {item}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   ))}
-                </ul>
+                  {note.overflowNote && (
+                    <p className="pl-4 text-xs leading-5 text-white/45">{note.overflowNote}</p>
+                  )}
+                </div>
               </article>
             ))}
           </div>

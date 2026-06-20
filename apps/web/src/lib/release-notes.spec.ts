@@ -11,8 +11,14 @@ describe('release notes (generated)', () => {
     for (const note of releaseNotes) {
       expect(note.version.trim().length).toBeGreaterThan(0);
       expect(note.title.trim().length).toBeGreaterThan(0);
-      expect(note.items.length).toBeGreaterThan(0);
-      for (const item of note.items) expect(item.trim().length).toBeGreaterThan(0);
+      expect(note.groups.length).toBeGreaterThan(0);
+      for (const group of note.groups) {
+        expect(group.label.trim().length).toBeGreaterThan(0);
+        expect(group.items.length).toBeGreaterThan(0);
+        for (const item of group.items) expect(item.trim().length).toBeGreaterThan(0);
+      }
+      if (note.overflowNote !== undefined)
+        expect(note.overflowNote.trim().length).toBeGreaterThan(0);
     }
   });
 });

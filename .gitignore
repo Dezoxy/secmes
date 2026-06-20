@@ -3,6 +3,9 @@ node_modules/
 .pnpm-store/
 .venv/
 
+# Node V8 compile cache (NODE_COMPILE_CACHE) — regenerated per run, never committed
+node-compile-cache/
+
 # throwaway spikes — never product code
 /spike/
 

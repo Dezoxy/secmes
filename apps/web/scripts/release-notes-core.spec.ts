@@ -42,7 +42,7 @@ describe('parseCommitSubject', () => {
 });
 
 describe('buildReleaseEntry', () => {
-  it('keeps feat+fix (feat first), prefixes fixes, drops noise, uses date as title', () => {
+  it('groups feat→New / fix+perf→Fixes, capitalizes, drops PR refs + noise, date as title', () => {
     const entry = buildReleaseEntry({
       version: 'v1.0.0',
       date: '2026-01-02',
@@ -51,8 +51,28 @@ describe('buildReleaseEntry', () => {
     expect(entry).toEqual({
       version: 'v1.0.0',
       title: '2026-01-02',
-      items: ['a (#1)', 'Fix: b (#2)', 'Fix: p (#3)'],
+      groups: [
+        { label: 'New', items: ['A'] },
+        { label: 'Fixes', items: ['B', 'P'] },
+      ],
     });
+  });
+
+  it('capitalizes an all-lowercase first word but preserves a leading mixed-case product name', () => {
+    const entry = buildReleaseEntry({
+      version: 'v1',
+      date: 'd',
+      subjects: ['feat: iOS install prompt', 'fix: macOS notarization', 'fix: tidy logs'],
+    });
+    expect(entry?.groups).toEqual([
+      { label: 'New', items: ['iOS install prompt'] },
+      { label: 'Fixes', items: ['macOS notarization', 'Tidy logs'] },
+    ]);
+  });
+
+  it('omits a group with no items (fixes-only release)', () => {
+    const entry = buildReleaseEntry({ version: 'v1', date: 'd', subjects: ['fix: only a fix'] });
+    expect(entry?.groups).toEqual([{ label: 'Fixes', items: ['Only a fix'] }]);
   });
 
   it('returns null when nothing user-facing remains', () => {
@@ -62,11 +82,28 @@ describe('buildReleaseEntry', () => {
     expect(buildReleaseEntry({ version: 'v1', date: 'd', subjects: [] })).toBeNull();
   });
 
-  it('caps at 12 items with an overflow line', () => {
+  it('caps at 12 items and carries the overflow as a neutral note, not inside a group', () => {
     const subjects = Array.from({ length: 15 }, (_, i) => `feat: item ${i}`);
     const entry = buildReleaseEntry({ version: 'v1', date: 'd', subjects });
-    expect(entry?.items).toHaveLength(13); // 12 + overflow
-    expect(entry?.items.at(-1)).toBe('…and 3 more changes');
+    expect(entry?.groups).toHaveLength(1);
+    const newGroup = entry?.groups[0];
+    expect(newGroup?.label).toBe('New');
+    expect(newGroup?.items).toHaveLength(12); // capped; the overflow line is NOT mixed into the group
+    expect(entry?.overflowNote).toBe('…and 3 more changes');
+  });
+
+  it('does not misfile hidden fixes under New when the first 12 are all feats', () => {
+    const subjects = [
+      ...Array.from({ length: 12 }, (_, i) => `feat: feature ${i}`),
+      'fix: a hidden fix',
+      'fix: another hidden fix',
+    ];
+    const entry = buildReleaseEntry({ version: 'v1', date: 'd', subjects });
+    // Only New survives the cap; the hidden fixes must NOT appear as a phantom "more changes" item under New.
+    expect(entry?.groups.map((g) => g.label)).toEqual(['New']);
+    expect(entry?.groups[0]?.items).toHaveLength(12);
+    expect(entry?.groups[0]?.items.some((i) => i.includes('more changes'))).toBe(false);
+    expect(entry?.overflowNote).toBe('…and 2 more changes');
   });
 });
 
