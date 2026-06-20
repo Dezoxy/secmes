@@ -44,7 +44,7 @@ A **multi-tenant, end-to-end-encrypted messaging product** delivered as an insta
 - Single device per user
 - Real-time delivery + offline catch-up
 - Delivery status
-- Encrypted key backup & recovery
+- PRF-sealed device keystore — no server backup, no recovery (a lost passkey is a fresh start; see §3.4)
 - Admin panel (metadata only — never content)
 - Audit log for security events
 
@@ -73,9 +73,9 @@ The backend manages: authentication, authorization, tenant isolation, the public
 
 ## 3. Security Model
 
-### 3.1 What "E2EE, single device" means in v1
-- Each user has **one client/device**. Their MLS private keys live in **IndexedDB** (via WebCrypto-managed key material).
-- "New phone / new browser" is handled by **key recovery** (§3.4), not live multi-device sync. This sidesteps the multi-device problem entirely for v1.
+### 3.1 What "E2EE" means here (device-local keys)
+- One client/device was the v1 baseline; **multi-device enrollment (B2) has since shipped** — a user may have N devices, each added by **approval from an existing trusted device** after an out-of-band fingerprint check (`multi-device-enrollment.md`). MLS private keys live in **IndexedDB**, sealed under the per-passkey PRF unlock key.
+- There is **no key backup/recovery**: every new device is provisioned **fresh** (no prior history — forward secrecy), either via B2 enrollment from an existing device or, for a user with **no** remaining enrolled device, via a new registration code (§3.4). "New phone / new browser" is therefore always a fresh device, never a restore of old keys.
 
 ### 3.2 The honest PWA caveat (read this twice)
 A web app delivers the encryption code on every load, so a **fully compromised server could ship malicious JavaScript** and capture plaintext. Native apps avoid this; a pure PWA cannot fully escape it. You can only narrow it:
@@ -93,12 +93,12 @@ Be honest with buyers: this is "very strong privacy," not "uncompromisable." It'
 - **Do not** compose your own scheme from primitives ("rolling crypto") — it weakens both security and your sales story.
 - Server stores MLS **KeyPackages** (public), ciphertext messages, and Welcome messages for offline delivery.
 
-### 3.4 Key backup & recovery (mandatory)
-iOS evicts PWA storage under pressure → without backup, a user loses all history. So:
-- Derive a backup key from a **user passphrase** with **Argon2id**.
-- Encrypt the user's private key material with it.
-- Store the result **server-side as ciphertext**. The server can't use it (no passphrase).
-- Recovery / new device = enter passphrase → fetch ciphertext → decrypt locally.
+### 3.4 Key backup & recovery — superseded: no server backup, no recovery
+> **Updated (2026-06):** the original passphrase / Argon2id / server-stored key-backup design was **dropped** (migration `0040_drop_key_backups.sql`; `packages/crypto/src/key-backup.ts` deleted). The shipped model seals the device keystore directly under a per-passkey **WebAuthn-PRF** key (no passphrase, no Argon2) and keeps **no recoverable secret on the server**.
+
+- The keystore is sealed at rest under the PRF unlock key (non-extractable AES-256-GCM `CryptoKey`, in memory only).
+- A lost passkey or an evicted PWA store is a **fresh start** — the admin mints a new registration code; the device re-enrolls and starts with no history.
+- This trades recoverability for a strictly smaller attack surface (no server-held key ciphertext to steal or brute-force) and is consistent with MLS forward secrecy. See `docs/threat-models/prf-keystore-unlock.md` and `key-model.md`.
 
 ### 3.5 Auth ↔ crypto boundary
 The IdP authenticates **who you are**. It **never** sees or holds **message keys**. Keep these two systems strictly separate or you've defeated E2EE.
@@ -196,9 +196,7 @@ devices(id, tenant_id, user_id, public_identity_key, status,
 
 key_packages(id, tenant_id, device_id, mls_key_package, used_at, created_at)
                                                         # MLS KeyPackages (public)
-
-key_backups(id, tenant_id, user_id, ciphertext, kdf_params, created_at)
-                                                        # passphrase-encrypted
+                          # (key_backups table removed — migration 0040; PRF keystore, no server backup)
 
 conversations(id, tenant_id, type, created_at, updated_at)
 
@@ -329,7 +327,7 @@ The `packages/contracts` shared types are the concrete payoff of going TypeScrip
 | Stolen infra credentials | Least-privilege, no long-lived keys on the VM (Managed Identity + Key Vault), audit logs |
 | Compromised container | NSG deny-inbound + Cloudflare edge; data services private on the Docker network; non-root, read-only FS, dropped caps |
 | Compromised admin | MFA via IdP, least privilege, full audit trail, no content access |
-| Lost device | Key recovery from encrypted backup; device revocation |
+| Lost device | Fresh start (no key backup/recovery by design — §3.4); device revocation |
 | Malicious insider (you) | E2EE means you *cannot* read content — provable, sellable |
 | Metadata exposure (who talks to whom, when, message sizes) | Inherent to a hosted delivery layer; minimized (opaque conversation IDs, no titles, pseudonymous identity, IDs-only logs, RLS) and stated as an accepted residual — see `threat-models/metadata-exposure.md` |
 | Malicious JS injection | CSP + SRI + service-worker pinning + hardened pipeline (§3.2) |
@@ -372,8 +370,8 @@ The Azure VM via Terraform (`infra/azure/`), Managed Identity → Key Vault, NSG
 **Phase 1 — Identity & tenancy**
 Zitadel deployed (Docker Compose on the VM); tenant + user model with RLS; OIDC login; admin role; audit events for login/logout.
 
-**Phase 2 — Device keys & recovery**
-Client MLS key generation; KeyPackage upload; key directory; passphrase-encrypted backup + recovery flow.
+**Phase 2 — Device keys**
+Client MLS key generation; KeyPackage upload; key directory; PRF-sealed device keystore (no passphrase, no server backup/recovery — a lost passkey is a fresh start).
 
 **Phase 3 — 1:1 encrypted text**
 Self-hosted Postgres on the VM; encrypt → store ciphertext → WSS delivery → offline catch-up → delivery status. Redis backplane (the realtime bus).

@@ -40,13 +40,13 @@ D2 (new device)                       Server (crypto-blind transport)          D
 
 For **new conversations created after D2 is enrolled**: D1's `confirmCreate`/`confirm` calls `claimAllKeyPackages(selfUserId)`, adds D2's KeyPackage to the epoch-0 commit's Welcome list, so D2 joins immediately without a retroactive step.
 
-**History**: D2 decrypts from its add-epoch forward only. Pre-join messages are intentionally inaccessible (forward secrecy preserved, `key-backup.md §4`). UI copy: "History stays on your other device."
+**History**: D2 decrypts from its add-epoch forward only. Pre-join messages are intentionally inaccessible (forward secrecy preserved; no key recovery — `prf-keystore-unlock.md`). UI copy: "History stays on your other device."
 
 ## 2. Assets & trust boundaries
 
 - **Assets:** D2's MLS signature private key (stable identity root); the enrollment linkage (proving D2 belongs to the user); future-traffic confidentiality (all conversations D1 adds D2 to).
 - **New boundary:** the enrollment-coordination surface. The server stores and routes enrollment *metadata* (fingerprint is public; status is routing state; IDs are UUIDs). The server never makes the trust decision — D1 does, cryptographically, via proof-of-possession.
-- **Existing boundaries (unchanged):** client-side MLS ratchet tree (crypto truth); per-device sealed keystores (IndexedDB, Argon2id + AES-GCM); `devices` / `key_packages` / `conversation_welcomes` tables (public key material + opaque join blobs only).
+- **Existing boundaries (unchanged):** client-side MLS ratchet tree (crypto truth); per-device sealed keystores (IndexedDB, AES-256-GCM under the per-passkey PRF unlock key; no passphrase, no Argon2 — `prf-keystore-unlock.md`); `devices` / `key_packages` / `conversation_welcomes` tables (public key material + opaque join blobs only).
 
 ## 3. Threats (STRIDE-lite)
 
@@ -87,7 +87,7 @@ For **new conversations created after D2 is enrolled**: D1's `confirmCreate`/`co
 ### T5 — History-expectation mismatch (UX, not security)
 **Threat (UX):** A user sees an empty transcript on D2 after linking and believes messages were lost.
 
-**Mitigation:** Clear UI copy in the link flow: "History stays on your other device. New messages will appear here." Mirrors `key-backup.md §4` (recovery brings back identity, not history) and `group-membership.md` T4 (joiners at epoch N can't decrypt epochs < N). This is an expected, documented, forward-secrecy consequence — not a data loss.
+**Mitigation:** Clear UI copy in the link flow: "History stays on your other device. New messages will appear here." Mirrors the no-recovery keystore model (`prf-keystore-unlock.md`: a new device starts fresh) and `group-membership.md` T4 (joiners at epoch N can't decrypt epochs < N). This is an expected, documented, forward-secrecy consequence — not a data loss.
 
 ### T6 — Epoch-slot contention from enrollment fan-out
 **Threat:** D1 issuing many add-commits (one per conversation) races with normal traffic, generating 409s.
@@ -96,10 +96,10 @@ For **new conversations created after D2 is enrolled**: D1's `confirmCreate`/`co
 
 **Residual:** A user in many active conversations may have a slow fan-out. Bounded and accepted.
 
-### T7 — Stranded KeyPackages after D2 reset or recovery
-**Threat:** D2 is cleared (lost passphrase, recovery) and re-provisions with a new signature key. The old KeyPackages remain in the directory, unclaimed; a peer may claim one and produce a Welcome D2 can never open.
+### T7 — Stranded KeyPackages after D2 reset
+**Threat:** D2 is cleared (account-switch reset, or a wiped/evicted keystore — no recovery) and re-provisions as a brand-new device with a fresh signature key. The old KeyPackages remain in the directory, unclaimed; a peer may claim one and produce a Welcome the new D2 can never open.
 
-**Mitigation:** Existing `revokeUnclaimed` on the restore path (`DeviceContext.restore`) revokes stale packages before re-publishing. Already built and tested (`device-provisioning.md §6`). The remaining availability residual (≤ pool cap, self-healing) is inherited and documented.
+**Mitigation:** The stale packages **self-heal** — each is consumed (and thus retired) on the claim that poisons one initiation attempt, bounded by the pool/200-per-device cap. A server-side device-scoped `revokeUnclaimed` endpoint exists for proactive cleanup, but the old client `DeviceContext.restore` wiring was removed with the no-recovery cutover (`device-provisioning.md §6`); the availability residual (≤ pool cap, self-healing) is inherited and documented.
 
 ## 4. Invariant check
 
@@ -115,5 +115,5 @@ For **new conversations created after D2 is enrolled**: D1's `confirmCreate`/`co
 1. **TOFU on first safety-number display (T2).** A user who skips the comparison can approve a swapped key. The artifact is now the full-width safety number (~133-bit), so a malicious server can no longer *grind* a colliding number (the closed FP-1 hole) — this residual is reduced to pure human negligence, the irreducible floor of any OOB check. The UI keeps the comparison prominent but cannot force it. Matches the existing #20 residual for peer-adds — accepted.
 2. **D1 offline at enrollment time.** D2 can register and display its code, but must wait for D1 to come online to approve and issue add-commits. This is the Signal model ("waiting for your other device"). UI must communicate the dependency explicitly.
 3. **Fan-out window.** Between D1 approving and D1 finishing all add-commits, D2 is partially enrolled (some conversations joined, some not). Messages in the unfinished conversations arrive before D2 is a leaf — they're undecryptable and silently skipped (existing join logic). Bounded by the number of conversations and 409-rebase retries; eventually consistent. Documented, accepted.
-4. **No history.** Pre-join messages are intentionally inaccessible on D2 (forward secrecy). The opt-in "sealed history transfer" sub-project from `key-backup.md §4` remains deferred; it requires a separate threat model and explicit FS-weakening user acceptance.
+4. **No history.** Pre-join messages are intentionally inaccessible on D2 (forward secrecy). An opt-in "sealed history transfer" sub-project (device-to-device, never server-stored) remains deferred; it requires a separate threat model and explicit FS-weakening user acceptance.
 5. **Unbounded device count per user (v1).** No per-user device cap is enforced. A user linking many devices (or an attacker with account access) can add many leaves to all conversations. Rate-limiting + the OOB verify gate bound this in practice; a hard cap is a follow-up.

@@ -9,8 +9,8 @@
 
 - **Persist (PR-5A):** MLS group state ratchets on every `encrypt`/`decrypt`/`addMember`, so it must be
   saved durably or a reload desyncs the group. The client serializes the ts-mls `GroupState`
-  (`encodeGroupState`) and stores it **sealed** (Argon2id + AES-256-GCM, the same passphrase as the device)
-  per conversation in IndexedDB. On unlock it rehydrates conversations from the store; once a join's group
+  (`encodeGroupState`) and stores it **sealed** (AES-256-GCM under the per-passkey PRF unlock key — the same
+  key that seals the device) per conversation in IndexedDB. On unlock it rehydrates conversations from the store; once a join's group
   is persisted, **consuming the Welcome + pruning the spent private** (deferred from Slice 4) become safe.
 - **Send (5B):** `conversation.encrypt(text)` → opaque wire bytes → `POST /conversations/:id/messages`
   (`{ clientMessageId, ciphertext: base64, alg, epoch }`). Idempotent on `clientMessageId`.
@@ -25,24 +25,24 @@ ciphertext** — never plaintext, never keys. All MLS work is client-side.
 - **Assets:** the persisted **MLS group state** — it carries `signaturePrivateKey`, `privatePath` HPKE path
   secrets, the `keySchedule`/`secretTree` ratchet secrets — **as sensitive as the device keys**; message
   plaintext (only ever in memory); the WS auth token.
-- **Boundaries:** at-rest (the sealed group-state blob ↔ unsealed in-memory state — the passphrase is the
+- **Boundaries:** at-rest (the sealed group-state blob ↔ unsealed in-memory state — the PRF unlock key is the
   gate); client↔server (crypto-blind — opaque ciphertext only); WS handshake (token authenticates the
   socket); tenant↔tenant (RLS, server-enforced).
 
 ## 3. Threats (STRIDE-lite)
 
 - **Information disclosure (persisted ratchet state):** the group-state blob holds live secret key material,
-  so it is **sealed at rest** exactly like the device + pool (Argon2id 64 MiB + AES-256-GCM, identity- and
-  signature-key-bound). A leaked at-rest blob (no passphrase) reveals nothing; a wrong passphrase fails the
-  GCM auth. Never logged or transmitted. The **save-side** serialized plaintext (a fresh copy from
+  so it is **sealed at rest** exactly like the device + pool (AES-256-GCM under the PRF unlock key, identity-
+  and signature-key-bound). A leaked at-rest blob (without the in-memory unlock key) reveals nothing; a wrong
+  unlock key fails the GCM auth. Never logged or transmitted. The **save-side** serialized plaintext (a fresh copy from
   `encodeGroupState`) is wiped after sealing; the **load-side** unsealed bytes are deliberately retained —
   `decodeGroupState` returns views over them, so they ARE the live in-memory group state (as resident as the
   device keys), not a transient copy.
 - **Rollback / nonce reuse (the headline correctness risk):** persisting a STALE group state behind a
   ratchet advance would break decryption or, worse, let a future `encrypt` reuse an AEAD nonce. Two distinct
   races, two guards:
-  - **Same instance** (snapshot in the op mutex but seal + write outside it → two close saves reorder when a
-    slow Argon2 seal lets an older write land last): `Conversation.persistVia(persister)` runs the snapshot
+  - **Same instance** (snapshot in the op mutex but seal + write outside it → two close saves reorder when the
+    async seal lets an older write land last): `Conversation.persistVia(persister)` runs the snapshot
     AND the persister's seal + write **inside** the per-conversation op mutex (`opQueue`), so saves are
     totally ordered with ratchet ops and with each other. A concurrency test fires interleaved encrypt+save
     and asserts the reload is the newest generation.
@@ -69,13 +69,13 @@ ciphertext** — never plaintext, never keys. All MLS work is client-side.
 ## 4. Invariant check
 
 - **#1 crypto-blind server:** upheld — ciphertext + metadata only; the server never sees plaintext or keys.
-- **#2 no secret logging:** upheld — group state / keys / passphrase / plaintext never logged or sent; the
+- **#2 no secret logging:** upheld — group state / keys / unlock key / plaintext never logged or sent; the
   sealed blob is the only at-rest form; transient plaintext wiped.
 - **#3 RLS:** upheld — the messages/sync/WS paths are tenant- + member-scoped server-side; **no new server
   table** (the messaging schema exists). The new client `group-state` store is local IndexedDB only.
 - **#4 no hand-rolled crypto:** upheld — persistence uses ts-mls `encodeGroupState`/`decodeGroupState`; the
-  seal reuses `@argus/crypto` `sealBackup`/`openBackup` (Argon2id + AES-GCM); encrypt/decrypt stay in
-  `@argus/crypto`. CSPRNG only.
+  seal reuses `@argus/crypto` `sealWithKey`/`openWithKey` (AES-256-GCM under the PRF unlock key); encrypt/decrypt
+  stay in `@argus/crypto`. CSPRNG only.
 - **#5 secrets via Key Vault / #6 no admin content path:** untouched.
 
 ## 5. Decision & mitigations
@@ -86,19 +86,18 @@ ciphertext** — never plaintext, never keys. All MLS work is client-side.
   re-attach `defaultClientConfig` → `new Conversation`). Keystore: a sealed, identity+signature-bound
   **`group-state`** store (IndexedDB v4, additive) keyed by conversationId, written through `persistVia`;
   wipe transients. Reviewer: **`crypto-reviewer`** (FS of persisted state, the codec, atomicity). Perf note:
-  PR-5A seals per explicit save (one-shot Argon2 is fine); 5B's per-message persistence should derive a
-  session key once at unlock rather than re-running Argon2 on every message.
+  every save is cheap AES-GCM under the in-memory PRF unlock key — there is no per-save or per-message KDF.
 - **PR-5B (send + fetch) — DONE:** `api.ts` `sendMessage`/`fetchMessages` (typed, ciphertext + metadata
   only); cross-conversation `/sync` lands in 5C with its reconnect caller. `lib/messaging.ts`:
   `sendLiveMessage` does **encrypt → persist → POST** and
   `backfillConversation` does **fetch → decrypt (peer only) → persist**, both under a per-conversation
   **single-writer lock** (`lib/locks.ts`, Web Locks with an in-process fallback) — this is the lock promised
   in PR-5A's rollback note, gating the ratchet ops across tabs. The join flow now **persists → consumes →
-  prunes** (closing the Slice-4 deferral). `DeviceContext` retains the session passphrase (in memory) to seal
+  prunes** (closing the Slice-4 deferral). `DeviceContext` retains the in-memory PRF unlock key to seal
   advances and rehydrates conversations on unlock (`loadConversations`); `ChatScreen` routes live sends/opens
   through these and drops the demo loopback for live conversations. Reviewer: **`security-boundary-auditor`**
-  (ciphertext-only client, no secret logging). Perf: still one Argon2 seal per user action (send / backfill
-  batch) — acceptable; the per-unlock session key remains the optimization.
+  (ciphertext-only client, no secret logging). Perf: each save is cheap AES-GCM under the in-memory PRF unlock
+  key — no per-action KDF.
 - **PR-5C (WebSocket) — DONE:** `lib/ws.ts` `createMessageSocket` — a reconnecting client that authenticates
   in the **first app frame** (`{event:'auth',data:{token}}`, never a token in the URL/query), subscribes each
   live conversation, and surfaces pushed envelopes. `lib/messaging.ts` `receiveLiveMessage` decrypts +
@@ -126,7 +125,8 @@ ciphertext** — never plaintext, never keys. All MLS work is client-side.
   ratchet — older ciphertext is at an already-consumed generation and is skipped (undecryptable). Own sent
   messages are never re-derivable from MLS state at all (the sending secret is consumed on `encrypt`), so
   back-fill skips self; they appear via local echo only for the session that sent them. A local **sealed
-  message log** (plaintext at rest under the device passphrase) is the follow-up that makes history durable.
+  message log** (plaintext at rest under the PRF unlock key) now makes history durable — shipped in Slice 5
+  (see `message-history.md`).
 - **Reconnect catch-up cost (5C):** live messages now arrive over the WebSocket push; on (re)connect the
   client catches up with a **per-conversation** back-fill (one keyset fetch per live conversation). A device
   in many conversations makes N calls; the server's cross-conversation `GET /sync` (single paginated stream)

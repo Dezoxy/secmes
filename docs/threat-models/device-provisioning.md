@@ -8,16 +8,17 @@
 
 On entering the authenticated app, the client:
 
-1. **Unlocks the device** — the device's MLS keys are sealed at rest in IndexedDB under the user's
-   passphrase (Argon2id + AES-256-GCM, #21/#23). A passphrase gate unseals the existing device, or
-   creates one on first run. The unsealed keys live only in memory for the session.
+1. **Unlocks the device** — the device's MLS keys are sealed at rest in IndexedDB under the per-passkey
+   **PRF unlock key** (AES-256-GCM; see `prf-keystore-unlock.md`). The WebAuthn unlock ceremony unseals the
+   existing device, or creates one on first run. The unsealed keys live only in memory for the session.
 2. **Provisions a KeyPackage pool** — mints a pool of **one-time** KeyPackages under the device's stable
    signature identity (`mintKeyPackage` → fresh HPKE init key, same Ed25519 signature key), persists them
    sealed (the privates are retained — a Welcome will be HPKE-sealed to one of them), and **publishes the
    public KeyPackages** to `POST /devices/me/key-packages`.
 
 Only **public** key material leaves the device (the signature public key + the public KeyPackages — both
-opaque base64 to the crypto-blind server). Private keys never leave; the passphrase never leaves.
+opaque base64 to the crypto-blind server). Private keys never leave; the PRF unlock key (computed in the
+authenticator, held in memory only) never leaves.
 
 - **Idempotent publish**: the server upserts the device by signature key and dedups KeyPackages (unique
   `(tenant, device, md5)`), so re-publishing the same pool each login is a safe no-op.
@@ -26,16 +27,16 @@ opaque base64 to the crypto-blind server). Private keys never leave; the passphr
 
 - **Assets:** the device's signature **private** key (the stable identity root — its leak lets an
   attacker impersonate the device) and each KeyPackage's **HPKE init private** key (needed to open the
-  Welcome sealed to it). Both stay sealed at rest + in-memory only when unlocked. The passphrase.
-- **Boundaries:** at-rest (sealed blob ↔ unsealed memory — the passphrase is the gate), client↔server
+  Welcome sealed to it). Both stay sealed at rest + in-memory only when unlocked. The per-passkey PRF unlock key.
+- **Boundaries:** at-rest (sealed blob ↔ unsealed memory — the PRF unlock key is the gate), client↔server
   (server stores **public** key material only — crypto-blind), and client↔key-directory (the server is
   untrusted for *authenticity*: a peer must verify the claimed KeyPackage's fingerprint out-of-band #20).
 
 ## 3. Threats (STRIDE-lite)
 
-- **Information disclosure (private keys):** the at-rest blob is Argon2id+AES-GCM sealed; only public
-  material is published. A wrong/missing passphrase fails the unseal (GCM auth) — no plaintext keys ever
-  touch disk unsealed or the network. The publish body carries public keys only.
+- **Information disclosure (private keys):** the at-rest blob is AES-GCM sealed under the PRF unlock key; only
+  public material is published. A wrong/missing unlock key (a different passkey) fails the unseal (GCM auth) —
+  no plaintext keys ever touch disk unsealed or the network. The publish body carries public keys only.
 - **Spoofing (publish for another user):** publish is bound to the **verified caller** (`auth.sub` →
   user); a user can only register their own device + packages (server-side, #19). The client never sends
   a user id.
@@ -57,7 +58,7 @@ opaque base64 to the crypto-blind server). Private keys never leave; the passphr
 
 - **#1 crypto-blind server:** upheld — only public KeyPackages + the signature public key are sent;
   opaque base64 the server stores and never interprets.
-- **#2 no secret logging:** upheld — private keys/passphrase never logged or transmitted; the keystore
+- **#2 no secret logging:** upheld — private keys/unlock key never logged or transmitted; the keystore
   seals at rest; the API client logs nothing sensitive.
 - **#4 no hand-rolled crypto:** all key material from `@argus/crypto` (MLS/ts-mls); the pool mint reuses
   `generateKeyPackageWithKey` under the existing signature key; serialization is ts-mls `encodeKeyPackage`.
@@ -69,8 +70,9 @@ opaque base64 to the crypto-blind server). Private keys never leave; the passphr
   identity) + `serializeKeyPackage`/`deserializeKeyPackage` (ts-mls wire codec) + a DeviceKeys-array codec
   for the sealed pool.
 - **Keystore**: a **sealed pool** of one-time DeviceKeys alongside the identity device; `ensurePool(target)`
-  mints up to `target` and re-seals. Privates retained until consumed (Slice 4). One Argon2 seal per change.
-- **Client**: a passphrase **unlock/create gate** (a `DeviceProvider` holding the unlocked device + pool
+  mints up to `target` and re-seals. Privates retained until consumed (Slice 4). One cheap AES-GCM seal per
+  change (no KDF).
+- **Client**: a WebAuthn-PRF **unlock/create gate** (a `DeviceProvider` holding the unlocked device + pool
   for the session) → provision (ensure pool → `publishKeyPackages`). `api.ts` gains the directory call.
 - **Reviewers:** `crypto-reviewer` (keystore pool + crypto additions) + `security-boundary-auditor` (the
   publish API client — public-only, no secret logging). **Tests:** crypto round-trips + pool minting
@@ -78,8 +80,9 @@ opaque base64 to the crypto-blind server). Private keys never leave; the passphr
 
 ## 6. Residual risk
 
-- **Passphrase UX is v1** — a local passcode gate (the sealed-keystore pattern; like Signal/Element
-  desktop). Open to refinement (strength meter, biometric unlock, session timeout). Reversible.
+- **Unlock is passkey-PRF, not a passphrase** — the keystore unlock key is derived from the WebAuthn PRF
+  extension during the login ceremony (`prf-keystore-unlock.md`); there is no typed passcode and no recovery
+  (a lost passkey is a fresh start). Reversible refinements (session timeout, multi-device UX) remain open.
 - **Replenishment is availability-driven**: the publish response returns `available` (this device's
   unclaimed count), and provisioning mints + publishes FRESH replacements until the directory is back at
   target — so a device stays addressable after peers claim its packages while it was offline (re-publishing
@@ -101,14 +104,16 @@ opaque base64 to the crypto-blind server). Private keys never leave; the passphr
   device resolved by (caller's verified user + the device's signature key) so a user can only revoke their
   own device (never another user's/device's). **Claimed** packages survive (an in-flight Welcome may be
   HPKE-sealed to one). Migration `0014` adds the `delete on key_packages` grant; RLS is unchanged
-  (tenant-scoped). The client wires this into the **restore path**
-  (`DeviceContext.restore` → `revokeKeyPackages(deviceSignaturePublicKeyB64)` **before** `provisionDevice`):
-  on a pre-restore wipe or a fresh-browser restore, the stable signature key's stale (now-unopenable)
-  packages are revoked before a fresh pool is published. **Best-effort** — a failed revoke only leaves the
-  self-healing residual, never blocks getting the device back. The **account-switch reset**
-  (`resetForNewAccount`) still does NOT revoke (the device is a different user's — no authority). The **account-switch** case is intentionally *not* client-revocable: the abandoned
-  device belongs to a different user and the current session has no authority over it (correct authz);
-  those packages are cleaned when that user next re-provisions. (Codex P2, PR #66 — accepted residual.)
+  (tenant-scoped). The endpoint remains available, but the old client **restore-path** wiring
+  (`DeviceContext.restore` → `revokeKeyPackages` before `provisionDevice`) was **removed with the
+  no-recovery cutover**: there is no restore/recovery flow now, so a fresh browser is a **brand-new device
+  with a fresh signature key** (not a re-provision of the old one). The old device's stale (now-unopenable)
+  packages therefore just age out via the **self-healing** path above — each dead package is consumed on the
+  claim that poisons one initiation attempt. The `revokeKeyPackages` API helper is retained but currently
+  uncalled; re-wire it into device reset / re-provision if proactive cleanup is later wanted. The
+  **account-switch reset** (`resetForNewAccount`) does NOT revoke — the abandoned device belongs to a
+  different user, so the current session has no authority over it (correct authz); those packages are cleaned
+  when that user next re-provisions. (Self-healing + an available server-side revoke — accepted residual.)
 - **Multi-device (B2, shipped PR #191)** — a user may have N devices, each with its own composite
   `userId:deviceUuid` MLS identity and independent KeyPackage pool. A second device (D2) registers a
   pending enrollment; an existing trusted device (D1) verifies D2's fingerprint out-of-band and approves
