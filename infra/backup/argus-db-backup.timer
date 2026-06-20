@@ -1,5 +1,6 @@
-# argus — daily timer for the encrypted DB backup worker. Runs in the early-morning quiet window (UTC);
-# the worker prunes backups older than RETENTION_DAYS each run, so storage stays bounded.
+# argus — daily timer for the encrypted DB backup worker. Runs in the early-morning quiet window (UTC).
+# Storage stays bounded via a server-side B2 lifecycle rule (Object Lock / BKP-2), not a script prune — the
+# worker's key has no delete capability.
 [Unit]
 Description=argus — nightly encrypted DB backup
 

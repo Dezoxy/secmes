@@ -1,8 +1,9 @@
 # Threat model: nightly DB backup (encrypted logical dump → B2)
 
 > Status: **DRAFT for ratification.** Roadmap **checkpoint 49** (VM deploy track). A nightly `pg_dump` of the
-> whole database, **encrypted client-side** (age) and shipped to a **private EU B2 bucket**, with retention
-> pruning. Standalone systemd unit on the VM. No app/API change.
+> whole database, **encrypted client-side** (age) and shipped to a **private EU B2 bucket** that is **WORM**
+> (B2 Object Lock — BKP-2); retention is enforced by the bucket + a B2 lifecycle rule, not script prune.
+> Standalone systemd unit on the VM. No app/API change.
 
 ## 1. Feature & data flow
 
@@ -11,7 +12,8 @@ systemd timer (daily 02:30 UTC)
   → backup-db.sh  (User=argus, hardened oneshot; as argus_backup: read-only, BYPASSRLS, all tenants)
       pg_dumpall --roles-only --no-role-passwords | age -r <PUBLIC key> | aws s3 cp -   → argus-globals-<UTC>.sql.age
       pg_dump --format=custom                      | age -r <PUBLIC key> | aws s3 cp -   → argus-db-<UTC>.dump.age
-      → verify each (PIPESTATUS + size floor) → prune backups older than RETENTION_DAYS (one list, shared prefix)
+      → verify each (PIPESTATUS + size floor) → write argus-ok-<UTC>.age success marker (commit point)
+      → no prune — bucket is WORM, reaping is a B2 lifecycle rule (BKP-2)
 ```
 
 Each run writes **two** encrypted objects: the cluster **roles** (definitions + memberships, **no password
@@ -50,21 +52,62 @@ in the backup — they are re-applied from Key Vault at restore.
   DELETE/DDL grant), **NOLOGIN** until provisioned out-of-band, not a superuser — so a leaked backup
   credential can **read** but never **mutate/destroy** data, and the dump it could produce is itself
   encrypted to a key it does not hold.
+- **Anti-DR scrub — a compromised host/key deletes or overwrites all backups (ransomware).** A backup bucket
+  whose write key can also `delete-object` lets a compromised VM credential wipe every backup — the classic
+  "delete the backups, then encrypt the live data" play. → **B2 Object Lock (WORM), Compliance mode, 35-day
+  default retention** (BKP-2): once written, a backup is immutable — not the key, not a `bypassGovernance`
+  key, not the account owner, not Backblaze support can delete or shorten the lock before it expires. The
+  runtime key is **re-minted without** `deleteFiles` / `bypassGovernance` / `writeFileRetentions`, so even
+  full key compromise cannot delete, overwrite-to-truncate, or shorten retention. Old backups are reaped by a
+  **server-side B2 lifecycle rule** (prefix `argus-`, ~35d) the runtime key cannot alter; the rule **defers to
+  Object Lock**, so it can never remove a still-locked object. See the operator runbook in
+  `infra/b2/README.md`.
+  - **Versioning nuance (Codex P1, #269).** Object Lock requires versioning and protects each *version*, not
+    the key *name*. A compromised key keeps `writeFiles`, so it can upload junk as a **new current version** of
+    every backup key. It **cannot destroy** the good backups — those survive as locked **non-current versions**
+    — but a key-*name* lookup would return only the attacker's current junk. So the **recovery path is
+    version-aware**: the restore runbook enumerates `list-object-versions` and downloads by explicit
+    `--version-id`, walking newest-first to the newest *valid* locked version, skipping shadow/junk versions.
+    Shadowing makes the recoverable pair **older, not unrecoverable**.
+  - **Authenticity nuance (Codex P1, #269).** `AGE_RECIPIENT` is a **public** key, so age gives
+    confidentiality, **not authenticity** — a compromised `writeFiles` key can encrypt an arbitrary dump to it
+    and upload a **forged** current version that passes size + `age -d` + `pg_restore --list`. Structural
+    validation therefore can't prove provenance, so "newest valid" alone could select a forgery. The anchor
+    that survives a forging attacker is the **B2-set upload time** (`LastModified`, which the attacker can't
+    backdate): the restore runbook takes a `COMPROMISE_BEFORE` cutoff and, in a suspected compromise, selects
+    the newest genuine pre-compromise locked pair. **Cryptographically signed backups** (a signature the B2
+    key can't forge — verified at restore) are the defense-in-depth follow-up that would remove the operator's
+    need to know the compromise window; until then the timestamp anchor is the recovery guarantee.
 - **Tampering / integrity — a corrupt or partial backup.** A mid-stream `pg_dump` failure would upload a
-  truncated dump. → `PIPESTATUS` checks every pipeline stage; on any non-zero the partial object is deleted
-  and the unit exits non-zero (visible failure). A post-upload `head-object` size floor **fails** (deletes
-  the object + exits non-zero) on a verified-tiny dump, but only *warns and keeps* if the size can't be read,
-  so a transient `head-object` error never false-fails a good backup. The **restore drill** is the real
-  integrity test (documented, required by checkpoint 49).
+  truncated dump. → The **write-time** defences are primary and unchanged: `PIPESTATUS` checks every pipeline
+  stage and a post-upload `head-object` **size floor** detect a failure; on either, the unit **exits
+  non-zero** (visible failure, fires the `OnFailure=` alert). Under WORM the worker can **no longer delete**
+  the partial/corrupt object (BKP-2; the key has no delete and a finalized object is locked), so a bad object
+  can linger until the lifecycle rule reaps it — to keep it from being *restored*, the worker writes a
+  **success marker** (`argus-ok-<stamp>.age`) only after BOTH dumps uploaded and passed their size floors, and
+  the restore runbook walks `argus-db-*` **newest-first** accepting only the first object that clears the size
+  floor, **has its success marker** (so any run that FAILED — and whose partial dump could be >1 KiB and pass
+  `pg_restore --list` — is excluded), has its paired `argus-globals-*`, and decrypts (`age`'s STREAM auth
+  rejects a mid-stream-truncated upload) with a valid TOC (`pg_restore --list`). **Caveat — `--list` validates
+  structure, not completeness:** the marker excludes runs that *failed*, but a `pg_dump` that exits 0 yet is
+  logically short (rare) would still pass. The real completeness test is the **mandatory restore drill** (a
+  full data replay into a scratch DB — documented, required by checkpoint 49); the marker + `--list` + size
+  floor cheaply reject failed/grossly-broken objects. An
+  orphaned *roles* object (DB dump failed after the roles uploaded) is harmless — restore pairs from the DB
+  side by stamp, so an unpaired globals is never selected. The lingering object is age-ciphertext (leaks
+  nothing) and the lifecycle rule reaps it after the window.
 - **Mismatched roles/DB pair.** The roles object and the DB object must come from the **same run**, or a
   restore could combine newer roles (after a role/grant-affecting migration) with an older DB. → Each run is
-  **all-or-nothing**: if the DB dump fails after the roles object uploaded, that orphan roles object is
-  deleted, so the latest complete pair is always consistent. The restore runbook also pairs **by shared
-  timestamp** (pick the latest DB, fetch the roles object with the same stamp) as defence-in-depth.
+  all-or-nothing **in intent**: if the DB dump fails after the roles object uploaded, the orphan roles object
+  can no longer be deleted (WORM; the key has no delete — BKP-2), so it is left in place and the run exits
+  non-zero. It is harmless because the restore runbook **pairs by shared timestamp from the DB side** (pick
+  the newest *valid* DB object, fetch the roles object with the same stamp) — an orphan globals with no
+  matching DB object is never selected — and the lifecycle rule reaps it after the window.
 - **Denial of availability — silent backup gap.** A backup that quietly stops is the classic DR trap. →
   `Persistent=true` reruns a missed nightly after downtime; the worker exits non-zero on failure, which now
   fires the `OnFailure=argus-notify-failure@` notifier (deployed by `deploy.sh` — see §7) to post a GlitchTip
-  alert. Retention pruning keeps storage bounded so the timer never wedges on a full bucket.
+  alert. A B2 lifecycle rule keeps storage bounded (reaping past-retention objects) so the timer never wedges
+  on a full bucket — without the worker needing delete capability.
 
 ## 4. Invariant check
 
@@ -91,11 +134,17 @@ in the backup — they are re-applied from Key Vault at restore.
 - Migration `0015_db_backup_role.sql`: `argus_backup` — NOLOGIN, NOSUPERUSER, **BYPASSRLS**, INHERIT, granted
   **`pg_read_all_data`** (read-only, covers future tables). `deploy.sh` step 5b grants it **LOGIN with no
   password** (it connects via in-container local trust).
+- **B2 Object Lock (WORM), Compliance mode, 35-day default retention** on the backup bucket (BKP-2); the
+  backup key re-minted with `listBuckets,listFiles,readFiles,writeFiles` — **no** `deleteFiles`/`bypassGovernance`/
+  `writeFileRetentions`. Reaping moves to a **B2 lifecycle rule** (prefix `argus-`, ~35d, + abort-incomplete-
+  multipart 1d). The console/CLI steps are the operator runbook in `infra/b2/README.md`; the enablement is by
+  hand (no B2 Terraform provider).
 - `infra/backup/backup-db.sh`: a roles dump + DB dump, each `docker compose exec -T postgres pg_dump… | age |
   aws s3 cp` (pg_dump runs in-container as `argus_backup` via local trust; no plaintext on disk), `PIPESTATUS`
-  failure handling with partial-upload cleanup + atomic role/DB pairing, size verification, day-granular
-  retention prune. The only host-side secret (the B2 key) stays file-backed (AWS credentials file, 0600
-  tmpfs) — never exported into the environment.
+  + size-floor failure **detection** with non-zero exit (fires the `OnFailure=` alert). Under WORM it **no
+  longer deletes** partial/orphaned objects or prunes (the key can't delete); integrity is enforced at restore
+  (newest-first + size floor + timestamp pairing) and reaping is the lifecycle rule. The only host-side secret
+  (the B2 key) stays file-backed (AWS credentials file, 0600 tmpfs) — never exported into the environment.
 - `argus-db-backup.{service,timer}`: hardened oneshot (`ProtectSystem=full` — relaxed from `strict` for the
   docker socket — empty `CapabilityBoundingSet`, `NoNewPrivileges`, the full `Protect*`/`Restrict*` set;
   `MemoryDenyWriteExecute` off for the AWS-CLI PyInstaller bundle), one `LoadCredential` (the B2 key), daily
@@ -113,8 +162,23 @@ in the backup — they are re-applied from Key Vault at restore.
   rotation (re-encrypt or roll forward) is a follow-up.
 - **`argus_backup` reads all tenant metadata.** Inherent to a full backup; bounded to read-only + a
   provisioned login + an encrypted-at-rest output. Per-tenant logical backups are not a goal for the beta.
+- **Ransomware resistance — CLOSED (BKP-2).** The backup bucket is now WORM (B2 Object Lock, Compliance, 35d)
+  and the runtime key has no delete, so a compromised host/key can no longer scrub backups. Three *new, smaller*
+  residuals replace it: (a) **bounded un-deletable storage** — a partial/corrupt or orphaned object (or, under
+  a compromised `writeFiles` key, junk *shadow versions*) can't be cleaned up for the retention window, so a
+  run of failures or an attacker leaves age-ciphertext objects locked for ≤35d. This is a bounded **storage-cost**
+  DoS only (no data loss — the good locked versions survive and the version-aware restore reaches them; leaks
+  nothing), reaped once the lock lapses by the lifecycle rule, which must be configured to also expire
+  **non-current versions**. (b) **Compliance is unforgiving** — a mis-typed long default retention would lock
+  storage for that whole period with no recourse (even Backblaze can't unlock it), mitigated by pinning the
+  default to **35 days** in the runbook and a verify-by-hand step. (c) **A shadowed recovery is staler** — junk
+  current versions push the newest *valid* pair older, but never make it unrecoverable; `OnFailure` alerting
+  surfaces the anomaly. (d) **No backup authenticity yet** — age-to-public-key is confidentiality only, so a
+  compromised `writeFiles` key can forge a structurally-valid version; recovery currently anchors on the
+  immutable B2 upload time (`COMPROMISE_BEFORE` cutoff), which requires the operator to know the compromise
+  window. **Signed backups** (a signature the B2 key can't forge) are the tracked follow-up that closes this.
 - **No off-cloud copy.** Backups live in one B2 bucket/region. A second provider/region copy (3-2-1) is an
-  enterprise follow-up; B2 object-lock for ransomware resistance is another.
+  enterprise follow-up.
 - **Docker-group membership grants in-container DB access.** PG has no published port; the host workers
   reach it via `docker compose exec` over the container's local-trust socket (see §7). That means anything
   that can talk to the docker socket — i.e. members of the `docker` group, which `argus` already is — can
@@ -160,7 +224,7 @@ network DB path, not a published port"). Closed by:
   **same** path the worker uses: `docker compose exec -T postgres psql -U argus_backup -d argus -c 'select 1'`,
   and **aborts the deploy** if it can't connect. It deliberately does **not** run a full encrypt+upload at
   deploy time — gating app rollout on a B2 round-trip would couple releases to backup-bucket IAM and a
-  transient B2 outage. The full chain (`pg_dump` → age → B2 → retention prune) runs on the nightly timer;
+  transient B2 outage. The full chain (`pg_dump` → age → B2; reaping via the lifecycle rule) runs on the nightly timer;
   its failure is now surfaced by the `OnFailure=` notifier, so a broken backup can no longer ship — or run —
   silently. (The deploy probe runs as root; the sandboxed `argus`-user unit's docker access is exercised on
   the first nightly run, with `OnFailure` alerting if it regresses — the same VM-only-validation caveat the

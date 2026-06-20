@@ -1,8 +1,9 @@
 # Nightly DB backup worker (checkpoint 49)
 
 Standalone VM worker that takes a **nightly logical backup** of the whole Postgres database, **encrypts it
-client-side**, and ships it to a **private EU Backblaze B2 bucket** — then prunes backups past the retention
-window. Runs natively on the VM via a **systemd timer** — no Node, no container.
+client-side**, and ships it to a **private EU Backblaze B2 bucket**. The bucket is **WORM** (B2 Object Lock —
+BKP-2): backups are immutable, the worker's key can't delete, and old backups are reaped by a server-side B2
+lifecycle rule, not by the worker. Runs natively on the VM via a **systemd timer** — no Node, no container.
 
 > Scope: this is a **logical** backup (`pg_dump`, daily granularity) — what the VM beta needs. Continuous
 > **PITR** (WAL archiving + base backups, restore to any second) is the enterprise-grade upgrade; noted in
@@ -19,8 +20,15 @@ window. Runs natively on the VM via a **systemd timer** — no Node, no containe
      (definitions + memberships, **no password hashes**), so a restore onto a fresh cluster has the roles the
      schema's RLS policies/grants reference.
    - `argus-db-<UTC>.dump.age` — `pg_dump --format=custom`: the database (compact, selective/parallel restore).
-3. Verifies each upload (PIPESTATUS + size floor), then **prunes** any backup older than `RETENTION_DAYS`
-   (default 30) — one list under the shared `argus-` prefix covers both families.
+   Then, only after **both** uploaded and cleared their size floors, a tiny `argus-ok-<UTC>.age` **success
+   marker** — the run's commit point. Under WORM a failed run's partial dump can't be deleted, so the marker
+   (absent on any failed run) is what makes a complete run **restore-eligible**; restore requires it.
+3. Verifies each upload (PIPESTATUS + size floor). It does **not** prune: the backup bucket is **WORM** (B2
+   Object Lock, Compliance mode — BKP-2), and the backup key has **no delete capability**, so old backups are
+   reaped by a server-side **B2 lifecycle rule** (prefix `argus-`, ~35 days), not by this script. A
+   partial/corrupt or orphaned object can't be deleted either — it is left in place (age-ciphertext, leaks
+   nothing), reaped by the lifecycle rule and **skipped at restore** (no success marker + size floor +
+   version/timestamp pairing).
 4. Logs object keys / sizes / counts only — never a secret.
 
 ## Why client-side encryption (not just B2 SSE)
@@ -80,8 +88,10 @@ age-keygen -o argus-backup-age.key      # prints "Public key: age1..." to stderr
 ### 3. B2 bucket
 
 A **private** bucket (e.g. `db-q7m2z9x4v6n8p3k1`), separate from the attachment bucket, with SSE-B2 on as a
-second layer. A **lifecycle rule** matching `RETENTION_DAYS` is a good backstop in case the script's prune is
-ever skipped (defence-in-depth, like the attachment bucket).
+second layer **and B2 Object Lock (WORM) enabled** — see the operator runbook in
+[`infra/b2/README.md`](../b2/README.md). Under Object Lock the script no longer prunes; a **B2 lifecycle
+rule** (prefix `argus-`, ~35 days) is now the **primary** reaper (it defers to Object Lock, so it can never
+remove a still-locked backup), and the backup key is re-minted **without delete capability**.
 
 ## Install (on the VM)
 
@@ -100,8 +110,9 @@ sudo install -d /opt/argus/backup
 sudo install -m 0755 backup-db.sh /opt/argus/backup/
 sudo cp argus-db-backup.{service,timer} /etc/systemd/system/
 # Edit argus-db-backup.service: set S3_BUCKET, S3_ACCESS_KEY_ID (the key-id of the db-backups `argus-b2-app-key`
-# — a SEPARATE key from the attachment key; deploy.sh fills this from the B2_APP_KEY_ID var), AGE_RECIPIENT,
-# RETENTION_DAYS. The DB is
+# — a SEPARATE key from the attachment key, re-minted WITHOUT delete capability; deploy.sh fills this from the
+# B2_APP_KEY_ID var) and AGE_RECIPIENT. (No RETENTION_DAYS — retention is the bucket's Object Lock + a B2
+# lifecycle rule; see infra/b2/README.md.) The DB is
 # reached in-container via `docker compose exec` (COMPOSE_FILE/COMPOSE_PROJECT_NAME, no PGHOST), so the
 # user running the timer must be in the `docker` group (argus already is). Ensure `age` and AWS CLI v2 are
 # installed on the host; `pg_dump` runs inside the postgres container.
@@ -125,17 +136,95 @@ On a trusted host (NOT the backup VM — it must NOT hold the age private key):
 ```bash
 EP=https://s3.eu-central-003.backblazeb2.com ; BUCKET=db-q7m2z9x4v6n8p3k1
 
-# 1. Fetch the age private key from Key Vault (mode 0400). Then pick the latest DB object and its PAIRED
-#    roles object BY SHARED TIMESTAMP — never mix a newer roles dump with an older DB (each run writes both
-#    objects with the same stamp; a failed run leaves neither).
+# 1. Fetch the age private key from Key Vault (mode 0400).
 az keyvault secret show --vault-name <vault> --name argus-backup-age-key --query value -o tsv > age.key
 chmod 0400 age.key
-DB_KEY=$(aws s3api list-objects-v2 --endpoint-url "$EP" --bucket "$BUCKET" --prefix argus-db- \
-  --query 'sort_by(Contents,&LastModified)[-1].Key' --output text)
-STAMP=${DB_KEY#argus-db-}; STAMP=${STAMP%.dump.age}          # e.g. 20260608T023012Z
-GLOBALS_KEY="argus-globals-${STAMP}.sql.age"
-aws s3 cp "s3://$BUCKET/$GLOBALS_KEY" ./globals.sql.age --endpoint-url "$EP"
-aws s3 cp "s3://$BUCKET/$DB_KEY"      ./backup.dump.age --endpoint-url "$EP"
+
+# 1b. Pick the newest VALID backup pair — VERSION-AWARE. This is the recovery path that ransomware resistance
+#     depends on, so it must reach a good LOCKED version even when a newer one shadows it.
+#     Why versions, not key names: Object Lock requires versioning and protects each VERSION, not the key name.
+#     A compromised VM/B2 key still has writeFiles — it can upload junk as a NEW (current) version of every
+#     argus-db-*/argus-globals-* key. The good backups survive as LOCKED non-current versions (un-deletable —
+#     WORM holds), but a key-NAME lookup (`list-objects-v2` / `s3 cp` by name / `head-object` without
+#     --version-id) returns only the attacker's CURRENT junk. So enumerate VERSIONS (`list-object-versions`)
+#     and download by explicit --version-id, walking newest-first and accepting the first DB version that
+#     (a) clears the 1024-byte size floor, (b) has a SUCCESS MARKER argus-ok-<stamp> (written by the worker
+#     only after BOTH dumps fully succeeded — so a failed run, whose partial db object can be >1 KiB and pass
+#     `pg_restore --list` yet be incomplete, is excluded), (c) decrypts (age STREAM auth rejects a mid-stream-
+#     truncated upload) with a valid TOC, and (d) has a paired argus-globals-<stamp> VERSION that is itself
+#     valid (≥64 B + decrypts). The walk skips past any junk/shadow/failed versions to the newest good pair.
+#     CAVEAT: `pg_restore --list` checks STRUCTURE, not completeness; the marker excludes runs that FAILED
+#     (non-zero pg_dump/upload), but a pg_dump that exits 0 yet is logically short (rare) would still pass —
+#     the full restore drill below (step 3 + sanity check) is the definitive data-completeness test.
+#     Shadowing by junk versions makes the good pair OLDER, not wrong — staleness is the exposure, and
+#     OnFailure surfaces a flapping backup (see "Denial of availability" in the threat model).
+#     AUTHENTICITY CAVEAT: AGE_RECIPIENT is a PUBLIC key, so age gives confidentiality, NOT authenticity —
+#     ANYONE (incl. a compromised writeFiles key) can encrypt an arbitrary dump to it and upload it as a
+#     current version that passes size + `age -d` + `pg_restore --list`. Structural validation therefore does
+#     NOT prove a version was produced by the worker. The anchor that DOES survive a forging attacker is the
+#     B2-set upload time (`LastModified`) — the attacker cannot backdate it. So in a SUSPECTED COMPROMISE, set
+#     COMPROMISE_BEFORE to an ISO-8601 instant just before the compromise window; the walk then ignores every
+#     version uploaded at/after it and lands on the newest genuine pre-compromise locked pair. (Cryptographic
+#     authenticity — signed backups the B2 key can't forge — is a tracked follow-up; until then this timestamp
+#     anchor is the recovery guarantee, so record/know your compromise window.)
+CUTOFF="${COMPROMISE_BEFORE:-}"   # unset = newest valid (normal restore); set to ISO-8601 during a compromise
+rm -f backup.dump backup.dump.age globals.sql.age   # idempotent: clear any leftovers from a prior aborted run
+
+# Echoes the version-id of the newest VALID globals version (≥64 B + decrypts, uploaded before $CUTOFF if set).
+pick_globals_version() {
+  local gk="$1" ver lm gsz
+  while read -r ver lm; do
+    [[ -n "$ver" ]] || continue
+    [[ -z "$CUTOFF" || "$lm" < "$CUTOFF" ]] || continue        # provenance anchor: ignore at/after compromise
+    gsz=$(aws s3api head-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$gk" --version-id "$ver" \
+      --query 'ContentLength' --output text 2>/dev/null || echo 0)
+    [[ "$gsz" =~ ^[0-9]+$ && "$gsz" -ge 64 ]] || continue
+    aws s3api get-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$gk" --version-id "$ver" \
+      ./globals.sql.age >/dev/null 2>&1 || continue
+    age -d -i age.key globals.sql.age >/dev/null 2>&1 || { rm -f globals.sql.age; continue; }
+    echo "$ver"; return 0
+  done < <(aws s3api list-object-versions --endpoint-url "$EP" --bucket "$BUCKET" --prefix "$gk" \
+    --query "reverse(sort_by(Versions[?Key=='$gk'],&LastModified))[].[VersionId,LastModified]" --output text)
+  return 1
+}
+
+# True if a SUCCESS MARKER for stamp $1 exists in a version uploaded before $CUTOFF. The worker writes the
+# marker (argus-ok-<stamp>.age) only after BOTH dumps uploaded AND passed their size floors, so a failed run —
+# whose partial db object can be >1 KiB and pass `pg_restore --list` yet be incomplete — has no marker and is
+# never eligible. Existence is the signal (not content); authenticity is the COMPROMISE_BEFORE anchor's job.
+marker_ok() {
+  local mk="argus-ok-${1}.age" ver lm
+  while read -r ver lm; do
+    [[ -n "$ver" ]] || continue
+    [[ -z "$CUTOFF" || "$lm" < "$CUTOFF" ]] || continue
+    return 0
+  done < <(aws s3api list-object-versions --endpoint-url "$EP" --bucket "$BUCKET" --prefix "$mk" \
+    --query "reverse(sort_by(Versions[?Key=='$mk'],&LastModified))[].[VersionId,LastModified]" --output text)
+  return 1
+}
+
+DB_KEY=""; DB_VER=""; G_KEY=""; G_VER=""; STAMP=""
+while read -r cand ver lm; do
+  [[ -n "$cand" && -n "$ver" ]] || continue
+  [[ -z "$CUTOFF" || "$lm" < "$CUTOFF" ]] || { echo "skip $cand@$ver (uploaded $lm ≥ cutoff $CUTOFF)"; continue; }
+  sz=$(aws s3api head-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$cand" --version-id "$ver" \
+    --query 'ContentLength' --output text 2>/dev/null || echo 0)
+  [[ "$sz" =~ ^[0-9]+$ && "$sz" -ge 1024 ]] || { echo "skip $cand@$ver (too small: ${sz}B)"; continue; }
+  st=${cand#argus-db-}; st=${st%.dump.age}                   # e.g. 20260608T023012Z
+  marker_ok "$st" || { echo "skip $cand@$ver (no success marker argus-ok-$st — failed/incomplete run)"; continue; }
+  aws s3api get-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$cand" --version-id "$ver" \
+    ./backup.dump.age >/dev/null 2>&1 || { echo "skip $cand@$ver (download failed)"; continue; }
+  if ! age -d -i age.key backup.dump.age >backup.dump 2>/dev/null || ! pg_restore --list backup.dump >/dev/null 2>&1; then
+    echo "skip $cand@$ver (failed decrypt / pg_restore --list)"; rm -f backup.dump.age backup.dump; continue
+  fi
+  gk="argus-globals-${st}.sql.age"
+  gver=$(pick_globals_version "$gk") || { echo "skip $cand@$ver (no valid paired globals version)"; continue; }
+  DB_KEY="$cand"; DB_VER="$ver"; G_KEY="$gk"; G_VER="$gver"; STAMP="$st"
+  echo "selected $DB_KEY@$DB_VER (roles: $G_KEY@$G_VER)"; break
+done < <(aws s3api list-object-versions --endpoint-url "$EP" --bucket "$BUCKET" --prefix argus-db- \
+  --query 'reverse(sort_by(Versions,&LastModified))[].[Key,VersionId,LastModified]' --output text)
+[[ -n "$DB_KEY" ]] || { echo "FATAL: no valid backup pair found in $BUCKET (checked all versions${CUTOFF:+ before $CUTOFF})"; exit 1; }
+# globals.sql.age + backup.dump.age are now the selected good versions; backup.dump is already decrypted.
 
 # 2. Roles FIRST (no passwords — re-applied from Key Vault in step 4). Connect to the maintenance DB.
 #    NOTE (found by the restore drill): no `-v ON_ERROR_STOP=1` here, on purpose — two globals lines can

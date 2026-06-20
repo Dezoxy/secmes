@@ -117,8 +117,132 @@ URLs, but prefer the CLI rule above.
    ```
    `allowedOrigins` should be exactly `["https://4rgus.com"]` and `allowedOperations` `["s3_put","s3_get"]`.
 
-## TODO — DB-backup bucket Object Lock
+## DB-backup bucket: Object Lock (WORM) — operator runbook (BKP-2)
 
-Unrelated to CORS but adjacent: the `db-…` bucket currently has **Object Lock disabled**. Enabling Object Lock
-(WORM) makes backups immune to a compromised VM credential deleting/overwriting them — `backup-db.sh` holds a
-key that can already `delete-object`. Track separately; it is a recovery-posture gap, not a CORS one.
+Unrelated to CORS but adjacent. The `db-…` backup bucket holds our last line of defence. Until BKP-2 it had
+**Object Lock disabled** and `backup-db.sh` held a key that could `delete-object` — so a compromised VM
+credential could **wipe every backup** (the ransomware "delete the backups, then encrypt the data" play).
+BKP-2 closes that: the bucket becomes **WORM** (write once, read many) and the backup key is re-minted
+**without delete capability**, so a stolen key can no longer scrub backups.
+
+The repo half (script + restore-runbook + threat-model changes) ships in the PR. **The steps below are the
+console/CLI half — you run them by hand**, because there is no Terraform provider for B2 in this repo (same as
+the CORS key above). Run them from your workstation (the VM has no `b2` CLI).
+
+> **Verify every B2-behaviour claim in the current B2 console/docs before acting** — B2's S3-compatible Object
+> Lock has evolved and the console wording lags the API. The four load-bearing facts this runbook relies on,
+> each confirmed against B2 docs at time of writing: (1) Object Lock **can** be enabled on an **existing**
+> bucket — no new bucket/migration needed; (2) **Compliance** mode default retention is settable from the web
+> UI (governance default needs an API call); (3) in compliance mode **no one** — not a `bypassGovernance` key,
+> not the account owner, not Backblaze support — can delete or shorten a lock before it expires; (4) a
+> **lifecycle rule defers to Object Lock** — it can never delete a still-locked object, so it can't become a
+> back-door deletion path.
+
+### The knobs (decided in the BKP-2 threat model — `docs/threat-models/db-backup.md`)
+
+| Knob | Value |
+| --- | --- |
+| Object Lock mode | **Compliance** |
+| Default retention | **35 days** (a few days over the ~30-day logical window; kept small so a mis-type can't lock years of un-deletable storage) |
+| Lifecycle: delete | prefix `argus-`, ~**35 days** (hide at 35d, delete 1d after hiding) |
+| Lifecycle: abort stuck multipart | **1 day** (un-finalized multipart parts are NOT lock-protected and bill until aborted) |
+| Re-minted backup key caps | `listBuckets, listFiles, readFiles, writeFiles` — **no** `deleteFiles`, **no** `bypassGovernance`, **no** `writeFileRetentions`/`*BucketRetentions` |
+
+### 1. Enable Object Lock + compliance default retention (web console)
+
+On the existing backup bucket `db-q7m2z9x4v6n8p3k1` (Bucket Settings → Object Lock):
+
+- **Enable Object Lock** (this turns on file versioning too; it cannot be disabled later — that's the point).
+- Set a **default retention**: mode **Compliance**, period **35 days**. New uploads then inherit the lock
+  automatically — `backup-db.sh` does **not** send per-object lock headers.
+- Existing pre-lock objects are **not** retroactively locked (only uploads after this inherit the default).
+  That's fine: old objects age out under the lifecycle rule below; new nightly backups are WORM.
+
+### 2. Lifecycle rules (web console → Lifecycle Settings)
+
+Two rules on the same bucket:
+
+- **Reap old backups (current AND non-current versions):** file-name prefix `argus-`, "hide" after **35 days**,
+  then delete **1 day** after hiding (B2's hide-then-delete; ≈36 days effective). Because delete-age ≥ lock
+  retention, the rule only ever acts at/after unlock — and per fact (4) it can't touch a still-locked version
+  even if it tried. **Versioning is on** (Object Lock requires it), so confirm the rule also expires
+  **non-current versions** (B2's `daysFromHidingToDeleting` covers hidden/old versions) — otherwise a
+  compromised `writeFiles` key that uploads junk *shadow versions* of each backup would inflate storage
+  unboundedly. The good locked versions are still safe and the version-aware restore (in `../backup/README.md`)
+  reaches them; this rule just keeps the shadow junk from accumulating past the window.
+- **Abort incomplete multipart uploads** after **1 day** (S3 `AbortIncompleteMultipartUpload` / B2's
+  cancel-unfinished). Without this a flapping uploader leaks un-reaped, un-lockable multipart parts.
+
+### 3. Re-mint the backup key WITHOUT delete (workstation)
+
+Mirror the CORS-key pattern above — bucket-scoped key, secret to Key Vault via `--file`, key-id (non-secret)
+to the deploy variable. **Crucially: no `deleteFiles`.**
+
+```bash
+# 1. Mint the db-backups key, scoped to the backup bucket, WRITE/LIST/READ only (no delete, no bypass).
+b2 key create --bucket db-q7m2z9x4v6n8p3k1 argus-b2-backup-key listBuckets,listFiles,readFiles,writeFiles
+#    Prints "<keyId> <applicationKey>".
+
+# 2. Store the applicationKey SECRET in Key Vault — overwrite the existing argus-b2-app-key secret
+#    (the name backup-db.sh's LoadCredential already points at). --file, never argv (mirrors the CORS step).
+umask 077; printf '%s' '<applicationKey>' >/tmp/b2backupkey
+az keyvault secret set --vault-name <vault> --name argus-b2-app-key --file /tmp/b2backupkey --encoding utf-8
+# Portable secure delete: shred on GNU/Linux, `rm -P` on macOS (no shred), plain rm -f as a last resort.
+shred -u /tmp/b2backupkey 2>/dev/null || rm -P /tmp/b2backupkey 2>/dev/null || rm -f /tmp/b2backupkey
+
+# 3. Set the key-id (NON-secret) as the deploy variable that templates the backup unit.
+gh variable set B2_APP_KEY_ID --repo <owner/repo> --body '<keyId>'
+```
+
+The bucket name is unchanged, so `BACKUP_S3_BUCKET` needs no update.
+
+### 4. Cut over
+
+Re-deploy so `deploy.sh` re-templates the unit with the new key-id (the secret is fetched from Key Vault on the
+VM). Then trigger one nightly run and confirm it writes **three** objects to the bucket (the two dumps + a
+success marker):
+
+```bash
+sudo systemctl start argus-db-backup.service && journalctl -u argus-db-backup.service -n 30
+# Expect: "uploaded argus-globals-…" + "uploaded argus-db-…" + "wrote success marker argus-ok-…" and a final
+#         "done … marker=argus-ok-… (retention: B2 Object Lock + lifecycle rule, not script prune)".
+```
+
+### 5. Restore drill (mandatory before trusting it)
+
+Run the updated restore runbook in [`../backup/README.md`](../backup/README.md) against the real bucket and
+confirm the newest-first / size-floor / paired-globals selection picks a good pair and the DB restores. An
+untested backup is not a backup.
+
+### 6. Verify by hand — the lock actually bites
+
+Two B2 facts make the naive check misleading: (1) the re-minted backup key has no `deleteFiles`, so deleting
+with it returns `AccessDenied` whether or not Object Lock is on (a FALSE positive that would pass cutover even
+if you forgot to enable retention); and (2) the bucket is now **versioned**, so a `delete-object` *without* a
+`--version-id` inserts a **delete marker and returns success** even under Compliance — it hides the object
+instead of failing, another false signal. So verify with a **separate verification credential** against a
+specific **version**:
+
+```bash
+EP=https://s3.eu-central-003.backblazeb2.com ; BUCKET=db-q7m2z9x4v6n8p3k1
+# Use a VERIFICATION credential — NOT the runtime backup key. `get-object-retention` needs the
+# `readFileRetentions` capability and the delete test needs `deleteFiles`; the minimal backup key has neither
+# (by design — least-privilege). Mint a TEMPORARY key with
+# `listFiles,readFiles,readFileRetentions,deleteFiles` (or use the account master key) for this check, and
+# REVOKE it right after.
+KV=$(aws s3api list-object-versions --endpoint-url "$EP" --bucket "$BUCKET" --prefix argus-db- \
+  --query 'reverse(sort_by(Versions,&LastModified))[0].[Key,VersionId]' --output text)
+KEY=$(echo "$KV" | cut -f1) ; VER=$(echo "$KV" | cut -f2)
+
+# (a) PRIMARY — read the retention of that VERSION (needs readFileRetentions). The real proof, independent of
+#     any delete capability.
+aws s3api get-object-retention --endpoint-url "$EP" --bucket "$BUCKET" --key "$KEY" --version-id "$VER"
+# EXPECT: {"Retention":{"Mode":"COMPLIANCE","RetainUntilDate":"<~35 days out>"}}.
+# If it errors with "no retention" / empty, the default retention is NOT applied — STOP and recheck steps 1–2.
+
+# (b) BELT-AND-SUSPENDERS — try to delete that exact VERSION (not the bare key). Under Compliance it must fail.
+aws s3api delete-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$KEY" --version-id "$VER"
+# EXPECT: a RETENTION error (403 citing object-lock / retention). A *version* delete that SUCCEEDS means the
+# lock is not in effect — STOP. (Without --version-id this would instead insert a delete marker and falsely
+# "succeed" — that is why we target the version.) Revoke the temporary verification key immediately after.
+```
