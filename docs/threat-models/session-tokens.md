@@ -164,13 +164,18 @@ its outstanding access token keeps working on **normal (non-admin) routes** unti
   `status = 'active'`) reject the revoked member immediately — but the **key-directory mutation routes do
   not**: `KeyDirectoryService.publish()` / `revokeUnclaimed()` resolve the caller by `auth.sub` /
   `external_identity_id` with **no `status` predicate**, and `claim()` resolves only the *target*. So a
-  revoked member holding an unexpired access JWT can still **publish / claim / revoke their own device's
-  KeyPackages for ≤10 min** until the token expires (the refresh path already blocks a non-active user
-  from minting a new one). Blast radius is the caller's **own** device key-material (no cross-user
-  effect), bounded by the 10-min TTL — accepted for beta. **Code-side close (follow-up):** add a
-  `status = 'active'` caller check (or route through `requireUser`) on the key-directory mutations. This
-  **refines** the broader `auth-tenant-context.md` §6 claim that member-revoke is neutralized on *every*
-  path — it is not.
+  revoked member holding an unexpired access JWT can still mutate the key directory **for ≤10 min** until
+  the token expires (the refresh path already blocks a non-active user from minting a new one). **Blast
+  radius:** `publish` / `revokeUnclaimed` touch only the caller's **own** device packages — but
+  `claim(targetUserId)` resolves the target solely by `d.user_id = targetUserId`, with **no
+  caller==target and no caller-active check**, so a revoked member can also **consume any in-tenant
+  peer's one-time KeyPackages** (a bounded cross-user pool-drain: one package per claim, capped at the
+  30/min claim limit, each emitting a `keydir.key_package_claimed` audit row, and the target self-heals
+  via replenishment). All of it is bounded by the 10-min TTL and tenant-scoped (RLS — no cross-tenant
+  reach) — accepted for beta. **Code-side close (follow-up):** add a `status = 'active'` caller check (or
+  route caller resolution through `requireUser`) on the key-directory mutations
+  (`publish`/`claim`/`claimAll`/`revokeUnclaimed`). This **refines** the broader
+  `auth-tenant-context.md` §6 claim that member-revoke is neutralized on *every* path — it is not.
 
 Revisit alongside any future DPoP / token-introspection work; until then the 10-minute TTL is the
 control and this is a documented, accepted residual.

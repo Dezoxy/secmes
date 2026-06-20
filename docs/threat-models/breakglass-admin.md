@@ -147,8 +147,9 @@ An absent or empty file means:
   an oracle indicating the endpoint exists but credentials are wrong.
 - The rest of the API (passkey auth, messaging, admin) is entirely unaffected.
 
-This matches the `BillingService` degraded-mode pattern: an unprovisioned optional secret
-degrades only that feature, never the whole stack.
+This follows the `OPTIONAL_SECRETS` degraded-mode pattern (`infra/stack/secrets/fetch-keyvault-secrets.sh`):
+an unprovisioned optional secret degrades only that feature, never the whole stack. (The earlier cross-reference
+here was to `BillingService`, removed in #223.)
 
 ---
 
