@@ -92,7 +92,9 @@ ARGUS_KEY_VAULT=argus-exp-kv-4ad322 ./infra/aws/scripts/populate-keyvault.sh # g
 
 # The age key is NOT created by populate.sh — set it explicitly from the keypair generated in blocker 1,
 # or restore is impossible. (age.key holds the AGE-SECRET-KEY line; restore writes it back and runs `age -i`.)
-az keyvault secret set --vault-name argus-exp-kv-4ad322 --name argus-backup-age-key --file age.key
+# `-o none --only-show-errors`: `az keyvault secret set` echoes the secret VALUE by default (Azure CLI
+# #20858), which would print the age private key to your terminal scrollback / run logs — suppress it.
+az keyvault secret set --vault-name argus-exp-kv-4ad322 --name argus-backup-age-key --file age.key --only-show-errors -o none
 
 az keyvault network-rule remove --name argus-exp-kv-4ad322 --ip-address "$MYIP"   # re-tighten when done
 ```
