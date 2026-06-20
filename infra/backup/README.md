@@ -136,43 +136,61 @@ EP=https://s3.eu-central-003.backblazeb2.com ; BUCKET=db-q7m2z9x4v6n8p3k1
 az keyvault secret show --vault-name <vault> --name argus-backup-age-key --query value -o tsv > age.key
 chmod 0400 age.key
 
-# 1b. Pick the newest VALID backup pair — do NOT blindly take the newest argus-db-*.
-#     WORM (Object Lock) means a truncated/corrupt or orphaned object can no longer be deleted by the nightly
-#     script (its key has no delete capability), so a bad object can LINGER in the bucket until the lifecycle
-#     rule reaps it. The blind `sort_by(...)[-1]` would pick that bad object. Instead walk newest-first and
-#     accept the first DB object that (a) clears the 1024-byte size floor (same floor the worker enforces),
-#     (b) has its PAIRED argus-globals-* (same stamp, ≥64 B), and (c) decrypts (age STREAM auth rejects a
-#     mid-stream-truncated upload) with a valid TOC. Each good run writes both objects with one stamp, so an
-#     orphan globals (no matching db) is simply never selected.
+# 1b. Pick the newest VALID backup pair — VERSION-AWARE. This is the recovery path that ransomware resistance
+#     depends on, so it must reach a good LOCKED version even when a newer one shadows it.
+#     Why versions, not key names: Object Lock requires versioning and protects each VERSION, not the key name.
+#     A compromised VM/B2 key still has writeFiles — it can upload junk as a NEW (current) version of every
+#     argus-db-*/argus-globals-* key. The good backups survive as LOCKED non-current versions (un-deletable —
+#     WORM holds), but a key-NAME lookup (`list-objects-v2` / `s3 cp` by name / `head-object` without
+#     --version-id) returns only the attacker's CURRENT junk. So enumerate VERSIONS (`list-object-versions`)
+#     and download by explicit --version-id, walking newest-first and accepting the first DB version that
+#     (a) clears the 1024-byte size floor, (b) decrypts (age STREAM auth rejects a mid-stream-truncated upload)
+#     with a valid TOC, and (c) has a paired argus-globals-<stamp> VERSION that is itself valid (≥64 B +
+#     decrypts). The walk skips past any junk/shadow versions to the newest good locked pair.
 #     CAVEAT: `pg_restore --list` checks STRUCTURE, not completeness — a dump truncated *after* the TOC but
 #     still age-valid would pass here yet restore with missing trailing rows. This walk only cheaply rejects
-#     grossly-broken objects; the data-completeness test is the full restore drill below (step 3 + sanity
-#     check). If OnFailure has been firing for N nights, the newest VALID pair this walk lands on is N days
-#     stale — that staleness, not a wrong restore, is the real exposure (see "Denial of availability" in the
-#     threat model).
+#     grossly-broken versions; the data-completeness test is the full restore drill below (step 3 + sanity
+#     check). Shadowing by junk versions makes the good pair OLDER, not wrong — staleness is the exposure, and
+#     OnFailure surfaces a flapping backup (see "Denial of availability" in the threat model).
 rm -f backup.dump backup.dump.age globals.sql.age   # idempotent: clear any leftovers from a prior aborted run
-DB_KEY=""; STAMP=""
-while read -r cand; do
-  [[ -n "$cand" ]] || continue
-  sz=$(aws s3api head-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$cand" \
+
+# Echoes the version-id of the newest VALID version of a globals key (≥64 B + decrypts), or nothing.
+pick_globals_version() {
+  local gk="$1" ver gsz
+  while read -r ver; do
+    [[ -n "$ver" ]] || continue
+    gsz=$(aws s3api head-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$gk" --version-id "$ver" \
+      --query 'ContentLength' --output text 2>/dev/null || echo 0)
+    [[ "$gsz" =~ ^[0-9]+$ && "$gsz" -ge 64 ]] || continue
+    aws s3api get-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$gk" --version-id "$ver" \
+      ./globals.sql.age >/dev/null 2>&1 || continue
+    age -d -i age.key globals.sql.age >/dev/null 2>&1 || { rm -f globals.sql.age; continue; }
+    echo "$ver"; return 0
+  done < <(aws s3api list-object-versions --endpoint-url "$EP" --bucket "$BUCKET" --prefix "$gk" \
+    --query "reverse(sort_by(Versions[?Key=='$gk'],&LastModified))[].VersionId" --output text | tr '\t' '\n')
+  return 1
+}
+
+DB_KEY=""; DB_VER=""; G_KEY=""; G_VER=""; STAMP=""
+while read -r cand ver; do
+  [[ -n "$cand" && -n "$ver" ]] || continue
+  sz=$(aws s3api head-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$cand" --version-id "$ver" \
     --query 'ContentLength' --output text 2>/dev/null || echo 0)
-  [[ "$sz" =~ ^[0-9]+$ && "$sz" -ge 1024 ]] || { echo "skip $cand (too small: ${sz}B)"; continue; }
+  [[ "$sz" =~ ^[0-9]+$ && "$sz" -ge 1024 ]] || { echo "skip $cand@$ver (too small: ${sz}B)"; continue; }
   st=${cand#argus-db-}; st=${st%.dump.age}                   # e.g. 20260608T023012Z
-  gk="argus-globals-${st}.sql.age"
-  gsz=$(aws s3api head-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$gk" \
-    --query 'ContentLength' --output text 2>/dev/null || echo 0)
-  [[ "$gsz" =~ ^[0-9]+$ && "$gsz" -ge 64 ]] || { echo "skip $cand (no paired roles object $gk)"; continue; }
-  # Decrypt + a structural smoke test. pg_restore --list reads the archive's TOC only — it never touches a DB.
-  aws s3 cp "s3://$BUCKET/$cand" ./backup.dump.age --endpoint-url "$EP" --only-show-errors
+  aws s3api get-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$cand" --version-id "$ver" \
+    ./backup.dump.age >/dev/null 2>&1 || { echo "skip $cand@$ver (download failed)"; continue; }
   if ! age -d -i age.key backup.dump.age >backup.dump 2>/dev/null || ! pg_restore --list backup.dump >/dev/null 2>&1; then
-    echo "skip $cand (failed decrypt / pg_restore --list)"; rm -f backup.dump.age backup.dump; continue
+    echo "skip $cand@$ver (failed decrypt / pg_restore --list)"; rm -f backup.dump.age backup.dump; continue
   fi
-  aws s3 cp "s3://$BUCKET/$gk" ./globals.sql.age --endpoint-url "$EP" --only-show-errors
-  DB_KEY="$cand"; STAMP="$st"; echo "selected $DB_KEY (roles: $gk)"; break
-done < <(aws s3api list-objects-v2 --endpoint-url "$EP" --bucket "$BUCKET" --prefix argus-db- \
-  --query 'reverse(sort_by(Contents,&LastModified))[].Key' --output text | tr '\t' '\n')
-[[ -n "$DB_KEY" ]] || { echo "FATAL: no valid backup pair found in $BUCKET"; exit 1; }
-# globals.sql.age + backup.dump.age are now the selected pair; backup.dump is already decrypted from step 1b.
+  gk="argus-globals-${st}.sql.age"
+  gver=$(pick_globals_version "$gk") || { echo "skip $cand@$ver (no valid paired globals version)"; continue; }
+  DB_KEY="$cand"; DB_VER="$ver"; G_KEY="$gk"; G_VER="$gver"; STAMP="$st"
+  echo "selected $DB_KEY@$DB_VER (roles: $G_KEY@$G_VER)"; break
+done < <(aws s3api list-object-versions --endpoint-url "$EP" --bucket "$BUCKET" --prefix argus-db- \
+  --query 'reverse(sort_by(Versions,&LastModified))[].[Key,VersionId]' --output text)
+[[ -n "$DB_KEY" ]] || { echo "FATAL: no valid backup pair found in $BUCKET (checked all versions)"; exit 1; }
+# globals.sql.age + backup.dump.age are now the selected good versions; backup.dump is already decrypted.
 
 # 2. Roles FIRST (no passwords — re-applied from Key Vault in step 4). Connect to the maintenance DB.
 #    NOTE (found by the restore drill): no `-v ON_ERROR_STOP=1` here, on purpose — two globals lines can

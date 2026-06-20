@@ -162,9 +162,14 @@ On the existing backup bucket `db-q7m2z9x4v6n8p3k1` (Bucket Settings → Object 
 
 Two rules on the same bucket:
 
-- **Reap old backups:** file-name prefix `argus-`, "hide" after **35 days**, then delete **1 day** after
-  hiding (B2's hide-then-delete; ≈36 days effective). Because delete-age ≥ lock retention, the rule only ever
-  acts at/after unlock — and per fact (4) it can't touch a still-locked object even if it tried.
+- **Reap old backups (current AND non-current versions):** file-name prefix `argus-`, "hide" after **35 days**,
+  then delete **1 day** after hiding (B2's hide-then-delete; ≈36 days effective). Because delete-age ≥ lock
+  retention, the rule only ever acts at/after unlock — and per fact (4) it can't touch a still-locked version
+  even if it tried. **Versioning is on** (Object Lock requires it), so confirm the rule also expires
+  **non-current versions** (B2's `daysFromHidingToDeleting` covers hidden/old versions) — otherwise a
+  compromised `writeFiles` key that uploads junk *shadow versions* of each backup would inflate storage
+  unboundedly. The good locked versions are still safe and the version-aware restore (in `../backup/README.md`)
+  reaches them; this rule just keeps the shadow junk from accumulating past the window.
 - **Abort incomplete multipart uploads** after **1 day** (S3 `AbortIncompleteMultipartUpload` / B2's
   cancel-unfinished). Without this a flapping uploader leaks un-reaped, un-lockable multipart parts.
 

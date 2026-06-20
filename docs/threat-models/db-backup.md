@@ -61,6 +61,13 @@ in the backup — they are re-applied from Key Vault at restore.
   **server-side B2 lifecycle rule** (prefix `argus-`, ~35d) the runtime key cannot alter; the rule **defers to
   Object Lock**, so it can never remove a still-locked object. See the operator runbook in
   `infra/b2/README.md`.
+  - **Versioning nuance (Codex P1, #269).** Object Lock requires versioning and protects each *version*, not
+    the key *name*. A compromised key keeps `writeFiles`, so it can upload junk as a **new current version** of
+    every backup key. It **cannot destroy** the good backups — those survive as locked **non-current versions**
+    — but a key-*name* lookup would return only the attacker's current junk. So the **recovery path is
+    version-aware**: the restore runbook enumerates `list-object-versions` and downloads by explicit
+    `--version-id`, walking newest-first to the newest *valid* locked version, skipping shadow/junk versions.
+    Shadowing makes the recoverable pair **older, not unrecoverable**.
 - **Tampering / integrity — a corrupt or partial backup.** A mid-stream `pg_dump` failure would upload a
   truncated dump. → The **write-time** defences are primary and unchanged: `PIPESTATUS` checks every pipeline
   stage and a post-upload `head-object` **size floor** detect a failure; on either, the unit **exits
@@ -143,12 +150,17 @@ in the backup — they are re-applied from Key Vault at restore.
 - **`argus_backup` reads all tenant metadata.** Inherent to a full backup; bounded to read-only + a
   provisioned login + an encrypted-at-rest output. Per-tenant logical backups are not a goal for the beta.
 - **Ransomware resistance — CLOSED (BKP-2).** The backup bucket is now WORM (B2 Object Lock, Compliance, 35d)
-  and the runtime key has no delete, so a compromised host/key can no longer scrub backups. Two *new, smaller*
-  residuals replace it: (a) **bounded un-deletable storage** — a partial/corrupt or orphaned object can't be
-  cleaned up for the retention window, so a run of failures leaves a few small age-ciphertext objects locked
-  for ≤35d (negligible cost; leaks nothing); (b) **Compliance is unforgiving** — a mis-typed long default
-  retention would lock storage for that whole period with no recourse (even Backblaze can't unlock it),
-  mitigated by pinning the default to **35 days** in the runbook and a verify-by-hand step.
+  and the runtime key has no delete, so a compromised host/key can no longer scrub backups. Three *new, smaller*
+  residuals replace it: (a) **bounded un-deletable storage** — a partial/corrupt or orphaned object (or, under
+  a compromised `writeFiles` key, junk *shadow versions*) can't be cleaned up for the retention window, so a
+  run of failures or an attacker leaves age-ciphertext objects locked for ≤35d. This is a bounded **storage-cost**
+  DoS only (no data loss — the good locked versions survive and the version-aware restore reaches them; leaks
+  nothing), reaped once the lock lapses by the lifecycle rule, which must be configured to also expire
+  **non-current versions**. (b) **Compliance is unforgiving** — a mis-typed long default retention would lock
+  storage for that whole period with no recourse (even Backblaze can't unlock it), mitigated by pinning the
+  default to **35 days** in the runbook and a verify-by-hand step. (c) **A shadowed recovery is staler** — junk
+  current versions push the newest *valid* pair older, but never make it unrecoverable; `OnFailure` alerting
+  surfaces the anomaly.
 - **No off-cloud copy.** Backups live in one B2 bucket/region. A second provider/region copy (3-2-1) is an
   enterprise follow-up.
 - **Docker-group membership grants in-container DB access.** PG has no published port; the host workers
