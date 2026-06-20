@@ -40,6 +40,13 @@ jobs:
 
   secrets-gitleaks:
     runs-on: ubuntu-latest
+    # gitleaks-action's ScanPullRequest lists the PR's commits via GET /repos/.../pulls/{n}/commits.
+    # On a PRIVATE repo that endpoint needs `pull-requests: read` — public repos returned it under the
+    # default token, so this only started 403'ing ("Resource not accessible by integration") once the repo
+    # went private. Job-level perms override the workflow default (contents+security-events) for least privilege.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
