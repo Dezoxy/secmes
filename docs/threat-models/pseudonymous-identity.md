@@ -7,10 +7,20 @@
 >
 > **Note (post-#223):** the "IdP real-name leak" this note guards against is now **structurally absent** —
 > OIDC/Zitadel was decommissioned (`phase-6-decommission.md`) and passkey users have **no** real-name claim
-> to leak. The server-generated pseudonymous handle described here is, since then, the **only** source of a
-> display name (not a replacement for an IdP `name` claim); the generation + per-tenant-uniqueness mechanics
-> below are unchanged and current. Read references to "the IdP `name` claim" / "refreshed from the IdP" as
-> historical motivation.
+> to leak. The server-generated pseudonymous handle described here is the **initial** display name minted at
+> first registration (not a replacement for an IdP `name` claim); read references to "the IdP `name` claim" /
+> "refreshed from the IdP" as historical motivation.
+>
+> **Two later claims in this note are now SUPERSEDED — see `profile-edit.md` for the shipped model:**
+> - **"The client cannot choose or set its own handle" is no longer true.** `PUT /me`
+>   (`UserService.updateProfile()`, `apps/api/src/users/me.controller.ts`) lets a user set their own
+>   `displayName` (a free nickname). The generated handle is only the **default** until the user edits it.
+> - **Per-tenant uniqueness is no longer enforced.** Migration `0038_avatar_seed.sql` **drops**
+>   `users_tenant_display_name_idx` — display names are deliberately non-unique free nicknames. The
+>   `unique (tenant_id, display_name)` index + regenerate-on-conflict described in §1 is historical.
+>
+> What remains current: handle **generation** (CSPRNG `Adjective Animal` as the first-registration default)
+> and that the server only ever sees this **metadata**, never message content.
 
 ## 1. Feature & data flow
 

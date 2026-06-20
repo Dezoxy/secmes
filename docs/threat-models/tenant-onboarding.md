@@ -4,11 +4,16 @@
 > creation was removed.** There is no `POST /tenants` create-org route and no anonymous tenant
 > self-registration: `apps/api/src/tenants/tenants.controller.ts` exposes only **admin-guarded**
 > invite management (`POST /tenants/invites`, list/revoke, member-role). The shipped onboarding
-> path is **admin mints a single-use invite code → invitee registers with a passkey** and is bound
-> to the tenant in the WebAuthn verify transaction (`registration-and-tenancy.md` T1–T9), not via a
-> bearer-token `accept` call. The **still-current** core of this note is the trust model of
-> `user_tenant_index` (INSERT-only, server-controlled `sub` binding, RLS) and the invite-token
-> threats of **entropy, single-use, and log hygiene**. **Email-binding (T3) is no longer a live
+> path is **admin mints a single-use invite code → invitee registers with a passkey** in the WebAuthn
+> verify transaction (`registration-and-tenancy.md` T1–T9), not via a bearer-token `accept` call.
+> **The invite does *not* bind the invitee to the issuing tenant.** `WebAuthnService.verifyRegistration()`
+> inserts the user + `user_tenant_index` row under a fixed **`DEFAULT_TENANT_ID`** (single-tenant beta)
+> regardless of which tenant issued the code — the invite is a **bearer gate** that authorizes *one*
+> passkey registration, not a tenant-selector (see the `redeemCode()` comment at
+> `apps/api/src/auth/webauthn.service.ts`). Multi-tenant `tenant_id`-from-invite binding is future work.
+> The **still-current** core of this note is the trust model of `user_tenant_index` (INSERT-only,
+> server-controlled `sub` binding, RLS) and the invite-token threats of **entropy, single-use, and log
+> hygiene**. **Email-binding (T3) is no longer a live
 > control** — migration `0039_decommission_enterprise.sql` nulled `tenant_invites.invitee_email` and
 > the passkey redeem path (`WebAuthnService.redeemCode()`) reads no email hint, so an invite link is
 > **bearer-only**. The `POST /tenants` create-org path and the "brand-new Zitadel user" framing are
