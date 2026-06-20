@@ -5,7 +5,7 @@
 
 /**
  * @typedef {{ label: string, items: string[] }} ReleaseNoteGroup
- * @typedef {{ version: string, title: string, groups: ReleaseNoteGroup[] }} ReleaseNote
+ * @typedef {{ version: string, title: string, groups: ReleaseNoteGroup[], overflowNote?: string }} ReleaseNote
  */
 
 // Conventional-commit types we surface to users, and the subsection label / sort rank each gets. Everything
@@ -65,7 +65,7 @@ export function buildReleaseEntry({ version, date, subjects }) {
   if (parsed.length === 0) return null;
 
   // Cleaned, labelled lines in display order (New before Fixes). The PR ref and "Fix:" prefix are dropped:
-  // the subsection label carries the type now. Cap across the whole release so features survive truncation.
+  // the subsection label carries the type now. Cap across the whole release (parsed is sorted feat-first).
   const labelled = parsed.map((c) => ({
     label: TYPE_GROUP[c.type].label,
     text: capitalizeFirst(c.summary),
@@ -78,11 +78,12 @@ export function buildReleaseEntry({ version, date, subjects }) {
     items: visible.filter((x) => x.label === label).map((x) => x.text),
   })).filter((g) => g.items.length > 0);
 
-  if (overflow > 0 && groups.length > 0) {
-    groups[groups.length - 1].items.push(`…and ${overflow} more changes`);
-  }
-
-  return { version, title: date, groups };
+  // The overflow line is type-agnostic, and the hidden items may be feats OR fixes — when the first MAX_ITEMS
+  // are all feats the Fixes group is dropped entirely, so pushing "…and N more" into the last surviving group
+  // would misfile hidden fixes under "New". Carry it as a neutral note OUTSIDE the typed groups instead.
+  return overflow > 0
+    ? { version, title: date, groups, overflowNote: `…and ${overflow} more changes` }
+    : { version, title: date, groups };
 }
 
 /**

@@ -17,6 +17,8 @@ describe('release notes (generated)', () => {
         expect(group.items.length).toBeGreaterThan(0);
         for (const item of group.items) expect(item.trim().length).toBeGreaterThan(0);
       }
+      if (note.overflowNote !== undefined)
+        expect(note.overflowNote.trim().length).toBeGreaterThan(0);
     }
   });
 });

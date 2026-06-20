@@ -70,14 +70,28 @@ describe('buildReleaseEntry', () => {
     expect(buildReleaseEntry({ version: 'v1', date: 'd', subjects: [] })).toBeNull();
   });
 
-  it('caps at 12 items with the overflow line on the last group', () => {
+  it('caps at 12 items and carries the overflow as a neutral note, not inside a group', () => {
     const subjects = Array.from({ length: 15 }, (_, i) => `feat: item ${i}`);
     const entry = buildReleaseEntry({ version: 'v1', date: 'd', subjects });
     expect(entry?.groups).toHaveLength(1);
     const newGroup = entry?.groups[0];
     expect(newGroup?.label).toBe('New');
-    expect(newGroup?.items).toHaveLength(13); // 12 + overflow
-    expect(newGroup?.items.at(-1)).toBe('…and 3 more changes');
+    expect(newGroup?.items).toHaveLength(12); // capped; the overflow line is NOT mixed into the group
+    expect(entry?.overflowNote).toBe('…and 3 more changes');
+  });
+
+  it('does not misfile hidden fixes under New when the first 12 are all feats', () => {
+    const subjects = [
+      ...Array.from({ length: 12 }, (_, i) => `feat: feature ${i}`),
+      'fix: a hidden fix',
+      'fix: another hidden fix',
+    ];
+    const entry = buildReleaseEntry({ version: 'v1', date: 'd', subjects });
+    // Only New survives the cap; the hidden fixes must NOT appear as a phantom "more changes" item under New.
+    expect(entry?.groups.map((g) => g.label)).toEqual(['New']);
+    expect(entry?.groups[0]?.items).toHaveLength(12);
+    expect(entry?.groups[0]?.items.some((i) => i.includes('more changes'))).toBe(false);
+    expect(entry?.overflowNote).toBe('…and 2 more changes');
   });
 });
 

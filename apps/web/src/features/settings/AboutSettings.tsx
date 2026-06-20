@@ -213,6 +213,9 @@ export function AboutSettings() {
                       </ul>
                     </div>
                   ))}
+                  {note.overflowNote && (
+                    <p className="pl-4 text-xs leading-5 text-white/45">{note.overflowNote}</p>
+                  )}
                 </div>
               </article>
             ))}
