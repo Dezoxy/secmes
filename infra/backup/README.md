@@ -176,11 +176,8 @@ On a trusted host (NOT the backup VM — it must NOT hold the age private key):
 ```bash
 EP=https://s3.eu-central-003.backblazeb2.com ; BUCKET=db-q7m2z9x4v6n8p3k1
 
-# 1. Fetch the age private key from Key Vault (mode 0400).
-az keyvault secret show --vault-name <vault> --name argus-backup-age-key --query value -o tsv > age.key
-chmod 0400 age.key
-
-# 1a. Backup-SIGNATURE verification setup. Run this from your argus checkout's infra/backup/ dir (or copy
+# 1a. Backup-SIGNATURE verification setup. Run this FIRST, BEFORE the age key is fetched, so a setup FATAL never
+#     leaves the decrypt key on disk. Run from your argus checkout's infra/backup/ dir (or copy
 #     backup-verify.pub next to where you run), so VERIFY_KEY reads the PINNED public key from the REPO — never
 #     from the bucket an attacker could write. Requires OpenSSL >=3.0 on THIS host (LibreSSL/1.1.1 can't do
 #     Ed25519 -rawin); the preflight below aborts legibly rather than fail-closing on every candidate.
@@ -217,7 +214,13 @@ fi
 rm -rf "$_pf"
 echo "verify key OK: ${vk_blocks} pinned key block(s), openssl Ed25519 -rawin preflight passed"
 
-# 1b. Pick the newest VALID backup pair — VERSION-AWARE. This is the recovery path that ransomware resistance
+# 1b. Fetch the age private key from Key Vault (mode 0400) — only NOW that the verify-key + openssl preflight
+#     passed, so none of the setup FATALs above could leave the decrypt key on disk. (Cleared by shred on every
+#     subsequent exit: the no-pair FATAL and step 5.)
+az keyvault secret show --vault-name <vault> --name argus-backup-age-key --query value -o tsv > age.key
+chmod 0400 age.key
+
+# 1c. Pick the newest VALID backup pair — VERSION-AWARE. This is the recovery path that ransomware resistance
 #     depends on, so it must reach a good LOCKED version even when a newer one shadows it.
 #     Why versions, not key names: Object Lock requires versioning and protects each VERSION, not the key name.
 #     A compromised VM/B2 key still has writeFiles — it can upload junk as a NEW (current) version of every
