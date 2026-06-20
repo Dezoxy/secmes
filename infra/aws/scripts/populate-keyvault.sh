@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # argus — populate the (REAL) Azure Key Vault an AWS deploy reads via Arc. Sets the MANDATORY runtime secret
-# set the stack needs to reach healthy: generates the generatable values (passwords + the Ed25519 session
-# signing key), derives the two DSNs, and takes the four EXTERNAL credentials from the environment.
+# set the stack needs to reach healthy: generates the generatable values (passwords + the Ed25519 session and
+# backup signing keys), derives the two DSNs, and takes the four EXTERNAL credentials from the environment.
 #
 # Idempotent + safe to re-run: by default it SKIPS any secret that already exists (never clobbers a live
 # value). Pass --rotate to overwrite existing values (rotation — expect a redeploy to pick them up). NOT every
@@ -142,6 +142,11 @@ fi
 #     Split by rotation safety — see the header note. ---
 # Rotatable (reconciled on the next deploy, or re-read from config each boot):
 put_ed25519_key argus-session-signing-key  # EdDSA JWT signing key (PKCS8 PEM) — rotatable; API re-reads on start
+put_ed25519_key argus-backup-signing-key   # DB-backup provenance signing key (PKCS8 PEM) — rotatable; the worker
+#   signs each nightly object with it and restore verifies the signature (signed backups, BKP-2 follow-up). After
+#   creating it, derive + commit the PUBLIC half to infra/backup/backup-verify.pub (non-secret), e.g.:
+#     az keyvault secret show --vault-name "$KV" --name argus-backup-signing-key --query value -o tsv \
+#       | openssl pkey -pubout
 put argus-redis-password "$(gen_alnum 32)"   # redis requirepass — re-read from its config file each boot
 put argus-backup-db-password "$(gen_alnum 32)"  # argus_backup login — deploy.sh re-applies via ALTER ROLE
 put argus-cleanup-db-password "$(gen_alnum 32)" # argus_cleanup login — deploy.sh re-applies via ALTER ROLE

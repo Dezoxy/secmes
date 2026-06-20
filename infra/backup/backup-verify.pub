@@ -1,0 +1,18 @@
+# argus DB-backup signature VERIFY key — Ed25519 public key (PEM). NON-SECRET, committed on purpose:
+# pinning it in git makes it tamper-evident and means restore reads the verify key from the repo, never from
+# the same bucket an attacker could write. The matching PRIVATE key lives ONLY in Key Vault
+# (argus-backup-signing-key) and on the backup host's tmpfs at sign time — never here.
+#
+# PLACEHOLDER — the real key does not exist until the operator generates it. Signature verification at restore
+# (slice 3) FAILS CLOSED against this placeholder, which is correct: an unpopulated verify key must not pass.
+# (Slice 3 must reject this by CONTENT — grep REPLACE_WITH_ and hard-abort with a legible message — not rely
+# only on `openssl pkey -pubin` failing to parse, so the operator sees "verify key not populated", not a
+# generic parse error.)
+# To populate (one-time, after running populate-keyvault.sh which creates argus-backup-signing-key):
+#   az keyvault secret show --vault-name <vault> --name argus-backup-signing-key --query value -o tsv \
+#     | openssl pkey -pubout
+# Replace the block below with that "-----BEGIN PUBLIC KEY-----" output and commit.
+# See infra/backup/README.md §"Backup signing key" and docs/threat-models/db-backup.md.
+-----BEGIN PUBLIC KEY-----
+REPLACE_WITH_ARGUS_BACKUP_VERIFY_PUBLIC_KEY
+-----END PUBLIC KEY-----

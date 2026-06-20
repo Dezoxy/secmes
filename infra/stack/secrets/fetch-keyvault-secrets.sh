@@ -60,6 +60,14 @@ SECRETS=(
   # before the first production deployment — an absent or empty key makes the API unbootable.
   # See docs/threat-models/session-tokens.md §invariant-4 for key generation instructions.
   "argus-session-signing-key=session_signing_key"
+  # Signed DB backups (BKP-2 follow-up): Ed25519 signing key (PKCS8 PEM), delivered to the backup worker via
+  # systemd LoadCredential. MANDATORY by design: a missing signing key hard-fails boot here rather than
+  # silently shipping unverifiable backups nobody notices until a restore drill. Trade-off owned: this couples
+  # whole-stack boot to a backup-only secret — acceptable because populate-keyvault.sh provisions it in the
+  # same pass as every other mandatory secret, so they are never independently missing. Run populate-keyvault.sh
+  # BEFORE deploying this change (idempotent skip-if-exists — no --rotate needed).
+  # Precedent for Ed25519-signing-outside-packages/crypto: docs/threat-models/session-tokens.md §invariant-4.
+  "argus-backup-signing-key=backup-signing-key"
 )
 
 # OPTIONAL secrets — may be ABSENT on a first boot (provisioned later). Unlike the mandatory set, an absent

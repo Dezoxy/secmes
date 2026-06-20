@@ -77,6 +77,11 @@ locals {
     # Phase 1 session tokens: generate with `openssl genpkey -algorithm Ed25519` and store the PKCS8 PEM here.
     # Without a valid key the API cannot start. populate-keyvault.sh generates this automatically.
     "argus-session-signing-key" = "REPLACE-with-Ed25519-PKCS8-PEM-from-openssl-genpkey"
+    # Signed DB backups (BKP-2 follow-up): Ed25519 PKCS8 PEM, MANDATORY in fetch-keyvault-secrets.sh, so the
+    # seed must be non-empty or the AWS-experiment stack won't boot. This dummy only satisfies the fetch
+    # presence gate; an invalid PEM correctly fails CLOSED at sign time (slice 2). populate-keyvault.sh
+    # generates the real key.
+    "argus-backup-signing-key" = "REPLACE-with-Ed25519-PKCS8-PEM-from-openssl-genpkey"
   }
 }
 
