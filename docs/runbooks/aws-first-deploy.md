@@ -90,6 +90,17 @@ az keyvault secret list --vault-name argus-exp-kv-4ad322 \
 # argus-ghcr-token). Set the vault name explicitly — its terraform-output fallback is flaky from a laptop:
 ARGUS_KEY_VAULT=argus-exp-kv-4ad322 ./infra/aws/scripts/populate-keyvault.sh # gitleaks:allow — vault NAME, not a secret
 
+# The list above checks NAMES only. Terraform SEEDS external secrets with "REPLACE-…" placeholders, and
+# populate.sh skips an existing name without --rotate — so a placeholder GHCR token looks "present" but breaks
+# `docker login` for the now-private images. Detect placeholders by VALUE, then overwrite the GHCR token:
+for s in argus-ghcr-token argus-b2-app-key argus-s3-secret-access-key; do
+  v=$(az keyvault secret show --vault-name argus-exp-kv-4ad322 --name "$s" --query value -o tsv --only-show-errors 2>/dev/null)
+  case "$v" in REPLACE*|"") echo "  placeholder/empty: $s — set its real value";; esac
+done
+read -rs -p 'GHCR read:packages PAT: ' GHCR_PAT && echo    # read -rs keeps the PAT out of shell history
+az keyvault secret set --vault-name argus-exp-kv-4ad322 --name argus-ghcr-token --value "$GHCR_PAT" --only-show-errors -o none
+unset GHCR_PAT
+
 # The age key is NOT created by populate.sh — set it explicitly from the keypair generated in blocker 1,
 # or restore is impossible. (age.key holds the AGE-SECRET-KEY line; restore writes it back and runs `age -i`.)
 # `-o none --only-show-errors`: `az keyvault secret set` echoes the secret VALUE by default (Azure CLI
