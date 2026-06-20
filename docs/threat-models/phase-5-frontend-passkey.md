@@ -34,7 +34,7 @@ navigator.credentials.get() → discoverable passkey (empty allowCredentials)
   → POST /auth/webauthn/authenticate/verify { response }
   → API verifies credential by stored credential_id (NOT client userHandle)
   → mints session → returns access token + refresh cookie
-  → keystore unlocked via PRF (or recovery-code fallback)
+  → keystore unlocked via WebAuthn-PRF (no passphrase, no recovery-code fallback)
 ```
 
 ### Breakglass login (admin)
@@ -183,5 +183,5 @@ exploitation, and CSP headers. This is the accepted residual risk of a PWA archi
 |---|---|
 | XSS steals in-memory access token | Token is 10-min lived; CSP + SameSite mitigate; only same-origin XSS applies; accepted for PWA |
 | Platform passkey sync (iCloud/Google) leaks credential | Private key never leaves the authenticator key material; sync is at the hardware/OS layer |
-| PRF not available on all authenticators | Phase 5 includes recovery-code fallback for PRF-less devices (decision #6 from plan) |
+| PRF not available on all authenticators | **No recovery-code fallback** (the originally-planned decision #6 was dropped 2026-06-17). A PRF-less authenticator simply cannot unlock the sealed keystore — there is no passphrase or recovery path; the device starts fresh and an admin re-issues a registration code (`keystore.ts`, `prf-keystore-unlock.md`). Accepted as the no-recovery model's cost. |
 | `listUsers()` removal breaks any forgotten caller | Pre-removal audit: `grep -r "listUsers"` over `apps/web` must return zero matches before merge |

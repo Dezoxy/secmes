@@ -232,7 +232,7 @@ Regular user endpoints are not affected.
 `rotate()` queries `admin_credentials WHERE user_id = $userId`, where `userId` comes from the
 caller's AdminGuard JWT. This is **intentional by design**: only the breakglass user (the one
 who logged in via `POST /auth/breakglass/login`) holds a JWT whose `userId` matches the
-`admin_credentials` row. A WebAuthn admin or Zitadel admin with an admin JWT would get 503
+`admin_credentials` row. A WebAuthn admin with an admin JWT would get 503
 ("breakglass not provisioned") since their `userId` has no matching row.
 
 This means: only the breakglass user themselves can rotate the breakglass credential. Operator-

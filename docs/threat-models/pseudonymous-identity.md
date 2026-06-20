@@ -4,6 +4,13 @@
 > server-generated pseudonymous handle (`Adjective Animal`) and a deterministic generated avatar. Slice 1
 > (this note) is the **server** half: handle generation + per-tenant uniqueness. Slice 2 is the client avatar
 > (local `@dicebear/*`, deterministic from the user id — no external image fetch).
+>
+> **Note (post-#223):** the "IdP real-name leak" this note guards against is now **structurally absent** —
+> OIDC/Zitadel was decommissioned (`phase-6-decommission.md`) and passkey users have **no** real-name claim
+> to leak. The server-generated pseudonymous handle described here is, since then, the **only** source of a
+> display name (not a replacement for an IdP `name` claim); the generation + per-tenant-uniqueness mechanics
+> below are unchanged and current. Read references to "the IdP `name` claim" / "refreshed from the IdP" as
+> historical motivation.
 
 ## 1. Feature & data flow
 

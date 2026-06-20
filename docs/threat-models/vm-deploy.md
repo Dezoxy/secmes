@@ -22,7 +22,7 @@ No message content is involved here; this is pure infrastructure (identity, netw
 
 ## 2. Assets & trust boundaries
 
-- **Assets:** the runtime secrets in Key Vault (DB passwords, B2 keys, Zitadel masterkey, cloudflared token);
+- **Assets:** the runtime secrets in Key Vault (DB passwords, B2 keys, the argus session signing key, cloudflared token);
   the VM host (which, once the stack runs, holds the DB + decrypted-at-rest-sealed material); the GitHub-OIDC
   deploy credential.
 - **Boundaries:** internet ↔ VM (closed — no inbound); GitHub ↔ Azure (OIDC federation, no stored creds);

@@ -19,7 +19,7 @@ users ─────▶ Cloudflare edge ─────────────
                                                  └─ /*      → file_server /srv (PWA, SPA fallback)
                                                                      │
                                    api:3000 ──▶ postgres / redis (internal network, NO published ports)
-                                   api:3000 ──▶ Backblaze B2 (egress, presigned) ; Zitadel (OIDC, internal)
+                                   api:3000 ──▶ Backblaze B2 (egress, presigned)
 ```
 
 The browser only ever talks to the **Cloudflare edge** over HTTPS. Cloudflare terminates TLS and runs the
@@ -31,8 +31,8 @@ the API are crypto-blind (server stores/forwards ciphertext only; invariant #1).
 
 ## 2. Assets & trust boundaries
 
-- **Assets:** the runtime secrets consumed by the stack (DB password, B2 secret key, Zitadel masterkey,
-  cloudflared tunnel token); the integrity of what Cloudflare forwards; availability of the ingress.
+- **Assets:** the runtime secrets consumed by the stack (DB password, B2 secret key, the argus session
+  signing key, cloudflared tunnel token); the integrity of what Cloudflare forwards; availability of the ingress.
 - **Boundaries:**
   - internet ↔ Cloudflare edge (TLS, WAF) — Cloudflare is trusted infrastructure.
   - Cloudflare ↔ cloudflared (authenticated tunnel; token-based, remotely-managed).
@@ -40,7 +40,7 @@ the API are crypto-blind (server stores/forwards ciphertext only; invariant #1).
   - api ↔ postgres/redis (intra-VM; **not** reachable off-host — no published ports). Redis additionally
     requires AUTH (`requirepass` from a Key-Vault-generated `redis.conf`; defense-in-depth vs a compromised
     neighbour container) — a CI guard asserts the prod stack publishes no host ports at all.
-  - admin surfaces (Zitadel console, future ops) ↔ users — gated by **Cloudflare Access** at the edge.
+  - admin surfaces (ops / breakglass console, future ops) ↔ users — gated by **Cloudflare Access** at the edge.
 
 ## 3. Threats (STRIDE-lite)
 
@@ -51,7 +51,7 @@ the API are crypto-blind (server stores/forwards ciphertext only; invariant #1).
 - **Tampering / info-disclosure in transit.** → TLS terminates at Cloudflare; the Cloudflare↔cloudflared leg
   is an authenticated tunnel; the internal cloudflared↔Caddy↔api legs are plain HTTP but never leave the
   host's Docker network. Message bodies are E2EE ciphertext regardless of the transport.
-- **Info-disclosure of secrets.** A leaked DB/B2/Zitadel/tunnel secret compromises the stack. → No secret
+- **Info-disclosure of secrets.** A leaked DB/B2/session-signing/tunnel secret compromises the stack. → No secret
   values live in `compose.prod.yaml` or the image. Data-plane secrets are **mounted credential files**
   (Docker secrets) the app reads via `*_FILE` (`POSTGRES_PASSWORD_FILE`, `DATABASE_URL_FILE`,
   `S3_SECRET_ACCESS_KEY_FILE`, `REDIS_URL_FILE`) — never the value in env (a password in container env would
@@ -61,7 +61,7 @@ the API are crypto-blind (server stores/forwards ciphertext only; invariant #1).
   **mounted credential file** read via `TUNNEL_TOKEN_FILE` (cloudflared >=2025.4.0) — never an env var, so it
   never surfaces in `docker inspect`. All are populated out-of-band (Slice 3: Key Vault via Managed Identity).
   `.env.prod.example` carries placeholders only. Non-secret config (B2 access-key-**id**, region, bucket,
-  issuer URL, public origin) may ride env per invariant #5. Logs carry IDs/metadata only (invariant #2); the
+  public origin) may ride env per invariant #5. Logs carry IDs/metadata only (invariant #2); the
   tunnel token is never logged.
 - **Elevation via a compromised container.** A breakout from api/Caddy must not trivially own the host or
   reach more than it needs. → Containers run **non-root** with `no-new-privileges`, `cap_drop: [ALL]`,
@@ -70,7 +70,7 @@ the API are crypto-blind (server stores/forwards ciphertext only; invariant #1).
 - **DoS / volumetric flood.** → Absorbed at the Cloudflare edge (WAF + rate-limit) before it reaches the
   tunnel; this is the edge tier that the API's per-user throttler (#46) deliberately delegates unauth-flood
   protection to. Caddy adds request timeouts; the VM has no open port to flood directly.
-- **Admin surface exposure.** Zitadel console / future ops UIs must never be world-reachable. → Published on
+- **Admin surface exposure.** Ops / breakglass / future admin UIs must never be world-reachable. → Published on
   admin subdomains gated by **Cloudflare Access** (identity at the edge) — and never exposing message content
   (invariant #6). Admin routing is dashboard-managed alongside the app hostname.
 
@@ -78,14 +78,14 @@ the API are crypto-blind (server stores/forwards ciphertext only; invariant #1).
 
 1. **Crypto-blind server** — ✅ Caddy/api forward ciphertext; no decryption added.
 2. **No secret/plaintext logging or persistence** — ✅ no secret values in compose/image; tunnel token,
-   DB/B2/Zitadel secrets are file/env-injected out-of-band; logs are IDs/metadata only.
+   DB/B2/session-signing secrets are file/env-injected out-of-band; logs are IDs/metadata only.
 3. **tenant_id + RLS on tenant tables** — N/A (no schema change); the data services that enforce it run
    with no off-host exposure.
 4. **No hand-rolled crypto** — ✅ none introduced; TLS is Cloudflare's, MLS stays in `packages/crypto`.
 5. **Secrets via Key Vault + Managed Identity as files** — ✅ data-plane secrets are mounted credential
    **files** (`*_FILE`), the tunnel token a runtime-fetched value; no secret rides a committed env file. The
    actual Key Vault wiring is Slice 3. Placeholders only in this slice; **no committed secrets**.
-6. **No admin path to content** — ✅ admin surfaces (Zitadel/ops) are metadata-only and gated by Cloudflare
+6. **No admin path to content** — ✅ admin surfaces (ops / breakglass) are metadata-only and gated by Cloudflare
    Access; no content endpoint is exposed to admins.
 
 ## 5. Decision & mitigations
