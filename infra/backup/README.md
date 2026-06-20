@@ -311,25 +311,35 @@ pick_globals_version() {
 # by the caller re-hashing them against M_DB_SHA / M_GLOBALS_SHA.
 M_STAMP=""; M_GLOBALS_KEY=""; M_DB_KEY=""; M_GLOBALS_SHA=""; M_DB_SHA=""; M_VERIFYKEY=""
 marker_verified() {
-  local st="$1" mk="argus-ok-${1}.age" sk="argus-ok-${1}.age.sig" ver lm sver vksha mani
+  local st="$1" mk="argus-ok-${1}.age" sk="argus-ok-${1}.age.sig" ver lm sver slm vksha mani sigline
   local mc="$VK_DIR/marker.age" ms="$VK_DIR/marker.sig"   # transient verify state lives in the 0700 temp dir
+  # ALL .sig versions for this stamp, newest-first. WORM keeps the genuine sig as an older version even if a
+  # writeFiles attacker shadows it with a junk NEWER one, so we must try EACH against the marker — not just the
+  # newest — or one junk .sig upload would brick recovery of an otherwise-genuine run (denial of recovery).
+  local sigvers
+  mapfile -t sigvers < <(aws s3api list-object-versions --endpoint-url "$EP" --bucket "$BUCKET" --prefix "$sk" \
+    --query "reverse(sort_by(Versions[?Key=='$sk'],&LastModified))[].[VersionId,LastModified]" --output text 2>/dev/null)
   while read -r ver lm; do
     [[ -n "$ver" && "$ver" != "None" ]] || continue
     before_cutoff "$lm" || continue
     aws s3api get-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$mk" --version-id "$ver" \
       "$mc" >/dev/null 2>&1 || continue
-    # Newest .sig version (the sig is a separate key argus-ok-<stamp>.age.sig), honouring $CUTOFF. The marker and
-    # sig version walks are INTENTIONALLY decoupled: a mismatched (marker_vN, sig_vM) pair simply fails verify_sig
-    # (the sig must verify over THIS marker ciphertext), and the marker walk continues to older self-consistent
-    # locked versions — safe-by-verification, and it never narrows the recovery search.
-    sver=$(aws s3api list-object-versions --endpoint-url "$EP" --bucket "$BUCKET" --prefix "$sk" \
-      --query "reverse(sort_by(Versions[?Key=='$sk'],&LastModified))[].[VersionId,LastModified]" --output text 2>/dev/null \
-      | while read -r sv slm; do [[ -n "$sv" && "$sv" != "None" ]] || continue; before_cutoff "$slm" || continue; echo "$sv"; break; done)
-    [[ -n "$sver" ]] || { echo "  skip marker $st@$ver (.sig absent)"; rm -f "$mc"; continue; }
-    aws s3api get-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$sk" --version-id "$sver" \
-      "$ms" >/dev/null 2>&1 || { rm -f "$mc"; continue; }
-    # (a) sig must verify over the marker ciphertext; vksha = DER-SHA256 of the verifying block (for check e)
-    vksha=$(verify_sig "$mc" "$ms") || { echo "  skip marker $st@$ver (.sig does not verify under pinned keyring)"; rm -f "$mc" "$ms"; continue; }
+    # (a) try every .sig VERSION against THIS marker ciphertext until one verifies; vksha = DER-SHA256 of the
+    # verifying block (for check e). The marker/sig version walks are decoupled and that's SAFE: a sig verifies
+    # only over the exact marker bytes it signed, so a junk shadow sig (or a junk shadow marker) just fails and
+    # the walk falls through to the older self-consistent locked pair — it never narrows the recovery search.
+    vksha=""
+    for sigline in "${sigvers[@]}"; do
+      [[ -n "$sigline" ]] || continue
+      read -r sver slm <<<"$sigline"
+      [[ -n "$sver" && "$sver" != "None" ]] || continue
+      before_cutoff "$slm" || continue
+      aws s3api get-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$sk" --version-id "$sver" \
+        "$ms" >/dev/null 2>&1 || continue
+      vksha=$(verify_sig "$mc" "$ms") && break
+      vksha=""
+    done
+    [[ -n "$vksha" ]] || { echo "  skip marker $st@$ver (no .sig version verifies it under the pinned keyring)"; rm -f "$mc" "$ms"; continue; }
     # only NOW decrypt the trusted manifest
     mani=$(age -d -i age.key < "$mc" 2>/dev/null) || { echo "  skip marker $st@$ver (manifest decrypt failed)"; rm -f "$mc" "$ms"; continue; }
     rm -f "$mc" "$ms"
