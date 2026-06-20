@@ -3,17 +3,30 @@
 // the git/fs I/O lives in gen-release-notes.mjs. See docs + the plan: the About changelog is GENERATED from
 // the git tags + commits at build time, never hand-written.
 
-/** @typedef {{ version: string, title: string, items: string[] }} ReleaseNote */
+/**
+ * @typedef {{ label: string, items: string[] }} ReleaseNoteGroup
+ * @typedef {{ version: string, title: string, groups: ReleaseNoteGroup[] }} ReleaseNote
+ */
 
-// Conventional-commit types we surface to users, and the group label / item prefix each gets. Everything else
-// (chore, ci, build, test, docs, style, refactor, deps bumps, merges) is noise → dropped from release notes.
+// Conventional-commit types we surface to users, and the subsection label / sort rank each gets. Everything
+// else (chore, ci, build, test, docs, style, refactor, deps bumps, merges) is noise → dropped from release
+// notes. The label is rendered as a subheading in the About page, so the redundant per-item "Fix:" prefix is
+// gone — the group conveys it. GROUP_ORDER fixes the subsection order (features before fixes).
 const TYPE_GROUP = {
-  feat: { rank: 0, prefix: '' },
-  fix: { rank: 1, prefix: 'Fix: ' },
-  perf: { rank: 1, prefix: 'Fix: ' },
+  feat: { rank: 0, label: 'New' },
+  fix: { rank: 1, label: 'Fixes' },
+  perf: { rank: 1, label: 'Fixes' },
 };
 
+const GROUP_ORDER = ['New', 'Fixes'];
+
 const MAX_ITEMS = 12;
+
+/** Capitalize the first character only (keep acronyms like B2/CORS intact); trims surrounding whitespace. */
+function capitalizeFirst(text) {
+  const t = (text ?? '').trim();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+}
 
 /**
  * Parse one commit subject line. Returns null for anything that isn't a user-facing conventional commit
@@ -51,17 +64,25 @@ export function buildReleaseEntry({ version, date, subjects }) {
 
   if (parsed.length === 0) return null;
 
-  const allItems = parsed.map((c) => {
-    const ref = c.pr ? ` (#${c.pr})` : '';
-    return `${TYPE_GROUP[c.type].prefix}${c.summary}${ref}`;
-  });
+  // Cleaned, labelled lines in display order (New before Fixes). The PR ref and "Fix:" prefix are dropped:
+  // the subsection label carries the type now. Cap across the whole release so features survive truncation.
+  const labelled = parsed.map((c) => ({
+    label: TYPE_GROUP[c.type].label,
+    text: capitalizeFirst(c.summary),
+  }));
+  const visible = labelled.slice(0, MAX_ITEMS);
+  const overflow = labelled.length - visible.length;
 
-  const items =
-    allItems.length > MAX_ITEMS
-      ? [...allItems.slice(0, MAX_ITEMS), `…and ${allItems.length - MAX_ITEMS} more changes`]
-      : allItems;
+  const groups = GROUP_ORDER.map((label) => ({
+    label,
+    items: visible.filter((x) => x.label === label).map((x) => x.text),
+  })).filter((g) => g.items.length > 0);
 
-  return { version, title: date, items };
+  if (overflow > 0 && groups.length > 0) {
+    groups[groups.length - 1].items.push(`…and ${overflow} more changes`);
+  }
+
+  return { version, title: date, groups };
 }
 
 /**

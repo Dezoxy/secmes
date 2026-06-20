@@ -35,6 +35,9 @@ describe('AboutSettings', () => {
     expect(html).toContain('Release notes');
     expect(html).toContain(releaseNotes[0]!.version);
     expect(html).toContain(releaseNotes[0]!.title);
+    // Items render under labelled Features/Fixes subsections.
+    expect(html).toContain(releaseNotes[0]!.groups[0]!.label);
+    expect(html).toContain(releaseNotes[0]!.groups[0]!.items[0]);
     expect(html).not.toContain('Argus secure messaging');
     expect(html).not.toContain('Safe diagnostic export');
     expect(html).not.toContain('Diagnostics menu reserved');

@@ -202,6 +202,7 @@ test('about exposes manual PWA update status and platform install expectations',
   await expect(releaseNotesScrollbar).toHaveClass(/opacity-0/, { timeout: 2_000 });
   // Scrolling reveals the bottom of the list — assert the last line of the last release entry is now visible.
   const lastRelease = releaseNotesData[releaseNotesData.length - 1]!;
-  const lastLine = lastRelease.items[lastRelease.items.length - 1]!;
+  const lastGroup = lastRelease.groups[lastRelease.groups.length - 1]!;
+  const lastLine = lastGroup.items[lastGroup.items.length - 1]!;
   await expect(releaseNotes.getByText(lastLine, { exact: true })).toBeVisible();
 });

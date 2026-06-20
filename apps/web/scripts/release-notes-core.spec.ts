@@ -42,7 +42,7 @@ describe('parseCommitSubject', () => {
 });
 
 describe('buildReleaseEntry', () => {
-  it('keeps feat+fix (feat first), prefixes fixes, drops noise, uses date as title', () => {
+  it('groups feat→New / fix+perf→Fixes, capitalizes, drops PR refs + noise, date as title', () => {
     const entry = buildReleaseEntry({
       version: 'v1.0.0',
       date: '2026-01-02',
@@ -51,8 +51,16 @@ describe('buildReleaseEntry', () => {
     expect(entry).toEqual({
       version: 'v1.0.0',
       title: '2026-01-02',
-      items: ['a (#1)', 'Fix: b (#2)', 'Fix: p (#3)'],
+      groups: [
+        { label: 'New', items: ['A'] },
+        { label: 'Fixes', items: ['B', 'P'] },
+      ],
     });
+  });
+
+  it('omits a group with no items (fixes-only release)', () => {
+    const entry = buildReleaseEntry({ version: 'v1', date: 'd', subjects: ['fix: only a fix'] });
+    expect(entry?.groups).toEqual([{ label: 'Fixes', items: ['Only a fix'] }]);
   });
 
   it('returns null when nothing user-facing remains', () => {
@@ -62,11 +70,14 @@ describe('buildReleaseEntry', () => {
     expect(buildReleaseEntry({ version: 'v1', date: 'd', subjects: [] })).toBeNull();
   });
 
-  it('caps at 12 items with an overflow line', () => {
+  it('caps at 12 items with the overflow line on the last group', () => {
     const subjects = Array.from({ length: 15 }, (_, i) => `feat: item ${i}`);
     const entry = buildReleaseEntry({ version: 'v1', date: 'd', subjects });
-    expect(entry?.items).toHaveLength(13); // 12 + overflow
-    expect(entry?.items.at(-1)).toBe('…and 3 more changes');
+    expect(entry?.groups).toHaveLength(1);
+    const newGroup = entry?.groups[0];
+    expect(newGroup?.label).toBe('New');
+    expect(newGroup?.items).toHaveLength(13); // 12 + overflow
+    expect(newGroup?.items.at(-1)).toBe('…and 3 more changes');
   });
 });
 

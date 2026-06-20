@@ -6,20 +6,30 @@ export const releaseNotes: ReleaseNote[] = [
   {
     "version": "dev",
     "title": "Development build",
-    "items": [
-      "move breakglass login to /admin behind Cloudflare Access (full boundary) (#230)",
-      "passkey-PRF keystore unlock — remove the passphrase + client recovery surface (#227)",
-      "converge B2 attachment-bucket CORS on every deploy (#228)",
-      "Phase 6 PR2 — decommission enterprise surface (SSO/billing/workspace) + data-minimization (#224)",
-      "Phase 6 PR1 — decommission Zitadel/OIDC, passkey-only auth + infra (#223)",
-      "Phase 5 — replace OIDC with passkey client (#219)",
-      "Phase 4 — discovery by argus-id + profile editing (#218)",
-      "Fix: make B2 CORS convergence robust to B2's header-name lowercasing (#229)",
-      "Fix: make DEFAULT_TENANT_ID a valid RFC-4122 UUID (fixes /me 500 for all users) (#225)",
-      "Fix: label Argus ID readonly input for WCAG 2.1 axe compliance",
-      "Fix: exclude breakglass from last-admin guards",
-      "Fix: close rotate-race + extend plan-limit exclusion",
-      "…and 12 more changes"
+    "groups": [
+      {
+        "label": "New",
+        "items": [
+          "Verify the signature at restore (signed backups slice 3/3)",
+          "Sign each nightly backup at write time (signed backups slice 2/3)",
+          "Provision Ed25519 signing key for signed backups (slice 1/3)",
+          "Unfriend UI — remove button on accepted friend rows (Slice F)",
+          "Wire friends-list UI to backend API (Slice E)",
+          "Friends API + contracts (Slice D)",
+          "Add friendships table + FORCE RLS (Slice C)"
+        ]
+      },
+      {
+        "label": "Fixes",
+        "items": [
+          "Make DB backups WORM via B2 Object Lock (BKP-2)",
+          "Enforce active caller on all mutations (ST-1)",
+          "Enforce audit/session retention + scrub erased target-id (F1/AR-1, ER-1)",
+          "SW subresource-integrity for dynamic chunks + pin CSP B2 egress (CDI-1, CSP-1)",
+          "Widen device-linking OOB artifact to full safety number (FP-1)",
+          "…and 2 more changes"
+        ]
+      }
     ]
   }
 ];
