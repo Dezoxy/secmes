@@ -134,8 +134,8 @@ in the backup — they are re-applied from Key Vault at restore.
 Signed backups (BKP-2 follow-up) add a **second** keypair: the worker signs each nightly run with an
 **Ed25519** key (`argus-backup-signing-key`) and restore verifies the signature, so a bucket-writer can no
 longer pass off a forged dump as genuine. Slice 1 **provisions** this key (Key Vault + the committed public
-verify key `infra/backup/backup-verify.pub`); **slice 2 implements the worker's signing step (this section)**;
-the restore-time verification lands in slice 3.
+verify key `infra/backup/backup-verify.pub`); slice 2 implements the worker's signing step; **slice 3 implements
+the restore-time verification (this section) — signed backups are now complete.**
 
 **Design: sign a digest manifest, not the multi-GB dumps.** The dumps stream `pg_dump → age → B2` and never
 touch disk — a load-bearing privacy property. Rather than break that to feed a whole `age`-ciphertext file into
@@ -148,16 +148,28 @@ identical to signing the raw files — what's signed is `age`-ciphertext either 
 object under a signed digest would require a **second-preimage** on SHA-256 (~256-bit), not a birthday
 collision. SHA-256 is the same standard-primitive category as `age`/Ed25519, so invariant #4 is unchanged.
 The signature is computed over the marker **ciphertext**, so restore verifies provenance *before* it needs the
-age key or touches the big objects. The manifest's `verifykey sha256:<hex>` is an **advisory** key-id for
-slice 3's current-then-previous keyring (it selects which verify key to try — the signature, not the
-self-declared id, is the actual authentication).
+age key or touches the big objects. The manifest's `verifykey sha256:<hex>` is an **advisory** key-id for the
+current-then-previous keyring — "advisory" means *never sufficient on its own* (the signature, not the
+self-declared id, is the actual authentication). Restore still **enforces** it as a corroborating cross-check:
+after a keyring block verifies the signature, restore hard-rejects the run if that block's DER-SHA256 ≠ the
+manifest's `verifykey` (a genuine worker always writes the fingerprint of the key it signed with, so this only
+fires on a malformed/confused run). Enforced-but-not-sufficient, not optional.
 
-**Slice-3 acceptance invariant (recorded now so the seam isn't lost).** The write side guarantees only that a
+**Acceptance invariant (now enforced at restore — slice 3).** The write side guarantees only that a
 restore-eligible run is *signed* (sign-before-marker, marker-before-sig). The matching read-side rule restore
-MUST enforce: a stamp is eligible **only if** its `.sig` is present **and** verifies under the pinned
-`backup-verify.pub` keyring **and** both manifest digests match the re-hashed objects — a missing, unparseable,
-or non-verifying signature (including against the un-replaced `REPLACE_WITH_` placeholder) is a **hard reject**,
-never "verify if present." That makes the "marker present but sig-upload failed" degraded state fail closed.
+**enforces** (`infra/backup/README.md` restore runbook, `marker_verified()` + the selection loop): a stamp is
+eligible **only if** its `.sig` is present (exactly 64 bytes) **and** verifies under the pinned `backup-verify.pub`
+keyring **and** the manifest's self-declared key-id matches the verifying key **and** the manifest's stamp/object
+keys match the candidate **and** both manifest digests match the re-hashed ciphertext objects — a missing,
+wrong-size, unparseable, or non-verifying signature (including against the un-replaced `REPLACE_WITH_` placeholder,
+rejected by content) is a **hard reject**, never "verify if present." That makes the "marker present but
+sig-upload failed" degraded state fail closed. The keyring is **split per PEM block and each tried** (so a
+current+previous rotation file works — `openssl pkeyutl -verify` reads only the first block of a file), and the
+restore host's `openssl` is **preflighted** for Ed25519 `-rawin` (OpenSSL ≥3.0) so a LibreSSL host aborts legibly
+instead of fail-closing on every candidate and masquerading as data loss. The placeholder, a zero-block keyring,
+and a `-rawin`-incapable openssl are **FATAL** (operator misconfig — every candidate would fail); a single
+candidate failing signature/digest is **skip-and-continue** (loud), so attacker junk shadowing a genuine older
+locked version is walked past, not fatal.
 
 This uses a cryptographic primitive (Ed25519) **outside `packages/crypto`**, so it must clear invariant #4
 explicitly. It does — and not as a new judgement, but under the **already-ratified precedent** for
@@ -226,16 +238,22 @@ never lands on the host — is the tracked upgrade, deferred as enterprise-grade
   storage for that whole period with no recourse (even Backblaze can't unlock it), mitigated by pinning the
   default to **35 days** in the runbook and a verify-by-hand step. (c) **A shadowed recovery is staler** — junk
   current versions push the newest *valid* pair older, but never make it unrecoverable; `OnFailure` alerting
-  surfaces the anomaly. (d) **No backup authenticity yet** — age-to-public-key is confidentiality only, so a
-  compromised `writeFiles` key can forge a structurally-valid version; recovery currently anchors on the
-  immutable B2 upload time (`COMPROMISE_BEFORE` cutoff), which requires the operator to know the compromise
-  window. **Signed backups** (a signature the B2 key can't forge) close this — now mostly in place: the signing
-key is provisioned (slice 1) and **the worker now signs each run (slice 2)** (see the §invariant-4 boundary
-section above). This residual flips to **closed for the B2-key threat** once slice 3's restore-time verification
-is live. Two slice-2 sub-notes: the signature binds **SHA-256 digests**, not raw bytes — substituting a forged
-object under a signed digest needs a second-preimage on SHA-256 (~256-bit), not a concern at this level; and the
-manifest's key-id (DER-pubkey SHA-256) is **advisory** for slice 3's keyring selection (the signature is the
-actual check, never the self-declared id).
+  surfaces the anomaly. (d) **Backup FORGERY by the B2 key — CLOSED (signed backups complete, slice 3).** The
+  worker signs each run with an Ed25519 key the bucket-writer lacks (slices 1–2) and **restore now verifies that
+  signature and re-hashes both objects against the signed digests before trusting a candidate** (see the
+  §invariant-4 boundary section above); a forged dump no longer verifies, so restore rejects it. A compromised
+  `writeFiles` key can still *upload* age-ciphertext, but it can no longer pass it off as genuine. Sub-notes: the
+  signature binds **SHA-256 digests**, not raw bytes — substituting a forged object under a signed digest needs a
+  second-preimage on SHA-256 (~256-bit), not a concern at this level; the manifest's key-id (DER-pubkey SHA-256) is
+  **advisory** keyring-selection only (the signature is the actual check, never the self-declared id). **What
+  signatures do NOT close — ROLLBACK (freshness).** A signature authenticates *provenance* ("our worker made
+  this"), not *freshness* ("this is the latest"): a genuine **old** signed pair verifies forever, so a `writeFiles`
+  attacker can replay a genuine pre-compromise pair as the current version and pass every signature/digest check.
+  The only anti-rollback anchor remains the immutable B2 upload time (`COMPROMISE_BEFORE` cutoff), which still
+  requires the operator to know the compromise window — signatures and the timestamp anchor are **orthogonal and
+  both required**. A **monotonic anti-rollback** mechanism (a freshness high-water-mark the `writeFiles` key can't
+  rewind — e.g. a separate WORM-keyed monotone counter checked at restore) is the tracked follow-up that would
+  close rollback without an operator-known window.
 - **No off-cloud copy.** Backups live in one B2 bucket/region. A second provider/region copy (3-2-1) is an
   enterprise follow-up.
 - **Docker-group membership grants in-container DB access.** PG has no published port; the host workers
