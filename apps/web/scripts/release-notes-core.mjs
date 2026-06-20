@@ -22,10 +22,17 @@ const GROUP_ORDER = ['New', 'Fixes'];
 
 const MAX_ITEMS = 12;
 
-/** Capitalize the first character only (keep acronyms like B2/CORS intact); trims surrounding whitespace. */
+/**
+ * Capitalize the first character only, trimming surrounding whitespace. Acronyms like B2/CORS mid-line are
+ * untouched (only the first char is changed), and a leading mixed-case product name (iOS, macOS, gRPC) is left
+ * as-is — if the first word already carries an uppercase letter, capitalizing would corrupt it (iOS → IOS).
+ */
 function capitalizeFirst(text) {
   const t = (text ?? '').trim();
-  return t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+  if (!t) return t;
+  const firstWord = t.split(/\s/, 1)[0] ?? '';
+  if (/[A-Z]/.test(firstWord)) return t;
+  return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
 /**

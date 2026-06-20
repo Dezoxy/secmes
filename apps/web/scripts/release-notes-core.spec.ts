@@ -58,6 +58,18 @@ describe('buildReleaseEntry', () => {
     });
   });
 
+  it('capitalizes an all-lowercase first word but preserves a leading mixed-case product name', () => {
+    const entry = buildReleaseEntry({
+      version: 'v1',
+      date: 'd',
+      subjects: ['feat: iOS install prompt', 'fix: macOS notarization', 'fix: tidy logs'],
+    });
+    expect(entry?.groups).toEqual([
+      { label: 'New', items: ['iOS install prompt'] },
+      { label: 'Fixes', items: ['macOS notarization', 'Tidy logs'] },
+    ]);
+  });
+
   it('omits a group with no items (fixes-only release)', () => {
     const entry = buildReleaseEntry({ version: 'v1', date: 'd', subjects: ['fix: only a fix'] });
     expect(entry?.groups).toEqual([{ label: 'Fixes', items: ['Only a fix'] }]);
