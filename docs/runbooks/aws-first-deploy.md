@@ -114,16 +114,20 @@ ARGUS_KEY_VAULT=argus-exp-kv-4ad322 ./infra/aws/scripts/populate-keyvault.sh --r
 # or restore is impossible. (age.key holds the AGE-SECRET-KEY line; restore writes it back and runs `age -i`.)
 # `-o none --only-show-errors`: `az keyvault secret set` echoes the secret VALUE by default (Azure CLI
 # #20858), which would print the age private key to your terminal scrollback / run logs — suppress it.
-# Upload the private key, then VERIFY it before deleting the local copy. The shred is gated on BOTH the upload
-# succeeding AND a read-back showing a usable age key — shredding age.key after a failed/partial upload would
-# destroy the only key that can decrypt your backups. grep -q reads the value over a pipe and prints nothing;
-# `-o none` keeps the set from echoing the key. Keep an offline password-manager copy as a break-glass if you like.
-if az keyvault secret set --vault-name argus-exp-kv-4ad322 --name argus-backup-age-key --file age.key --only-show-errors -o none \
+# First confirm the local private key's PUBLIC half equals the recipient backups are encrypted to — a mismatched
+# pair means backups go to a key whose private half you never stored (unrecoverable). Then upload and VERIFY
+# before deleting the local copy: the shred is gated on the keypair matching AND the upload succeeding AND a
+# read-back showing a usable age key, so a wrong/failed upload can't leave you with only an unusable key.
+# `-o none`/grep-over-pipe keep the key off the terminal; keep an offline password-manager copy as a break-glass.
+pub_local=$(age-keygen -y age.key)                                                      # derive public key from the private key
+recipient=$(gh api repos/Dezoxy/secmes/actions/variables/BACKUP_AGE_RECIPIENT --jq .value 2>/dev/null)
+if [ -n "$pub_local" ] && [ "$pub_local" = "$recipient" ] \
+   && az keyvault secret set --vault-name argus-exp-kv-4ad322 --name argus-backup-age-key --file age.key --only-show-errors -o none \
    && az keyvault secret show --vault-name argus-exp-kv-4ad322 --name argus-backup-age-key \
         --query value -o tsv --only-show-errors | grep -q 'AGE-SECRET-KEY'; then
-  shred -u age.key 2>/dev/null || rm -P age.key   # uploaded AND read back OK → remove local copy (rm -P = BSD/macOS overwrite-delete)
+  shred -u age.key 2>/dev/null || rm -P age.key   # keypair matches + uploaded + read back OK → remove local copy
 else
-  echo "FATAL: argus-backup-age-key upload/verify failed — KEEP age.key and retry before deleting it"
+  echo "FATAL: age keypair mismatch or upload/verify failed — KEEP age.key; do NOT tag until BACKUP_AGE_RECIPIENT == age-keygen -y age.key"
 fi
 
 az keyvault network-rule remove --name argus-exp-kv-4ad322 --ip-address "$MYIP"   # re-tighten when done
