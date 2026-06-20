@@ -8048,10 +8048,10 @@
         "properties": {
           "displayName": {
             "type": "string",
-            "description": "new display name (1–64 chars, trimmed)",
-            "minLength": 1,
-            "maxLength": 64,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+            "description": "new display name: 2–32 chars after trimming; letters, numbers, spaces, and . _ - ' only",
+            "minLength": 2,
+            "maxLength": 32,
+            "pattern": "^[A-Za-z0-9 ._'-]+$"
           },
           "avatarSeed": {
             "type": "string",

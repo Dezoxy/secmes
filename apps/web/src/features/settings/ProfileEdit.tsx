@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { User } from 'lucide-react';
+import { displayNameSchema } from '@argus/contracts';
 import { updateProfile } from '../../lib/api';
 import { useAuth } from '../auth/AuthContext';
 
@@ -24,13 +25,20 @@ export function ProfileEdit() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const name = displayName.trim();
-    if (!name || busy) return;
+    if (busy) return;
+    // Validate against the shared policy (Latin-only, 2–32 chars) before hitting the API, so the
+    // user sets a clear reason rather than a generic "save failed" from the server's 400.
+    const parsed = displayNameSchema.safeParse(displayName);
+    if (!parsed.success) {
+      setSaved(false);
+      setError(parsed.error.issues[0]?.message ?? 'Invalid display name.');
+      return;
+    }
     setError(null);
     setSaved(false);
     setBusy(true);
     try {
-      await updateProfile({ displayName: name });
+      await updateProfile({ displayName: parsed.data });
       await refreshProfile();
       setSaved(true);
     } catch {
@@ -60,7 +68,7 @@ export function ProfileEdit() {
               setDisplayName(e.target.value);
               setSaved(false);
             }}
-            maxLength={64}
+            maxLength={32}
             placeholder="Your name…"
             disabled={busy}
             className="w-full rounded-xl border border-white/5 bg-[#1a1a26] px-4 py-2.5 text-sm text-white placeholder-white/30 outline-none transition-colors focus:border-purple-500/50 disabled:opacity-50"
