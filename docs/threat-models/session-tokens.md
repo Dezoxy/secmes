@@ -169,12 +169,19 @@ its outstanding access token keeps working on **normal (non-admin) routes** unti
   revoked caller is rejected with 400 **before** any KeyPackage is read, claimed, or deleted —
   enforced by `key-directory.service.spec.ts` (`describe('revoked caller cannot mutate the key
   directory (ST-1)')`). This also restores the broader `auth-tenant-context.md` §6 claim that
-  member-revoke is neutralized on the key-directory paths. The generic ≤10-min window on ordinary
-  *read* routes (below) remains the accepted part of this residual.
+  member-revoke is neutralized on the key-directory paths. **This PR scopes the close to the
+  key-directory mutations only** — the ≤10-min window still applies to other **non-admin routes**, both
+  reads and **non-key-directory mutations** that resolve the caller without a `status = 'active'`
+  predicate: e.g. `PushService.upsert` / `remove` (`apps/api/src/push/push.service.ts` — push-subscription
+  metadata, self-scoped to the caller's own device) and `GdprService.resolveUserId`
+  (`apps/api/src/users/gdpr.service.ts` — but account *self*-delete removes the binding, which is the
+  neutralizing action, not an exploit). Those remain the accepted part of this residual; a follow-up may
+  extend the `requireUser` guard to them.
 
-Revisit alongside any future DPoP / token-introspection work; until then, on ordinary (non-admin, read)
-routes the 10-minute TTL is the control and this is a documented, accepted residual — the key-directory
-*mutation* paths are now actively revocation-checked via `requireUser` (above).
+Revisit alongside any future DPoP / token-introspection work; until then, on ordinary **non-admin** routes
+(reads and the non-key-directory mutations noted above) the 10-minute TTL is the control and this is a
+documented, accepted residual — only the key-directory *mutation* paths are now actively
+revocation-checked via `requireUser` (above).
 
 ---
 
