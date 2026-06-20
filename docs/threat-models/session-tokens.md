@@ -5,8 +5,13 @@
 ## Scope
 
 Introduces EdDSA JWTs minted by the API itself, plus rotating HttpOnly refresh tokens backed by an
-`auth_sessions` table. The API continues to accept Zitadel-issued tokens (dual-accept mode) until
-Phase 6 removes OIDC.
+`auth_sessions` table.
+
+> **Update (2026-06-17, #223 / `phase-6-decommission.md`):** the dual-accept transition is over.
+> **Phase 6 removed OIDC**, so `AuthService.verify()` now accepts **only** the self-minted argus
+> EdDSA token — the Zitadel JWKS fallback was deleted (`auth.service.ts`). The "dual-accept" and
+> "Zitadel" passages below are retained for the historical rationale but **no longer describe a
+> live path**; the argus-EdDSA half is exactly what ships today.
 
 ---
 
@@ -26,10 +31,11 @@ following reasons:
    the signing key so it can assert its own identity — the server is *supposed* to hold this key.
    It never touches a message key, a session key, or any content the server is forbidden to see.
 
-3. **This extends an already-ratified exception.** `auth.service.ts` already uses `jose`'s
-   `jwtVerify` for Zitadel JWKS validation, explicitly cleared in
-   `docs/threat-models/auth-tenant-context.md:35`. Phase 1 adds the *signing* direction of the same
-   library, for the same trust domain (server auth infrastructure).
+3. **This extends an already-ratified exception.** `auth.service.ts` uses `jose`'s `jwtVerify` to
+   verify the access token — at Phase 1 this validated both the argus EdDSA token and (in dual-accept
+   mode) Zitadel JWKS, cleared in `docs/threat-models/auth-tenant-context.md`; since #223 it verifies
+   the argus EdDSA token only. Phase 1 added the *signing* direction of the same library, for the same
+   trust domain (server auth infrastructure).
 
 4. **The enforcing Semgrep rule (`argus-crypto-only-in-crypto-package`, `.semgrep/argus.yml:18-27`)
    is a regex allowlist** matching `crypto.subtle|createCipheriv|createHmac|pbkdf2|scrypt|tweetnacl|libsodium`.
@@ -55,6 +61,10 @@ Call-site comments in the affected files point here.
 ---
 
 ## Dual-accept `verify()` — downgrade surface analysis
+
+> ⚠️ **HISTORICAL (#223).** Dual-accept was removed in Phase 6 — `verify()` now runs the **argus
+> path only**; there is no Zitadel fallback. The analysis below explains why the *former* dual path
+> was downgrade-safe and is kept for that record.
 
 `auth.service.ts verify()` tries our token first, then Zitadel as a fallback.
 
@@ -124,6 +134,51 @@ already-rotated token.
 
 This forces both the legitimate user and the attacker to re-authenticate, eliminating any window
 the attacker has with the stolen token chain.
+
+---
+
+## Revoked-session access-token window (ST-1 — accepted residual)
+
+Refresh-token revocation (above) is enforced on the **refresh** path, but a session's already-minted
+**access** token is a **stateless EdDSA JWT** — `AuthService.verify()` (`auth.service.ts`) checks only
+signature / `iss` / `aud` / `exp` and the `user_tenant_index` lookup; it does **not** read
+`auth_sessions.revoked_at`. So after a session is revoked (logout, admin action, family revocation),
+its outstanding access token keeps working on **normal (non-admin) routes** until it expires.
+
+- **Bound:** the access-token TTL is **10 minutes** (`session-token.service.ts` `mintAccessToken()`
+  `.setExpirationTime('10m')`). The exposure window is therefore ≤10 min and self-closing — no new
+  access token can be minted, because the refresh path *is* revocation-checked (reuse detection +
+  non-active-user block).
+- **Admin routes close it immediately:** only `AdminGuard` (`admin.guard.ts`) re-reads
+  `auth_sessions.revoked_at` per request and 401s a revoked session — so the higher-value admin
+  surface has **no** window. The residual is confined to ordinary user routes.
+- **Why accepted (not a per-request denylist):** a stateful revocation lookup on every request trades
+  the dominant cost (a DB hit per call) against a residual already bounded by a short TTL; this mirrors
+  the in-window-replay decision in `auth-tenant-context.md` §6.
+- **Account-delete is fully neutralized (not part of this residual).** `gdpr.deleteAccount` removes the
+  `user_tenant_index` row, so `verify()`'s next lookup returns **unbound → 403** on every guarded route,
+  regardless of token validity.
+- **Member-revoke is only *partially* neutralized — so it *is* part of this residual.**
+  `TenantsService.revokeMember()` sets `users.status = 'revoked'` but does **not** delete the binding.
+  Routes that resolve the caller via `requireUser` (`messaging/membership.ts`, which filters
+  `status = 'active'`) reject the revoked member immediately — but the **key-directory mutation routes do
+  not**: `KeyDirectoryService.publish()` / `revokeUnclaimed()` resolve the caller by `auth.sub` /
+  `external_identity_id` with **no `status` predicate**, and `claim()` resolves only the *target*. So a
+  revoked member holding an unexpired access JWT can still mutate the key directory **for ≤10 min** until
+  the token expires (the refresh path already blocks a non-active user from minting a new one). **Blast
+  radius:** `publish` / `revokeUnclaimed` touch only the caller's **own** device packages — but
+  `claim(targetUserId)` resolves the target solely by `d.user_id = targetUserId`, with **no
+  caller==target and no caller-active check**, so a revoked member can also **consume any in-tenant
+  peer's one-time KeyPackages** (a bounded cross-user pool-drain: one package per claim, capped at the
+  30/min claim limit, each emitting a `keydir.key_package_claimed` audit row, and the target self-heals
+  via replenishment). All of it is bounded by the 10-min TTL and tenant-scoped (RLS — no cross-tenant
+  reach) — accepted for beta. **Code-side close (follow-up):** add a `status = 'active'` caller check (or
+  route caller resolution through `requireUser`) on the key-directory mutations
+  (`publish`/`claim`/`claimAll`/`revokeUnclaimed`). This **refines** the broader
+  `auth-tenant-context.md` §6 claim that member-revoke is neutralized on *every* path — it is not.
+
+Revisit alongside any future DPoP / token-introspection work; until then the 10-minute TTL is the
+control and this is a documented, accepted residual.
 
 ---
 

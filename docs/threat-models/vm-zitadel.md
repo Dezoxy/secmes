@@ -1,11 +1,19 @@
 # Threat model: self-hosted Zitadel on the VM (checkpoint 9)
 
-> Status: **DRAFT for ratification.** Stands up the production identity provider (roadmap Phase 1,
-> checkpoint 9): the `zitadel` + `zitadel-db` + `zitadel-login` services in `compose.prod.yaml`, the
-> `auth.4rgus.com` ingress through Caddy, and the masterkey/DB secrets from Key Vault. **Build-only** —
-> this defines the IdP as code; nothing is deployed (`vars.ENABLE_DEPLOY` off). Extends `vm-ingress.md`
-> (the single-origin topology) and `auth-tenant-context.md` (how the API consumes the issued JWT).
-> The local stand-in is `compose.yaml` + `infra/local/zitadel/` (see `docs/local-auth.md`).
+> ⚠️ **SUPERSEDED — WHOLESALE (2026-06-17, #223 / `phase-6-decommission.md`).** Zitadel was never
+> deployed and has been **removed** from prod + dev compose, the Caddy ingress (`auth.4rgus.com` is
+> gone), the secret-fetch set (the masterkey / DB-password / login-PAT secrets left the mandatory
+> fetch list), the deploy script, and Terraform — reclaiming ~1.8 GB RAM so the stack fits the EC2
+> box. Auth is **passkey-only** with a **self-minted argus EdDSA session token** (no IdP, no OIDC, no
+> JWKS); see `session-tokens.md`, `passkey-auth.md`, and `phase-6-decommission.md`. This entire note
+> is retained only as the historical IdP-as-code design; **nothing below describes a shipped or
+> planned control.**
+
+> Status: **HISTORICAL (never deployed; removed in #223).** Originally stood up the production identity
+> provider (roadmap Phase 1, checkpoint 9): the `zitadel` + `zitadel-db` + `zitadel-login` services in
+> `compose.prod.yaml`, the `auth.4rgus.com` ingress through Caddy, and the masterkey/DB secrets from Key
+> Vault. **Build-only** — it defined the IdP as code; it was never deployed (`vars.ENABLE_DEPLOY` off)
+> and was then deleted entirely.
 
 ## 1. Feature & data flow
 

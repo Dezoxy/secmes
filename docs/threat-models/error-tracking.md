@@ -18,7 +18,7 @@ API request → handler throws / explicitly-reported error
                          ↳ SENTRY_DSN_FILE empty/unset = NO-OP (nothing sent, the default until arming)
 
 GlitchTip topology (Slice B, compose.prod.yaml):
-  glitchtip-db    — dedicated postgres:16-alpine (separate cluster from argus app DB, same isolation as zitadel-db)
+  glitchtip-db    — dedicated postgres:16-alpine (separate cluster from the argus app DB — its own volume + internal-only network, no published port)
   glitchtip       — Django web + gunicorn on :8000; runs migrate on startup; depends on glitchtip-db healthy
   glitchtip-worker — Celery worker + beat (async event ingest, cleanup, notifications)
   Caddy           — host-splits glitchtip.4rgus.com:8080 → glitchtip:8000 (same pattern as grafana.4rgus.com)

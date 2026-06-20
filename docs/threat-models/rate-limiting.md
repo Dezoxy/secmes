@@ -31,11 +31,13 @@ noted in the constants (Redis is already wired for the realtime bus).
 missing/invalid token before the throttler is reached. So it bounds *authenticated* abuse (the app-specific
 risks: pool drain, storage flood) — it does **not** see, and does not bound, **unauthenticated** request
 floods. That is deliberate: a pre-auth IP throttle can't tell an authed user from an attacker before auth
-runs, so it would penalise legitimate NAT'd office traffic; and this API has **no password/login endpoint**
-(auth is OIDC-delegated to Zitadel), so "pre-auth brute-force" is really a generic HTTP flood against a cheap
-token-rejection path. Unauthenticated-flood protection is therefore delegated to the **edge** (Caddy
-`rate_limit` / WAF), part of the VM deploy track (§6). The `ip:` key is only a degradation default so the
-guard never crashes if `req.auth` is somehow absent.
+runs, so it would penalise legitimate NAT'd office traffic; and the heavy *unauthenticated* auth
+endpoints that do exist (passkey register/redeem + the WebAuthn ceremonies — auth is **passkey-only**
+since #223; there is no IdP and no password endpoint) carry their own per-route caps
+(`SENSITIVE_LIMITS.passkeyRedeem`, see `registration-and-tenancy.md` T8), so the remaining pre-auth
+surface is a generic HTTP flood against a cheap token-rejection path. Unauthenticated-flood protection
+is therefore delegated to the **edge** (Cloudflare, §7). The `ip:` key is only a degradation default so
+the guard never crashes if `req.auth` is somehow absent.
 
 Per-route caps (one source of truth: `rate-limit.constants.ts → SENSITIVE_LIMITS`):
 
@@ -44,8 +46,6 @@ Per-route caps (one source of truth: `rate-limit.constants.ts → SENSITIVE_LIMI
 | `POST /users/:id/key-package/claim` | 30 | intra-tenant KeyPackage pool drain (key-directory §3) |
 | `POST /devices/me/key-packages` (publish) | 12 | KeyPackage storage flood (key-directory) |
 | `POST /devices/me/key-packages/revoke` | 12 | own-device delete hammering (key-directory) |
-| `PUT /backups/me` (store) | 12 | sealed-backup write/churn abuse (key-backup) |
-| `GET /backups/me` (fetch) | 20 | repeated-restore exfil / brute-force (key-backup §49) |
 | `POST /attachments` (upload grant) | 30 | upload/storage abuse (encrypted-attachments) |
 | `POST /attachments/download-url` (download grant) | 60 | presigned-URL minting churn; looser than upload — read-only, membership-gated, no storage write |
 
@@ -117,13 +117,14 @@ Everything else rides the 120/min baseline. Two row-creation paths are **conscio
 
 - **Unauthenticated request floods are not bounded by this guard.** Because `JwtAuthGuard` runs first and
   rejects a missing/invalid token before the throttler, failed-auth requests never reach it — so the app
-  layer does not throttle the pre-auth/JWKS-verification path. This is an accepted, deliberate boundary: a
-  pre-auth IP throttle would penalise legitimate NAT'd traffic, and the API has no password endpoint to
-  brute-force (OIDC-delegated). **Resolution:** unauthenticated-flood throttling is the **edge's** job —
-  Caddy `rate_limit` (per-IP, connection-level) / WAF, landing with the VM deploy track. If app-layer
-  coverage is ever needed, the correct hook is the **auth-failure path** (count only failed verifies by IP),
-  not a blanket pre-auth IP guard. Token verification itself is cheap (jose, cached JWKS, no DB), so the
-  un-throttled surface is a generic HTTP flood, not a credential oracle.
+  layer does not throttle the pre-auth token-verification path. This is an accepted, deliberate boundary: a
+  pre-auth IP throttle would penalise legitimate NAT'd traffic, and the heavy pre-auth auth endpoints
+  (passkey register/redeem + WebAuthn ceremonies) carry their own per-route caps. **Resolution:**
+  generic unauthenticated-flood throttling is the **edge's** job — Cloudflare WAF / rate-limit rules (§7).
+  If app-layer coverage is ever needed, the correct hook is the **auth-failure path** (count only failed
+  verifies by IP), not a blanket pre-auth IP guard. Token verification itself is cheap (jose EdDSA verify
+  against a locally-held key, no remote JWKS, no DB on the failure path), so the un-throttled surface is a
+  generic HTTP flood, not a credential oracle.
 - **In-memory counters reset on restart / aren't shared across instances.** A pod restart clears windows, and
   a future scale-out (>1 API process) would give each its own counters (effective limit ×N). Acceptable for
   the single-VM beta; the upgrade is the **Redis store** (`@nestjs/throttler` storage adapter) — Redis is
@@ -144,10 +145,17 @@ Everything else rides the 120/min baseline. Two row-creation paths are **conscio
 ## 7. Edge rate-limiting (Cloudflare) — the unauthenticated surface (COMP-2)
 
 The app throttler (§1–§6) only bounds **authenticated** abuse. The **unauthenticated surface** — the pre-auth
-WebSocket handshake, `POST /webhooks/stripe`, the OIDC login/token round-trip, and tenant **invite-accept**
-before the caller is tenant-bound — is bounded at the **edge**. Ingress is **Cloudflare Tunnel**, so the edge
-is **Cloudflare, not Caddy** (the in-repo Caddyfile has no `rate_limit` — that Caddy module isn't in our
-build; earlier "Caddy `rate_limit`" mentions above are superseded by this section).
+WebSocket handshake and the **passkey auth endpoints** (invite-code redemption + the WebAuthn register/
+authenticate ceremonies) that run **before** the caller is tenant-bound — is bounded at the **edge**.
+Ingress is **Cloudflare Tunnel**, so the edge is **Cloudflare, not Caddy** (the in-repo Caddyfile has no
+`rate_limit` — that Caddy module isn't in our build; earlier "Caddy `rate_limit`" mentions above are
+superseded by this section).
+
+> **Single origin since #223.** OIDC/Zitadel was decommissioned (`phase-6-decommission.md`), so there is
+> **no `auth.4rgus.com` zone**, no Zitadel console/Login-V2 alias, and **no Stripe webhook** endpoint
+> (billing was removed). The former rules #2 (`/webhooks/stripe`) and #5 (`auth.4rgus.com`
+> login/`oauth/v2/token`), and the two-zone `/api/*` disambiguation, are deleted. All traffic is the one
+> `4rgus.com` origin; the auth surface to protect is now the passkey endpoints on `/api/auth/*`.
 
 - **Closed internal beta:** Cloudflare's **always-on L3/4 DDoS protection** (automatic) is sufficient — no
   manual rules required to start.
@@ -155,26 +163,27 @@ build; earlier "Caddy `rate_limit`" mentions above are superseded by this sectio
   (Security → WAF → Rate limiting rules). They are **dashboard-managed** (like the Tunnel ingress), so this
   table is their authoritative spec — there is no repo IaC for them.
 
-Apply per **client IP**, each rule scoped to the **zone** shown. **Important:** `/api/*` exists on *both*
-zones but means different things — on the **app** zone it is our API (rule #3); on the **auth** zone it is the
-Zitadel console / Login-V2 alias (Caddyfile routes `auth.4rgus.com` `/api/*` → Zitadel). Do **not** apply
-rule #3 to the auth zone or it throttles Zitadel's own console; rule #5 governs the auth zone.
+Apply per **client IP** on the single `4rgus.com` zone (the edge sees the `/api` prefix — Caddy strips it
+only internally):
 
-| # | Zone | Match | Limit / IP | Action | Closes |
-|---|---|---|---|---|---|
-| 1 | `4rgus.com` | `uri.path starts_with "/ws"` | 30 / min | Managed Challenge | pre-auth WebSocket connect flood — each socket holds a `ConnState` + 10s auth timer in the gateway |
-| 2 | `4rgus.com` | `uri.path eq "/webhooks/stripe"` | 60 / min | Block (1 min) | webhook flood (legit Stripe volume is low; still signature-gated + now idempotent) |
-| 3 | `4rgus.com` | `uri.path starts_with "/api/"` | 600 / min | Managed Challenge | generic API flood on the cheap token-rejection path (well above any legitimate per-user burst) |
-| 4 | `4rgus.com` | `POST /api/tenants/invites/accept` (the edge sees the `/api` prefix — Caddy strips it only internally; order this rule ABOVE #3 so its tighter limit applies) | 10 / min | Block (5 min) | invite-token guessing before the caller is tenant-bound — complements the in-app per-user cap |
-| 5 | `auth.4rgus.com` | the login + `/oauth/v2/token` endpoints (incl. the `/api/*` Zitadel alias) | 30 / min | Managed Challenge | credential-stuffing / flood against Zitadel |
+| # | Match | Limit / IP | Action | Closes |
+|---|---|---|---|---|
+| 1 | `uri.path starts_with "/ws"` | 30 / min | Managed Challenge | pre-auth WebSocket connect flood — each socket holds a `ConnState` + 10s auth timer in the gateway |
+| 2 | `uri.path starts_with "/api/auth/register/" or uri.path starts_with "/api/auth/webauthn/"` (order ABOVE #3 so its tighter limit applies) | 30 / min | Block (5 min) | invite-code guessing + WebAuthn-ceremony flood on the **pre-tenant-bound** registration/login surface — complements the in-app per-route `passkeyRedeem` cap |
+| 3 | `uri.path starts_with "/api/"` | 600 / min | Managed Challenge | generic API flood on the cheap token-rejection path (well above any legitimate per-user burst) |
 
-**Do NOT enable Bot Fight Mode / Super Bot Fight Mode (or "Under Attack" mode) on `/api/*`, `/ws`, or
-`/webhooks/*`.** Those modes issue JS/managed challenges to *every* request, which non-browser clients cannot
-solve — it would break **Stripe webhooks** and the PWA's own programmatic `fetch`/WebSocket calls. If you use
-bot protection, scope it to browser-facing HTML routes only (or add a WAF/Bot-Management **skip** exception
-for those three path prefixes). The per-IP rate-limit rules above already gate abuse without challenging
-normal traffic. Keep "Under Attack" mode strictly as break-glass, and even then exempt the webhook + API/WS
-paths.
+**Scope of rule #2 — deliberately narrow.** It covers only `/api/auth/register/*` and `/api/auth/webauthn/*`
+(the unauthenticated, guessable, pre-tenant-bound surface). It intentionally does **not** blanket all of
+`/api/auth/*`: the refresh path (`/api/auth/session/refresh`) carries its own in-app cap (60/min) and must
+not be edge-throttled *below* it; `auth/session/logout` is benign; and `auth/breakglass/login` is already
+gated at the edge by **Cloudflare Access** (`admin-access-gating.md`). Those ride the generic #3 limit.
+
+**Do NOT enable Bot Fight Mode / Super Bot Fight Mode (or "Under Attack" mode) on `/api/*` or `/ws`.**
+Those modes issue JS/managed challenges to *every* request, which non-browser clients cannot solve — it
+would break the PWA's own programmatic `fetch`/WebSocket calls. If you use bot protection, scope it to
+browser-facing HTML routes only (or add a WAF/Bot-Management **skip** exception for those two path
+prefixes). The per-IP rate-limit rules above already gate abuse without challenging normal traffic. Keep
+"Under Attack" mode strictly as break-glass, and even then exempt the API/WS paths.
 
 **In-repo follow-up (before public, code):** add a **pre-auth connection cap** to the realtime gateway —
 bound the number of concurrent *un-authenticated* sockets (and/or shorten the first-frame auth timeout) so a

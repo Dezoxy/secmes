@@ -9,7 +9,7 @@
 ```
 D2 (new device)                       Server (crypto-blind transport)          D1 (existing device, online once)
 ───────────────                       ───────────────────────────────          ──────────────────────────────────
-1. D2 signs in (OIDC) — same userId
+1. D2 signs in (passkey) — same userId
 2. D2 generates MLS device keys:
    identity = userId:newDeviceUuid
    (CSPRNG deviceUuid, client-minted)
@@ -51,7 +51,7 @@ For **new conversations created after D2 is enrolled**: D1's `confirmCreate`/`co
 ## 3. Threats (STRIDE-lite)
 
 ### T1 — Rogue-device enrollment via stolen session (CRITICAL)
-**Threat:** An attacker with a stolen bearer token (from an OIDC replay, XSS cookie theft, etc.) registers a rogue device, which D1 approves, joining every conversation Alice is in. Reads all future traffic.
+**Threat:** An attacker with a stolen bearer token (from a stolen refresh cookie, XSS, etc.) registers a rogue device, which D1 approves, joining every conversation Alice is in. Reads all future traffic.
 
 **Mitigations (layered):**
 1. **Approval requires a proof-of-possession from D1** (`argus-enroll:v1\n${D1id}\n${enrollId}` signed by D1's Ed25519 private key). A session token alone cannot forge this — it doesn't hold D1's key. The server verifies the proof against D1's published signature public key.
@@ -82,7 +82,7 @@ For **new conversations created after D2 is enrolled**: D1's `confirmCreate`/`co
 2. **`expires_at`** — pending enrollments expire after 15 minutes; the pending list seen by D1 is bounded.
 3. **Enrollment is scoped to the caller's own user** — the server resolves `requesting_device_id` by `(userId, signaturePublicKey)` match, so a different authenticated user cannot create an enrollment for Alice's account. An in-tenant attacker can only flood their *own* enrollment queue.
 
-**Residual:** An attacker with the victim's OIDC credentials (full account takeover) could register many devices. But at that point they control the account entirely; enrollment spam is the least of the concerns. Bounded by rate-limit + `expires_at` GC; no unbounded storage growth.
+**Residual:** An attacker with the victim's passkey / full account access (account takeover) could register many devices. But at that point they control the account entirely; enrollment spam is the least of the concerns. Bounded by rate-limit + `expires_at` GC; no unbounded storage growth.
 
 ### T5 — History-expectation mismatch (UX, not security)
 **Threat (UX):** A user sees an empty transcript on D2 after linking and believes messages were lost.

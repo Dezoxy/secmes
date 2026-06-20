@@ -2,6 +2,12 @@
 
 > Covers the code-redemption + WebAuthn registration ceremony and the DEFAULT_TENANT_ID tenancy model.
 > Read alongside `passkey-auth.md` (authentication ceremony) and `session-tokens.md` (token minting).
+>
+> **Note (post-#223):** this note was written while passkey users coexisted with legacy OIDC users.
+> The OIDC-coexistence references below (T6 "existing OIDC tenants", T7's "deferred to Phase 6" email
+> null-out, T9's Zitadel-sub example) are now **historical** — Phase 6 removed OIDC, nulled all stored
+> `email`, and purged legacy non-`argusid:` subjects (`phase-6-decommission.md`). The passkey
+> registration ceremony itself (T1–T5, T8) is current and unchanged.
 
 ## Scope
 

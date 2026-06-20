@@ -6,7 +6,7 @@
 
 | # | Invariant | How it's met |
 |---|-----------|-------------|
-| 1 | Server is crypto-blind | No message content, no key material, no ciphertext blobs returned. Devices endpoint returns only public-key prefix (12 chars, non-reversible identifier). Audit endpoint returns event types and OIDC subs — metadata only. |
+| 1 | Server is crypto-blind | No message content, no key material, no ciphertext blobs returned. Devices endpoint returns only public-key prefix (12 chars, non-reversible identifier). Audit endpoint returns event types and session subjects (`argusid:<id>`) — metadata only. |
 | 2 | Never log plaintext/keys/tokens | `device.revoked` audit event records only `actorSub` + `tenantId`. No presigned URLs in responses. IP is returned to the **admin of the same tenant** — this is intentional (security/forensics). |
 | 3 | tenant_id + RLS on every table | All queries run inside `withTenant(auth.tenantId, …)` which sets `app.tenant_id`; FORCE RLS on `devices` and `audit_events` provides a second enforcement layer independent of application logic. |
 | 4 | No hand-rolled crypto | Not applicable — no crypto in this feature. |
@@ -29,8 +29,8 @@
 ## Audit log exposure
 
 - The `ip` column (inet) is shown to tenant admins for forensic purposes. It is not exposed to members or external parties.
-- `actorSub` is the verified OIDC subject (an opaque identifier, not a session token).
-- `actorDisplayName` is resolved via LEFT JOIN on `users.external_identity_id` within the same RLS context — a deleted/revoked user resolves to `null`.
+- `actorSub` is the verified session subject (`argusid:<id>`, an opaque identifier, not a session token).
+- `actorDisplayName` is resolved via LEFT JOIN matching either `users.external_identity_id` or `'argusid:'||argus_id` against `actorSub`, within the same RLS context — a deleted/revoked user resolves to `null`.
 - Cursor encoding: `base64url(JSON({ createdAt, id }))` — no secret data, tamper-tolerant (a malformed cursor returns from the beginning).
 
 ## Rate limits
