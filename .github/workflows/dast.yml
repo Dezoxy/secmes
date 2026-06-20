@@ -3,8 +3,11 @@ name: dast
 # The 42Crunch conformance scan is SELF-HOSTED: it boots the API + Postgres + Redis in the runner and
 # scans localhost via 42Crunch's free (freemium) DAST endpoint — no staging deployment or paid token needed.
 on:
-  schedule:
-    - cron: '0 2 * * *' # nightly
+  # Nightly schedule disabled until the first deploy: pre-deploy there's no STAGING_URL for the ZAP job to
+  # hit, so the cron just burns Actions minutes. Run on demand with `gh workflow run dast.yml`; re-enable the
+  # schedule once a deployed target exists.
+  # schedule:
+  #   - cron: '0 2 * * *' # nightly
   workflow_dispatch:
 
 permissions:
