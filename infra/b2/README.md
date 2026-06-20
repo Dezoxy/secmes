@@ -215,26 +215,33 @@ untested backup is not a backup.
 
 ### 6. Verify by hand — the lock actually bites
 
-**Do NOT "prove" the lock by deleting with the re-minted key** — that key has no `deleteFiles`, so it returns
-`AccessDenied` whether or not Object Lock is on. A no-delete-key denial is a FALSE positive: it would pass the
-cutover even if you forgot to enable retention, leaving backups deletable by the account/master/any
-delete-capable key. Prove the lock two ways instead:
+Two B2 facts make the naive check misleading: (1) the re-minted backup key has no `deleteFiles`, so deleting
+with it returns `AccessDenied` whether or not Object Lock is on (a FALSE positive that would pass cutover even
+if you forgot to enable retention); and (2) the bucket is now **versioned**, so a `delete-object` *without* a
+`--version-id` inserts a **delete marker and returns success** even under Compliance — it hides the object
+instead of failing, another false signal. So verify with a **separate verification credential** against a
+specific **version**:
 
 ```bash
 EP=https://s3.eu-central-003.backblazeb2.com ; BUCKET=db-q7m2z9x4v6n8p3k1
-KEY=$(aws s3api list-objects-v2 --endpoint-url "$EP" --bucket "$BUCKET" --prefix argus-db- \
-  --query 'reverse(sort_by(Contents,&LastModified))[0].Key' --output text)
+# Use a VERIFICATION credential — NOT the runtime backup key. `get-object-retention` needs the
+# `readFileRetentions` capability and the delete test needs `deleteFiles`; the minimal backup key has neither
+# (by design — least-privilege). Mint a TEMPORARY key with
+# `listFiles,readFiles,readFileRetentions,deleteFiles` (or use the account master key) for this check, and
+# REVOKE it right after.
+KV=$(aws s3api list-object-versions --endpoint-url "$EP" --bucket "$BUCKET" --prefix argus-db- \
+  --query 'reverse(sort_by(Versions,&LastModified))[0].[Key,VersionId]' --output text)
+KEY=$(echo "$KV" | cut -f1) ; VER=$(echo "$KV" | cut -f2)
 
-# (a) PRIMARY — read the object's retention directly (needs a key with readFiles, which the backup key has).
-#     This is the real proof the lock is applied, independent of any key's delete capability.
-aws s3api get-object-retention --endpoint-url "$EP" --bucket "$BUCKET" --key "$KEY"
+# (a) PRIMARY — read the retention of that VERSION (needs readFileRetentions). The real proof, independent of
+#     any delete capability.
+aws s3api get-object-retention --endpoint-url "$EP" --bucket "$BUCKET" --key "$KEY" --version-id "$VER"
 # EXPECT: {"Retention":{"Mode":"COMPLIANCE","RetainUntilDate":"<~35 days out>"}}.
 # If it errors with "no retention" / empty, the default retention is NOT applied — STOP and recheck steps 1–2.
 
-# (b) BELT-AND-SUSPENDERS — attempt the delete with a DELETE-CAPABLE key (e.g. a temporary key minted WITH
-#     deleteFiles, or the account master key). Under Compliance it must still fail.
-aws s3api delete-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$KEY"   # using the delete-capable key
-# EXPECT: a RETENTION error (e.g. AccessDenied citing object-lock / retention period), NOT a plain
-# missing-permission denial. A delete that SUCCEEDS means Object Lock is not in effect — STOP. Revoke the
-# temporary delete-capable key immediately after this check.
+# (b) BELT-AND-SUSPENDERS — try to delete that exact VERSION (not the bare key). Under Compliance it must fail.
+aws s3api delete-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$KEY" --version-id "$VER"
+# EXPECT: a RETENTION error (403 citing object-lock / retention). A *version* delete that SUCCEEDS means the
+# lock is not in effect — STOP. (Without --version-id this would instead insert a delete marker and falsely
+# "succeed" — that is why we target the version.) Revoke the temporary verification key immediately after.
 ```
