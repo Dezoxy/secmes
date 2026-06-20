@@ -1,8 +1,9 @@
 # Nightly DB backup worker (checkpoint 49)
 
 Standalone VM worker that takes a **nightly logical backup** of the whole Postgres database, **encrypts it
-client-side**, and ships it to a **private EU Backblaze B2 bucket** — then prunes backups past the retention
-window. Runs natively on the VM via a **systemd timer** — no Node, no container.
+client-side**, and ships it to a **private EU Backblaze B2 bucket**. The bucket is **WORM** (B2 Object Lock —
+BKP-2): backups are immutable, the worker's key can't delete, and old backups are reaped by a server-side B2
+lifecycle rule, not by the worker. Runs natively on the VM via a **systemd timer** — no Node, no container.
 
 > Scope: this is a **logical** backup (`pg_dump`, daily granularity) — what the VM beta needs. Continuous
 > **PITR** (WAL archiving + base backups, restore to any second) is the enterprise-grade upgrade; noted in
@@ -19,8 +20,11 @@ window. Runs natively on the VM via a **systemd timer** — no Node, no containe
      (definitions + memberships, **no password hashes**), so a restore onto a fresh cluster has the roles the
      schema's RLS policies/grants reference.
    - `argus-db-<UTC>.dump.age` — `pg_dump --format=custom`: the database (compact, selective/parallel restore).
-3. Verifies each upload (PIPESTATUS + size floor), then **prunes** any backup older than `RETENTION_DAYS`
-   (default 30) — one list under the shared `argus-` prefix covers both families.
+3. Verifies each upload (PIPESTATUS + size floor). It does **not** prune: the backup bucket is **WORM** (B2
+   Object Lock, Compliance mode — BKP-2), and the backup key has **no delete capability**, so old backups are
+   reaped by a server-side **B2 lifecycle rule** (prefix `argus-`, ~35 days), not by this script. A
+   partial/corrupt or orphaned object can't be deleted either — it is left in place (age-ciphertext, leaks
+   nothing), reaped by the lifecycle rule and **skipped at restore** (size floor + timestamp pairing).
 4. Logs object keys / sizes / counts only — never a secret.
 
 ## Why client-side encryption (not just B2 SSE)
@@ -80,8 +84,10 @@ age-keygen -o argus-backup-age.key      # prints "Public key: age1..." to stderr
 ### 3. B2 bucket
 
 A **private** bucket (e.g. `db-q7m2z9x4v6n8p3k1`), separate from the attachment bucket, with SSE-B2 on as a
-second layer. A **lifecycle rule** matching `RETENTION_DAYS` is a good backstop in case the script's prune is
-ever skipped (defence-in-depth, like the attachment bucket).
+second layer **and B2 Object Lock (WORM) enabled** — see the operator runbook in
+[`infra/b2/README.md`](../b2/README.md). Under Object Lock the script no longer prunes; a **B2 lifecycle
+rule** (prefix `argus-`, ~35 days) is now the **primary** reaper (it defers to Object Lock, so it can never
+remove a still-locked backup), and the backup key is re-minted **without delete capability**.
 
 ## Install (on the VM)
 
@@ -100,8 +106,9 @@ sudo install -d /opt/argus/backup
 sudo install -m 0755 backup-db.sh /opt/argus/backup/
 sudo cp argus-db-backup.{service,timer} /etc/systemd/system/
 # Edit argus-db-backup.service: set S3_BUCKET, S3_ACCESS_KEY_ID (the key-id of the db-backups `argus-b2-app-key`
-# — a SEPARATE key from the attachment key; deploy.sh fills this from the B2_APP_KEY_ID var), AGE_RECIPIENT,
-# RETENTION_DAYS. The DB is
+# — a SEPARATE key from the attachment key, re-minted WITHOUT delete capability; deploy.sh fills this from the
+# B2_APP_KEY_ID var) and AGE_RECIPIENT. (No RETENTION_DAYS — retention is the bucket's Object Lock + a B2
+# lifecycle rule; see infra/b2/README.md.) The DB is
 # reached in-container via `docker compose exec` (COMPOSE_FILE/COMPOSE_PROJECT_NAME, no PGHOST), so the
 # user running the timer must be in the `docker` group (argus already is). Ensure `age` and AWS CLI v2 are
 # installed on the host; `pg_dump` runs inside the postgres container.
@@ -125,17 +132,47 @@ On a trusted host (NOT the backup VM — it must NOT hold the age private key):
 ```bash
 EP=https://s3.eu-central-003.backblazeb2.com ; BUCKET=db-q7m2z9x4v6n8p3k1
 
-# 1. Fetch the age private key from Key Vault (mode 0400). Then pick the latest DB object and its PAIRED
-#    roles object BY SHARED TIMESTAMP — never mix a newer roles dump with an older DB (each run writes both
-#    objects with the same stamp; a failed run leaves neither).
+# 1. Fetch the age private key from Key Vault (mode 0400).
 az keyvault secret show --vault-name <vault> --name argus-backup-age-key --query value -o tsv > age.key
 chmod 0400 age.key
-DB_KEY=$(aws s3api list-objects-v2 --endpoint-url "$EP" --bucket "$BUCKET" --prefix argus-db- \
-  --query 'sort_by(Contents,&LastModified)[-1].Key' --output text)
-STAMP=${DB_KEY#argus-db-}; STAMP=${STAMP%.dump.age}          # e.g. 20260608T023012Z
-GLOBALS_KEY="argus-globals-${STAMP}.sql.age"
-aws s3 cp "s3://$BUCKET/$GLOBALS_KEY" ./globals.sql.age --endpoint-url "$EP"
-aws s3 cp "s3://$BUCKET/$DB_KEY"      ./backup.dump.age --endpoint-url "$EP"
+
+# 1b. Pick the newest VALID backup pair — do NOT blindly take the newest argus-db-*.
+#     WORM (Object Lock) means a truncated/corrupt or orphaned object can no longer be deleted by the nightly
+#     script (its key has no delete capability), so a bad object can LINGER in the bucket until the lifecycle
+#     rule reaps it. The blind `sort_by(...)[-1]` would pick that bad object. Instead walk newest-first and
+#     accept the first DB object that (a) clears the 1024-byte size floor (same floor the worker enforces),
+#     (b) has its PAIRED argus-globals-* (same stamp, ≥64 B), and (c) decrypts (age STREAM auth rejects a
+#     mid-stream-truncated upload) with a valid TOC. Each good run writes both objects with one stamp, so an
+#     orphan globals (no matching db) is simply never selected.
+#     CAVEAT: `pg_restore --list` checks STRUCTURE, not completeness — a dump truncated *after* the TOC but
+#     still age-valid would pass here yet restore with missing trailing rows. This walk only cheaply rejects
+#     grossly-broken objects; the data-completeness test is the full restore drill below (step 3 + sanity
+#     check). If OnFailure has been firing for N nights, the newest VALID pair this walk lands on is N days
+#     stale — that staleness, not a wrong restore, is the real exposure (see "Denial of availability" in the
+#     threat model).
+rm -f backup.dump backup.dump.age globals.sql.age   # idempotent: clear any leftovers from a prior aborted run
+DB_KEY=""; STAMP=""
+while read -r cand; do
+  [[ -n "$cand" ]] || continue
+  sz=$(aws s3api head-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$cand" \
+    --query 'ContentLength' --output text 2>/dev/null || echo 0)
+  [[ "$sz" =~ ^[0-9]+$ && "$sz" -ge 1024 ]] || { echo "skip $cand (too small: ${sz}B)"; continue; }
+  st=${cand#argus-db-}; st=${st%.dump.age}                   # e.g. 20260608T023012Z
+  gk="argus-globals-${st}.sql.age"
+  gsz=$(aws s3api head-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$gk" \
+    --query 'ContentLength' --output text 2>/dev/null || echo 0)
+  [[ "$gsz" =~ ^[0-9]+$ && "$gsz" -ge 64 ]] || { echo "skip $cand (no paired roles object $gk)"; continue; }
+  # Decrypt + a structural smoke test. pg_restore --list reads the archive's TOC only — it never touches a DB.
+  aws s3 cp "s3://$BUCKET/$cand" ./backup.dump.age --endpoint-url "$EP" --only-show-errors
+  if ! age -d -i age.key backup.dump.age >backup.dump 2>/dev/null || ! pg_restore --list backup.dump >/dev/null 2>&1; then
+    echo "skip $cand (failed decrypt / pg_restore --list)"; rm -f backup.dump.age backup.dump; continue
+  fi
+  aws s3 cp "s3://$BUCKET/$gk" ./globals.sql.age --endpoint-url "$EP" --only-show-errors
+  DB_KEY="$cand"; STAMP="$st"; echo "selected $DB_KEY (roles: $gk)"; break
+done < <(aws s3api list-objects-v2 --endpoint-url "$EP" --bucket "$BUCKET" --prefix argus-db- \
+  --query 'reverse(sort_by(Contents,&LastModified))[].Key' --output text | tr '\t' '\n')
+[[ -n "$DB_KEY" ]] || { echo "FATAL: no valid backup pair found in $BUCKET"; exit 1; }
+# globals.sql.age + backup.dump.age are now the selected pair; backup.dump is already decrypted from step 1b.
 
 # 2. Roles FIRST (no passwords — re-applied from Key Vault in step 4). Connect to the maintenance DB.
 #    NOTE (found by the restore drill): no `-v ON_ERROR_STOP=1` here, on purpose — two globals lines can

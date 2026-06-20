@@ -448,6 +448,9 @@ install -m 0644 "$REPO_ROOT/infra/notify/argus-notify-failure@.service" /etc/sys
 # over-broad cross-bucket key — BKP-2): the backup worker → the db-backups key (B2_APP_KEY_ID + the
 # argus-b2-app-key secret it LoadCredentials); the cleanup worker → the attachment key (S3_ACCESS_KEY_ID + the
 # argus-s3-secret-access-key secret), the same key the api manages attachments with.
+# NB (BKP-2): the db-backups bucket is WORM (B2 Object Lock) and B2_APP_KEY_ID is a key re-minted WITHOUT
+# delete capability — do NOT re-add a retention prune to backup-db.sh or grant the key delete; reaping is a
+# B2 lifecycle rule (see infra/b2/README.md).
 sed -i "s|REPLACE_WITH_B2_KEY_ID|${B2_APP_KEY_ID}|" /etc/systemd/system/argus-db-backup.service
 sed -i "s|REPLACE_WITH_ATTACHMENT_KEY_ID|${S3_ACCESS_KEY_ID}|" /etc/systemd/system/argus-attachment-cleanup.service
 sed -i "s|REPLACE_WITH_AGE_PUBLIC_KEY|${BACKUP_AGE_RECIPIENT}|" /etc/systemd/system/argus-db-backup.service

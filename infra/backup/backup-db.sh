@@ -2,7 +2,16 @@
 # argus — nightly logical DB backup worker (VM deploy track, roadmap checkpoint 49). Standalone; runs on
 # the VM via a systemd timer (see argus-db-backup.{service,timer}). Each run ships TWO encrypted objects to a
 # private EU Backblaze B2 bucket — the cluster ROLES (so a restore onto a fresh cluster has the roles its
-# RLS policies/grants reference) and the database itself — then prunes backups past the retention window.
+# RLS policies/grants reference) and the database itself.
+#
+# The backup bucket is WORM (B2 Object Lock, Compliance mode — BKP-2): once written, an object cannot be
+# deleted or overwritten by anyone (not this key, not the account owner) until its retention expires. So this
+# script no longer prunes, and its key intentionally has NO delete capability. Retention/reaping is a
+# server-side B2 LIFECYCLE RULE (account-owner-managed, which a compromised host key cannot disable), and a
+# lifecycle delete defers to Object Lock — it can never remove a still-locked backup. A partial/corrupt or
+# orphaned object is therefore left in place (it is age-ciphertext garbage, leaks nothing); the lifecycle rule
+# reaps it after the window, and the restore runbook skips it (size floor + timestamp pairing). See
+# infra/b2/README.md (operator runbook) and docs/threat-models/db-backup.md.
 #
 # Security model:
 #   - Connects to Postgres as the least-privilege `argus_backup` role (migration 0015): READ-ONLY across all
@@ -50,8 +59,10 @@ export AWS_REGION="${S3_REGION:-eu-central-003}" # EU default (B2 ignores it for
 # in-container exit code propagates through `exec -T`, so the dump_upload PIPESTATUS checks still hold.
 pgx() { docker compose exec -T postgres "$@"; }
 
-RETENTION_DAYS="${RETENTION_DAYS:-30}"
-BACKUP_PREFIX="${BACKUP_PREFIX:-argus}" # common root → both objects share it so one prune covers them
+# No RETENTION_DAYS knob: retention is enforced by the bucket (Object Lock default retention) and old objects
+# are reaped by a B2 lifecycle rule, NOT by this script — the backup key has no delete capability (BKP-2).
+BACKUP_PREFIX="${BACKUP_PREFIX:-argus}" # common root → both objects share it so the lifecycle rule (prefix
+# argus-) covers both families with one rule
 
 read_secret_file() {
   local f="$1"
@@ -97,7 +108,9 @@ log() { printf '[%s] backup: %s\n' "$(date -u +%FT%TZ)" "$*"; }
 
 # dump_upload <label> <key> <min_bytes> -- <generator cmd...>
 # Streams `<cmd> | age | aws s3 cp -` (no plaintext on disk). Verifies via PIPESTATUS + a size floor.
-# Returns non-zero (after deleting any partial/too-small object) on failure, so the caller can abort.
+# Returns non-zero on failure so the caller can abort. It does NOT delete a partial/too-small object: under
+# Object Lock the key cannot delete, and a leftover is age-ciphertext that the lifecycle rule reaps and the
+# restore runbook skips (size floor + timestamp pairing) — see the header.
 dump_upload() {
   local label="$1" key="$2" floor="$3"
   shift 4 # drop label, key, floor, and the literal "--" separator
@@ -110,8 +123,10 @@ dump_upload() {
   set -e
 
   if [[ "${p[0]}" -ne 0 || "${p[1]}" -ne 0 || "${p[2]}" -ne 0 ]]; then
-    log "FAILED ${label} (gen=${p[0]} age=${p[1]} aws=${p[2]}) — deleting any partial upload ${key}"
-    aws s3api delete-object --endpoint-url "$S3_ENDPOINT" --bucket "$S3_BUCKET" --key "$key" >/dev/null 2>&1 || true
+    # WORM bucket: we cannot delete a partial upload (no delete capability, and a finalized object is locked).
+    # Leave it — it is age-ciphertext, reaped by the lifecycle rule and skipped at restore (size floor). The
+    # non-zero return still aborts the run and fires the OnFailure alert.
+    log "FAILED ${label} (gen=${p[0]} age=${p[1]} aws=${p[2]}) — partial object ${key} left for the B2 lifecycle rule (WORM: not deletable here)"
     return 1
   fi
 
@@ -122,8 +137,9 @@ dump_upload() {
     --query 'ContentLength' --output text 2>/dev/null || true)"
   if [[ "$size" =~ ^[0-9]+$ ]]; then
     if [[ "$size" -lt "$floor" ]]; then
-      log "FAILED ${label} object too small (${size} < ${floor} bytes) — deleting suspected-broken dump: ${key}"
-      aws s3api delete-object --endpoint-url "$S3_ENDPOINT" --bucket "$S3_BUCKET" --key "$key" >/dev/null 2>&1 || true
+      # Suspected-broken dump. WORM: cannot delete it here; the restore runbook applies the SAME size floor and
+      # skips it (walks to the next-older good object), and the lifecycle rule reaps it after the window.
+      log "FAILED ${label} object too small (${size} < ${floor} bytes) — suspected-broken dump ${key} left for the B2 lifecycle rule (WORM); restore skips it by the same size floor"
       return 1
     fi
     log "uploaded ${key} (${size} bytes, encrypted)"
@@ -141,35 +157,20 @@ db_key="${BACKUP_PREFIX}-db-${stamp}.dump.age"
 dump_upload "roles (globals)" "$globals_key" 64 -- \
   pgx pg_dumpall -U "$PGUSER" --database="$PGDATABASE" --no-password --roles-only --no-role-passwords || exit 1
 
-# 2) The database (custom format → compact, supports selective/parallel restore). A run is ALL-OR-NOTHING:
-#    if the DB dump fails, delete the roles object we just wrote so no orphaned `globals` is left to be paired
-#    with an OLDER db at restore (which, after a role/grant-affecting migration, would restore mismatched
-#    ACL/policy state). Either both of this run's objects land, or neither.
+# 2) The database (custom format → compact, supports selective/parallel restore). A run is ALL-OR-NOTHING in
+#    INTENT: if the DB dump fails after the roles object uploaded, that roles object is now orphaned. Under
+#    WORM we cannot delete it (no delete capability, and it is locked), so we leave it and exit non-zero. The
+#    orphan is HARMLESS at restore: the restore runbook pairs from the DB side — it picks the latest valid
+#    `argus-db-*` and fetches the `argus-globals-*` with the SAME stamp — so an orphan globals with no matching
+#    db is never selected. The lifecycle rule reaps it after the window.
 if ! dump_upload "db dump" "$db_key" 1024 -- \
   pgx pg_dump -U "$PGUSER" --format=custom --no-password "$PGDATABASE"; then
-  log "db dump failed — removing the now-orphaned roles object ${globals_key} (keep the run atomic)"
-  aws s3api delete-object --endpoint-url "$S3_ENDPOINT" --bucket "$S3_BUCKET" --key "$globals_key" >/dev/null 2>&1 || true
+  log "db dump failed — roles object ${globals_key} is now orphaned; left in place (WORM: not deletable). Harmless: restore pairs from the db side by stamp, so an unpaired globals is never selected. Reaped by the lifecycle rule."
   exit 1
 fi
 
-# --- Retention prune. Day-granular (perfect for a daily timer): delete backups whose date is older than the
-#     cutoff. One list under the shared prefix covers BOTH object families. ISO-8601 date strings compare
-#     lexically, so no per-object date parsing. The just-written objects (today) are never older than the
-#     cutoff, so they are never pruned. ---
-cutoff_date="$(date -u -d "${RETENTION_DAYS} days ago" +%Y-%m-%d)"
-pruned=0
-while IFS=$'\t' read -r okey lastmodified; do
-  [[ -n "$okey" ]] || continue
-  [[ "${lastmodified:0:10}" < "$cutoff_date" ]] || continue
-  if aws s3api delete-object --endpoint-url "$S3_ENDPOINT" --bucket "$S3_BUCKET" --key "$okey" >/dev/null 2>&1; then
-    pruned=$((pruned + 1))
-    log "pruned old backup ${okey} (modified ${lastmodified:0:10}, cutoff ${cutoff_date})"
-  else
-    log "prune failed for ${okey} (kept; retries next run)"
-  fi
-done < <(
-  aws s3api list-objects-v2 --endpoint-url "$S3_ENDPOINT" --bucket "$S3_BUCKET" --prefix "${BACKUP_PREFIX}-" \
-    --query 'Contents[].[Key,LastModified]' --output text 2>/dev/null || true
-)
-
-log "done globals=${globals_key} db=${db_key} pruned=${pruned} retention_days=${RETENTION_DAYS}"
+# Retention/reaping is NOT done here. The bucket is WORM (Object Lock) and the backup key has no delete
+# capability (BKP-2), so old objects are removed by a server-side B2 LIFECYCLE RULE (prefix argus-, ~35d),
+# which a compromised host key cannot disable and which defers to Object Lock (it can never remove a
+# still-locked backup). See infra/b2/README.md for the rule + the operator runbook.
+log "done globals=${globals_key} db=${db_key} (retention: B2 Object Lock + lifecycle rule, not script prune)"

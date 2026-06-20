@@ -43,14 +43,18 @@ Environment=PGUSER=argus_backup
 Environment=PGDATABASE=argus
 Environment=S3_ENDPOINT=https://s3.eu-central-003.backblazeb2.com
 Environment=S3_REGION=eu-central-003
-# The PRIVATE db-backups bucket — separate from the attachment bucket, never public. Templated per deploy
-# from BACKUP_S3_BUCKET so the AWS experiment can't write its dumps into the production backup bucket.
+# The PRIVATE db-backups bucket — separate from the attachment bucket, never public. WORM via B2 Object Lock
+# (Compliance mode — BKP-2): backups are immutable for the bucket's retention window. Templated per deploy from
+# BACKUP_S3_BUCKET so the AWS experiment can't write its dumps into the production backup bucket.
 Environment=S3_BUCKET=REPLACE_WITH_BACKUP_BUCKET
+# Non-secret key-id of the db-backups B2 key, re-minted WITHOUT delete capability (write/list/read only) so a
+# compromised host cannot scrub backups. Templated from B2_APP_KEY_ID.
 Environment=S3_ACCESS_KEY_ID=REPLACE_WITH_B2_KEY_ID
 # age PUBLIC recipient key (age1...). The matching PRIVATE key is NOT here — it lives in Key Vault and is
 # fetched only at restore time, so this host cannot decrypt the backups it writes.
 Environment=AGE_RECIPIENT=REPLACE_WITH_AGE_PUBLIC_KEY
-Environment=RETENTION_DAYS=30
+# No RETENTION_DAYS: retention/reaping is the bucket's Object Lock default retention + a B2 lifecycle rule, not
+# this script (the key can't delete). See infra/b2/README.md.
 
 # --- Secret: the B2 application key, delivered as a credential FILE, never in env/Helm at rest (invariant
 #     #5). The source path is populated from Azure Key Vault by the Managed Identity at boot (a separate fetch
