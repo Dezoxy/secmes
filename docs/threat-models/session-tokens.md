@@ -154,9 +154,23 @@ its outstanding access token keeps working on **normal (non-admin) routes** unti
   surface has **no** window. The residual is confined to ordinary user routes.
 - **Why accepted (not a per-request denylist):** a stateful revocation lookup on every request trades
   the dominant cost (a DB hit per call) against a residual already bounded by a short TTL; this mirrors
-  the in-window-replay decision in `auth-tenant-context.md` §6. The account-delete / member-revoke
-  cases are *not* part of this residual — those flip the user to unbound/`revoked` and are rejected on
-  the next request by `requireUser`/`AdminGuard` regardless of token validity.
+  the in-window-replay decision in `auth-tenant-context.md` §6.
+- **Account-delete is fully neutralized (not part of this residual).** `gdpr.deleteAccount` removes the
+  `user_tenant_index` row, so `verify()`'s next lookup returns **unbound → 403** on every guarded route,
+  regardless of token validity.
+- **Member-revoke is only *partially* neutralized — so it *is* part of this residual.**
+  `TenantsService.revokeMember()` sets `users.status = 'revoked'` but does **not** delete the binding.
+  Routes that resolve the caller via `requireUser` (`messaging/membership.ts`, which filters
+  `status = 'active'`) reject the revoked member immediately — but the **key-directory mutation routes do
+  not**: `KeyDirectoryService.publish()` / `revokeUnclaimed()` resolve the caller by `auth.sub` /
+  `external_identity_id` with **no `status` predicate**, and `claim()` resolves only the *target*. So a
+  revoked member holding an unexpired access JWT can still **publish / claim / revoke their own device's
+  KeyPackages for ≤10 min** until the token expires (the refresh path already blocks a non-active user
+  from minting a new one). Blast radius is the caller's **own** device key-material (no cross-user
+  effect), bounded by the 10-min TTL — accepted for beta. **Code-side close (follow-up):** add a
+  `status = 'active'` caller check (or route through `requireUser`) on the key-directory mutations. This
+  **refines** the broader `auth-tenant-context.md` §6 claim that member-revoke is neutralized on *every*
+  path — it is not.
 
 Revisit alongside any future DPoP / token-introspection work; until then the 10-minute TTL is the
 control and this is a documented, accepted residual.

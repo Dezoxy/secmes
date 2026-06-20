@@ -8,9 +8,11 @@
 > to the tenant in the WebAuthn verify transaction (`registration-and-tenancy.md` T1–T9), not via a
 > bearer-token `accept` call. The **still-current** core of this note is the trust model of
 > `user_tenant_index` (INSERT-only, server-controlled `sub` binding, RLS) and the invite-token
-> threats (entropy, single-use, email binding, log hygiene); the `POST /tenants` create-org path
-> and the "brand-new Zitadel user" framing are historical. Read `registration-and-tenancy.md` for
-> the live flow.
+> threats of **entropy, single-use, and log hygiene**. **Email-binding (T3) is no longer a live
+> control** — migration `0039_decommission_enterprise.sql` nulled `tenant_invites.invitee_email` and
+> the passkey redeem path (`WebAuthnService.redeemCode()`) reads no email hint, so an invite link is
+> **bearer-only**. The `POST /tenants` create-org path and the "brand-new Zitadel user" framing are
+> likewise historical. Read `registration-and-tenancy.md` for the live flow.
 
 > Covers the invite flow (`POST /tenants/invites` / `revoke`) and `user_tenant_index` (the binding
 > table). Companion to `session-tokens.md` (token edge) and `rls-tenant-isolation.md` (DB layer).
