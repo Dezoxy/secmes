@@ -199,12 +199,13 @@ The bucket name is unchanged, so `BACKUP_S3_BUCKET` needs no update.
 ### 4. Cut over
 
 Re-deploy so `deploy.sh` re-templates the unit with the new key-id (the secret is fetched from Key Vault on the
-VM). Then trigger one nightly run and confirm it writes **two** objects to the bucket:
+VM). Then trigger one nightly run and confirm it writes **three** objects to the bucket (the two dumps + a
+success marker):
 
 ```bash
 sudo systemctl start argus-db-backup.service && journalctl -u argus-db-backup.service -n 30
-# Expect: "uploaded argus-globals-…" + "uploaded argus-db-…" and a final
-#         "done … (retention: B2 Object Lock + lifecycle rule, not script prune)".
+# Expect: "uploaded argus-globals-…" + "uploaded argus-db-…" + "wrote success marker argus-ok-…" and a final
+#         "done … marker=argus-ok-… (retention: B2 Object Lock + lifecycle rule, not script prune)".
 ```
 
 ### 5. Restore drill (mandatory before trusting it)

@@ -12,7 +12,8 @@ systemd timer (daily 02:30 UTC)
   → backup-db.sh  (User=argus, hardened oneshot; as argus_backup: read-only, BYPASSRLS, all tenants)
       pg_dumpall --roles-only --no-role-passwords | age -r <PUBLIC key> | aws s3 cp -   → argus-globals-<UTC>.sql.age
       pg_dump --format=custom                      | age -r <PUBLIC key> | aws s3 cp -   → argus-db-<UTC>.dump.age
-      → verify each (PIPESTATUS + size floor); no prune — bucket is WORM, reaping is a B2 lifecycle rule (BKP-2)
+      → verify each (PIPESTATUS + size floor) → write argus-ok-<UTC>.age success marker (commit point)
+      → no prune — bucket is WORM, reaping is a B2 lifecycle rule (BKP-2)
 ```
 
 Each run writes **two** encrypted objects: the cluster **roles** (definitions + memberships, **no password
@@ -82,13 +83,16 @@ in the backup — they are re-applied from Key Vault at restore.
   stage and a post-upload `head-object` **size floor** detect a failure; on either, the unit **exits
   non-zero** (visible failure, fires the `OnFailure=` alert). Under WORM the worker can **no longer delete**
   the partial/corrupt object (BKP-2; the key has no delete and a finalized object is locked), so a bad object
-  can linger until the lifecycle rule reaps it — to keep it from being *restored*, the restore runbook walks
-  `argus-db-*` **newest-first** and accepts only the first object that clears the size floor, has its paired
-  `argus-globals-*`, and decrypts (`age`'s STREAM auth rejects a mid-stream-truncated upload) with a valid TOC
-  (`pg_restore --list`). **Caveat — `--list` validates structure, not completeness:** a dump truncated *after*
-  the TOC but still `age`-valid would pass `--list` yet restore with missing trailing rows. The real
-  completeness test is the **mandatory restore drill** (a full data replay into a scratch DB — documented,
-  required by checkpoint 49); `--list` + the size floor only cheaply reject the *grossly* broken objects. An
+  can linger until the lifecycle rule reaps it — to keep it from being *restored*, the worker writes a
+  **success marker** (`argus-ok-<stamp>.age`) only after BOTH dumps uploaded and passed their size floors, and
+  the restore runbook walks `argus-db-*` **newest-first** accepting only the first object that clears the size
+  floor, **has its success marker** (so any run that FAILED — and whose partial dump could be >1 KiB and pass
+  `pg_restore --list` — is excluded), has its paired `argus-globals-*`, and decrypts (`age`'s STREAM auth
+  rejects a mid-stream-truncated upload) with a valid TOC (`pg_restore --list`). **Caveat — `--list` validates
+  structure, not completeness:** the marker excludes runs that *failed*, but a `pg_dump` that exits 0 yet is
+  logically short (rare) would still pass. The real completeness test is the **mandatory restore drill** (a
+  full data replay into a scratch DB — documented, required by checkpoint 49); the marker + `--list` + size
+  floor cheaply reject failed/grossly-broken objects. An
   orphaned *roles* object (DB dump failed after the roles uploaded) is harmless — restore pairs from the DB
   side by stamp, so an unpaired globals is never selected. The lingering object is age-ciphertext (leaks
   nothing) and the lifecycle rule reaps it after the window.

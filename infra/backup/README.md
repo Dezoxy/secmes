@@ -20,11 +20,15 @@ lifecycle rule, not by the worker. Runs natively on the VM via a **systemd timer
      (definitions + memberships, **no password hashes**), so a restore onto a fresh cluster has the roles the
      schema's RLS policies/grants reference.
    - `argus-db-<UTC>.dump.age` — `pg_dump --format=custom`: the database (compact, selective/parallel restore).
+   Then, only after **both** uploaded and cleared their size floors, a tiny `argus-ok-<UTC>.age` **success
+   marker** — the run's commit point. Under WORM a failed run's partial dump can't be deleted, so the marker
+   (absent on any failed run) is what makes a complete run **restore-eligible**; restore requires it.
 3. Verifies each upload (PIPESTATUS + size floor). It does **not** prune: the backup bucket is **WORM** (B2
    Object Lock, Compliance mode — BKP-2), and the backup key has **no delete capability**, so old backups are
    reaped by a server-side **B2 lifecycle rule** (prefix `argus-`, ~35 days), not by this script. A
    partial/corrupt or orphaned object can't be deleted either — it is left in place (age-ciphertext, leaks
-   nothing), reaped by the lifecycle rule and **skipped at restore** (size floor + timestamp pairing).
+   nothing), reaped by the lifecycle rule and **skipped at restore** (no success marker + size floor +
+   version/timestamp pairing).
 4. Logs object keys / sizes / counts only — never a secret.
 
 ## Why client-side encryption (not just B2 SSE)
@@ -144,13 +148,15 @@ chmod 0400 age.key
 #     WORM holds), but a key-NAME lookup (`list-objects-v2` / `s3 cp` by name / `head-object` without
 #     --version-id) returns only the attacker's CURRENT junk. So enumerate VERSIONS (`list-object-versions`)
 #     and download by explicit --version-id, walking newest-first and accepting the first DB version that
-#     (a) clears the 1024-byte size floor, (b) decrypts (age STREAM auth rejects a mid-stream-truncated upload)
-#     with a valid TOC, and (c) has a paired argus-globals-<stamp> VERSION that is itself valid (≥64 B +
-#     decrypts). The walk skips past any junk/shadow versions to the newest good locked pair.
-#     CAVEAT: `pg_restore --list` checks STRUCTURE, not completeness — a dump truncated *after* the TOC but
-#     still age-valid would pass here yet restore with missing trailing rows. This walk only cheaply rejects
-#     grossly-broken versions; the data-completeness test is the full restore drill below (step 3 + sanity
-#     check). Shadowing by junk versions makes the good pair OLDER, not wrong — staleness is the exposure, and
+#     (a) clears the 1024-byte size floor, (b) has a SUCCESS MARKER argus-ok-<stamp> (written by the worker
+#     only after BOTH dumps fully succeeded — so a failed run, whose partial db object can be >1 KiB and pass
+#     `pg_restore --list` yet be incomplete, is excluded), (c) decrypts (age STREAM auth rejects a mid-stream-
+#     truncated upload) with a valid TOC, and (d) has a paired argus-globals-<stamp> VERSION that is itself
+#     valid (≥64 B + decrypts). The walk skips past any junk/shadow/failed versions to the newest good pair.
+#     CAVEAT: `pg_restore --list` checks STRUCTURE, not completeness; the marker excludes runs that FAILED
+#     (non-zero pg_dump/upload), but a pg_dump that exits 0 yet is logically short (rare) would still pass —
+#     the full restore drill below (step 3 + sanity check) is the definitive data-completeness test.
+#     Shadowing by junk versions makes the good pair OLDER, not wrong — staleness is the exposure, and
 #     OnFailure surfaces a flapping backup (see "Denial of availability" in the threat model).
 #     AUTHENTICITY CAVEAT: AGE_RECIPIENT is a PUBLIC key, so age gives confidentiality, NOT authenticity —
 #     ANYONE (incl. a compromised writeFiles key) can encrypt an arbitrary dump to it and upload it as a
@@ -182,6 +188,21 @@ pick_globals_version() {
   return 1
 }
 
+# True if a SUCCESS MARKER for stamp $1 exists in a version uploaded before $CUTOFF. The worker writes the
+# marker (argus-ok-<stamp>.age) only after BOTH dumps uploaded AND passed their size floors, so a failed run —
+# whose partial db object can be >1 KiB and pass `pg_restore --list` yet be incomplete — has no marker and is
+# never eligible. Existence is the signal (not content); authenticity is the COMPROMISE_BEFORE anchor's job.
+marker_ok() {
+  local mk="argus-ok-${1}.age" ver lm
+  while read -r ver lm; do
+    [[ -n "$ver" ]] || continue
+    [[ -z "$CUTOFF" || "$lm" < "$CUTOFF" ]] || continue
+    return 0
+  done < <(aws s3api list-object-versions --endpoint-url "$EP" --bucket "$BUCKET" --prefix "$mk" \
+    --query "reverse(sort_by(Versions[?Key=='$mk'],&LastModified))[].[VersionId,LastModified]" --output text)
+  return 1
+}
+
 DB_KEY=""; DB_VER=""; G_KEY=""; G_VER=""; STAMP=""
 while read -r cand ver lm; do
   [[ -n "$cand" && -n "$ver" ]] || continue
@@ -190,6 +211,7 @@ while read -r cand ver lm; do
     --query 'ContentLength' --output text 2>/dev/null || echo 0)
   [[ "$sz" =~ ^[0-9]+$ && "$sz" -ge 1024 ]] || { echo "skip $cand@$ver (too small: ${sz}B)"; continue; }
   st=${cand#argus-db-}; st=${st%.dump.age}                   # e.g. 20260608T023012Z
+  marker_ok "$st" || { echo "skip $cand@$ver (no success marker argus-ok-$st — failed/incomplete run)"; continue; }
   aws s3api get-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$cand" --version-id "$ver" \
     ./backup.dump.age >/dev/null 2>&1 || { echo "skip $cand@$ver (download failed)"; continue; }
   if ! age -d -i age.key backup.dump.age >backup.dump 2>/dev/null || ! pg_restore --list backup.dump >/dev/null 2>&1; then

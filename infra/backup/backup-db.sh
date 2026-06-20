@@ -169,8 +169,24 @@ if ! dump_upload "db dump" "$db_key" 1024 -- \
   exit 1
 fi
 
+# 3) SUCCESS MARKER — the run's commit point, written ONLY now that BOTH objects uploaded and cleared their
+#    size floors. Why it matters under WORM: when pg_dump fails *after* emitting the custom-format TOC + some
+#    data, the partial db object can be >1 KiB, age-valid, and pass `pg_restore --list` despite being
+#    incomplete — and we can no longer delete it (no delete capability). Any failure above exits BEFORE this
+#    line, so a failed run writes NO marker; the restore runbook requires the marker for a stamp before that
+#    stamp's db object is eligible, so an incomplete run can never be selected over the previous good backup.
+#    The marker is age-encrypted for consistency (bucket holds ciphertext only); restore checks existence, not
+#    content. A marker-upload failure leaves a complete-but-unmarked (hence not-yet-restorable) pair, so we
+#    exit non-zero to fire the alert — the next run writes a fresh marked pair.
+marker_key="${BACKUP_PREFIX}-ok-${stamp}.age"
+if ! printf '%s\t%s\n' "$globals_key" "$db_key" | age -r "$AGE_RECIPIENT" \
+  | aws s3 cp - "s3://${S3_BUCKET}/${marker_key}" --endpoint-url "$S3_ENDPOINT" --only-show-errors; then
+  log "FAILED success marker ${marker_key} — backup pair landed but is NOT restore-eligible until a later run; exiting non-zero"
+  exit 1
+fi
+
 # Retention/reaping is NOT done here. The bucket is WORM (Object Lock) and the backup key has no delete
 # capability (BKP-2), so old objects are removed by a server-side B2 LIFECYCLE RULE (prefix argus-, ~35d),
 # which a compromised host key cannot disable and which defers to Object Lock (it can never remove a
 # still-locked backup). See infra/b2/README.md for the rule + the operator runbook.
-log "done globals=${globals_key} db=${db_key} (retention: B2 Object Lock + lifecycle rule, not script prune)"
+log "done globals=${globals_key} db=${db_key} marker=${marker_key} (retention: B2 Object Lock + lifecycle rule, not script prune)"
