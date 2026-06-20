@@ -189,9 +189,9 @@ OPENSSL="${OPENSSL:-openssl}"   # override if your default openssl is LibreSSL: 
 VK_DIR="$(mktemp -d)" || { echo "FATAL: mktemp failed"; exit 1; }
 awk -v d="$VK_DIR" '
   { sub(/\r$/, "") }
-  /-----BEGIN PUBLIC KEY-----/ { n++; f=d "/blk." n }
+  /^-----BEGIN PUBLIC KEY-----$/ { n++; f=d "/blk." n }
   f { print > f }
-  /-----END PUBLIC KEY-----/   { if (f) close(f); f="" }
+  /^-----END PUBLIC KEY-----$/   { if (f) close(f); f="" }
 ' "$VERIFY_KEY"
 vk_blocks=$(find "$VK_DIR" -name 'blk.*' | wc -l | tr -d ' ')
 [[ "$vk_blocks" =~ ^[0-9]+$ && "$vk_blocks" -ge 1 ]] || { echo "FATAL: $VERIFY_KEY has no usable PUBLIC KEY block"; rm -rf "$VK_DIR"; exit 1; }
