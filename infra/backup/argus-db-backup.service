@@ -62,6 +62,13 @@ Environment=AGE_RECIPIENT=REPLACE_WITH_AGE_PUBLIC_KEY
 #     password: the DB connection runs in-container over the local-trust socket — see backup-db.sh.) ---
 LoadCredential=b2-secret:/run/argus/secrets/b2-app-key
 Environment=S3_SECRET_ACCESS_KEY_FILE=%d/b2-secret
+# --- Secret: the Ed25519 backup-signing key (PKCS8 PEM), delivered as a credential FILE the same way as the B2
+#     key — populated from Azure Key Vault (argus-backup-signing-key) by the Managed Identity via
+#     argus-secrets.service. The worker signs each run's manifest with it; openssl reads it from the file PATH,
+#     so the private key never enters env/argv (invariant #2/#5). Its PUBLIC half is committed at
+#     infra/backup/backup-verify.pub for restore-time verification (slice 3). ---
+LoadCredential=backup-sign-key:/run/argus/secrets/backup-signing-key
+Environment=BACKUP_SIGN_KEY_FILE=%d/backup-sign-key
 
 # AWS CLI v2 wants a writable HOME/cache, but ProtectHome + ProtectSystem make the FS read-only.
 # Give it a private tmpfs runtime dir as HOME so it never touches the real home.
