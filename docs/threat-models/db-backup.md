@@ -68,6 +68,15 @@ in the backup — they are re-applied from Key Vault at restore.
     version-aware**: the restore runbook enumerates `list-object-versions` and downloads by explicit
     `--version-id`, walking newest-first to the newest *valid* locked version, skipping shadow/junk versions.
     Shadowing makes the recoverable pair **older, not unrecoverable**.
+  - **Authenticity nuance (Codex P1, #269).** `AGE_RECIPIENT` is a **public** key, so age gives
+    confidentiality, **not authenticity** — a compromised `writeFiles` key can encrypt an arbitrary dump to it
+    and upload a **forged** current version that passes size + `age -d` + `pg_restore --list`. Structural
+    validation therefore can't prove provenance, so "newest valid" alone could select a forgery. The anchor
+    that survives a forging attacker is the **B2-set upload time** (`LastModified`, which the attacker can't
+    backdate): the restore runbook takes a `COMPROMISE_BEFORE` cutoff and, in a suspected compromise, selects
+    the newest genuine pre-compromise locked pair. **Cryptographically signed backups** (a signature the B2
+    key can't forge — verified at restore) are the defense-in-depth follow-up that would remove the operator's
+    need to know the compromise window; until then the timestamp anchor is the recovery guarantee.
 - **Tampering / integrity — a corrupt or partial backup.** A mid-stream `pg_dump` failure would upload a
   truncated dump. → The **write-time** defences are primary and unchanged: `PIPESTATUS` checks every pipeline
   stage and a post-upload `head-object` **size floor** detect a failure; on either, the unit **exits
@@ -160,7 +169,10 @@ in the backup — they are re-applied from Key Vault at restore.
   storage for that whole period with no recourse (even Backblaze can't unlock it), mitigated by pinning the
   default to **35 days** in the runbook and a verify-by-hand step. (c) **A shadowed recovery is staler** — junk
   current versions push the newest *valid* pair older, but never make it unrecoverable; `OnFailure` alerting
-  surfaces the anomaly.
+  surfaces the anomaly. (d) **No backup authenticity yet** — age-to-public-key is confidentiality only, so a
+  compromised `writeFiles` key can forge a structurally-valid version; recovery currently anchors on the
+  immutable B2 upload time (`COMPROMISE_BEFORE` cutoff), which requires the operator to know the compromise
+  window. **Signed backups** (a signature the B2 key can't forge) are the tracked follow-up that closes this.
 - **No off-cloud copy.** Backups live in one B2 bucket/region. A second provider/region copy (3-2-1) is an
   enterprise follow-up.
 - **Docker-group membership grants in-container DB access.** PG has no published port; the host workers

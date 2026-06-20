@@ -187,7 +187,8 @@ b2 key create --bucket db-q7m2z9x4v6n8p3k1 argus-b2-backup-key listBuckets,listF
 #    (the name backup-db.sh's LoadCredential already points at). --file, never argv (mirrors the CORS step).
 umask 077; printf '%s' '<applicationKey>' >/tmp/b2backupkey
 az keyvault secret set --vault-name <vault> --name argus-b2-app-key --file /tmp/b2backupkey --encoding utf-8
-rm -P /tmp/b2backupkey   # macOS has no `shred`; -P overwrites before unlinking
+# Portable secure delete: shred on GNU/Linux, `rm -P` on macOS (no shred), plain rm -f as a last resort.
+shred -u /tmp/b2backupkey 2>/dev/null || rm -P /tmp/b2backupkey 2>/dev/null || rm -f /tmp/b2backupkey
 
 # 3. Set the key-id (NON-secret) as the deploy variable that templates the backup unit.
 gh variable set B2_APP_KEY_ID --repo <owner/repo> --body '<keyId>'
@@ -214,14 +215,26 @@ untested backup is not a backup.
 
 ### 6. Verify by hand — the lock actually bites
 
+**Do NOT "prove" the lock by deleting with the re-minted key** — that key has no `deleteFiles`, so it returns
+`AccessDenied` whether or not Object Lock is on. A no-delete-key denial is a FALSE positive: it would pass the
+cutover even if you forgot to enable retention, leaving backups deletable by the account/master/any
+delete-capable key. Prove the lock two ways instead:
+
 ```bash
-# Pick any freshly-written (post-lock) object, then try to delete it with the re-minted key.
-KEY=$(aws s3api list-objects-v2 --endpoint-url https://s3.eu-central-003.backblazeb2.com \
-  --bucket db-q7m2z9x4v6n8p3k1 --prefix argus-db- \
+EP=https://s3.eu-central-003.backblazeb2.com ; BUCKET=db-q7m2z9x4v6n8p3k1
+KEY=$(aws s3api list-objects-v2 --endpoint-url "$EP" --bucket "$BUCKET" --prefix argus-db- \
   --query 'reverse(sort_by(Contents,&LastModified))[0].Key' --output text)
-aws s3api delete-object --endpoint-url https://s3.eu-central-003.backblazeb2.com \
-  --bucket db-q7m2z9x4v6n8p3k1 --key "$KEY"
-# EXPECT: AccessDenied (the key has no deleteFiles). Even a delete-capable key must fail with
-# the object still inside its 35-day Compliance retention. If the delete SUCCEEDS, Object Lock is not in
-# effect — stop and recheck steps 1–2 before relying on the backups.
+
+# (a) PRIMARY — read the object's retention directly (needs a key with readFiles, which the backup key has).
+#     This is the real proof the lock is applied, independent of any key's delete capability.
+aws s3api get-object-retention --endpoint-url "$EP" --bucket "$BUCKET" --key "$KEY"
+# EXPECT: {"Retention":{"Mode":"COMPLIANCE","RetainUntilDate":"<~35 days out>"}}.
+# If it errors with "no retention" / empty, the default retention is NOT applied — STOP and recheck steps 1–2.
+
+# (b) BELT-AND-SUSPENDERS — attempt the delete with a DELETE-CAPABLE key (e.g. a temporary key minted WITH
+#     deleteFiles, or the account master key). Under Compliance it must still fail.
+aws s3api delete-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$KEY"   # using the delete-capable key
+# EXPECT: a RETENTION error (e.g. AccessDenied citing object-lock / retention period), NOT a plain
+# missing-permission denial. A delete that SUCCEEDS means Object Lock is not in effect — STOP. Revoke the
+# temporary delete-capable key immediately after this check.
 ```

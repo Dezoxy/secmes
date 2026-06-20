@@ -152,13 +152,24 @@ chmod 0400 age.key
 #     grossly-broken versions; the data-completeness test is the full restore drill below (step 3 + sanity
 #     check). Shadowing by junk versions makes the good pair OLDER, not wrong — staleness is the exposure, and
 #     OnFailure surfaces a flapping backup (see "Denial of availability" in the threat model).
+#     AUTHENTICITY CAVEAT: AGE_RECIPIENT is a PUBLIC key, so age gives confidentiality, NOT authenticity —
+#     ANYONE (incl. a compromised writeFiles key) can encrypt an arbitrary dump to it and upload it as a
+#     current version that passes size + `age -d` + `pg_restore --list`. Structural validation therefore does
+#     NOT prove a version was produced by the worker. The anchor that DOES survive a forging attacker is the
+#     B2-set upload time (`LastModified`) — the attacker cannot backdate it. So in a SUSPECTED COMPROMISE, set
+#     COMPROMISE_BEFORE to an ISO-8601 instant just before the compromise window; the walk then ignores every
+#     version uploaded at/after it and lands on the newest genuine pre-compromise locked pair. (Cryptographic
+#     authenticity — signed backups the B2 key can't forge — is a tracked follow-up; until then this timestamp
+#     anchor is the recovery guarantee, so record/know your compromise window.)
+CUTOFF="${COMPROMISE_BEFORE:-}"   # unset = newest valid (normal restore); set to ISO-8601 during a compromise
 rm -f backup.dump backup.dump.age globals.sql.age   # idempotent: clear any leftovers from a prior aborted run
 
-# Echoes the version-id of the newest VALID version of a globals key (≥64 B + decrypts), or nothing.
+# Echoes the version-id of the newest VALID globals version (≥64 B + decrypts, uploaded before $CUTOFF if set).
 pick_globals_version() {
-  local gk="$1" ver gsz
-  while read -r ver; do
+  local gk="$1" ver lm gsz
+  while read -r ver lm; do
     [[ -n "$ver" ]] || continue
+    [[ -z "$CUTOFF" || "$lm" < "$CUTOFF" ]] || continue        # provenance anchor: ignore at/after compromise
     gsz=$(aws s3api head-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$gk" --version-id "$ver" \
       --query 'ContentLength' --output text 2>/dev/null || echo 0)
     [[ "$gsz" =~ ^[0-9]+$ && "$gsz" -ge 64 ]] || continue
@@ -167,13 +178,14 @@ pick_globals_version() {
     age -d -i age.key globals.sql.age >/dev/null 2>&1 || { rm -f globals.sql.age; continue; }
     echo "$ver"; return 0
   done < <(aws s3api list-object-versions --endpoint-url "$EP" --bucket "$BUCKET" --prefix "$gk" \
-    --query "reverse(sort_by(Versions[?Key=='$gk'],&LastModified))[].VersionId" --output text | tr '\t' '\n')
+    --query "reverse(sort_by(Versions[?Key=='$gk'],&LastModified))[].[VersionId,LastModified]" --output text)
   return 1
 }
 
 DB_KEY=""; DB_VER=""; G_KEY=""; G_VER=""; STAMP=""
-while read -r cand ver; do
+while read -r cand ver lm; do
   [[ -n "$cand" && -n "$ver" ]] || continue
+  [[ -z "$CUTOFF" || "$lm" < "$CUTOFF" ]] || { echo "skip $cand@$ver (uploaded $lm ≥ cutoff $CUTOFF)"; continue; }
   sz=$(aws s3api head-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$cand" --version-id "$ver" \
     --query 'ContentLength' --output text 2>/dev/null || echo 0)
   [[ "$sz" =~ ^[0-9]+$ && "$sz" -ge 1024 ]] || { echo "skip $cand@$ver (too small: ${sz}B)"; continue; }
@@ -188,8 +200,8 @@ while read -r cand ver; do
   DB_KEY="$cand"; DB_VER="$ver"; G_KEY="$gk"; G_VER="$gver"; STAMP="$st"
   echo "selected $DB_KEY@$DB_VER (roles: $G_KEY@$G_VER)"; break
 done < <(aws s3api list-object-versions --endpoint-url "$EP" --bucket "$BUCKET" --prefix argus-db- \
-  --query 'reverse(sort_by(Versions,&LastModified))[].[Key,VersionId]' --output text)
-[[ -n "$DB_KEY" ]] || { echo "FATAL: no valid backup pair found in $BUCKET (checked all versions)"; exit 1; }
+  --query 'reverse(sort_by(Versions,&LastModified))[].[Key,VersionId,LastModified]' --output text)
+[[ -n "$DB_KEY" ]] || { echo "FATAL: no valid backup pair found in $BUCKET (checked all versions${CUTOFF:+ before $CUTOFF})"; exit 1; }
 # globals.sql.age + backup.dump.age are now the selected good versions; backup.dump is already decrypted.
 
 # 2. Roles FIRST (no passwords — re-applied from Key Vault in step 4). Connect to the maintenance DB.
