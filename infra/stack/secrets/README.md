@@ -31,6 +31,7 @@ consumers `Requires=` this unit, so they don't start on a missing secret).
 | `argus-redis-password`          | `redis_password`                   | `redis` (`requirepass` via the deploy-generated `redis.conf`; healthcheck reads this file) + `api` (`REDIS_URL_FILE`, deploy-generated `redis_url`) — never in env; must be URL-safe (e.g. `openssl rand -hex 32`) |
 | `argus-tunnel-token`            | `tunnel_token`                     | `cloudflared` (`TUNNEL_TOKEN_FILE` — file-secret mount, not env) |
 | `argus-session-signing-key`     | `session_signing_key`              | `api` (`SESSION_SIGNING_KEY_FILE`) — Ed25519 PEM signing passkey session JWTs (**mandatory**) |
+| `argus-backup-signing-key`      | `backup-signing-key`               | `argus-db-backup` (`LoadCredential`) — Ed25519 PEM signing nightly backup objects (**mandatory**) |
 | `argus-grafana-admin-password`  | `grafana_admin_password`           | `grafana` (`GF_SECURITY_ADMIN_PASSWORD__FILE`) — observability dashboards admin login |
 | `argus-backup-db-password`      | `backup-db-password`               | `argus-db-backup` (`LoadCredential`) — `argus_backup` role |
 | `argus-cleanup-db-password`     | `cleanup-db-password`              | `argus-attachment-cleanup` (`LoadCredential`) — `argus_cleanup` role |
@@ -43,6 +44,12 @@ consumers `Requires=` this unit, so they don't start on a missing secret).
 > `argus-session-signing-key` is the Ed25519 PKCS8 PEM key the API uses to sign passkey session JWTs. It is
 > **mandatory** — the fetch fails closed if it's absent, and the API will not boot without it. Generate it
 > ONCE: `openssl genpkey -algorithm ed25519 | openssl pkcs8 -topk8 -nocrypt -outform PEM`.
+>
+> `argus-backup-signing-key` is a separate Ed25519 PKCS8 PEM key the nightly DB-backup worker uses to **sign**
+> each backup object so restore can verify provenance (signed backups — BKP-2 follow-up). It is **mandatory**
+> for the same fail-closed reason. After creating it, derive and commit its **public** half to
+> `infra/backup/backup-verify.pub` (restore reads the verify key from git, not the bucket). See
+> [`infra/backup/README.md`](../../backup/README.md) §"Backup signing key".
 
 ### Deploy-time secrets (fetched by `deploy.sh`, NOT delivered to the running stack)
 
@@ -70,6 +77,9 @@ az keyvault secret set --vault-name "$KV" --name argus-redis-password        --v
 az keyvault secret set --vault-name "$KV" --name argus-tunnel-token           --value '<cloudflare-tunnel-token>'
 # Passkey session signing key (Ed25519 PKCS8 PEM) — MANDATORY; the API will not boot without it.
 az keyvault secret set --vault-name "$KV" --name argus-session-signing-key    --value "$(openssl genpkey -algorithm ed25519 | openssl pkcs8 -topk8 -nocrypt -outform PEM)"
+# DB-backup provenance signing key (Ed25519 PKCS8 PEM) — MANDATORY; the boot-time fetch fails closed without it.
+# After setting it, commit its PUBLIC half to infra/backup/backup-verify.pub: `az keyvault secret show … | openssl pkey -pubout`.
+az keyvault secret set --vault-name "$KV" --name argus-backup-signing-key     --value "$(openssl genpkey -algorithm ed25519 | openssl pkcs8 -topk8 -nocrypt -outform PEM)"
 az keyvault secret set --vault-name "$KV" --name argus-grafana-admin-password --value '<grafana-admin-pw>'   # observability #47
 az keyvault secret set --vault-name "$KV" --name argus-backup-db-password     --value '<argus_backup-role-pw>'
 az keyvault secret set --vault-name "$KV" --name argus-cleanup-db-password    --value '<argus_cleanup-role-pw>'
