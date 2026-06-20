@@ -104,18 +104,26 @@ decrypting) a candidate.
     | openssl pkey -pubout   # paste into infra/backup/backup-verify.pub, then commit
   ```
   Restore reads the verify key from the repo (tamper-evident in git), never from the bucket an attacker could
-  write. Verification **fails closed** against the un-replaced placeholder.
+  write. Verification **fails closed** against the un-replaced placeholder (rejected by content with a legible
+  "verify key not populated", not a generic parse error), and the restore host needs **OpenSSL ≥3.0** (the
+  runbook preflights this — LibreSSL/1.1.1 can't verify Ed25519 `-rawin`).
+- **Key rotation** — `backup-verify.pub` may hold **multiple** PEM blocks (current + previous): restore tries
+  each, so a backup signed by either verifies during the rollover. The file is a keyring, not a single key. When
+  rotation is complete and no live backup is still signed by the old key, **delete the retired block and
+  commit** — leaving a compromised-then-rotated-out key in the file keeps its signatures acceptable forever.
 
 > **Upgrade ordering (existing deployments):** `argus-backup-signing-key` is a **mandatory** fetched secret, so
 > run `populate-keyvault.sh` (no `--rotate` — it skip-creates only the missing key) **before** pulling this
 > change and redeploying. Otherwise the boot-time secret fetch 404s on the new key and fails closed.
 
-> The worker now **signs** at write time (this slice): each run uploads a signed manifest marker
-> (`argus-ok-<stamp>.age` + `.age.sig`) binding both objects by SHA-256. The key reaches the unit via
-> `LoadCredential=backup-sign-key` (`BACKUP_SIGN_KEY_FILE`). **Restore-time verification** still lands in the
-> following change (slice 3). Threat model: `docs/threat-models/db-backup.md`; the
-> Ed25519-signing-outside-`packages/crypto` boundary follows the ratified precedent in
-> `docs/threat-models/session-tokens.md §invariant-4`.
+> The worker **signs** at write time and **restore verifies** (signed backups, complete): each run uploads a
+> signed manifest marker (`argus-ok-<stamp>.age` + `.age.sig`) binding both objects by SHA-256; the restore
+> runbook below rejects any candidate whose signature doesn't verify under the pinned `backup-verify.pub`, or
+> whose objects don't re-hash to the signed digests. The key reaches the unit via `LoadCredential=backup-sign-key`
+> (`BACKUP_SIGN_KEY_FILE`). Signatures stop **forgery** by the bucket-writer; **rollback** to a genuine older
+> backup still anchors on the `COMPROMISE_BEFORE` timestamp (signatures authenticate provenance, not freshness).
+> Threat model: `docs/threat-models/db-backup.md`; the Ed25519-signing-outside-`packages/crypto` boundary follows
+> the ratified precedent in `docs/threat-models/session-tokens.md §invariant-4`.
 
 ### 4. B2 bucket
 
@@ -168,51 +176,135 @@ On a trusted host (NOT the backup VM — it must NOT hold the age private key):
 ```bash
 EP=https://s3.eu-central-003.backblazeb2.com ; BUCKET=db-q7m2z9x4v6n8p3k1
 
-# 1. Fetch the age private key from Key Vault (mode 0400).
+# 1a. Backup-SIGNATURE verification setup. Run this FIRST, BEFORE the age key is fetched, so a setup FATAL never
+#     leaves the decrypt key on disk. Run from your argus checkout's infra/backup/ dir (or copy
+#     backup-verify.pub next to where you run), so VERIFY_KEY reads the PINNED public key from the REPO — never
+#     from the bucket an attacker could write. Requires OpenSSL >=3.0 on THIS host (LibreSSL/1.1.1 can't do
+#     Ed25519 -rawin); the preflight below aborts legibly rather than fail-closing on every candidate.
+VERIFY_KEY="${VERIFY_KEY:-backup-verify.pub}"
+OPENSSL="${OPENSSL:-openssl}"   # override if your default openssl is LibreSSL: OPENSSL=/path/to/openssl@3/bin/openssl
+[[ -s "$VERIFY_KEY" ]] || { echo "FATAL: verify key $VERIFY_KEY missing/empty — copy infra/backup/backup-verify.pub here"; exit 1; }
+# Split the keyring into one file per PEM block: `openssl pkeyutl -verify -inkey <file>` reads only the FIRST
+# block, so a concatenated current+previous keyring MUST be split and each block tried. (CRLF-tolerant.)
+VK_DIR="$(mktemp -d)" || { echo "FATAL: mktemp failed"; exit 1; }
+awk -v d="$VK_DIR" '
+  { sub(/\r$/, "") }
+  /^-----BEGIN PUBLIC KEY-----$/ { n++; f=d "/blk." n }
+  f { print > f }
+  /^-----END PUBLIC KEY-----$/   { if (f) close(f); f="" }
+' "$VERIFY_KEY"
+vk_blocks=$(find "$VK_DIR" -name 'blk.*' | wc -l | tr -d ' ')
+[[ "$vk_blocks" =~ ^[0-9]+$ && "$vk_blocks" -ge 1 ]] || { echo "FATAL: $VERIFY_KEY has no usable PUBLIC KEY block"; rm -rf "$VK_DIR"; exit 1; }
+# Fail closed on the un-populated placeholder, scanning ONLY the PEM PAYLOAD (the split blocks) — NOT the whole
+# file, whose operator-instruction comments legitimately mention REPLACE_WITH_ even after the key is populated.
+if grep -q 'REPLACE_WITH_' "$VK_DIR"/blk.*; then
+  echo "FATAL: $VERIFY_KEY is the un-replaced placeholder — populate the verify key (see §'Backup signing key') before restoring"; rm -rf "$VK_DIR"; exit 1
+fi
+# Every block must parse as a public key — a stray non-key block (junk between BEGIN/END) is a malformed keyring.
+for _vb in "$VK_DIR"/blk.*; do
+  "$OPENSSL" pkey -pubin -in "$_vb" -noout 2>/dev/null || { echo "FATAL: $VERIFY_KEY has a block that is not a valid public key"; rm -rf "$VK_DIR"; exit 1; }
+done
+# Preflight: this host's openssl must be able to VERIFY an Ed25519 -rawin signature, or every candidate would
+# fail-closed and look identical to "no good backup exists". Sign+verify a probe with an ephemeral key.
+_pf="$(mktemp -d)" || { echo "FATAL: mktemp failed"; rm -rf "$VK_DIR"; exit 1; }
+if ! "$OPENSSL" genpkey -algorithm Ed25519 -out "$_pf/k" 2>/dev/null \
+  || ! "$OPENSSL" pkey -in "$_pf/k" -pubout -out "$_pf/k.pub" 2>/dev/null \
+  || ! printf 'argus-restore-verify-preflight' >"$_pf/m" \
+  || ! "$OPENSSL" pkeyutl -sign -rawin -inkey "$_pf/k" -in "$_pf/m" -out "$_pf/s" 2>/dev/null \
+  || [[ "$(wc -c <"$_pf/s" 2>/dev/null || echo 0)" -ne 64 ]] \
+  || ! "$OPENSSL" pkeyutl -verify -rawin -pubin -inkey "$_pf/k.pub" -sigfile "$_pf/s" -in "$_pf/m" >/dev/null 2>&1; then
+  rm -rf "$_pf" "$VK_DIR"
+  echo "FATAL: openssl '$OPENSSL' cannot verify Ed25519 -rawin signatures (needs OpenSSL >=3.0; LibreSSL/1.1.1 lack it). Set OPENSSL=/path/to/openssl@3 or restore on a host with OpenSSL 3."; exit 1
+fi
+rm -rf "$_pf"
+echo "verify key OK: ${vk_blocks} pinned key block(s), openssl Ed25519 -rawin preflight passed"
+
+# 1b. Fetch the age private key from Key Vault (mode 0400) — only NOW that the verify-key + openssl preflight
+#     passed, so none of the setup FATALs above could leave the decrypt key on disk. (Cleared by shred on every
+#     subsequent exit: the no-pair FATAL and step 5.)
 az keyvault secret show --vault-name <vault> --name argus-backup-age-key --query value -o tsv > age.key
 chmod 0400 age.key
 
-# 1b. Pick the newest VALID backup pair — VERSION-AWARE. This is the recovery path that ransomware resistance
+# 1c. Pick the newest VALID backup pair — VERSION-AWARE. This is the recovery path that ransomware resistance
 #     depends on, so it must reach a good LOCKED version even when a newer one shadows it.
 #     Why versions, not key names: Object Lock requires versioning and protects each VERSION, not the key name.
 #     A compromised VM/B2 key still has writeFiles — it can upload junk as a NEW (current) version of every
 #     argus-db-*/argus-globals-* key. The good backups survive as LOCKED non-current versions (un-deletable —
 #     WORM holds), but a key-NAME lookup (`list-objects-v2` / `s3 cp` by name / `head-object` without
 #     --version-id) returns only the attacker's CURRENT junk. So enumerate VERSIONS (`list-object-versions`)
-#     and download by explicit --version-id, walking newest-first and accepting the first DB version that
-#     (a) clears the 1024-byte size floor, (b) has a SUCCESS MARKER argus-ok-<stamp> (written by the worker
-#     only after BOTH dumps fully succeeded — so a failed run, whose partial db object can be >1 KiB and pass
-#     `pg_restore --list` yet be incomplete, is excluded), (c) decrypts (age STREAM auth rejects a mid-stream-
-#     truncated upload) with a valid TOC, and (d) has a paired argus-globals-<stamp> VERSION that is itself
-#     valid (≥64 B + decrypts). The walk skips past any junk/shadow/failed versions to the newest good pair.
-#     CAVEAT: `pg_restore --list` checks STRUCTURE, not completeness; the marker excludes runs that FAILED
-#     (non-zero pg_dump/upload), but a pg_dump that exits 0 yet is logically short (rare) would still pass —
-#     the full restore drill below (step 3 + sanity check) is the definitive data-completeness test.
+#     and download by explicit --version-id, walking newest-first and accepting the first DB version whose run
+#     is AUTHENTIC and complete: (a) clears the 1024-byte size floor, (b) has a SUCCESS MARKER argus-ok-<stamp>
+#     whose .sig VERIFIES under the pinned keyring (backup-verify.pub) — existence is NO LONGER enough; the gate
+#     is an Ed25519 signature the bucket-writer can't forge, over a manifest that pins BOTH objects by SHA-256,
+#     (c) the db object's ciphertext re-hashes to the SIGNED digest AND decrypts (age STREAM auth rejects a
+#     mid-stream-truncated upload) with a valid TOC, and (d) has a paired argus-globals-<stamp> VERSION whose
+#     ciphertext re-hashes to the SIGNED globals digest AND decrypts. The walk skips past any
+#     junk/shadow/failed/FORGED versions to the newest good signed pair.
+#     CAVEAT: `pg_restore --list` checks STRUCTURE, not completeness; signature + marker exclude FAILED and
+#     FORGED runs, but a pg_dump that exits 0 yet is logically short (rare) would still pass — the full restore
+#     drill below (step 3 + sanity check) is the definitive data-completeness test.
 #     Shadowing by junk versions makes the good pair OLDER, not wrong — staleness is the exposure, and
 #     OnFailure surfaces a flapping backup (see "Denial of availability" in the threat model).
-#     AUTHENTICITY CAVEAT: AGE_RECIPIENT is a PUBLIC key, so age gives confidentiality, NOT authenticity —
-#     ANYONE (incl. a compromised writeFiles key) can encrypt an arbitrary dump to it and upload it as a
-#     current version that passes size + `age -d` + `pg_restore --list`. Structural validation therefore does
-#     NOT prove a version was produced by the worker. The anchor that DOES survive a forging attacker is the
-#     B2-set upload time (`LastModified`) — the attacker cannot backdate it. So in a SUSPECTED COMPROMISE, set
-#     COMPROMISE_BEFORE to an ISO-8601 instant just before the compromise window; the walk then ignores every
-#     version uploaded at/after it and lands on the newest genuine pre-compromise locked pair. (Cryptographic
-#     authenticity — signed backups the B2 key can't forge — is a tracked follow-up; until then this timestamp
-#     anchor is the recovery guarantee, so record/know your compromise window.)
-CUTOFF="${COMPROMISE_BEFORE:-}"   # unset = newest valid (normal restore); set to ISO-8601 during a compromise
+#     FRESHNESS CAVEAT (why COMPROMISE_BEFORE still matters AFTER signing): the signature authenticates
+#     PROVENANCE ("our worker made this"), NOT FRESHNESS ("this is the latest"). A genuine OLD signed pair
+#     verifies forever, so a writeFiles attacker can ROLLBACK by re-uploading a genuine pre-compromise pair as
+#     the current version — every signature/digest check passes. The only anti-rollback anchor is the B2-set
+#     upload time (`LastModified`), which the attacker cannot backdate. So in a SUSPECTED COMPROMISE, set
+#     COMPROMISE_BEFORE to an ISO-8601 instant just before the window; the walk then ignores every version
+#     uploaded at/after it and lands on the newest genuine pre-compromise locked pair. Signatures and this
+#     timestamp anchor are ORTHOGONAL and BOTH required (monotonic anti-rollback is a tracked follow-up).
+CUTOFF="${COMPROMISE_BEFORE:-}"   # unset = newest valid (normal restore); set during a compromise (any form GNU
+                                  # `date -d` parses, e.g. 2026-06-10T00:00:00Z or +00:00 — both accepted)
 rm -f backup.dump backup.dump.age globals.sql.age   # idempotent: clear any leftovers from a prior aborted run
 
-# Echoes the version-id of the newest VALID globals version (≥64 B + decrypts, uploaded before $CUTOFF if set).
+# before_cutoff <LastModified> : 0 if no cutoff set, or if the version was uploaded STRICTLY BEFORE $CUTOFF.
+# Compares as EPOCH SECONDS, never lexically: AWS renders LastModified as `...+00:00` while operators type `...Z`,
+# and '+' < 'Z' lexically would wrongly include post-cutoff versions — fail-OPEN on the only freshness anchor.
+# A timestamp that won't parse is treated as NOT-before (fail-closed: the version is skipped). Needs GNU date.
+before_cutoff() {
+  [[ -z "$CUTOFF" ]] && return 0
+  local le ce
+  le=$(date -d "$1" +%s 2>/dev/null) || return 1
+  ce=$(date -d "$CUTOFF" +%s 2>/dev/null) || return 1
+  [[ "$le" =~ ^[0-9]+$ && "$ce" =~ ^[0-9]+$ && "$le" -lt "$ce" ]]
+}
+
+# verify_sig <marker_cipher_file> <sig_file> : 0 + prints the verifying key's DER-SHA256 if the detached sig
+# verifies over the marker CIPHERTEXT under ANY pinned keyring block; else non-zero. The Ed25519 sig is exactly
+# 64 bytes — assert that BEFORE spending a verify (a 0-byte/short file must never be treated as "nothing to
+# check"). openssl pkeyutl -verify reads only the first block of a multi-key file, so we loop the split blocks.
+verify_sig() {
+  local marker="$1" sig="$2" ssz blk der vksha
+  ssz=$(wc -c <"$sig" 2>/dev/null | tr -d '[:space:]'); ssz="${ssz:-0}"   # tr: BSD wc pads with spaces
+  [[ "$ssz" =~ ^[0-9]+$ && "$ssz" -eq 64 ]] || return 1
+  for blk in "$VK_DIR"/blk.*; do
+    [[ -f "$blk" ]] || continue
+    "$OPENSSL" pkeyutl -verify -rawin -pubin -inkey "$blk" -sigfile "$sig" -in "$marker" >/dev/null 2>&1 || continue
+    # This block verified — compute its DER (SubjectPublicKeyInfo) SHA-256 for the manifest key-id cross-check.
+    # Stage to a file and check openssl's exit EXPLICITLY: piping openssl|sha256sum would hash an EMPTY stream
+    # on failure and yield a valid-looking 64-hex digest.
+    der="$VK_DIR/der"
+    if "$OPENSSL" pkey -pubin -in "$blk" -pubout -outform DER -out "$der" 2>/dev/null; then
+      vksha=$(sha256sum "$der" | cut -d' ' -f1); rm -f "$der"
+      [[ "$vksha" =~ ^[0-9a-f]{64}$ ]] && { printf '%s' "$vksha"; return 0; }
+    fi
+    rm -f "$der"; return 1
+  done
+  return 1
+}
+
+# Echoes the version-id of the globals version whose CIPHERTEXT re-hashes to the SIGNED digest $2 (and decrypts),
+# walking newest-first before $CUTOFF. Binding to the signed digest is strictly stronger than the old size floor:
+# attacker junk shadowing the genuine globals fails the digest and the walk falls through to the locked good one.
 pick_globals_version() {
-  local gk="$1" ver lm gsz
+  local gk="$1" want_sha="$2" ver lm gsha
   while read -r ver lm; do
-    [[ -n "$ver" ]] || continue
-    [[ -z "$CUTOFF" || "$lm" < "$CUTOFF" ]] || continue        # provenance anchor: ignore at/after compromise
-    gsz=$(aws s3api head-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$gk" --version-id "$ver" \
-      --query 'ContentLength' --output text 2>/dev/null || echo 0)
-    [[ "$gsz" =~ ^[0-9]+$ && "$gsz" -ge 64 ]] || continue
+    [[ -n "$ver" && "$ver" != "None" ]] || continue
+    before_cutoff "$lm" || continue                            # freshness anchor: ignore at/after compromise
     aws s3api get-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$gk" --version-id "$ver" \
       ./globals.sql.age >/dev/null 2>&1 || continue
+    gsha=$(sha256sum globals.sql.age | cut -d' ' -f1)
+    [[ "$gsha" == "$want_sha" ]] || { rm -f globals.sql.age; continue; }     # (d) bind to the SIGNED globals digest
     age -d -i age.key globals.sql.age >/dev/null 2>&1 || { rm -f globals.sql.age; continue; }
     echo "$ver"; return 0
   done < <(aws s3api list-object-versions --endpoint-url "$EP" --bucket "$BUCKET" --prefix "$gk" \
@@ -220,15 +312,69 @@ pick_globals_version() {
   return 1
 }
 
-# True if a SUCCESS MARKER for stamp $1 exists in a version uploaded before $CUTOFF. The worker writes the
-# marker (argus-ok-<stamp>.age) only after BOTH dumps uploaded AND passed their size floors, so a failed run —
-# whose partial db object can be >1 KiB and pass `pg_restore --list` yet be incomplete — has no marker and is
-# never eligible. Existence is the signal (not content); authenticity is the COMPROMISE_BEFORE anchor's job.
-marker_ok() {
-  local mk="argus-ok-${1}.age" ver lm
+# marker_verified <stamp> : find a marker version for <stamp> whose .sig VERIFIES under the pinned keyring, then
+# decrypt the (now-TRUSTED) manifest and export its fields as M_* globals. Existence is NO LONGER the signal — a
+# verifying Ed25519 signature is. Walks marker versions newest-first before $CUTOFF; returns 0 on the first that
+# verifies + parses + passes the key-id/stamp cross-checks, else 1. Authenticity of the OBJECTS is then enforced
+# by the caller re-hashing them against M_DB_SHA / M_GLOBALS_SHA.
+M_STAMP=""; M_GLOBALS_KEY=""; M_DB_KEY=""; M_GLOBALS_SHA=""; M_DB_SHA=""; M_VERIFYKEY=""
+marker_verified() {
+  local st="$1" mk="argus-ok-${1}.age" sk="argus-ok-${1}.age.sig" ver lm sver slm vksha mani sigline msz ssz
+  local mc="$VK_DIR/marker.age" ms="$VK_DIR/marker.sig"   # transient verify state lives in the 0700 temp dir
+  # Control objects are TINY (the manifest ciphertext is well under a KiB; the sig is exactly 64 bytes). A
+  # writeFiles attacker could shadow either with a HUGE current version to fill the restore host's disk or stall
+  # the walk before it reaches the locked genuine version. So bound ContentLength BY VERSION and skip oversized
+  # ones BEFORE downloading. Generous caps (the real objects are far smaller); verify_sig still asserts 64 exactly.
+  local marker_max=16384 sig_max=1024
+  # ALL .sig versions for this stamp, newest-first. WORM keeps the genuine sig as an older version even if a
+  # writeFiles attacker shadows it with a junk NEWER one, so we must try EACH against the marker — not just the
+  # newest — or one junk .sig upload would brick recovery of an otherwise-genuine run (denial of recovery).
+  local sigvers
+  mapfile -t sigvers < <(aws s3api list-object-versions --endpoint-url "$EP" --bucket "$BUCKET" --prefix "$sk" \
+    --query "reverse(sort_by(Versions[?Key=='$sk'],&LastModified))[].[VersionId,LastModified]" --output text 2>/dev/null)
   while read -r ver lm; do
-    [[ -n "$ver" ]] || continue
-    [[ -z "$CUTOFF" || "$lm" < "$CUTOFF" ]] || continue
+    [[ -n "$ver" && "$ver" != "None" ]] || continue
+    before_cutoff "$lm" || continue
+    msz=$(aws s3api head-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$mk" --version-id "$ver" \
+      --query 'ContentLength' --output text 2>/dev/null || echo 0)
+    [[ "$msz" =~ ^[0-9]+$ && "$msz" -ge 1 && "$msz" -le "$marker_max" ]] || { echo "  skip marker $st@$ver (implausible marker size ${msz}B)"; continue; }
+    aws s3api get-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$mk" --version-id "$ver" \
+      "$mc" >/dev/null 2>&1 || continue
+    # (a) try every .sig VERSION against THIS marker ciphertext until one verifies; vksha = DER-SHA256 of the
+    # verifying block (for check e). The marker/sig version walks are decoupled and that's SAFE: a sig verifies
+    # only over the exact marker bytes it signed, so a junk shadow sig (or a junk shadow marker) just fails and
+    # the walk falls through to the older self-consistent locked pair — it never narrows the recovery search.
+    vksha=""
+    for sigline in "${sigvers[@]}"; do
+      [[ -n "$sigline" ]] || continue
+      read -r sver slm <<<"$sigline"
+      [[ -n "$sver" && "$sver" != "None" ]] || continue
+      before_cutoff "$slm" || continue
+      ssz=$(aws s3api head-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$sk" --version-id "$sver" \
+        --query 'ContentLength' --output text 2>/dev/null || echo 0)
+      [[ "$ssz" =~ ^[0-9]+$ && "$ssz" -ge 1 && "$ssz" -le "$sig_max" ]] || continue
+      aws s3api get-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$sk" --version-id "$sver" \
+        "$ms" >/dev/null 2>&1 || continue
+      vksha=$(verify_sig "$mc" "$ms") && break
+      vksha=""
+    done
+    [[ -n "$vksha" ]] || { echo "  skip marker $st@$ver (no .sig version verifies it under the pinned keyring)"; rm -f "$mc" "$ms"; continue; }
+    # only NOW decrypt the trusted manifest
+    mani=$(age -d -i age.key < "$mc" 2>/dev/null) || { echo "  skip marker $st@$ver (manifest decrypt failed)"; rm -f "$mc" "$ms"; continue; }
+    rm -f "$mc" "$ms"
+    [[ "$(printf '%s\n' "$mani" | head -1)" == "$(printf 'argus-backup-manifest\tv1')" ]] || { echo "  skip marker $st@$ver (bad manifest header/version)"; continue; }
+    M_STAMP=$(printf '%s\n' "$mani" | awk -F'\t' '$1=="stamp"{print $2}')
+    M_GLOBALS_KEY=$(printf '%s\n' "$mani" | awk -F'\t' '$1=="globals"{print $2}')
+    M_GLOBALS_SHA=$(printf '%s\n' "$mani" | awk -F'\t' '$1=="globals"{print $3}'); M_GLOBALS_SHA=${M_GLOBALS_SHA#sha256:}
+    M_DB_KEY=$(printf '%s\n' "$mani" | awk -F'\t' '$1=="db"{print $2}')
+    M_DB_SHA=$(printf '%s\n' "$mani" | awk -F'\t' '$1=="db"{print $3}'); M_DB_SHA=${M_DB_SHA#sha256:}
+    M_VERIFYKEY=$(printf '%s\n' "$mani" | awk -F'\t' '$1=="verifykey"{print $2}'); M_VERIFYKEY=${M_VERIFYKEY#sha256:}
+    # (e) the key that verified must be the key the manifest names (advisory id corroborated, never gating alone)
+    [[ "$vksha" == "$M_VERIFYKEY" ]] || { echo "  skip marker $st@$ver (verifying key $vksha != manifest verifykey $M_VERIFYKEY)"; continue; }
+    # (b) the manifest's own stamp must equal the stamp we looked up
+    [[ "$M_STAMP" == "$st" ]] || { echo "  skip marker $st@$ver (manifest stamp $M_STAMP != $st)"; continue; }
+    # sanity-check digest shapes before the caller trusts them
+    [[ "$M_DB_SHA" =~ ^[0-9a-f]{64}$ && "$M_GLOBALS_SHA" =~ ^[0-9a-f]{64}$ ]] || { echo "  skip marker $st@$ver (malformed manifest digest)"; continue; }
     return 0
   done < <(aws s3api list-object-versions --endpoint-url "$EP" --bucket "$BUCKET" --prefix "$mk" \
     --query "reverse(sort_by(Versions[?Key=='$mk'],&LastModified))[].[VersionId,LastModified]" --output text)
@@ -237,25 +383,32 @@ marker_ok() {
 
 DB_KEY=""; DB_VER=""; G_KEY=""; G_VER=""; STAMP=""
 while read -r cand ver lm; do
-  [[ -n "$cand" && -n "$ver" ]] || continue
-  [[ -z "$CUTOFF" || "$lm" < "$CUTOFF" ]] || { echo "skip $cand@$ver (uploaded $lm ≥ cutoff $CUTOFF)"; continue; }
+  [[ -n "$cand" && -n "$ver" && "$ver" != "None" ]] || continue
+  before_cutoff "$lm" || { echo "skip $cand@$ver (uploaded $lm at/after cutoff $CUTOFF)"; continue; }
   sz=$(aws s3api head-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$cand" --version-id "$ver" \
     --query 'ContentLength' --output text 2>/dev/null || echo 0)
   [[ "$sz" =~ ^[0-9]+$ && "$sz" -ge 1024 ]] || { echo "skip $cand@$ver (too small: ${sz}B)"; continue; }
   st=${cand#argus-db-}; st=${st%.dump.age}                   # e.g. 20260608T023012Z
-  marker_ok "$st" || { echo "skip $cand@$ver (no success marker argus-ok-$st — failed/incomplete run)"; continue; }
+  # AUTHENTICITY GATE: a marker whose .sig verifies, decrypting the SIGNED manifest into M_* (keys + digests).
+  marker_verified "$st" || { echo "skip $cand@$ver (no marker with a verifying signature)"; continue; }
+  # (c) the signed manifest must name THIS db object — bind the version-walk SELECTION to the verified manifest.
+  [[ "$M_DB_KEY" == "$cand" ]] || { echo "skip $cand@$ver (manifest db key $M_DB_KEY != selected $cand)"; continue; }
+  [[ "$M_GLOBALS_KEY" == "argus-globals-${st}.sql.age" ]] || { echo "skip $cand@$ver (manifest globals key $M_GLOBALS_KEY unexpected)"; continue; }
+  # download the db ciphertext ONCE; (d) re-hash that file and require it matches the SIGNED digest; decrypt the
+  # SAME file (never re-fetch between hash and restore).
   aws s3api get-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$cand" --version-id "$ver" \
     ./backup.dump.age >/dev/null 2>&1 || { echo "skip $cand@$ver (download failed)"; continue; }
+  dbsha=$(sha256sum backup.dump.age | cut -d' ' -f1)
+  [[ "$dbsha" == "$M_DB_SHA" ]] || { echo "skip $cand@$ver (db ciphertext digest $dbsha != signed $M_DB_SHA)"; rm -f backup.dump.age; continue; }
   if ! age -d -i age.key backup.dump.age >backup.dump 2>/dev/null || ! pg_restore --list backup.dump >/dev/null 2>&1; then
     echo "skip $cand@$ver (failed decrypt / pg_restore --list)"; rm -f backup.dump.age backup.dump; continue
   fi
-  gk="argus-globals-${st}.sql.age"
-  gver=$(pick_globals_version "$gk") || { echo "skip $cand@$ver (no valid paired globals version)"; continue; }
-  DB_KEY="$cand"; DB_VER="$ver"; G_KEY="$gk"; G_VER="$gver"; STAMP="$st"
-  echo "selected $DB_KEY@$DB_VER (roles: $G_KEY@$G_VER)"; break
+  gver=$(pick_globals_version "$M_GLOBALS_KEY" "$M_GLOBALS_SHA") || { echo "skip $cand@$ver (no globals version matching the signed digest)"; rm -f backup.dump.age backup.dump globals.sql.age; continue; }
+  DB_KEY="$cand"; DB_VER="$ver"; G_KEY="$M_GLOBALS_KEY"; G_VER="$gver"; STAMP="$st"
+  echo "selected $DB_KEY@$DB_VER (roles: $G_KEY@$G_VER) — signature VERIFIED, both objects bound to the signed manifest"; break
 done < <(aws s3api list-object-versions --endpoint-url "$EP" --bucket "$BUCKET" --prefix argus-db- \
   --query 'reverse(sort_by(Versions,&LastModified))[].[Key,VersionId,LastModified]' --output text)
-[[ -n "$DB_KEY" ]] || { echo "FATAL: no valid backup pair found in $BUCKET (checked all versions${CUTOFF:+ before $CUTOFF})"; exit 1; }
+[[ -n "$DB_KEY" ]] || { echo "FATAL: no backup pair with a VERIFYING signature found in $BUCKET (checked all versions${CUTOFF:+ before $CUTOFF}) — every candidate failed signature/digest verification, NOT mere absence"; rm -rf "$VK_DIR"; rm -f backup.dump backup.dump.age globals.sql.age; shred -u age.key 2>/dev/null; exit 1; }
 # globals.sql.age + backup.dump.age are now the selected good versions; backup.dump is already decrypted.
 
 # 2. Roles FIRST (no passwords — re-applied from Key Vault in step 4). Connect to the maintenance DB.
@@ -284,8 +437,9 @@ pg_restore --dbname argus_restore backup.dump   # NOT --no-owner/--no-privileges
 #    GRANT pg_read_all_data TO argus_backup;   -- restores full-DB read for the next backup (BYPASSRLS survives)
 #    -- verify: `\du argus_backup` must show BOTH "Bypass RLS" and membership of pg_read_all_data
 
-# 5. Sanity-check, then cut over. Securely remove the key + plaintext dump.
+# 5. Sanity-check, then cut over. Securely remove the key + plaintext dump, and the split-keyring temp dir.
 shred -u age.key backup.dump
+rm -rf "$VK_DIR"
 ```
 
 > **Migration ordering on restore/deploy:** a restored DB is at the schema of its dump. Run
