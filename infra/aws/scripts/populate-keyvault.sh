@@ -5,9 +5,10 @@
 #
 # Idempotent + safe to re-run: by default it SKIPS any secret that already exists (never clobbers a live
 # value). Pass --rotate to overwrite existing values (rotation — expect a redeploy to pick them up). NOT every
-# secret is rotatable: the SET-ONCE group (postgres/glitchtip-db POSTGRES_PASSWORD, grafana admin) is consumed
-# only at a component's FIRST init and is NOT reconciled on redeploy — overwriting it breaks the component's
-# auth or silently has no effect, so --rotate SKIPS it. Rotating one of those is a per-component DR step.
+# secret is rotatable: the SET-ONCE group (postgres/glitchtip-db POSTGRES_PASSWORD, grafana admin, and the
+# backup signing key — its verifier is pinned in git, so a blind rotate orphans WORM-locked backups) is consumed
+# only at a component's FIRST init / pinned out-of-band and is NOT reconciled on redeploy — overwriting it breaks
+# the component's auth/verification or silently has no effect, so --rotate SKIPS it. Rotating one is a DR step.
 # Rotatable: the session signing key + the argus_app/cleanup/backup DB logins (deploy.sh re-applies them) +
 # redis (requirepass re-read from its config file each boot).
 #
@@ -86,9 +87,13 @@ secret_exists() { az keyvault secret show --vault-name "$KV" --name "$1" --only-
 
 # Store an Ed25519 PKCS8 PEM key without ever putting it on argv.
 # Generates the key into the secure WORKDIR temp and uploads via --file.
-put_ed25519_key() { # $1 = kv name
-  if [ "$ROTATE" -eq 0 ] && secret_exists "$1"; then
-    log "exists, skipping $1 (use --rotate to overwrite)"
+put_ed25519_key() { # $1 = kv name ; $2 = "once" → set-once (skip even with --rotate)
+  if { [ "${2:-}" = once ] || [ "$ROTATE" -eq 0 ]; } && secret_exists "$1"; then
+    if [ "${2:-}" = once ] && [ "$ROTATE" -eq 1 ]; then
+      log "exists, NOT rotating $1 (set-once — blind rotation orphans pinned-verifier backups; needs a coordinated keyring)"
+    else
+      log "exists, skipping $1 (use --rotate to overwrite)"
+    fi
     return 0
   fi
   local f="$WORKDIR/val"
@@ -142,16 +147,16 @@ fi
 #     Split by rotation safety — see the header note. ---
 # Rotatable (reconciled on the next deploy, or re-read from config each boot):
 put_ed25519_key argus-session-signing-key  # EdDSA JWT signing key (PKCS8 PEM) — rotatable; API re-reads on start
-put_ed25519_key argus-backup-signing-key   # DB-backup provenance signing key (PKCS8 PEM) — rotatable; the worker
-#   signs each nightly object with it and restore verifies the signature (signed backups, BKP-2 follow-up). After
-#   creating it, derive + commit the PUBLIC half to infra/backup/backup-verify.pub (non-secret), e.g.:
-#     az keyvault secret show --vault-name "$KV" --name argus-backup-signing-key --query value -o tsv \
-#       | openssl pkey -pubout
 put argus-redis-password "$(gen_alnum 32)"   # redis requirepass — re-read from its config file each boot
 put argus-backup-db-password "$(gen_alnum 32)"  # argus_backup login — deploy.sh re-applies via ALTER ROLE
 put argus-cleanup-db-password "$(gen_alnum 32)" # argus_cleanup login — deploy.sh re-applies via ALTER ROLE
 put argus-glitchtip-secret-key "$(gen_alnum 50)" # Django SECRET_KEY — env each boot (only logs sessions out)
-# Set-once (consumed at a component's first init, NOT reconciled — rotating is a per-component DR step):
+# Set-once (consumed at a component's first init / verifier pinned out-of-band, NOT reconciled — rotating is a DR step):
+put_ed25519_key argus-backup-signing-key once  # DB-backup signing key (PKCS8 PEM) — SET-ONCE: its verifier is
+#   pinned in infra/backup/backup-verify.pub (not runtime-derived), so a blind --rotate would orphan verification
+#   of WORM-locked backups signed with the old key. Rotate only with a coordinated keyring (restore verifying
+#   current-then-previous). After first creation, commit the PUBLIC half to backup-verify.pub:
+#     az keyvault secret show --vault-name "$KV" --name argus-backup-signing-key --query value -o tsv | openssl pkey -pubout
 put_once argus-postgres-owner-password "$(gen_alnum 32)" # postgres POSTGRES_PASSWORD — rotating breaks migration auth
 put_once argus-glitchtip-db-password "$(gen_alnum 32)"   # glitchtip-db POSTGRES_PASSWORD — rotating breaks GlitchTip↔DB auth
 put_once argus-grafana-admin-password "$(gen_alnum 24)"  # GF admin set at first init; rotating has no effect on the live UI
