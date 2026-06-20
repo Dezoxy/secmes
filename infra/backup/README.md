@@ -110,9 +110,12 @@ decrypting) a candidate.
 > run `populate-keyvault.sh` (no `--rotate` — it skip-creates only the missing key) **before** pulling this
 > change and redeploying. Otherwise the boot-time secret fetch 404s on the new key and fails closed.
 
-> This is provisioning only; the worker's signing step and the restore-time verification land in the following
-> changes. Threat model: `docs/threat-models/db-backup.md`; the Ed25519-signing-outside-`packages/crypto`
-> boundary follows the ratified precedent in `docs/threat-models/session-tokens.md §invariant-4`.
+> The worker now **signs** at write time (this slice): each run uploads a signed manifest marker
+> (`argus-ok-<stamp>.age` + `.age.sig`) binding both objects by SHA-256. The key reaches the unit via
+> `LoadCredential=backup-sign-key` (`BACKUP_SIGN_KEY_FILE`). **Restore-time verification** still lands in the
+> following change (slice 3). Threat model: `docs/threat-models/db-backup.md`; the
+> Ed25519-signing-outside-`packages/crypto` boundary follows the ratified precedent in
+> `docs/threat-models/session-tokens.md §invariant-4`.
 
 ### 4. B2 bucket
 

@@ -131,11 +131,33 @@ in the backup — they are re-applied from Key Vault at restore.
 
 ## §invariant-4 boundary: backup signing is not E2EE crypto (signed backups)
 
-Signed backups (BKP-2 follow-up) add a **second** keypair: the worker signs each nightly object with an
+Signed backups (BKP-2 follow-up) add a **second** keypair: the worker signs each nightly run with an
 **Ed25519** key (`argus-backup-signing-key`) and restore verifies the signature, so a bucket-writer can no
 longer pass off a forged dump as genuine. Slice 1 **provisions** this key (Key Vault + the committed public
-verify key `infra/backup/backup-verify.pub`); the worker's signing step and the restore-time verification land
-in the following slices.
+verify key `infra/backup/backup-verify.pub`); **slice 2 implements the worker's signing step (this section)**;
+the restore-time verification lands in slice 3.
+
+**Design: sign a digest manifest, not the multi-GB dumps.** The dumps stream `pg_dump → age → B2` and never
+touch disk — a load-bearing privacy property. Rather than break that to feed a whole `age`-ciphertext file into
+`openssl pkeyutl` (which loads its entire input into RAM, on both the signing host and the restore host), the
+worker computes each object's **SHA-256 as it streams** (constant memory, via a `tee` into `sha256sum`), writes
+both digests + the run stamp + the verify-key id into the small success-marker **manifest**, and signs *that*.
+One Ed25519 signature over the tiny manifest authenticates both large objects transitively (their bytes are
+pinned by digest) and binds them to one run by stamp, defeating mix-and-match/rollback. The integrity claim is
+identical to signing the raw files — what's signed is `age`-ciphertext either way — and substituting a forged
+object under a signed digest would require a **second-preimage** on SHA-256 (~256-bit), not a birthday
+collision. SHA-256 is the same standard-primitive category as `age`/Ed25519, so invariant #4 is unchanged.
+The signature is computed over the marker **ciphertext**, so restore verifies provenance *before* it needs the
+age key or touches the big objects. The manifest's `verifykey sha256:<hex>` is an **advisory** key-id for
+slice 3's current-then-previous keyring (it selects which verify key to try — the signature, not the
+self-declared id, is the actual authentication).
+
+**Slice-3 acceptance invariant (recorded now so the seam isn't lost).** The write side guarantees only that a
+restore-eligible run is *signed* (sign-before-marker, marker-before-sig). The matching read-side rule restore
+MUST enforce: a stamp is eligible **only if** its `.sig` is present **and** verifies under the pinned
+`backup-verify.pub` keyring **and** both manifest digests match the re-hashed objects — a missing, unparseable,
+or non-verifying signature (including against the un-replaced `REPLACE_WITH_` placeholder) is a **hard reject**,
+never "verify if present." That makes the "marker present but sig-upload failed" degraded state fail closed.
 
 This uses a cryptographic primitive (Ed25519) **outside `packages/crypto`**, so it must clear invariant #4
 explicitly. It does — and not as a new judgement, but under the **already-ratified precedent** for
@@ -207,9 +229,13 @@ never lands on the host — is the tracked upgrade, deferred as enterprise-grade
   surfaces the anomaly. (d) **No backup authenticity yet** — age-to-public-key is confidentiality only, so a
   compromised `writeFiles` key can forge a structurally-valid version; recovery currently anchors on the
   immutable B2 upload time (`COMPROMISE_BEFORE` cutoff), which requires the operator to know the compromise
-  window. **Signed backups** (a signature the B2 key can't forge) close this — now in progress: the signing key
-is provisioned in slice 1 (see the §invariant-4 boundary section above), with the worker's signing and the
-restore-time verification following. This residual flips to closed once verification is live.
+  window. **Signed backups** (a signature the B2 key can't forge) close this — now mostly in place: the signing
+key is provisioned (slice 1) and **the worker now signs each run (slice 2)** (see the §invariant-4 boundary
+section above). This residual flips to **closed for the B2-key threat** once slice 3's restore-time verification
+is live. Two slice-2 sub-notes: the signature binds **SHA-256 digests**, not raw bytes — substituting a forged
+object under a signed digest needs a second-preimage on SHA-256 (~256-bit), not a concern at this level; and the
+manifest's key-id (DER-pubkey SHA-256) is **advisory** for slice 3's keyring selection (the signature is the
+actual check, never the self-declared id).
 - **No off-cloud copy.** Backups live in one B2 bucket/region. A second provider/region copy (3-2-1) is an
   enterprise follow-up.
 - **Docker-group membership grants in-container DB access.** PG has no published port; the host workers
