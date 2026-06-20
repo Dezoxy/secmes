@@ -85,9 +85,14 @@ az keyvault network-rule add --name argus-exp-kv-4ad322 --ip-address "$MYIP"
 
 az keyvault secret list --vault-name argus-exp-kv-4ad322 \
   --query "[?contains(name,'signing') || name=='argus-b2-app-key' || name=='argus-backup-age-key' || name=='argus-ghcr-token'].name" -o tsv
-# If any are missing, the idempotent populate script fills them (set the vault name explicitly —
-# its terraform-output fallback is flaky from a laptop):
+
+# populate.sh GENERATES the signing keys and PROMPTS for the external creds (argus-b2-app-key,
+# argus-ghcr-token). Set the vault name explicitly — its terraform-output fallback is flaky from a laptop:
 ARGUS_KEY_VAULT=argus-exp-kv-4ad322 ./infra/aws/scripts/populate-keyvault.sh # gitleaks:allow — vault NAME, not a secret
+
+# The age key is NOT created by populate.sh — set it explicitly from the keypair generated in blocker 1,
+# or restore is impossible. (age.key holds the AGE-SECRET-KEY line; restore writes it back and runs `age -i`.)
+az keyvault secret set --vault-name argus-exp-kv-4ad322 --name argus-backup-age-key --file age.key
 
 az keyvault network-rule remove --name argus-exp-kv-4ad322 --ip-address "$MYIP"   # re-tighten when done
 ```
