@@ -129,6 +129,37 @@ in the backup — they are re-applied from Key Vault at restore.
 - **#6 no admin content path** — upheld: a backup is not an admin surface; nobody reads message *content* from
   it (bodies are ciphertext), and access requires the Key-Vault-held age private key.
 
+## §invariant-4 boundary: backup signing is not E2EE crypto (signed backups)
+
+Signed backups (BKP-2 follow-up) add a **second** keypair: the worker signs each nightly object with an
+**Ed25519** key (`argus-backup-signing-key`) and restore verifies the signature, so a bucket-writer can no
+longer pass off a forged dump as genuine. Slice 1 **provisions** this key (Key Vault + the committed public
+verify key `infra/backup/backup-verify.pub`); the worker's signing step and the restore-time verification land
+in the following slices.
+
+This uses a cryptographic primitive (Ed25519) **outside `packages/crypto`**, so it must clear invariant #4
+explicitly. It does — and not as a new judgement, but under the **already-ratified precedent** for
+`argus-session-signing-key` (see `session-tokens.md §invariant-4`):
+
+- **It is server-infrastructure integrity, not E2EE key material.** The signature asserts "this backup was
+  produced by *our* worker." It never touches a message key, a session key, or any content the server is
+  forbidden to see — the thing being signed is `age`-**ciphertext** of metadata the server already legitimately
+  handles. `packages/crypto` is an MLS wrapper for E2EE message-key operations and has no concept of "sign a
+  server artifact"; routing this through it would give the crypto-blind boundary an infrastructure job and blur
+  what it guards.
+- **It is a standard, audited primitive, not hand-rolled** — the same line invariant #4 already draws for
+  `age` (bullet #4 above). Ed25519 via `openssl` is the same category.
+- **The Semgrep gate (`argus-crypto-only-in-crypto-package`) does not fire and should not** — it is a regex
+  allowlist over TS/JS primitive calls (`crypto.subtle|createCipheriv|createHmac|…`); it does not scan shell
+  and does not match `openssl`. There is no rule being bypassed.
+
+**Honest limit (recorded, not hidden).** The signing private key must live on the backup host to sign nightly
+(delivered as a `LoadCredential` file, like the B2 key) — so unlike the age **private** key, which is
+Key-Vault-only and never on the VM, a full **host-root** compromise can read it and forge a validly-signed
+backup. This is a strictly **smaller** attacker set than the status quo it closes (any leaked/compromised B2
+`writeFiles` key — a broad, off-host surface). The complete fix — a Key-Vault-side *sign operation* so the key
+never lands on the host — is the tracked upgrade, deferred as enterprise-grade for the single-VM beta.
+
 ## 5. Decision & mitigations
 
 - Migration `0015_db_backup_role.sql`: `argus_backup` — NOLOGIN, NOSUPERUSER, **BYPASSRLS**, INHERIT, granted
@@ -176,7 +207,9 @@ in the backup — they are re-applied from Key Vault at restore.
   surfaces the anomaly. (d) **No backup authenticity yet** — age-to-public-key is confidentiality only, so a
   compromised `writeFiles` key can forge a structurally-valid version; recovery currently anchors on the
   immutable B2 upload time (`COMPROMISE_BEFORE` cutoff), which requires the operator to know the compromise
-  window. **Signed backups** (a signature the B2 key can't forge) are the tracked follow-up that closes this.
+  window. **Signed backups** (a signature the B2 key can't forge) close this — now in progress: the signing key
+is provisioned in slice 1 (see the §invariant-4 boundary section above), with the worker's signing and the
+restore-time verification following. This residual flips to closed once verification is live.
 - **No off-cloud copy.** Backups live in one B2 bucket/region. A second provider/region copy (3-2-1) is an
   enterprise follow-up.
 - **Docker-group membership grants in-container DB access.** PG has no published port; the host workers
