@@ -158,31 +158,23 @@ its outstanding access token keeps working on **normal (non-admin) routes** unti
 - **Account-delete is fully neutralized (not part of this residual).** `gdpr.deleteAccount` removes the
   `user_tenant_index` row, so `verify()`'s next lookup returns **unbound → 403** on every guarded route,
   regardless of token validity.
-- **Member-revoke is only *partially* neutralized — so it *is* part of this residual.**
-  `TenantsService.revokeMember()` sets `users.status = 'revoked'` but does **not** delete the binding.
-  Routes that resolve the caller via `requireUser` (`messaging/membership.ts`, which filters
-  `status = 'active'`) reject the revoked member immediately — but the **key-directory mutation routes do
-  not**: `KeyDirectoryService.publish()` / `revokeUnclaimed()` resolve the caller by `auth.sub` /
-  `external_identity_id` with **no `status` predicate**, and `claim()` resolves only the *target*. So a
-  revoked member holding an unexpired access JWT can still mutate the key directory **for ≤10 min** until
-  the token expires (the refresh path already blocks a non-active user from minting a new one). **Blast
-  radius:** `publish` / `revokeUnclaimed` touch only the caller's **own** device packages — but
-  `claim(targetUserId)` resolves the target solely by `d.user_id = targetUserId`, with **no
-  caller==target and no caller-active check**, so a revoked member can also **consume any in-tenant
-  peer's one-time KeyPackages** (a bounded cross-user pool-drain). The sibling route `claimAll`
-  (`POST /users/:userId/key-packages/claim-all`) shares the **same** missing caller-active check and the
-  **same** 30/min cap, but `KeyDirectoryService.claimAll()` consumes **one package per non-provisional
-  device** of the target in a single request (audited as `keydir.key_packages_claimed_bulk`) — so against
-  a multi-device peer a revoked member drains **more than one package per request**, not the one-per-call
-  of `claim` (audited as `keydir.key_package_claimed`). The drain stays bounded — 30 requests/min × the
-  target's device count — and the target self-heals via replenishment. All of it is bounded by the 10-min
-  TTL and tenant-scoped (RLS — no cross-tenant reach) — accepted for beta. **Code-side close
-  (follow-up):** add a `status = 'active'` caller check (or route caller resolution through `requireUser`)
-  on the key-directory mutations (`publish`/`claim`/`claimAll`/`revokeUnclaimed`). This **refines** the broader
-  `auth-tenant-context.md` §6 claim that member-revoke is neutralized on *every* path — it is not.
+- **Member-revoke on the key-directory routes — CLOSED.** `TenantsService.revokeMember()` sets
+  `users.status = 'revoked'` but does **not** delete the binding, so a revoked member with an unexpired
+  access JWT was, for the ≤10-min TTL, still able to mutate the key directory: `KeyDirectoryService`'s
+  `publish` / `revokeUnclaimed` resolved the caller by `auth.sub` / `external_identity_id` with **no
+  `status` predicate**, and `claim` / `claimAll` checked only the *target* — so a revoked member could
+  drain any in-tenant peer's one-time KeyPackages (`claimAll` burning one per non-provisional device of a
+  multi-device target per request). **Fix (this PR):** all four mutations now resolve the caller through
+  the shared `requireUser` helper (`messaging/membership.ts`, which filters `status = 'active'`), so a
+  revoked caller is rejected with 400 **before** any KeyPackage is read, claimed, or deleted —
+  enforced by `key-directory.service.spec.ts` (`describe('revoked caller cannot mutate the key
+  directory (ST-1)')`). This also restores the broader `auth-tenant-context.md` §6 claim that
+  member-revoke is neutralized on the key-directory paths. The generic ≤10-min window on ordinary
+  *read* routes (below) remains the accepted part of this residual.
 
-Revisit alongside any future DPoP / token-introspection work; until then the 10-minute TTL is the
-control and this is a documented, accepted residual.
+Revisit alongside any future DPoP / token-introspection work; until then, on ordinary (non-admin, read)
+routes the 10-minute TTL is the control and this is a documented, accepted residual — the key-directory
+*mutation* paths are now actively revocation-checked via `requireUser` (above).
 
 ---
 

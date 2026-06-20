@@ -131,6 +131,9 @@ export class KeyDirectoryController {
   @ApiParam({ name: 'userId', format: 'uuid' })
   @ApiOkResponse({ type: ClaimedKeyPackageDto })
   @ApiNotFoundResponse({ description: 'no key package available — ask the user to replenish' })
+  @ApiBadRequestResponse({
+    description: 'malformed userId, or caller not provisioned or not active',
+  })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async claim(
     @CurrentAuth() auth: VerifiedAuth,
@@ -169,6 +172,9 @@ export class KeyDirectoryController {
       "When provided, skip this device's packages (caller's own device — avoids burning the caller's own key packages during self-claim for group-add).",
   })
   @ApiOkResponse({ type: [ClaimedKeyPackageDto] })
+  @ApiBadRequestResponse({
+    description: 'malformed userId/deviceId, or caller not provisioned or not active',
+  })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async claimAll(
     @CurrentAuth() auth: VerifiedAuth,

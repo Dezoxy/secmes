@@ -29,7 +29,7 @@ The server **stores and serves public KeyPackages**. It never sees private keys 
 
 ## Server-side implementation (checkpoint 19)
 
-`devices` + `key_packages` tables (tenant-scoped, FORCE RLS). The server **binds** every KeyPackage to the authenticated uploader (`publish` resolves the device from the verified `sub`; a user can only publish for their own device) and serves them **one-time-use** (atomic `UPDATE … FOR UPDATE SKIP LOCKED`; empty pool → 404, never silent reuse). It stores only **public** base64 key material (opaque; crypto-blind upheld). This is the binding + lifecycle half only — **identity↔key authenticity still rests on client-side fingerprint verification** (§5 v1), which is the actual MITM defense and is NOT yet implemented.
+`devices` + `key_packages` tables (tenant-scoped, FORCE RLS). The server **binds** every KeyPackage to the authenticated uploader (`publish` resolves the device from the verified `sub`; a user can only publish for their own device) and serves them **one-time-use** (atomic `UPDATE … FOR UPDATE SKIP LOCKED`; empty pool → 404, never silent reuse). Every mutation route (`publish` / `claim` / `claimAll` / `revokeUnclaimed`) resolves the caller through the shared `requireUser` helper, so a **tenant-revoked** member (`users.status != 'active'`) holding an unexpired access token is rejected before any write — see `session-tokens.md` §ST-1 (member-revoke close). It stores only **public** base64 key material (opaque; crypto-blind upheld). This is the binding + lifecycle half only — **identity↔key authenticity still rests on client-side fingerprint verification** (§5 v1), which is the actual MITM defense and is NOT yet implemented.
 
 ## 4. Invariant check
 
