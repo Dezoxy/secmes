@@ -96,6 +96,10 @@ ARGUS_KEY_VAULT=argus-exp-kv-4ad322 ./infra/aws/scripts/populate-keyvault.sh # g
 # #20858), which would print the age private key to your terminal scrollback / run logs — suppress it.
 az keyvault secret set --vault-name argus-exp-kv-4ad322 --name argus-backup-age-key --file age.key --only-show-errors -o none
 
+# Key Vault is now the system of record for the private key — remove the local copy so it doesn't linger on
+# disk. (Keep an offline copy in your password manager if you want a break-glass beyond Key Vault.)
+shred -u age.key 2>/dev/null || rm -P age.key   # rm -P is the BSD/macOS overwrite-then-delete
+
 az keyvault network-rule remove --name argus-exp-kv-4ad322 --ip-address "$MYIP"   # re-tighten when done
 ```
 
