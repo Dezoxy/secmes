@@ -169,12 +169,16 @@ its outstanding access token keeps working on **normal (non-admin) routes** unti
   radius:** `publish` / `revokeUnclaimed` touch only the caller's **own** device packages — but
   `claim(targetUserId)` resolves the target solely by `d.user_id = targetUserId`, with **no
   caller==target and no caller-active check**, so a revoked member can also **consume any in-tenant
-  peer's one-time KeyPackages** (a bounded cross-user pool-drain: one package per claim, capped at the
-  30/min claim limit, each emitting a `keydir.key_package_claimed` audit row, and the target self-heals
-  via replenishment). All of it is bounded by the 10-min TTL and tenant-scoped (RLS — no cross-tenant
-  reach) — accepted for beta. **Code-side close (follow-up):** add a `status = 'active'` caller check (or
-  route caller resolution through `requireUser`) on the key-directory mutations
-  (`publish`/`claim`/`claimAll`/`revokeUnclaimed`). This **refines** the broader
+  peer's one-time KeyPackages** (a bounded cross-user pool-drain). The sibling route `claimAll`
+  (`POST /users/:userId/key-packages/claim-all`) shares the **same** missing caller-active check and the
+  **same** 30/min cap, but `KeyDirectoryService.claimAll()` consumes **one package per non-provisional
+  device** of the target in a single request (audited as `keydir.key_packages_claimed_bulk`) — so against
+  a multi-device peer a revoked member drains **more than one package per request**, not the one-per-call
+  of `claim` (audited as `keydir.key_package_claimed`). The drain stays bounded — 30 requests/min × the
+  target's device count — and the target self-heals via replenishment. All of it is bounded by the 10-min
+  TTL and tenant-scoped (RLS — no cross-tenant reach) — accepted for beta. **Code-side close
+  (follow-up):** add a `status = 'active'` caller check (or route caller resolution through `requireUser`)
+  on the key-directory mutations (`publish`/`claim`/`claimAll`/`revokeUnclaimed`). This **refines** the broader
   `auth-tenant-context.md` §6 claim that member-revoke is neutralized on *every* path — it is not.
 
 Revisit alongside any future DPoP / token-introspection work; until then the 10-minute TTL is the
