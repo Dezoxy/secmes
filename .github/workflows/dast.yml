@@ -30,7 +30,8 @@ jobs:
       contents: read
     services:
       postgres:
-        image: postgres:16-alpine
+        # SUP-1: digest-pinned (see docs/threat-models/supply-chain-ci.md). Keep in sync with ci.yml.
+        image: postgres:16-alpine@sha256:e013e867e712fec275706a6c51c966f0bb0c93cfa8f51000f85a15f9865a28cb
         # CI-throwaway DB: trust auth → no password literal. `argus` is the service superuser; app code
         # drops to the non-bypass `argus_app` role per transaction.
         env:
@@ -45,7 +46,8 @@ jobs:
           --health-timeout 3s
           --health-retries 12
       redis:
-        image: redis:8-alpine
+        # SUP-1: digest-pinned (see docs/threat-models/supply-chain-ci.md). Keep in sync with ci.yml.
+        image: redis:8-alpine@sha256:09160599abd229764c0fb44cb6be640294e1d360a54b19985ab4843dcf2d90f1
         ports:
           - 6379:6379
         options: >-
