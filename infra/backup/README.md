@@ -184,10 +184,6 @@ EP=https://s3.eu-central-003.backblazeb2.com ; BUCKET=db-q7m2z9x4v6n8p3k1
 VERIFY_KEY="${VERIFY_KEY:-backup-verify.pub}"
 OPENSSL="${OPENSSL:-openssl}"   # override if your default openssl is LibreSSL: OPENSSL=/path/to/openssl@3/bin/openssl
 [[ -s "$VERIFY_KEY" ]] || { echo "FATAL: verify key $VERIFY_KEY missing/empty — copy infra/backup/backup-verify.pub here"; exit 1; }
-# Fail closed on the un-populated placeholder, BY CONTENT, so the operator sees a clear message (not a parse error).
-if grep -q 'REPLACE_WITH_' "$VERIFY_KEY"; then
-  echo "FATAL: $VERIFY_KEY is the un-replaced placeholder — populate the verify key (see §'Backup signing key') before restoring"; exit 1
-fi
 # Split the keyring into one file per PEM block: `openssl pkeyutl -verify -inkey <file>` reads only the FIRST
 # block, so a concatenated current+previous keyring MUST be split and each block tried. (CRLF-tolerant.)
 VK_DIR="$(mktemp -d)" || { echo "FATAL: mktemp failed"; exit 1; }
@@ -199,6 +195,15 @@ awk -v d="$VK_DIR" '
 ' "$VERIFY_KEY"
 vk_blocks=$(find "$VK_DIR" -name 'blk.*' | wc -l | tr -d ' ')
 [[ "$vk_blocks" =~ ^[0-9]+$ && "$vk_blocks" -ge 1 ]] || { echo "FATAL: $VERIFY_KEY has no usable PUBLIC KEY block"; rm -rf "$VK_DIR"; exit 1; }
+# Fail closed on the un-populated placeholder, scanning ONLY the PEM PAYLOAD (the split blocks) — NOT the whole
+# file, whose operator-instruction comments legitimately mention REPLACE_WITH_ even after the key is populated.
+if grep -q 'REPLACE_WITH_' "$VK_DIR"/blk.*; then
+  echo "FATAL: $VERIFY_KEY is the un-replaced placeholder — populate the verify key (see §'Backup signing key') before restoring"; rm -rf "$VK_DIR"; exit 1
+fi
+# Every block must parse as a public key — a stray non-key block (junk between BEGIN/END) is a malformed keyring.
+for _vb in "$VK_DIR"/blk.*; do
+  "$OPENSSL" pkey -pubin -in "$_vb" -noout 2>/dev/null || { echo "FATAL: $VERIFY_KEY has a block that is not a valid public key"; rm -rf "$VK_DIR"; exit 1; }
+done
 # Preflight: this host's openssl must be able to VERIFY an Ed25519 -rawin signature, or every candidate would
 # fail-closed and look identical to "no good backup exists". Sign+verify a probe with an ephemeral key.
 _pf="$(mktemp -d)" || { echo "FATAL: mktemp failed"; rm -rf "$VK_DIR"; exit 1; }
