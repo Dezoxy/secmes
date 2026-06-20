@@ -58,12 +58,23 @@ the backup-arming step without them. Set:
 ```bash
 gh variable set BACKUP_S3_BUCKET     -R Dezoxy/secmes --body "db-q7m2z9x4v6n8p3k1"   # private db-backups bucket (known)
 gh variable set B2_APP_KEY_ID        -R Dezoxy/secmes --body "<db-backups key-id>"    # from B2 console; pairs with KV argus-b2-app-key
-gh variable set BACKUP_AGE_RECIPIENT -R Dezoxy/secmes --body "age1<...>"              # backup-encryption PUBLIC key (the one provisioned for signed backups)
+gh variable set BACKUP_AGE_RECIPIENT -R Dezoxy/secmes --body "age1<...>"              # age PUBLIC key; its matching PRIVATE key MUST be in KV (blocker 2) or backups are unrecoverable
 ```
 
-**2. Verify the two newest mandatory KV secrets exist** (added after the original populate run, so
-likely absent): `argus-session-signing-key` (passkey session JWT — without it the API won't boot)
-and `argus-backup-signing-key` (signed backups). Also confirm `argus-b2-app-key` (db-backups).
+**2. Verify the mandatory KV secrets that post-date the original populate run** (likely absent):
+`argus-session-signing-key` (passkey session JWT — without it the API won't boot),
+`argus-backup-signing-key` (signed backups), and **`argus-backup-age-key`** — the age **PRIVATE**
+key matching the `BACKUP_AGE_RECIPIENT` public key from blocker 1. Also confirm `argus-b2-app-key`
+(db-backups) and `argus-ghcr-token` (now mandatory — the GHCR images are private, so the box needs a
+`read:packages` PAT to pull them).
+
+> ⚠️ **Data-loss blocker — the age keypair.** `populate-keyvault.sh` does **not** create the age key.
+> If backups are armed with a `BACKUP_AGE_RECIPIENT` whose matching private key was never stored as
+> `argus-backup-age-key`, every nightly backup is encrypted to a key you cannot decrypt — permanently
+> unrecoverable. Generate the pair **once** (`age-keygen -o age.key` → the `age1…` line is the public
+> recipient), set that public key as `BACKUP_AGE_RECIPIENT`, store the private key as KV
+> `argus-backup-age-key`, and confirm the two halves are the same keypair **before tagging**. The
+> restore runbook (`infra/backup/README.md`) fetches `argus-backup-age-key` to decrypt.
 
 The vault firewall (`Deny` default) only allows the EC2 EIP and one old IP, so to inspect/populate
 you must allow your current IP first:
@@ -73,7 +84,7 @@ MYIP=$(curl -s https://api.ipify.org)
 az keyvault network-rule add --name argus-exp-kv-4ad322 --ip-address "$MYIP"
 
 az keyvault secret list --vault-name argus-exp-kv-4ad322 \
-  --query "[?contains(name,'signing') || name=='argus-b2-app-key'].name" -o tsv
+  --query "[?contains(name,'signing') || name=='argus-b2-app-key' || name=='argus-backup-age-key' || name=='argus-ghcr-token'].name" -o tsv
 # If any are missing, the idempotent populate script fills them (set the vault name explicitly —
 # its terraform-output fallback is flaky from a laptop):
 ARGUS_KEY_VAULT=argus-exp-kv-4ad322 ./infra/aws/scripts/populate-keyvault.sh # gitleaks:allow — vault NAME, not a secret
@@ -115,7 +126,10 @@ secret (404 fail-closed), Arc HIMDS unreachable, or one of the three vars still 
 
 ## Post-deploy smoke test
 1. Load `https://4rgus.com` → register a passkey → sign in.
-2. Confirm `https://4rgus.com/admin` prompts Cloudflare Access (tom-only breakglass).
+2. Confirm Cloudflare Access gates the **whole** admin surface, not just the page: `https://4rgus.com/admin`
+   prompts Access **and** the admin API paths `/api/auth/breakglass/*` and `/api/admin/*` are covered (the
+   prod Caddyfile rejects those without a `Cf-Access-Jwt-Assertion` header). Best check: complete a real
+   breakglass login through Access end-to-end, not just the page load.
 3. Confirm `https://grafana.4rgus.com` loads (admin password = KV `argus-grafana-admin-password`).
 4. On the box: `docker compose -f /opt/argus/compose.prod.yaml ps` — every service healthy/running.
 
