@@ -91,15 +91,16 @@ az keyvault secret list --vault-name argus-exp-kv-4ad322 \
 ARGUS_KEY_VAULT=argus-exp-kv-4ad322 ./infra/aws/scripts/populate-keyvault.sh # gitleaks:allow — vault NAME, not a secret
 
 # The list above checks NAMES only. Terraform SEEDS external secrets with "REPLACE-…" placeholders, and
-# populate.sh skips an existing name without --rotate — so a placeholder GHCR token looks "present" but breaks
-# `docker login` for the now-private images. Detect placeholders by VALUE, then overwrite the GHCR token:
-for s in argus-ghcr-token argus-b2-app-key argus-s3-secret-access-key; do
+# populate.sh skips an existing name without --rotate — so a placeholder (e.g. the GHCR token) looks "present"
+# but breaks `docker login` for the now-private images. Find any placeholder/empty external cred by VALUE:
+for s in argus-ghcr-token argus-b2-app-key argus-s3-secret-access-key argus-tunnel-token; do
   v=$(az keyvault secret show --vault-name argus-exp-kv-4ad322 --name "$s" --query value -o tsv --only-show-errors 2>/dev/null)
-  case "$v" in REPLACE*|"") echo "  placeholder/empty: $s — set its real value";; esac
+  case "$v" in REPLACE*|"") echo "  placeholder/empty: $s — re-enter it below";; esac
 done
-read -rs -p 'GHCR read:packages PAT: ' GHCR_PAT && echo    # read -rs keeps the PAT out of shell history
-az keyvault secret set --vault-name argus-exp-kv-4ad322 --name argus-ghcr-token --value "$GHCR_PAT" --only-show-errors -o none
-unset GHCR_PAT
+# Re-enter any placeholder external cred (incl. the GHCR read:packages PAT) the SAFE way — populate --rotate
+# re-prompts (read -rsp) and writes via a 0600 temp file + --file, never on argv or in shell history. On a
+# FIRST deploy nothing is running yet so --rotate is harmless; post-deploy it needs a redeploy to take effect.
+ARGUS_KEY_VAULT=argus-exp-kv-4ad322 ./infra/aws/scripts/populate-keyvault.sh --rotate # gitleaks:allow — vault NAME, not a secret
 
 # The age key is NOT created by populate.sh — set it explicitly from the keypair generated in blocker 1,
 # or restore is impossible. (age.key holds the AGE-SECRET-KEY line; restore writes it back and runs `age -i`.)
