@@ -75,11 +75,18 @@ az keyvault secret set --vault-name "$KV" --name argus-s3-secret-access-key   --
 # Redis AUTH — URL-safe (it rides in the deploy-generated redis_url `redis://:<pw>@redis:6379` + a redis.conf requirepass line).
 az keyvault secret set --vault-name "$KV" --name argus-redis-password        --value "$(openssl rand -hex 32)"
 az keyvault secret set --vault-name "$KV" --name argus-tunnel-token           --value '<cloudflare-tunnel-token>'
-# Passkey session signing key (Ed25519 PKCS8 PEM) — MANDATORY; the API will not boot without it.
-az keyvault secret set --vault-name "$KV" --name argus-session-signing-key    --value "$(openssl genpkey -algorithm ed25519 | openssl pkcs8 -topk8 -nocrypt -outform PEM)"
-# DB-backup provenance signing key (Ed25519 PKCS8 PEM) — MANDATORY; the boot-time fetch fails closed without it.
-# After setting it, commit its PUBLIC half to infra/backup/backup-verify.pub: `az keyvault secret show … | openssl pkey -pubout`.
-az keyvault secret set --vault-name "$KV" --name argus-backup-signing-key     --value "$(openssl genpkey -algorithm ed25519 | openssl pkcs8 -topk8 -nocrypt -outform PEM)"
+# MANDATORY Ed25519 signing keys — session (passkey JWTs; the API won't boot without it) and backup (signs
+# nightly dumps; the boot-time fetch fails closed without it). Generate each to a 0600 temp file and set via
+# --file so the PEM private key NEVER appears on argv (/proc/<pid>/cmdline) — matching populate-keyvault.sh
+# (invariant #2/#5). The `--value "$(…)"` form would leak the key while `az` runs.
+umask 077
+for s in argus-session-signing-key argus-backup-signing-key; do
+  f="$(mktemp)"; openssl genpkey -algorithm ed25519 | openssl pkcs8 -topk8 -nocrypt -outform PEM >"$f"
+  az keyvault secret set --vault-name "$KV" --name "$s" --file "$f" --encoding utf-8
+  shred -u "$f" 2>/dev/null || rm -P "$f" 2>/dev/null || rm -f "$f"   # portable secure delete
+done
+# Then commit argus-backup-signing-key's PUBLIC half to infra/backup/backup-verify.pub:
+#   az keyvault secret show --vault-name "$KV" --name argus-backup-signing-key --query value -o tsv | openssl pkey -pubout
 az keyvault secret set --vault-name "$KV" --name argus-grafana-admin-password --value '<grafana-admin-pw>'   # observability #47
 az keyvault secret set --vault-name "$KV" --name argus-backup-db-password     --value '<argus_backup-role-pw>'
 az keyvault secret set --vault-name "$KV" --name argus-cleanup-db-password    --value '<argus_cleanup-role-pw>'
