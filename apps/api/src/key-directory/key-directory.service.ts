@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { AuditService } from '../audit/audit.service.js';
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
+import { requireUser } from '../messaging/membership.js';
 
 /** Max un-claimed KeyPackages per device — bounds pool growth until GC exists (cf. audit retention). */
 const MAX_AVAILABLE_PER_DEVICE = 200;
@@ -56,21 +57,15 @@ export class KeyDirectoryService {
     keyPackages: string[],
   ): Promise<PublishResult> {
     return withTenant(auth.tenantId, async (tx) => {
-      const [user] = await tx
-        .select({ id: schema.users.id })
-        .from(schema.users)
-        .where(
-          auth.userId
-            ? eq(schema.users.id, auth.userId)
-            : eq(schema.users.externalIdentityId, auth.sub),
-        )
-        .limit(1);
-      if (!user) throw new BadRequestException('user not provisioned; sign in first');
+      // Resolve the verified caller to an ACTIVE user id (ST-1): a tenant-revoked member holding an
+      // unexpired access token must not mutate the key directory during the token's ≤10-min window.
+      // Same id/sub resolution as before, now gated on users.status = 'active'.
+      const userId = await requireUser(tx, auth);
 
       // Serialize concurrent first-device provisioning: lock the user row so two simultaneous
       // publish() calls for a new user cannot both read no existing trusted device and both
       // compute isProvisional = false, producing two "genesis" devices without enrollment.
-      await tx.execute(sql`select 1 from users where id = ${user.id} for update`);
+      await tx.execute(sql`select 1 from users where id = ${userId} for update`);
 
       // Provisional = true when the user already has at least one trusted (non-provisional) device,
       // meaning this is a new secondary device that must go through the enrollment ceremony before
@@ -78,13 +73,13 @@ export class KeyDirectoryService {
       const [existingTrusted] = await tx
         .select({ id: schema.devices.id })
         .from(schema.devices)
-        .where(and(eq(schema.devices.userId, user.id), eq(schema.devices.isProvisional, false)))
+        .where(and(eq(schema.devices.userId, userId), eq(schema.devices.isProvisional, false)))
         .limit(1);
       const isProvisional = existingTrusted !== undefined;
 
       const [device] = await tx
         .insert(schema.devices)
-        .values({ tenantId: auth.tenantId, userId: user.id, signaturePublicKey, isProvisional })
+        .values({ tenantId: auth.tenantId, userId, signaturePublicKey, isProvisional })
         .onConflictDoUpdate({
           target: [
             schema.devices.tenantId,
@@ -146,6 +141,10 @@ export class KeyDirectoryService {
    */
   async claim(auth: VerifiedAuth, targetUserId: string): Promise<ClaimedKeyPackage | null> {
     const claimed = await withTenant(auth.tenantId, async (tx) => {
+      // ST-1: the caller must be an ACTIVE member to consume a peer's one-time-use KeyPackage — a
+      // tenant-revoked member's unexpired token must not drain the pool during its ≤10-min window.
+      await requireUser(tx, auth);
+
       // SELECT ... FOR UPDATE SKIP LOCKED inside the UPDATE makes concurrent claims pick different rows.
       const rows = (await tx.execute(sql`
         update key_packages set claimed_at = now()
@@ -200,16 +199,9 @@ export class KeyDirectoryService {
    */
   async revokeUnclaimed(auth: VerifiedAuth, signaturePublicKey: string): Promise<RevokeResult> {
     const revoked = await withTenant(auth.tenantId, async (tx) => {
-      const [user] = await tx
-        .select({ id: schema.users.id })
-        .from(schema.users)
-        .where(
-          auth.userId
-            ? eq(schema.users.id, auth.userId)
-            : eq(schema.users.externalIdentityId, auth.sub),
-        )
-        .limit(1);
-      if (!user) throw new BadRequestException('user not provisioned; sign in first');
+      // ST-1: resolve the caller to an ACTIVE user id — a tenant-revoked member's unexpired token must
+      // not mutate the key directory during its ≤10-min window. Same id/sub resolution, now active-gated.
+      const userId = await requireUser(tx, auth);
 
       // Resolve the caller's OWN device by its signature key (ownership authz — never another user's device;
       // the row is also tenant-scoped by RLS). No such device → nothing to revoke (no existence oracle).
@@ -218,7 +210,7 @@ export class KeyDirectoryService {
         .from(schema.devices)
         .where(
           and(
-            eq(schema.devices.userId, user.id),
+            eq(schema.devices.userId, userId),
             eq(schema.devices.signaturePublicKey, signaturePublicKey),
           ),
         )
@@ -261,6 +253,10 @@ export class KeyDirectoryService {
     excludeDeviceId?: string,
   ): Promise<ClaimedKeyPackage[]> {
     const claimed = await withTenant(auth.tenantId, async (tx) => {
+      // ST-1: the caller must be an ACTIVE member to bulk-claim a peer's KeyPackages — a tenant-revoked
+      // member's unexpired token must not drain the pool during its ≤10-min window.
+      await requireUser(tx, auth);
+
       // LATERAL JOIN: for each device of the target user, select the oldest unclaimed package with
       // FOR UPDATE SKIP LOCKED, then UPDATE (claim) it in one statement. This avoids DISTINCT ON +
       // FOR UPDATE, which PostgreSQL rejects (DISTINCT ON is not allowed with locking clauses). The

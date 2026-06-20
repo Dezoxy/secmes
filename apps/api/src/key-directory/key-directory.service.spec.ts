@@ -22,6 +22,7 @@ describe.skipIf(!DB_URL)('KeyDirectoryService', () => {
   let daveAuth: VerifiedAuth;
   let eveAuth: VerifiedAuth;
   let frankAuth: VerifiedAuth;
+  let graceAuth: VerifiedAuth; // tenant-A member who has been REVOKED (status = 'revoked')
 
   beforeAll(async () => {
     sql = getDb().sql;
@@ -35,6 +36,9 @@ describe.skipIf(!DB_URL)('KeyDirectoryService', () => {
     await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantA}, 'kd-eve', 'eve@a.test')`;
     [{ id: frankId }] =
       await sql`insert into users (tenant_id, external_identity_id, email) values (${tenantA}, 'kd-frank', 'frank@a.test') returning id`;
+    // Grace is a tenant-A member whose status is 'revoked' (e.g. TenantsService.revokeMember) but who
+    // still holds an unexpired access token — the ST-1 case the active-caller guard must reject.
+    await sql`insert into users (tenant_id, external_identity_id, email, status) values (${tenantA}, 'kd-grace', 'grace@a.test', 'revoked')`;
 
     aliceAuth = { sub: 'kd-alice', tenantId: tenantA };
     bobAuth = { sub: 'kd-bob', tenantId: tenantA };
@@ -42,6 +46,7 @@ describe.skipIf(!DB_URL)('KeyDirectoryService', () => {
     daveAuth = { sub: 'kd-dave', tenantId: tenantA };
     eveAuth = { sub: 'kd-eve', tenantId: tenantA };
     frankAuth = { sub: 'kd-frank', tenantId: tenantA };
+    graceAuth = { sub: 'kd-grace', tenantId: tenantA };
   });
 
   afterAll(async () => {
@@ -160,5 +165,36 @@ describe.skipIf(!DB_URL)('KeyDirectoryService', () => {
     const afterNoop = await auditCount();
     expect(afterEffective - before).toBe(1); // the effective revoke added exactly one event
     expect(afterNoop - afterEffective).toBe(0); // the no-op added none
+  });
+
+  // ST-1 (docs/threat-models/session-tokens.md): a tenant-revoked member holding an unexpired access
+  // token must not mutate the key directory during the token's ≤10-min window. Every mutation resolves
+  // the caller through requireUser (status = 'active'), so a revoked caller is rejected before any write.
+  describe('revoked caller cannot mutate the key directory (ST-1)', () => {
+    it('publish is rejected for a revoked member', async () => {
+      await expect(dir.publish(graceAuth, 'R1JBQ0U=', ['gr1', 'gr2'])).rejects.toThrow();
+    });
+
+    it('claim is rejected and does NOT drain the target pool', async () => {
+      await dir.publish(bobAuth, 'Qk9CU0lH', ['st1-claim']); // refill Bob's pool to 1
+      await expect(dir.claim(graceAuth, bobId)).rejects.toThrow();
+      // The package survives — the guard fires before the claim UPDATE, so Alice can still take it.
+      const stolen = await dir.claim(aliceAuth, bobId);
+      expect(stolen?.keyPackage).toBeTruthy();
+    });
+
+    it('claimAll is rejected and does NOT drain the target pool', async () => {
+      await dir.publish(bobAuth, 'Qk9CU0lH', ['st1-claimall']); // ensure Bob has a package
+      await expect(dir.claimAll(graceAuth, bobId)).rejects.toThrow();
+      // The guard fires before the bulk claim, so an active caller still gets Bob's device package.
+      const stolen = await dir.claimAll(aliceAuth, bobId);
+      expect(stolen.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('revokeUnclaimed is rejected for a revoked member', async () => {
+      // Grace has no device, but the active-caller guard must reject BEFORE the device lookup —
+      // so this throws rather than returning a benign { revoked: 0 }.
+      await expect(dir.revokeUnclaimed(graceAuth, 'R1JBQ0U=')).rejects.toThrow();
+    });
   });
 });

@@ -3904,7 +3904,7 @@
             }
           },
           "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
+            "description": "malformed userId, or caller not provisioned or not active",
             "content": {
               "application/json": {
                 "schema": {
@@ -4052,7 +4052,7 @@
             }
           },
           "400": {
-            "description": "Validation failed — malformed or out-of-bounds request.",
+            "description": "malformed userId/deviceId, or caller not provisioned or not active",
             "content": {
               "application/json": {
                 "schema": {
