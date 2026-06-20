@@ -314,8 +314,13 @@ pick_globals_version() {
 # by the caller re-hashing them against M_DB_SHA / M_GLOBALS_SHA.
 M_STAMP=""; M_GLOBALS_KEY=""; M_DB_KEY=""; M_GLOBALS_SHA=""; M_DB_SHA=""; M_VERIFYKEY=""
 marker_verified() {
-  local st="$1" mk="argus-ok-${1}.age" sk="argus-ok-${1}.age.sig" ver lm sver slm vksha mani sigline
+  local st="$1" mk="argus-ok-${1}.age" sk="argus-ok-${1}.age.sig" ver lm sver slm vksha mani sigline msz ssz
   local mc="$VK_DIR/marker.age" ms="$VK_DIR/marker.sig"   # transient verify state lives in the 0700 temp dir
+  # Control objects are TINY (the manifest ciphertext is well under a KiB; the sig is exactly 64 bytes). A
+  # writeFiles attacker could shadow either with a HUGE current version to fill the restore host's disk or stall
+  # the walk before it reaches the locked genuine version. So bound ContentLength BY VERSION and skip oversized
+  # ones BEFORE downloading. Generous caps (the real objects are far smaller); verify_sig still asserts 64 exactly.
+  local marker_max=16384 sig_max=1024
   # ALL .sig versions for this stamp, newest-first. WORM keeps the genuine sig as an older version even if a
   # writeFiles attacker shadows it with a junk NEWER one, so we must try EACH against the marker — not just the
   # newest — or one junk .sig upload would brick recovery of an otherwise-genuine run (denial of recovery).
@@ -325,6 +330,9 @@ marker_verified() {
   while read -r ver lm; do
     [[ -n "$ver" && "$ver" != "None" ]] || continue
     before_cutoff "$lm" || continue
+    msz=$(aws s3api head-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$mk" --version-id "$ver" \
+      --query 'ContentLength' --output text 2>/dev/null || echo 0)
+    [[ "$msz" =~ ^[0-9]+$ && "$msz" -ge 1 && "$msz" -le "$marker_max" ]] || { echo "  skip marker $st@$ver (implausible marker size ${msz}B)"; continue; }
     aws s3api get-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$mk" --version-id "$ver" \
       "$mc" >/dev/null 2>&1 || continue
     # (a) try every .sig VERSION against THIS marker ciphertext until one verifies; vksha = DER-SHA256 of the
@@ -337,6 +345,9 @@ marker_verified() {
       read -r sver slm <<<"$sigline"
       [[ -n "$sver" && "$sver" != "None" ]] || continue
       before_cutoff "$slm" || continue
+      ssz=$(aws s3api head-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$sk" --version-id "$sver" \
+        --query 'ContentLength' --output text 2>/dev/null || echo 0)
+      [[ "$ssz" =~ ^[0-9]+$ && "$ssz" -ge 1 && "$ssz" -le "$sig_max" ]] || continue
       aws s3api get-object --endpoint-url "$EP" --bucket "$BUCKET" --key "$sk" --version-id "$sver" \
         "$ms" >/dev/null 2>&1 || continue
       vksha=$(verify_sig "$mc" "$ms") && break
