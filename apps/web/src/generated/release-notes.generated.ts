@@ -10,26 +10,26 @@ export const releaseNotes: ReleaseNote[] = [
       {
         "label": "New",
         "items": [
-          "Group About release notes by New/Fixes with cleaner wording",
           "Verify the signature at restore (signed backups slice 3/3)",
           "Sign each nightly backup at write time (signed backups slice 2/3)",
           "Provision Ed25519 signing key for signed backups (slice 1/3)",
-          "Unfriend UI — remove button on accepted friend rows (Slice F)"
+          "Unfriend UI — remove button on accepted friend rows (Slice F)",
+          "Wire friends-list UI to backend API (Slice E)",
+          "Friends API + contracts (Slice D)",
+          "Add friendships table + FORCE RLS (Slice C)"
         ]
       },
       {
         "label": "Fixes",
         "items": [
-          "Render release-notes overflow as a neutral note, not inside a typed group (Codex P3)",
           "Make DB backups WORM via B2 Object Lock (BKP-2)",
           "Enforce active caller on all mutations (ST-1)",
           "Enforce audit/session retention + scrub erased target-id (F1/AR-1, ER-1)",
           "SW subresource-integrity for dynamic chunks + pin CSP B2 egress (CDI-1, CSP-1)",
-          "Widen device-linking OOB artifact to full safety number (FP-1)",
-          "Deliver cloudflared tunnel token as a file-secret, not env (INF-4)"
+          "Widen device-linking OOB artifact to full safety number (FP-1)"
         ]
       }
     ],
-    "overflowNote": "…and 1 more changes"
+    "overflowNote": "…and 2 more changes"
   }
 ];
