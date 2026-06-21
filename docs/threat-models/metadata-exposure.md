@@ -29,7 +29,7 @@ What the crypto-blind server (and therefore an operator, or a DB/infra compromis
   (`schema.ts:105-118`): second-precise "who read what, when," per member.
 - **Volume & rough message size** — row counts and ciphertext length (no padding; see §6).
 - **Device topology** — `devices` / `device_enrollments`: how many devices a user has and when they linked.
-- **Presence / online activity** — live WebSocket connection state and subscription set.
+- **Presence / online activity** — live WebSocket connection state and subscription set. (The per-`(socket, conversation)` `deliverySeq` added in Track 3 item D adds **no new operator-side inference**: it is ephemeral per-socket transport state the operator already implicitly knows — it counts the frames it just fanned out — and is **not** a persisted per-conversation message-volume counter; nothing about it lands at rest.)
 - **Attachment existence, size, and timing** — blob object keys + B2 object sizes (content encrypted).
 - **Lookup / discovery history (incl. hit/miss)** — `audit_events.metadata` records the argus-id each user
   probed via `users.lookup` and `friends.request_created` (`schema.ts:237-246`; `users.controller.ts:70-73`,

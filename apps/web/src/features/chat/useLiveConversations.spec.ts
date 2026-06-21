@@ -3,6 +3,7 @@ import type { Conversation } from './seed';
 import { currentUser } from './seed';
 import {
   addLiveId,
+  classifyDeliveryFrame,
   liveConversationShell,
   prependConversationIfMissing,
   setsEqual,
@@ -94,5 +95,48 @@ describe('identity-change detection routing', () => {
     expect(setsEqual(['a', 'b'], ['b', 'a'])).toBe(false); // callers pre-sort; out-of-order = mismatch
     expect(setsEqual(['a'], ['a', 'b'])).toBe(false);
     expect(setsEqual([], [])).toBe(true);
+  });
+});
+
+// Track 3 item D — transport delivery-gap detection. classifyDeliveryFrame is the pure decision behind the
+// live `onMessage` handler: given the last-seen counter and an incoming frame's seq/prevSeq, does the client
+// need to backfill? The seq is a HINT only — it never gates decryption or ordering.
+describe('classifyDeliveryFrame (delivery-gap detection)', () => {
+  it('absent counter (older gateway) ⇒ no gap, state unchanged', () => {
+    expect(classifyDeliveryFrame(undefined, undefined, undefined)).toEqual({
+      last: undefined,
+      gap: false,
+    });
+    expect(classifyDeliveryFrame(5, undefined, undefined)).toEqual({ last: 5, gap: false });
+  });
+
+  it('prevSeq === null (gateway’s first frame on this socket) ⇒ (re)baseline, no gap', () => {
+    expect(classifyDeliveryFrame(undefined, 1, null)).toEqual({ last: 1, gap: false });
+    // Even after a previous socket left a stale baseline, a fresh prevSeq=null frame re-baselines (reconnect).
+    expect(classifyDeliveryFrame(9, 1, null)).toEqual({ last: 1, gap: false });
+  });
+
+  it('contiguous frame (prevSeq === last) ⇒ no gap, advances last', () => {
+    expect(classifyDeliveryFrame(1, 2, 1)).toEqual({ last: 2, gap: false });
+    expect(classifyDeliveryFrame(41, 42, 41)).toEqual({ last: 42, gap: false });
+  });
+
+  it('a skipped frame (prevSeq !== last) ⇒ GAP, advances last to the new seq', () => {
+    expect(classifyDeliveryFrame(3, 6, 5)).toEqual({ last: 6, gap: true }); // missed 4 and 5
+  });
+
+  it('a dropped LEADING frame (numeric prevSeq with no baseline) ⇒ GAP', () => {
+    // The genuine first frame (prevSeq=null) was lost; we first see seq 2 (prevSeq 1) → we missed seq 1.
+    expect(classifyDeliveryFrame(undefined, 2, 1)).toEqual({ last: 2, gap: true });
+  });
+
+  it('a duplicate / late-arriving reorder (seq <= last) ⇒ no gap, keeps position', () => {
+    expect(classifyDeliveryFrame(5, 3, 2)).toEqual({ last: 5, gap: false });
+    expect(classifyDeliveryFrame(5, 5, 4)).toEqual({ last: 5, gap: false });
+  });
+
+  it('missing prevSeq falls back to the raw seq step (defensive)', () => {
+    expect(classifyDeliveryFrame(4, 5, undefined)).toEqual({ last: 5, gap: false }); // contiguous step
+    expect(classifyDeliveryFrame(4, 7, undefined)).toEqual({ last: 7, gap: true }); // jumped
   });
 });

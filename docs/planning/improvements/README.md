@@ -20,7 +20,7 @@ non-exhaustive RLS test coverage, and several operational single-point risks.
 | --- | ---------------------------------------------------------------------------- | --------------- | -------------------------------------------------- | --------------- |
 | 1   | ✅ [Messaging service refactor](./01-messaging-service-refactor.md)          | Readability     | Merge-conflict & onboarding cost on a 1,185-LOC file | none            |
 | 2   | ✅ [Test coverage + RLS assertions](./02-test-coverage-and-rls-assertions.md) | Test hardening  | A typo'd RLS policy could ship a cross-tenant leak | tests only      |
-| 3   | 🟡 [Ops / infra hardening](./03-ops-infra-hardening.md)                       | Operational     | No rollback story; flippable deploy gate; lossy WS | small           |
+| 3   | ✅ [Ops / infra hardening](./03-ops-infra-hardening.md)                       | Operational     | No rollback story; flippable deploy gate; lossy WS | small           |
 | 4   | [Message retention & ciphertext pruning](./04-message-retention-and-pruning.md) | Retention / privacy | `messages` ciphertext grows forever — cost, breach/subpoena surface, no GDPR storage-limitation story | small (cursor contract + role + worker) |
 
 > Track 4 was added 2026-06-21 — a retention/data-minimization improvement, not part of the original
@@ -47,10 +47,15 @@ change; Track 3 is mostly activating things already designed.
   `aws-first-deploy.md` documenting locked Terraform remote state + the per-release approval gate.
   **Correction:** the **first environment deployed is AWS** (its release-safety controls are already active);
   the single-Azure-VM path (still production-of-record in `deploy.md`) is **not yet armed** and these controls
-  are a **hard prerequisite before arming it**. Item **D** (realtime sequence numbers) ships separately as
-  **PR 3b**. Docs only.
+  are a **hard prerequisite before arming it**. Docs only.
+- ✅ **Track 3 item D implemented** (2026-06-21, PR 3b) — realtime **delivery-gap detection**: an **ephemeral
+  per-socket** `deliverySeq`/`deliveryPrevSeq` the gateway stamps at fan-out so the client notices a
+  dropped/reordered live frame and self-heals over the existing `(created_at, id)` backfill. Corrected the
+  written proposal on two points after the security-architect + crypto-reviewer pass: ephemeral (no DB
+  column/RLS surface) instead of persisted-at-write, and **no server-consumed ACK** (keeps the Track 4
+  delete-on-delivery boundary intact). Metadata-only, outside the MLS envelope. **Track 3 is now complete.**
 
-Track 3 item D + Track 4 remain planning docs.
+Track 4 (message retention & pruning) remains a planning doc.
 
 ## Constraints every track must respect
 

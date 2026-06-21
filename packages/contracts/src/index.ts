@@ -564,6 +564,27 @@ export const CommitEventSchema = z.object({
 });
 export type CommitEvent = z.infer<typeof CommitEventSchema>;
 
+// The `message` WS frame the gateway pushes when a stored message is fanned out to a subscribed
+// socket. Metadata + the opaque envelope only — the ciphertext rides inside `message` (FetchedMessage),
+// never decrypted by the server.
+//
+// `deliverySeq` / `deliveryPrevSeq` are an EPHEMERAL, per-(socket, conversation) TRANSPORT counter the
+// gateway stamps at fan-out (1, 2, 3, … for the frames it actually sends THAT socket) so the client can
+// notice a dropped or reordered frame and self-heal by re-fetching over the existing message backfill.
+// They are NOT the MLS `epoch` and NOT the MLS ratchet generation, and carry NO cryptographic guarantee:
+// a gap merely TRIGGERS a re-fetch — it never gates decryption, ordering, or dedup (those remain MLS +
+// the durable (created_at, id) cursor + dedup-by-id). Both are optional for backward compatibility — an
+// old server omits them (gap-detection simply unavailable) and an old client ignores them.
+export const MessageEventSchema = z.object({
+  conversationId: z.string().uuid(),
+  message: FetchedMessageSchema,
+  /** This socket+conversation's transport delivery counter; 1-based, +1 per fanned-out frame. Not the MLS epoch/generation. */
+  deliverySeq: z.number().int().positive().optional(),
+  /** The deliverySeq of the immediately-preceding frame on this socket+conversation; null on the first frame. */
+  deliveryPrevSeq: z.number().int().positive().nullable().optional(),
+});
+export type MessageEvent = z.infer<typeof MessageEventSchema>;
+
 // ── Admin-minted invite / registration codes ────────────────────────────────
 
 export const CreateInviteResponseSchema = z.object({
