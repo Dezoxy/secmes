@@ -1,5 +1,5 @@
 import { ConflictException } from '@nestjs/common';
-import { and, asc, eq, gt, inArray, max, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, max, min, sql } from 'drizzle-orm';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
@@ -461,12 +461,17 @@ export class MessageDeliveryService {
   /**
    * Drain commits after `afterEpoch` for a conversation (the client's catch-up / epoch-advance path).
    * OPAQUE COMMIT BYTES ONLY — ciphertext only, server never decrypts. Member-only.
+   *
+   * Also returns `oldestRetainedEpoch` — the smallest `epoch` still stored for the WHOLE conversation
+   * (metadata only, never the commit blob) — so a catching-up client can tell a transient stall from a
+   * pruned/lost commit (`oldestRetainedEpoch > localEpoch` ⇒ sync-lost). The controller surfaces it as
+   * the `X-Oldest-Retained-Epoch` header.
    */
   async listCommits(
     auth: VerifiedAuth,
     conversationId: string,
     query: ListCommitsQuery,
-  ): Promise<FetchedCommit[]> {
+  ): Promise<{ commits: FetchedCommit[]; oldestRetainedEpoch: number | null }> {
     return withTenant(auth.tenantId, async (tx) => {
       const user = await requireUser(tx, auth);
       await requireMembership(tx, conversationId, user);
@@ -491,14 +496,36 @@ export class MessageDeliveryService {
         .orderBy(asc(schema.conversationCommits.epoch))
         .limit(query.limit);
 
-      return rows.map((r) => ({
-        id: r.id,
-        clientCommitId: r.clientCommitId,
-        epoch: Number(r.epoch),
-        senderUserId: r.senderUserId,
-        commit: r.commit,
-        createdAt: r.createdAt.toISOString(),
-      }));
+      // Oldest commit epoch still retained for the WHOLE conversation (no afterEpoch filter), so a
+      // catching-up client can tell a transient stall from a pruned gap: when oldestRetainedEpoch >
+      // its local epoch, the commit it needs is gone and will never arrive (sync-lost). Metadata only —
+      // never reads the commit blob (crypto-blind). Same RLS-scoped transaction → one round trip, no
+      // cross-tenant leak. `null` when the conversation has no commits (e.g. a 1:1 that never committed).
+      const [oldestRow] = await tx
+        .select({ epoch: min(schema.conversationCommits.epoch) })
+        .from(schema.conversationCommits)
+        .where(
+          and(
+            eq(schema.conversationCommits.tenantId, auth.tenantId),
+            eq(schema.conversationCommits.conversationId, conversationId),
+          ),
+        );
+      const oldestRetainedEpoch =
+        oldestRow?.epoch === null || oldestRow?.epoch === undefined
+          ? null
+          : Number(oldestRow.epoch);
+
+      return {
+        commits: rows.map((r) => ({
+          id: r.id,
+          clientCommitId: r.clientCommitId,
+          epoch: Number(r.epoch),
+          senderUserId: r.senderUserId,
+          commit: r.commit,
+          createdAt: r.createdAt.toISOString(),
+        })),
+        oldestRetainedEpoch,
+      };
     });
   }
 }

@@ -144,7 +144,7 @@ pruning is implemented.
    after the client side is adopted. Gates: `security-boundary-auditor`, a `listMessages` anchor-pruned cursor
    test + web response test + a stale-PWA-compat test.
 
-   > **Implemented 2026-06-21 (PR _pending_).** Instantiated the "new field" as a **per-message opaque
+   > **Implemented 2026-06-21 ([#289](https://github.com/Dezoxy/secmes/pull/289)).** Instantiated the "new field" as a **per-message opaque
    > `cursor`** on `FetchedMessage` (not a page-level `nextCursorV2`), reusing the proven `/sync`
    > `encodeKeysetCursor` (microsecond `(created_at, id)`, base64url). The client echoes it as `after`;
    > it never builds a cursor itself (no format coupling, no ms-truncation footgun). **Why per-message:** the
@@ -156,7 +156,7 @@ pruning is implemented.
 2. **✅ Threat-model note (no code)** — `docs/threat-models/message-retention.md` via `/feature-threat-model`;
    verify the 6 invariants; `security-architect` sign-off on the rule + the #262 re-scope.
 
-   > **Implemented 2026-06-21 (PR _pending_).** Wrote [`docs/threat-models/message-retention.md`](../../threat-models/message-retention.md)
+   > **Implemented 2026-06-21 ([#290](https://github.com/Dezoxy/secmes/pull/290)).** Wrote [`docs/threat-models/message-retention.md`](../../threat-models/message-retention.md)
    > (6-section structure, all 6 invariants checked). Both reviewers **PASS_WITH_CONDITIONS** — the design is
    > validated against the code; every condition is binding on the **code** slices (3/4/5) and is recorded in
    > the note's §7 + here. Gaps the sign-off surfaced for those slices: (a) **slice 3** — the `0007`
@@ -172,7 +172,7 @@ pruning is implemented.
    `(id, created_at)` SELECT + `created_at` index; **grant DELETE on `messages` only** + the #262 regression
    spec. Gates: `/db-migration`, `security-boundary-auditor`, live-DB RLS tests in CI.
 
-   > **Implemented 2026-06-21 (PR _pending_).** [`0044_messages_prune_role.sql`](../../../apps/api/src/db/migrations/0044_messages_prune_role.sql) —
+   > **Implemented 2026-06-21 ([#291](https://github.com/Dezoxy/secmes/pull/291)).** [`0044_messages_prune_role.sql`](../../../apps/api/src/db/migrations/0044_messages_prune_role.sql) —
    > a **dedicated** `argus_msg_prune` role (`nologin nobypassrls`, §7 cond 2), the `messages_tenant_isolation`
    > re-scope `TO argus_app` (the #262 fix), window-scoped `for select`/`for delete` prune policies
    > (`created_at < now() - interval '90 days'`), a **column-scoped** `grant select (id, created_at), delete`
@@ -189,7 +189,7 @@ pruning is implemented.
    counts-only logging, fail-closed, batched with a max-rounds cap. Gates: `infra-reviewer`, shellcheck,
    dry-run against a disposable DB.
 
-   > **Implemented 2026-06-21 (PR _pending_).** The v1 TTL deletion now ships.
+   > **Implemented 2026-06-21 ([#292](https://github.com/Dezoxy/secmes/pull/292)).** The v1 TTL deletion now ships.
    > [`infra/retention/prune-messages.sh`](../../../infra/retention/prune-messages.sh) — a single-table clone
    > of `prune-audit.sh`: connects in-container as `argus_msg_prune` (no password), batch-deletes `messages`
    > with `created_at < now() - interval '90 days'` (the **same literal as the `0044` RLS policy** — the RLS
@@ -202,13 +202,38 @@ pruning is implemented.
    > LOGIN PASSWORD NULL` out-of-band **plus a connectivity probe** that fails the deploy if the role can't
    > connect (so retention can never silently never-run). **No app code, no migration, no contract change.**
    > `conversation_commits` pruning (slice 5) stays deferred — no `DELETE` grant on it exists.
-5. **Extend to `conversation_commits`** — *only once the client missing-commit / sync-lost recovery signal
-   exists* (Codex P2). This slice's migration re-scopes `commits_tenant_isolation` `TO argus_app`, adds the
-   commit window policy + `(id, created_at, conversation_id, epoch)` SELECT + `created_at` index, and **grants
-   DELETE on `conversation_commits` here — not in the boundary migration**, so no DELETE capability over
-   commits exists before pruning is safe. Worker does the contiguity-preserving reap, current epoch always
-   kept. `conversation_welcomes` stays **deferred** (every row is unconsumed; needs a re-invite recovery path
-   first).
+5. **Extend to `conversation_commits` — re-sliced (the original slice 5).** A `security-architect` design pass
+   (2026-06-21) confirmed the gating recovery signal does not exist **and** that a device behind the oldest
+   *retained* commit epoch spins forever **today** (`drainCommits` stops at the first unprocessable commit and
+   the catch-up loop silently retries) — a latent bug, independent of pruning. The MLS-correct recovery is
+   **re-add by an existing member via a fresh Welcome** (reuse the existing `enrollDevice` /
+   `joinConversationFromPool` path), **not** MLS external-commit (new crypto surface, weaker device trust). So
+   the tail is split into the prerequisite — built now — and the deferred pruning:
+   - **5a — server: expose the oldest retained commit epoch** (read-only header; no deletion/migration).
+   - **5b — client: detect "sync-lost"** (the drain reports advance/stall; a true gap is `oldestRetainedEpoch
+     > localEpoch`, distinguished from a transient stall with a bounded retry budget).
+   - **5c — recovery: sync-lost → re-add via the member path + a UI affordance** (re-runs the out-of-band
+     safety-number check; never a shortcut).
+   - **5d (deferred) — commit-prune boundary migration**: re-scope `commits_tenant_isolation` `TO argus_app`,
+     window policies, the correlated `EXISTS (epoch > this.epoch)` never-current-epoch DELETE policy,
+     column-scoped grant (never the `commit` blob), **first DELETE grant on commits** (§7 cond 3/4).
+   - **5e (deferred) — contiguity-preserving worker**: oldest contiguous prefix only, never a gap, never the
+     current epoch; counts-only, fail-closed.
+   - **Why 5d–5e are deferred:** 1:1 conversations write **zero** commit rows; only group chat does, slowly —
+     commit pruning is premature at current scale. Un-defer when group chat is GA / commit growth is
+     measurable. `conversation_welcomes` stays **excluded** (every row is unconsumed; needs a re-invite path).
+
+   > **Slice 5a implemented 2026-06-21 (PR _pending_).** `listCommits`
+   > ([`message-delivery.service.ts`](../../../apps/api/src/messaging/message-delivery.service.ts)) now also
+   > returns the oldest retained commit epoch — `min(epoch)` over the **whole** conversation (no `afterEpoch`
+   > filter), computed in the **same RLS-scoped transaction** after `requireMembership`, **metadata only,
+   > never the `commit` blob** (invariant #1). It is surfaced on `GET …/commits` as the
+   > **`X-Oldest-Retained-Epoch`** response header (the shared `OLDEST_RETAINED_EPOCH_HEADER` contract
+   > constant) — a header, **not** a body field, so stale PWAs that validate the body as a bare
+   > `FetchedCommit[]` (`CommitPageSchema`) keep working; updated clients read it (5b) to tell a transient
+   > stall from a pruned/lost gap. No deletion, no migration, no body-shape change. Gates: controller spec
+   > (header set/omitted), a live-DB test (`min(epoch)` independent of `afterEpoch`, `null` when empty),
+   > `security-boundary-auditor`, regenerated OpenAPI + 42Crunch.
 6. **(Optional, separable) metadata-table sweepers** — see below; own PR or deferred.
 7. **(Future, prerequisite-gated) delivery-confirmed pruning** — *only after per-device delivery tracking
    exists* (Codex P1). Extends the worker join + the role's metadata grants. **Not part of this track's

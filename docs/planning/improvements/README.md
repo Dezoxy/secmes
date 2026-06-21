@@ -55,7 +55,7 @@ change; Track 3 is mostly activating things already designed.
   column/RLS surface) instead of persisted-at-write, and **no server-consumed ACK** (keeps the Track 4
   delete-on-delivery boundary intact). Metadata-only, outside the MLS envelope. **Track 3 is now complete.**
 
-- 🟡 **Track 4 slice 1 implemented** (2026-06-21, PR _pending_) — the **prune-safe catch-up cursor**, the
+- 🟡 **Track 4 slice 1 implemented** (2026-06-21, [#289](https://github.com/Dezoxy/secmes/pull/289)) — the **prune-safe catch-up cursor**, the
   safety prerequisite that must land before any deletion. `listMessages` now stamps each message with an
   opaque, position-carrying `(created_at, id)` `cursor` (reusing the proven `/sync` encoding) that the client
   echoes as `after`; the legacy bare-message-id cursor stays valid, so cached PWA bundles keep paging. A
@@ -75,16 +75,24 @@ change; Track 3 is mostly activating things already designed.
   `created_at` index — mirroring `0043`. The live-DB RLS spec proves §7 cond 1 both ways (no-GUC sweep
   succeeds AND the GUC-set bypass is denied). **No deletion** — the role stays `NOLOGIN`; the worker is slice 4.
 
-- 🟡 **Track 4 slice 4 implemented** (2026-06-21, PR _pending_) — the **TTL prune worker**, the v1 deletion
+- 🟡 **Track 4 slice 4 implemented** (2026-06-21, [#292](https://github.com/Dezoxy/secmes/pull/292)) — the **TTL prune worker**, the v1 deletion
   (and the only deletion this track ships). `infra/retention/prune-messages.sh` + a daily systemd
   `service`/`timer`, a single-table clone of `infra/audit-prune/`: connects in-container as `argus_msg_prune`
   (no password), batch-deletes `messages` past the 90-day ceiling (same literal as the `0044` RLS policy — the
   DB-enforced hard floor), logs **counts only**, and **fails closed**. `deploy.sh` adds the role's
   `LOGIN PASSWORD NULL` + a connectivity probe (§7 cond 2). No app code, migration, or contract change.
 
-Track 4's v1 message TTL deletion now ships (slice 4); slice 5 (`conversation_commits` pruning, gated on a
-client missing-commit / sync-lost recovery signal that does not yet exist) remains a planning doc, so Track 4
-stays 🟡.
+- 🟡 **Track 4 slice 5 re-sliced; slice 5a implemented** (2026-06-21, PR _pending_) — a `security-architect`
+  pass found the original slice 5 (`conversation_commits` pruning) blocked on a recovery signal that doesn't
+  exist, **and** that a device behind the oldest *retained* commit epoch spins forever **today** (a latent
+  bug). So the tail splits into a prerequisite — **5a** server exposes the oldest retained commit epoch
+  (read-only `X-Oldest-Retained-Epoch` header, metadata-only `min(epoch)`, no deletion/migration), **5b**
+  client detects "sync-lost", **5c** recovery (re-add via the existing member/Welcome path) + UI — and the
+  **deferred** pruning **5d** (commit-prune boundary migration) + **5e** (contiguity-preserving worker). 5d–5e
+  are deferred because 1:1 chats write zero commits (only group chat does, slowly) — un-defer at group-chat GA.
+
+Track 4's v1 message TTL deletion ships (slice 4); the commit-pruning tail is re-sliced — its prerequisite is
+landing now (5a–5c), the actual pruning (5d–5e) is deferred until group chat is GA. Track 4 stays 🟡.
 
 ## Constraints every track must respect
 

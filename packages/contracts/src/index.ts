@@ -560,6 +560,16 @@ export type FetchedCommit = z.infer<typeof FetchedCommitSchema>;
 export const CommitPageSchema = z.array(FetchedCommitSchema);
 export type CommitPage = z.infer<typeof CommitPageSchema>;
 
+/**
+ * Response header on GET /conversations/:id/commits carrying the oldest commit epoch the server still
+ * retains for the conversation (metadata only — never the commit blob). A catching-up client compares it
+ * to its local epoch: `oldestRetainedEpoch > localEpoch` means the commit it needs has been pruned/lost
+ * and will never arrive (a genuine sync-lost gap, not a transient stall). Delivered as a header — not a
+ * body field — so stale PWAs that validate the body as `CommitPageSchema` (a bare array) keep working.
+ * Single source of truth shared by the API (sets it) and the web client (reads it).
+ */
+export const OLDEST_RETAINED_EPOCH_HEADER = 'X-Oldest-Retained-Epoch';
+
 // The `commit` WS frame the gateway pushes when a commit wins its epoch slot. Metadata only —
 // the commit ciphertext is NOT included; clients fetch it via GET /commits?afterEpoch=N.
 export const CommitEventSchema = z.object({

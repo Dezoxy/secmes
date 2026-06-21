@@ -1,4 +1,16 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Query,
+  Res,
+} from '@nestjs/common';
+import { OLDEST_RETAINED_EPOCH_HEADER } from '@argus/contracts';
+import type { Response } from 'express';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -331,15 +343,35 @@ export class MessagingController {
     required: false,
     schema: { type: 'integer', minimum: 1, maximum: 50, default: 50 },
   })
-  @ApiOkResponse({ type: [FetchedCommitDto] })
+  @ApiOkResponse({
+    type: [FetchedCommitDto],
+    headers: {
+      [OLDEST_RETAINED_EPOCH_HEADER]: {
+        description:
+          'Oldest commit epoch the server still retains for this conversation (metadata only — never the commit blob). Omitted when the conversation has no commits. A client whose local epoch is below this value has lost a pruned commit it can never fetch (sync-lost).',
+        schema: { type: 'integer', minimum: 0 },
+      },
+    },
+  })
   @ApiNotFoundResponse({ description: 'conversation not found or caller is not a member' })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async listCommits(
     @CurrentAuth() auth: VerifiedAuth,
     @Param('conversationId', ParseUUIDPipe) conversationId: string,
     @Query(new ZodValidationPipe(ListCommitsQuerySchema)) query: ListCommitsQuery,
+    @Res({ passthrough: true }) res: Response,
   ): Promise<FetchedCommit[]> {
-    return this.messaging.listCommits(auth, conversationId, query);
+    const { commits, oldestRetainedEpoch } = await this.messaging.listCommits(
+      auth,
+      conversationId,
+      query,
+    );
+    // Surface the oldest retained epoch as a header so stale PWAs that validate the body as a bare
+    // FetchedCommit[] (CommitPageSchema) keep working; updated clients read it to detect sync-lost.
+    if (oldestRetainedEpoch !== null) {
+      res.setHeader(OLDEST_RETAINED_EPOCH_HEADER, String(oldestRetainedEpoch));
+    }
+    return commits;
   }
 
   @Get(':conversationId/messages')
