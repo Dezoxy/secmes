@@ -201,10 +201,15 @@ export function useLiveConversations({
   // Transport delivery-gap detection (Track 3 item D). lastDeliverySeq holds the last per-(socket,
   // conversation) `deliverySeq` we saw; a non-contiguous next frame means a live frame was dropped/reordered,
   // so we re-fetch over the existing backfill. gapBackfillTimers coalesces a burst of gaps per conversation
-  // into one fetch. Both reset on (re)subscribe and on removal. The seq is a HINT only — it never gates
-  // decryption or ordering (MLS + the (created_at,id) cursor own those); it carries no cryptographic guarantee.
+  // into one fetch. `catchingUp` holds conversations whose live frames we DEFER (don't decrypt inline) until
+  // their gap backfill completes — so the backfill decrypts from the durable cursor in generation ORDER and
+  // never consumes a later generation before the missed earlier one (MLS's skipped-key cache is bounded —
+  // `retainKeysForGenerations`, 10 by default — so a burst could otherwise evict it and lose the message).
+  // All reset on (re)subscribe and on removal. The seq is a HINT only — it never gates decryption or ordering
+  // (MLS + the (created_at,id) cursor own those); it carries no cryptographic guarantee.
   const lastDeliverySeq = useRef(new Map<string, number>());
   const gapBackfillTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const catchingUp = useRef(new Set<string>());
 
   const addLive = useCallback((conversationId: string, conversation: MlsGroup): void => {
     liveGroups.current.set(conversationId, conversation);
@@ -404,10 +409,10 @@ export function useLiveConversations({
     // future epoch were seen — drain commits to EXACTLY that epoch (not beyond) and backfill again, until
     // no further epoch gaps. Preserves forward secrecy (epoch-N keys consumed only after all epoch-N
     // messages decrypt). Shared by the on-subscribe catch-up and the transport-gap backfill.
-    const runCatchUp = (conversationId: string): void => {
+    const runCatchUp = (conversationId: string): Promise<void> => {
       const group = liveGroups.current.get(conversationId);
-      if (!group) return;
-      void (async () => {
+      if (!group) return Promise.resolve();
+      return (async () => {
         for (;;) {
           const result = await backfillInto(conversationId, group, selfUserId);
           const nextEpoch = result?.nextEpoch;
@@ -420,14 +425,17 @@ export function useLiveConversations({
       });
     };
 
-    // Debounced backfill on a detected transport gap. Coalesces a burst per conversation (see
-    // GAP_BACKFILL_DEBOUNCE_MS) so a flaky link can't trigger a backfill storm.
+    // Debounced backfill on a detected transport gap. Marks the conversation `catchingUp` immediately (so
+    // onMessage stops decrypting its live frames inline — see there) and coalesces a burst per conversation
+    // (GAP_BACKFILL_DEBOUNCE_MS) into one fetch. The catch-up re-decrypts from the durable cursor in
+    // generation order; once it settles we clear `catchingUp` and live decryption resumes.
     const scheduleGapBackfill = (conversationId: string): void => {
+      catchingUp.current.add(conversationId);
       const timers = gapBackfillTimers.current;
       if (timers.has(conversationId)) return; // a fetch is already scheduled — coalesce
       const timer = setTimeout(() => {
         timers.delete(conversationId);
-        runCatchUp(conversationId);
+        void runCatchUp(conversationId).finally(() => catchingUp.current.delete(conversationId));
       }, GAP_BACKFILL_DEBOUNCE_MS);
       timers.set(conversationId, timer);
     };
@@ -486,6 +494,11 @@ export function useLiveConversations({
         );
         if (nextLast !== undefined) lastDeliverySeq.current.set(conversationId, nextLast);
         if (gap) scheduleGapBackfill(conversationId);
+        // While catching up after a gap, DON'T decrypt this frame inline — the pending backfill re-decrypts
+        // from the durable cursor in generation order, so we never advance/consume the receive ratchet past
+        // the missed earlier message (whose skipped key MLS only caches for a bounded window). The frame is
+        // durably stored, so the backfill picks it up and dedup-by-id avoids a double-render.
+        if (catchingUp.current.has(conversationId)) return;
 
         const group = liveGroups.current.get(conversationId);
         if (!group) return;
@@ -522,9 +535,10 @@ export function useLiveConversations({
       onReceipt: applyReceipt,
       onSubscribed: (conversationId) => {
         // A fresh room join (re)starts the gateway's per-socket counter, so drop any stale baseline — the
-        // first live frame (deliveryPrevSeq === null) re-establishes it. The REST catch-up below already
-        // covers anything missed up to now, so no gap backfill is needed here.
+        // first live frame (deliveryPrevSeq === null) re-establishes it. Also clear any stale catch-up gate.
+        // The REST catch-up below already covers anything missed up to now, so no gap backfill is needed here.
         lastDeliverySeq.current.delete(conversationId);
+        catchingUp.current.delete(conversationId);
         runCatchUp(conversationId);
         seedReceipts(conversationId); // seed historical delivered/read ticks once in the room
       },
@@ -534,6 +548,7 @@ export function useLiveConversations({
       onRemoved: (conversationId) => {
         liveGroups.current.delete(conversationId);
         lastDeliverySeq.current.delete(conversationId);
+        catchingUp.current.delete(conversationId);
         const pending = gapBackfillTimers.current.get(conversationId);
         if (pending) {
           clearTimeout(pending);
@@ -584,6 +599,7 @@ export function useLiveConversations({
       for (const timer of gapBackfillTimers.current.values()) clearTimeout(timer);
       gapBackfillTimers.current.clear();
       lastDeliverySeq.current.clear();
+      catchingUp.current.clear();
     };
   }, [
     applyReceipt,
