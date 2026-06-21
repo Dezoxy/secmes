@@ -99,8 +99,17 @@ The schema change is incompatible with every deployed image. Restore the most re
 > one, the most recent backup is last night's. Continuous PITR (WAL archiving) is the enterprise-grade
 > upgrade, noted in `docs/threat-models/db-backup.md`.
 
-1. **Stop the API** so nothing writes to the doomed schema (a redeploy already stops the old API at step
-   4b; otherwise `docker compose -f <compose> stop api` on the box).
+1. **Quiesce every DB writer — not just the API.** Stopping `api` alone isn't enough: the VM's systemd
+   timers (attachment-cleanup, audit-prune, and the nightly backup) connect to `argus` and issue DELETEs or
+   hold connections — one firing mid-restore can break the `ALTER DATABASE … RENAME` (active connection) or
+   mutate the restored DB before the corrected rollout. Stop the API (a redeploy already did, at step 4b)
+   **and** the timers, then confirm none is mid-run:
+   ```bash
+   docker compose -f <compose> stop api      # if a redeploy hasn't already
+   sudo systemctl stop argus-db-backup.timer argus-attachment-cleanup.timer argus-audit-prune.timer
+   systemctl is-active argus-db-backup.service argus-attachment-cleanup.service argus-audit-prune.service
+   ```
+   Re-arm the timers only **after** the corrected deploy is healthy (end of step 5).
 2. **Restore the pre-migration pair** by following the **Restore runbook in
    [`infra/backup/README.md`](../../../infra/backup/README.md)** verbatim — do not improvise. It fetches
    the age private key from Key Vault, **verifies the Ed25519 signature** and re-hashes both objects against
@@ -134,7 +143,9 @@ The schema change is incompatible with every deployed image. Restore the most re
    step brings the restored DB to the fixed head before serving. (Single-VM caveat: editing an already-shipped
    migration is normally forbidden because other clusters may have applied it — but here there is **one**
    cluster and it no longer has `0044` recorded, so correcting the file is the right move. In a multi-cluster
-   world you'd instead deploy an image whose migration set is corrected for every cluster.)
+   world you'd instead deploy an image whose migration set is corrected for every cluster.) Once the
+   corrected deploy is healthy, **re-arm the timers stopped in step 1**:
+   `sudo systemctl start argus-db-backup.timer argus-attachment-cleanup.timer argus-audit-prune.timer`.
 
 ## Why no automatic down-migrations, and no auto-checkpoint in `deploy.sh`
 
