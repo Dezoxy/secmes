@@ -161,6 +161,12 @@ The schema change is incompatible with every deployed image. Restore the most re
    docker compose -f <compose> exec -T postgres psql -U argus -d argus_restore \
      -c "select version from schema_migrations order by version desc limit 5;"   # the bad migration must NOT be listed
    ```
+   **Role-drift caveat:** Postgres roles are **cluster-global** — the database rename below does *not* reset
+   them, and the `--roles-only` dump is additive (`CREATE`/`ALTER`/`GRANT`, not a cleanup script that emits
+   `DROP`s). So if the bad migration changed cluster-global role state (a new membership or attribute — e.g. an
+   elevated `GRANT … TO argus_app`), an in-place restore does **not** undo it. If the bad migration touched
+   roles/grants, either restore into a **fresh cluster/volume** (roles start empty) or explicitly **reconcile
+   the affected roles** (revoke the drift) before cutover — don't assume the rename cleaned it.
 4. **Cut the restored DB into place.** The stack connects to the `argus` database (the Key Vault DSNs end
    `…:5432/argus`); if you skip this, `deploy.sh` runs `db:migrate` against the still-bad `argus` and the
    restored snapshot is never used. With every writer stopped (step 1) and no connections to either DB, rename
