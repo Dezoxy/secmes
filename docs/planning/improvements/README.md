@@ -19,7 +19,7 @@ non-exhaustive RLS test coverage, and several operational single-point risks.
 | #   | Track                                                                        | Type            | Risk if untouched                                  | Net-new surface |
 | --- | ---------------------------------------------------------------------------- | --------------- | -------------------------------------------------- | --------------- |
 | 1   | ✅ [Messaging service refactor](./01-messaging-service-refactor.md)          | Readability     | Merge-conflict & onboarding cost on a 1,185-LOC file | none            |
-| 2   | [Test coverage + RLS assertions](./02-test-coverage-and-rls-assertions.md)   | Test hardening  | A typo'd RLS policy could ship a cross-tenant leak | tests only      |
+| 2   | ✅ [Test coverage + RLS assertions](./02-test-coverage-and-rls-assertions.md) | Test hardening  | A typo'd RLS policy could ship a cross-tenant leak | tests only      |
 | 3   | [Ops / infra hardening](./03-ops-infra-hardening.md)                          | Operational     | No rollback story; flippable deploy gate; lossy WS | small           |
 | 4   | [Message retention & ciphertext pruning](./04-message-retention-and-pruning.md) | Retention / privacy | `messages` ciphertext grows forever — cost, breach/subpoena surface, no GDPR storage-limitation story | small (cursor contract + role + worker) |
 
@@ -33,9 +33,17 @@ storage-limitation story). Track 2 is the highest-*severity* item (a typo'd RLS 
 cross-tenant leak) and should follow immediately; Track 1 is the biggest readability win at zero behavior
 change; Track 3 is mostly activating things already designed.
 
-**Progress:** ✅ **Track 1 implemented** (2026-06-21, [#285](https://github.com/Dezoxy/secmes/pull/285)) —
-`messaging.service.ts` split into four collaborators behind an unchanged façade; the 45-test contract spec
-passes unchanged. Tracks 2–4 remain planning docs.
+**Progress:**
+
+- ✅ **Track 1 implemented** (2026-06-21, [#285](https://github.com/Dezoxy/secmes/pull/285)) —
+  `messaging.service.ts` split into four collaborators behind an unchanged façade; the 45-test contract spec
+  passes unchanged.
+- ✅ **Track 2 implemented** (2026-06-21) — three live-DB service specs (`admin`, `user`, `devices`) plus a
+  catalog-driven `db/rls-coverage.spec.ts` that fails CI if any non-allowlisted `public` table lacks forced
+  `app.tenant_id` RLS. (It already surfaced the drift: 19 tenant-scoped tables today, not the "13" the docs
+  repeated.) Tests only.
+
+Tracks 3–4 remain planning docs.
 
 ## Constraints every track must respect
 
