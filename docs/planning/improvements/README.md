@@ -33,8 +33,9 @@ storage-limitation story). Track 2 is the highest-*severity* item (a typo'd RLS 
 cross-tenant leak) and should follow immediately; Track 1 is the biggest readability win at zero behavior
 change; Track 3 is mostly activating things already designed.
 
-**Progress:** ✅ **Track 1 implemented** (2026-06-21) — `messaging.service.ts` split into four collaborators
-behind an unchanged façade; the 45-test contract spec passes unchanged. Tracks 2–4 remain planning docs.
+**Progress:** ✅ **Track 1 implemented** (2026-06-21, [#285](https://github.com/Dezoxy/secmes/pull/285)) —
+`messaging.service.ts` split into four collaborators behind an unchanged façade; the 45-test contract spec
+passes unchanged. Tracks 2–4 remain planning docs.
 
 ## Constraints every track must respect
 
