@@ -1,8 +1,9 @@
 # Track 4 — Message retention & ciphertext pruning (bound DB growth)
 
 > **Status:** PROPOSED 2026-06-21. Mostly server-side, with **gated prerequisites before any deletion**: a
-> position-carrying backfill cursor (a small `ListMessagesQuery` change), and — for commit pruning — a client
-> missing-commit / sync-lost signal. No message wire-format / envelope change. The only user-visible effect:
+> position-carrying backfill cursor (a backward-compatible shared-cursor change spanning `@argus/contracts` +
+> `apps/api` + web + OpenAPI), and — for commit pruning — a client missing-commit / sync-lost signal. No
+> message wire-format / envelope change. The only user-visible effect:
 > ciphertext older than the retention ceiling is no longer fetchable from the server (clients keep their own
 > local history). Ships as its own slices (below). Sequenced **first** (see [README priority](./README.md))
 > because it should land before production starts accumulating ciphertext that can never be reclaimed.
@@ -36,7 +37,10 @@ offline catch-up buffer — yet that buffer is never drained. Consequences:
 regardless of delivery state. This bounds growth and is safe for multi-device — a device has the full 90-day
 window to come back and catch up — **provided the catch-up cursor is made prune-safe first** (prerequisite
 below); only a device offline *longer* than the ceiling loses history it never received, the
-disappearing-history trade `message-history.md` already anticipates. The ceiling is config, tunable.
+disappearing-history trade `message-history.md` already anticipates. The ceiling is a **single reviewed
+constant shared by the RLS policy and the worker** (Codex P2) — changing it is a migration that re-issues the
+policy alongside the worker setting, *not* an independent runtime knob, so the DB boundary and the worker can
+never drift.
 
 **Why *not* delete-on-confirmed-delivery in v1 (Codex P1 — verified).** A delivery gate would reclaim hot
 conversations faster, but the delivery signal today is **per-user, not per-device**: `conversation_receipts`
@@ -96,7 +100,8 @@ window-scoped RLS so it can only ever see/delete past-window rows, counts-only l
 in-container local-trust socket (no DB password on the host). The role reads **non-content metadata only —
 never `ciphertext` / `commit` / `welcome` blobs**: `messages (id, created_at)`, and `conversation_commits
 (id, created_at, conversation_id, epoch)` for the contiguity rule (see grants below). The RLS policy enforces
-the 90-day time bound as the fail-closed boundary.
+the time bound as the fail-closed boundary — and **its window is derived from the same reviewed ceiling
+constant as the worker** (Codex P2), so the policy and the worker can never disagree on what is reapable.
 
 **The grant must cover every column *and table* the predicate reads (Codex P2).** PostgreSQL requires SELECT
 privilege on all columns/tables referenced in a DELETE `USING`/predicate, not just the deleted row. The TTL
@@ -120,10 +125,10 @@ delete an in-window row even after setting a tenant GUC. (This is exactly the by
 
 ### Implementation slices (safety boundary lands before any deletion)
 
-1. **Prune-safe catch-up cursor (no deletion)** — make `after` a position-carrying `(created_at, id)` token
-   (or add the retained-window fallback) so backfill survives a pruned anchor (prerequisite above), so TTL
-   pruning can't silently break catch-up. Gates: `security-boundary-auditor`, a `listMessages` cursor unit
-   test (anchor-pruned case).
+1. **Prune-safe catch-up cursor (no deletion)** — make `after` / `MessagePage.nextCursor` a position-carrying
+   `(created_at, id)` token across `@argus/contracts` + `apps/api` + web response validation + OpenAPI (or add
+   the retained-window fallback), backward-compatibly, so backfill survives a pruned anchor (prerequisite
+   above). Gates: `security-boundary-auditor`, a `listMessages` anchor-pruned cursor test + web response test.
 2. **Threat-model note (no code)** — `docs/threat-models/message-retention.md` via `/feature-threat-model`;
    verify the 6 invariants; `security-architect` sign-off on the rule + the #262 re-scope.
 3. **Migration: role + `TO argus_app` re-scope + window policies + `created_at` indexes** (the boundary, no
@@ -157,9 +162,14 @@ delete an in-window row even after setting a tenant GUC. (This is exactly the by
 - `infra/stack/deploy/deploy.sh`: grant the new role LOGIN with a NULL password out-of-band + install the
   timer (mirror the existing prune/cleanup wiring).
 - New `docs/threat-models/message-retention.md`.
-- **A small `apps/api` + query-schema change** — the position-carrying cursor in `listMessages` /
-  `ListMessagesQuery` (slice 1; backward-compatible). Commit pruning additionally needs a **client**
-  missing-commit / sync-lost signal (prerequisite to slice 5). No message wire-format / envelope change.
+- **The position-carrying cursor spans the shared contract (slice 1), not just `apps/api` (Codex P2):**
+  `ListMessagesQuerySchema.after` *and* `MessagePage.nextCursor` (today a UUID at
+  [`contracts/src/index.ts:345`](../../packages/contracts/src/index.ts)), the web response validation +
+  tests ([`apps/web/src/lib/api.ts:468`](../../apps/web/src/lib/api.ts)), and the OpenAPI DTO format — all
+  updated together, backward-compatibly, or the PWA rejects any page carrying the new cursor. (The
+  `syncMessages` path already uses an opaque encoded cursor — `messaging.schemas.ts:32-35` — so this aligns
+  `listMessages` with an existing pattern.) Commit pruning additionally needs a **client** missing-commit /
+  sync-lost signal (prerequisite to slice 5). No message wire-format / envelope change.
 
 ## Other prunable data classes (slice 5 / follow-ups)
 
