@@ -14,16 +14,24 @@ rules). Difficulty is medium-high but mostly _inherent_ to building E2EE (MLS / 
 actionable debt: a handful of oversized files, thin unit-isolation on a few API services plus
 non-exhaustive RLS test coverage, and several operational single-point risks.
 
-## The three tracks
+## The tracks
 
 | #   | Track                                                                        | Type            | Risk if untouched                                  | Net-new surface |
 | --- | ---------------------------------------------------------------------------- | --------------- | -------------------------------------------------- | --------------- |
 | 1   | [Messaging service refactor](./01-messaging-service-refactor.md)             | Readability     | Merge-conflict & onboarding cost on a 1,185-LOC file | none            |
 | 2   | [Test coverage + RLS assertions](./02-test-coverage-and-rls-assertions.md)   | Test hardening  | A typo'd RLS policy could ship a cross-tenant leak | tests only      |
 | 3   | [Ops / infra hardening](./03-ops-infra-hardening.md)                          | Operational     | No rollback story; flippable deploy gate; lossy WS | small           |
+| 4   | [Message retention & ciphertext pruning](./04-message-retention-and-pruning.md) | Retention / privacy | `messages` ciphertext grows forever — cost, breach/subpoena surface, no GDPR storage-limitation story | small (1 role + 1 worker) |
 
-**Priority order:** 2 → 1 → 3. Track 2 closes the highest-impact latent-bug class (RLS), Track 1 is the
-biggest readability win at zero behavior change, Track 3 is mostly activating things already designed.
+> Track 4 was added 2026-06-21 — a retention/data-minimization improvement, not part of the original
+> three-track codebase-health review. The server retains every relayed MLS ciphertext forever; this track
+> makes it behave like the transient relay it is.
+
+**Priority order:** 4 → 2 → 1 → 3. Track 4 leads because the deletion **boundary** should be designed and in
+place *before* production accumulates ciphertext that can never be reclaimed (and it delivers the GDPR
+storage-limitation story). Track 2 is the highest-*severity* item (a typo'd RLS policy is a silent
+cross-tenant leak) and should follow immediately; Track 1 is the biggest readability win at zero behavior
+change; Track 3 is mostly activating things already designed.
 
 ## Constraints every track must respect
 
