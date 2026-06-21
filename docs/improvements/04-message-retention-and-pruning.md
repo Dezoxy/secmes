@@ -85,8 +85,12 @@ and it is the first slice.
   behind the first retained epoch would **spin / stay stuck**, not re-invite. Commit pruning therefore carries
   its own prerequisite: build an **explicit missing-commit / sync-lost signal** (detect the gap → surface
   re-invite) *before* enabling it. Until that exists, do not prune commits.
-- `conversation_welcomes` — already self-prunes on join (`consumeWelcome`); residual is stranded welcomes.
-  **TTL ceiling only.** Low volume — cleanup, not the main event.
+- `conversation_welcomes` — already self-prunes on join (`consumeWelcome`). **Prune only consumed /
+  superseded welcomes by TTL; never an *unconsumed* one (Codex P2)** — for a device added while offline that
+  HPKE-sealed Welcome/RatchetTree row is the *only* way it can ever enter the MLS group, so deleting it
+  strands the device with membership metadata but no entry path. Pruning an unconsumed welcome is allowed only
+  once a missing-welcome / re-invite recovery path exists (same prerequisite class as commits). Low volume —
+  cleanup, not the main event.
 
 **Attachment blobs are already handled — explicitly decoupled, no new B2 logic.** Every attachment gets a
 **7-day** `expires_at` at upload and `infra/cleanup/cleanup-attachments.sh` reaps the **B2 object first,
@@ -127,8 +131,13 @@ delete an in-window row even after setting a tenant GUC. (This is exactly the by
 
 1. **Prune-safe catch-up cursor (no deletion)** — make `after` / `MessagePage.nextCursor` a position-carrying
    `(created_at, id)` token across `@argus/contracts` + `apps/api` + web response validation + OpenAPI (or add
-   the retained-window fallback), backward-compatibly, so backfill survives a pruned anchor (prerequisite
-   above). Gates: `security-boundary-auditor`, a `listMessages` anchor-pruned cursor test + web response test.
+   the retained-window fallback) so backfill survives a pruned anchor (prerequisite above). **Cached-PWA-safe
+   rollout (Codex P2):** old bundles validate `nextCursor` as `z.string().uuid()`, so an opaque token breaks
+   their paging until they update — so do *not* swap it in place. Use a new field (e.g. `nextCursorV2`) **or**
+   gate the opaque cursor behind a client capability flag (the existing `default=false` opt-in pattern at
+   `messaging.schemas.ts:15`), keeping the UUID `nextCursor` valid for old clients; only enable TTL deletion
+   after the client side is adopted. Gates: `security-boundary-auditor`, a `listMessages` anchor-pruned cursor
+   test + web response test + a stale-PWA-compat test.
 2. **Threat-model note (no code)** — `docs/threat-models/message-retention.md` via `/feature-threat-model`;
    verify the 6 invariants; `security-architect` sign-off on the rule + the #262 re-scope.
 3. **Migration: role + `TO argus_app` re-scope + window policies + `created_at` indexes** (the boundary, no
