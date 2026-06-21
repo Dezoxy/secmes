@@ -20,7 +20,7 @@ name: argus-prod
 # cloudflared tunnel token (TUNNEL_TOKEN_FILE → /run/secrets/tunnel_token; cloudflared >=2025.4.0 reads
 # --token-file / TUNNEL_TOKEN_FILE). No secret is delivered via a container env var, so none surfaces in
 # `docker inspect`. Slice 3 populates all of these from Key Vault via the VM's Managed Identity (systemd); see
-# docs/planning/roadmap/01-phase-0-platform-foundation.md (Phase 0 #8), docs/deploy.md, and .env.prod.example.
+# docs/planning/roadmap/01-phase-0-platform-foundation.md (Phase 0 #8), docs/architecture/deploy.md, and .env.prod.example.
 # AUTH: login is passkey-only — the API mints/verifies its own EdDSA session tokens (no external IdP).
 # Zitadel/OIDC was decommissioned in Phase 6 (docs/threat-models/phase-6-decommission.md).
 
@@ -140,7 +140,7 @@ services:
       # secret file; the app reads it via REDIS_URL_FILE (ioredis parses the URL). Keeping it in a file (not
       # REDIS_URL env) keeps the password out of `docker inspect` / the daemon's at-rest container config.
       # database_url MUST be the non-bypass RUNTIME role argus_app (not the argus owner) — least privilege so
-      # RLS/grants bind even off the SET-LOCAL-ROLE path. See .env.prod.example + docs/deploy.md.
+      # RLS/grants bind even off the SET-LOCAL-ROLE path. See .env.prod.example + docs/architecture/deploy.md.
       DATABASE_URL_FILE: /run/secrets/database_url
       S3_SECRET_ACCESS_KEY_FILE: /run/secrets/s3_secret_access_key
       REDIS_URL_FILE: /run/secrets/redis_url
@@ -157,7 +157,7 @@ services:
       # Access app's AUD tag are public, like FRONTEND_ORIGIN). When BOTH are set, the API verifies the
       # Cf-Access-Jwt-Assertion signature on /auth/breakglass/* and /admin/* (defense in depth behind the
       # Caddy edge gate). Unset/empty = no-op (dev / before the Access app is created). See .env.prod.example
-      # + docs/deploy.md + docs/threat-models/admin-access-gating.md.
+      # + docs/architecture/deploy.md + docs/threat-models/admin-access-gating.md.
       CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN:-}
       CF_ACCESS_AUD: ${CF_ACCESS_AUD:-}
     secrets:

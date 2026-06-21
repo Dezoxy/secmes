@@ -53,5 +53,5 @@ Open items, grouped by what unblocks them.
 - Two GA gates (**G4 crypto review, G5 pen test**) are **external and paid** — schedule and budget them early; they block launch.
 - This is a genuine multi-month solo effort. That's expected — the list just makes it honest.
 - **Front-load the unknowns** (spikes S1–S2): the hardest thing (MLS) and the longest-lead-time thing (paid audits) start _now_, not in sequence.
-- This roadmap is **canonical** for phasing; `docs/secure_messaging_platform_plan.md` §17 is an earlier, looser cut — defer to this folder when they disagree.
+- This roadmap is **canonical** for phasing; `docs/architecture/secure_messaging_platform_plan.md` §17 is an earlier, looser cut — defer to this folder when they disagree.
 - Each phase is gated by its `docs/threat-models/*.md` note (rls-tenant-isolation, key-directory, prf-keystore-unlock, attachments) — ratify the note before the code.

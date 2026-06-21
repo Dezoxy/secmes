@@ -18,7 +18,7 @@
 **Problem.** `apps/api/src/db/migrate.ts` applies 44 forward-only migrations; there is no down-migration
 or documented recovery. If a schema change breaks production, the operator has no rehearsed path back.
 
-**Approach.** This is primarily a _runbook_, not a framework. Add `docs/runbooks/migration-rollback.md`
+**Approach.** This is primarily a _runbook_, not a framework. Add `docs/operations/runbooks/migration-rollback.md`
 documenting the supported recovery: restore from the nightly B2 DB backup to a point before the bad
 migration, then re-apply known-good migrations. Pair it with a pre-migration backup checkpoint step in the
 deploy flow so a fresh restore point always exists. (A full reversible-migration framework is explicitly

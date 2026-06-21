@@ -3,7 +3,7 @@
 Operational checklist for the **first** production rollout of argus to the AWS EC2
 experiment box. This is the AWS path (`infra/aws/`, `cd-aws.yml`, the `aws-experiment`
 GitHub Environment) — **not** the canonical single-Azure-VM path described in
-[`docs/deploy.md`](../deploy.md), which stays the authoritative reference for topology,
+[`docs/architecture/deploy.md`](../../architecture/deploy.md), which stays the authoritative reference for topology,
 the stack, secrets delivery, and observability. Read that for the "how it works"; this
 doc is the "what to do, in order, the first time."
 

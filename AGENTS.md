@@ -3,7 +3,7 @@
 Canonical instructions for **any** AI coding agent working in this repo (Codex, Claude Code, Cursor, Gemini CLI, …). Tool-specific wiring is at the bottom; the rules here apply to all.
 
 Privacy-first, **end-to-end-encrypted** messaging platform. Multi-tenant SaaS, installable PWA.
-Architecture: `docs/secure_messaging_platform_plan.md`. Security toolchain: `docs/security_toolchain.md`.
+Architecture: `docs/architecture/secure_messaging_platform_plan.md`. Security toolchain: `docs/architecture/security_toolchain.md`.
 
 ## Languages
 
@@ -81,5 +81,5 @@ Whatever agent you are, these gates run on commit/push regardless — do not byp
 
 ## Per-tool wiring
 
-- **Codex**: reads this file natively (merges `~/.codex/AGENTS.md` + repo `AGENTS.md`). Recommended `~/.codex/config.toml` and prompt files are in `.codex/` — see `docs/agent-portability.md`. Codex enforces the destructive-command boundary via its **sandbox + approval policy**, not per-command hooks.
+- **Codex**: reads this file natively (merges `~/.codex/AGENTS.md` + repo `AGENTS.md`). Recommended `~/.codex/config.toml` and prompt files are in `.codex/` — see `docs/architecture/agent-portability.md`. Codex enforces the destructive-command boundary via its **sandbox + approval policy**, not per-command hooks.
 - **Claude Code**: `CLAUDE.md` imports this file and adds subagents (`.claude/agents/`), skills (`.claude/skills/`), and hooks/permissions (`.claude/settings.json`).

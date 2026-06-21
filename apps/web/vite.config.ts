@@ -126,7 +126,7 @@ export default defineConfig({
     ),
   },
   // Dev-only: proxy `/api/*` to the local API so the browser talks same-origin (no CORS). The API
-  // runs on the host via `make api-dev`; see docs/local-auth.md. Prod uses a real origin (VITE_API_URL).
+  // runs on the host via `make api-dev`; see docs/operations/local-auth.md. Prod uses a real origin (VITE_API_URL).
   server: {
     proxy: {
       '/api': {

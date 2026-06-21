@@ -129,7 +129,7 @@ runtime env (Zitadel side). Gates: **`infra-reviewer`** (container hardening, no
 delivery, EU region), plus the standing CI (Checkov/Trivy/gitleaks). The API-side JWT validation is unchanged
 and already covered by `auth-tenant-context.md`.
 
-**Operational must-dos (documented in `docs/deploy.md`, enforced at arming, not in code):**
+**Operational must-dos (documented in `docs/architecture/deploy.md`, enforced at arming, not in code):**
 
 - **Generate the masterkey once** (32 bytes, CSPRNG), store it in Key Vault, and **never rotate it casually** —
   rotation requires Zitadel's documented key-re-encryption, and loss makes the instance's encrypted data

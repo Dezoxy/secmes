@@ -36,7 +36,7 @@ plus the UI move.
   no-op pass-through (dev / un-armed deploy), mirroring the breakglass `ADMIN_BOOTSTRAP_HASH_FILE` and Sentry
   DSN degraded-mode patterns. The assertion and request body are never logged.
 - **Cloudflare Access** is dashboard-managed (no Terraform): a self-hosted application on `4rgus.com` scoped to
-  the three path prefixes, with an Allow policy for the operator's email (see `docs/deploy.md`).
+  the three path prefixes, with an Allow policy for the operator's email (see `docs/architecture/deploy.md`).
 - **Dev preserved:** local dev runs Vite (no Caddy, no Access); `/admin` renders and breakglass login works as
   before. Layer A lives only in the prod Caddyfile; Layer B is env-gated off. E2E (no Access) hits `/admin`
   directly.

@@ -35,7 +35,7 @@ clean-tools: ## Remove the Python venv
 up: ## Start the local stack (postgres, redis, minio)
 	docker compose up -d --build postgres redis minio minio-setup
 	@echo ""
-	@echo "Stack up. Auth is passkey-only — no IdP to provision (see docs/local-auth.md)."
+	@echo "Stack up. Auth is passkey-only — no IdP to provision (see docs/operations/local-auth.md)."
 	@echo "Then:  make migrate && make seed         # apply schema + seed the dev tenant"
 	@echo "       make api-dev                      # API on :3000 (host; ephemeral dev session key)"
 	@echo "       pnpm --filter @argus/web dev      # http://localhost:5173"
