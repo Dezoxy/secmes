@@ -234,6 +234,26 @@ pruning is implemented.
    > stall from a pruned/lost gap. No deletion, no migration, no body-shape change. Gates: controller spec
    > (header set/omitted), a live-DB test (`min(epoch)` independent of `afterEpoch`, `null` when empty),
    > `security-boundary-auditor`, regenerated OpenAPI + 42Crunch.
+
+   > **Slice 5b implemented 2026-06-21 (PR _pending_).** Client-only; no server, contract, or wire change.
+   > The web client now **detects** a stranded conversation instead of spinning on it:
+   > - [`listCommits`](../../../apps/web/src/lib/api.ts) reads the 5a `X-Oldest-Retained-Epoch` header (via a
+   >   new, body-agnostic `onResponse` header tap in
+   >   [`api-client.ts`](../../../apps/web/src/lib/api-client.ts)) and returns
+   >   `{ commits, oldestRetainedEpoch }`.
+   > - [`drainCommits` / `processCommitEvent`](../../../apps/web/src/lib/messaging.ts) now return a
+   >   `CommitDrainResult` (`advanced`, `stoppedReason`, `oldestRetainedEpoch`) instead of `void` — the
+   >   forward-secrecy `maxEpoch` ceiling is unchanged.
+   > - A pure, unit-tested `classifyCommitDrain`
+   >   ([`useLiveConversations.ts`](../../../apps/web/src/features/chat/useLiveConversations.ts)) turns a
+   >   non-advancing drain into `transient` (retry) vs **`sync-lost`** — the latter exactly when the commit
+   >   that would advance the group (the one stamped at the local epoch) has been pruned
+   >   (`oldestRetainedEpoch > localEpoch`).
+   > - The catch-up loop + `onCommit` handler escalate a genuine gap to a new optional `onSyncLost`
+   >   callback (recovery + UI are 5c) and otherwise retry within a **bounded budget** — closing the
+   >   spin-forever latent bug. The epoch is metadata only; it never gates decryption or ordering. Gates:
+   >   unit tests (classifier table + drain-result contract + the 5a↔5b header seam), `crypto-reviewer`
+   >   (epoch-overshoot discipline preserved).
 6. **(Optional, separable) metadata-table sweepers** — see below; own PR or deferred.
 7. **(Future, prerequisite-gated) delivery-confirmed pruning** — *only after per-device delivery tracking
    exists* (Codex P1). Extends the worker join + the role's metadata grants. **Not part of this track's

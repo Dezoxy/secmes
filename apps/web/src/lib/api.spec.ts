@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { OLDEST_RETAINED_EPOCH_HEADER } from '@argus/contracts';
 
 vi.mock('./auth', () => ({ accessToken: vi.fn() }));
 import { accessToken } from './auth';
@@ -9,6 +10,7 @@ import {
   createConversation,
   deliverWelcome,
   fetchWelcomeMaterial,
+  listCommits,
   listWelcomes,
   publishKeyPackages,
   revokeKeyPackages,
@@ -183,5 +185,39 @@ describe('api client', () => {
     await expect(consumeWelcome(welcomeId, deviceId, 'pf')).rejects.toThrow(
       'API request failed with status 404.',
     );
+  });
+
+  // Track 4 slice 5b — listCommits reads the 5a `X-Oldest-Retained-Epoch` response header (the server's
+  // oldest still-retained commit epoch, metadata only) alongside the commit page. This is the cross-slice
+  // seam the sync-lost detection depends on.
+  describe('listCommits oldest-retained-epoch header', () => {
+    it('parses the header into oldestRetainedEpoch alongside the commit page', async () => {
+      token.mockResolvedValue('tok');
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response('[]', { status: 200, headers: { [OLDEST_RETAINED_EPOCH_HEADER]: '5' } }),
+      );
+      await expect(listCommits(conversationId, { afterEpoch: 0 })).resolves.toEqual({
+        commits: [],
+        oldestRetainedEpoch: 5,
+      });
+    });
+
+    it('reports null when the header is absent (no commits yet / a server too old to send it)', async () => {
+      token.mockResolvedValue('tok');
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('[]', { status: 200 }));
+      await expect(listCommits(conversationId)).resolves.toEqual({
+        commits: [],
+        oldestRetainedEpoch: null,
+      });
+    });
+
+    it('ignores a non-integer header value (defensive — never a NaN epoch)', async () => {
+      token.mockResolvedValue('tok');
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response('[]', { status: 200, headers: { [OLDEST_RETAINED_EPOCH_HEADER]: 'oops' } }),
+      );
+      const result = await listCommits(conversationId);
+      expect(result.oldestRetainedEpoch).toBeNull();
+    });
   });
 });

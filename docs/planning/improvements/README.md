@@ -82,7 +82,7 @@ change; Track 3 is mostly activating things already designed.
   DB-enforced hard floor), logs **counts only**, and **fails closed**. `deploy.sh` adds the role's
   `LOGIN PASSWORD NULL` + a connectivity probe (§7 cond 2). No app code, migration, or contract change.
 
-- 🟡 **Track 4 slice 5 re-sliced; slice 5a implemented** (2026-06-21, PR _pending_) — a `security-architect`
+- 🟡 **Track 4 slice 5 re-sliced; slice 5a implemented** (2026-06-21, [#293](https://github.com/Dezoxy/secmes/pull/293)) — a `security-architect`
   pass found the original slice 5 (`conversation_commits` pruning) blocked on a recovery signal that doesn't
   exist, **and** that a device behind the oldest *retained* commit epoch spins forever **today** (a latent
   bug). So the tail splits into a prerequisite — **5a** server exposes the oldest retained commit epoch
@@ -90,6 +90,13 @@ change; Track 3 is mostly activating things already designed.
   client detects "sync-lost", **5c** recovery (re-add via the existing member/Welcome path) + UI — and the
   **deferred** pruning **5d** (commit-prune boundary migration) + **5e** (contiguity-preserving worker). 5d–5e
   are deferred because 1:1 chats write zero commits (only group chat does, slowly) — un-defer at group-chat GA.
+
+- 🟡 **Track 4 slice 5b implemented** (2026-06-21, PR _pending_) — **client sync-lost detection** (no UI, no
+  recovery action yet). The web client reads the 5a `X-Oldest-Retained-Epoch` header, the commit drain now
+  reports whether it advanced + the oldest retained epoch, and a pure, unit-tested `classifyCommitDrain` tells
+  a transient stall (retry within a bounded budget) from a genuine **`sync-lost`** gap (the commit needed to
+  advance was pruned). The catch-up loop + `onCommit` escalate a real gap to an `onSyncLost` callback (wired in
+  5c) — closing the spin-forever latent bug. Client-only; no server, contract, migration, or wire change.
 
 Track 4's v1 message TTL deletion ships (slice 4); the commit-pruning tail is re-sliced — its prerequisite is
 landing now (5a–5c), the actual pruning (5d–5e) is deferred until group chat is GA. Track 4 stays 🟡.

@@ -3,13 +3,21 @@ import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock the transport; the crypto (encrypt/decrypt) and the keystore (real sealed IndexedDB) are real.
-vi.mock('./api', () => ({ sendMessage: vi.fn(), fetchMessages: vi.fn() }));
-import { fetchMessages, sendMessage, type FetchedMessage } from './api';
+vi.mock('./api', () => ({ sendMessage: vi.fn(), fetchMessages: vi.fn(), listCommits: vi.fn() }));
+import {
+  fetchMessages,
+  listCommits,
+  sendMessage,
+  type FetchedCommit,
+  type FetchedMessage,
+} from './api';
 import { fromBase64, toBase64 } from './base64';
 import { DeviceKeystore, GroupStateConflict } from './keystore';
 import { decodeEnvelope } from './message-envelope';
 import {
   backfillConversation,
+  drainCommits,
+  processCommitEvent,
   receiveLiveMessage,
   sendLiveMessage,
   type MessagingDeps,
@@ -17,6 +25,7 @@ import {
 
 const send = vi.mocked(sendMessage);
 const fetch = vi.mocked(fetchMessages);
+const commits = vi.mocked(listCommits);
 
 /** A real 1:1: returns the self (alice) + peer (bob) conversations over a shared group. */
 async function pair(
@@ -45,6 +54,18 @@ function fetched(
     attachmentObjectKey: null,
     createdAt: '2026-01-01T00:00:00Z',
     cursor,
+  };
+}
+
+/** A fake commit row at `epoch`; `blob` defaults to a byte the real MLS group cannot process. */
+function commit(epoch: number, blob: Uint8Array = new Uint8Array([1, 2, 3, 4, 5])): FetchedCommit {
+  return {
+    id: `commit-${epoch}`,
+    clientCommitId: `client-commit-${epoch}`,
+    epoch,
+    senderUserId: 'bob-user',
+    commit: toBase64(blob),
+    createdAt: '2026-01-01T00:00:00Z',
   };
 }
 
@@ -363,5 +384,69 @@ describe('receiveLiveMessage', () => {
 
     expect(got).toBeNull();
     expect(saveSpy).not.toHaveBeenCalled();
+  });
+});
+
+// Track 4 slice 5b — the commit drain reports whether it advanced, why it stopped, and the server's oldest
+// retained commit epoch (the 5a header), so a client stranded behind a pruned commit can detect the gap
+// instead of retrying forever. The forward-secrecy maxEpoch ceiling must still hold.
+describe('drainCommits / processCommitEvent (sync-lost signal)', () => {
+  beforeEach(() => {
+    globalThis.indexedDB = new IDBFactory();
+    send.mockReset();
+    fetch.mockReset();
+    commits.mockReset();
+  });
+
+  async function realDeps(): Promise<{ deps: MessagingDeps; aliceConv: Conversation }> {
+    const engine = await MlsEngine.create();
+    const { alice, aliceConv } = await pair(engine);
+    const ks = await DeviceKeystore.open(engine);
+    const key = await importUnlockKey(new Uint8Array(32).fill(1));
+    return { deps: { keystore: ks, device: alice, sessionKey: key }, aliceConv };
+  }
+
+  it('caught-up: no commits → advanced=false, passes the oldest retained epoch through', async () => {
+    const { deps, aliceConv } = await realDeps();
+    commits.mockResolvedValue({ commits: [], oldestRetainedEpoch: 7 });
+
+    const res = await drainCommits(deps, 'c1', aliceConv, aliceConv.epoch - 1);
+
+    expect(res).toEqual({ advanced: false, stoppedReason: 'caught-up', oldestRetainedEpoch: 7 });
+  });
+
+  it('capped: stops BEFORE a commit at/over maxEpoch (forward-secrecy ceiling), nothing applied', async () => {
+    const { deps, aliceConv } = await realDeps();
+    // A commit at epoch 5 with maxEpoch 3 must not be processed — the ceiling guards in-flight messages.
+    commits.mockResolvedValue({ commits: [commit(5)], oldestRetainedEpoch: 0 });
+
+    const res = await drainCommits(deps, 'c1', aliceConv, aliceConv.epoch - 1, 3);
+
+    expect(res).toEqual({ advanced: false, stoppedReason: 'capped', oldestRetainedEpoch: 0 });
+  });
+
+  it('unprocessable: a commit that will not apply → advanced=false, oldest passed through (the gap signal)', async () => {
+    const { deps, aliceConv } = await realDeps();
+    // The needed commit is gone: the server's oldest retained (5) is past our epoch, and what it returns
+    // can't be applied to our group. classifyCommitDrain turns (localEpoch < oldestRetained) into sync-lost.
+    commits.mockResolvedValue({ commits: [commit(5)], oldestRetainedEpoch: 5 });
+
+    const res = await drainCommits(deps, 'c1', aliceConv, aliceConv.epoch - 1);
+
+    expect(res.advanced).toBe(false);
+    expect(res.stoppedReason).toBe('unprocessable');
+    expect(res.oldestRetainedEpoch).toBe(5);
+  });
+
+  it('processCommitEvent: a stale event (already past) drains nothing and never fetches', async () => {
+    const stale = await processCommitEvent(
+      {} as unknown as MessagingDeps,
+      'c1',
+      { epoch: 5 } as unknown as Conversation,
+      { epoch: 2 },
+    );
+
+    expect(stale).toEqual({ advanced: false, stoppedReason: 'stale', oldestRetainedEpoch: null });
+    expect(commits).not.toHaveBeenCalled();
   });
 });
