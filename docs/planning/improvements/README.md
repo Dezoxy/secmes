@@ -62,12 +62,20 @@ change; Track 3 is mostly activating things already designed.
   cursor now survives its anchor message being reaped. **No deletion yet** — slices 2-5 (threat model →
   `messages` boundary migration → TTL worker → commits) follow as their own PRs.
 
-- 🟡 **Track 4 slice 2 implemented** (2026-06-21, PR _pending_) — the **threat-model note**
-  (`docs/threat-models/message-retention.md`), written before the code slices. Carries a `security-architect`
-  + `crypto-reviewer` sign-off (both **PASS_WITH_CONDITIONS** — the design is validated against the code; the
-  conditions are binding on slices 3–5 and recorded in the note's §7). No code.
+- 🟡 **Track 4 slice 2 implemented** (2026-06-21, [#290](https://github.com/Dezoxy/secmes/pull/290)) — the
+  **threat-model note** (`docs/threat-models/message-retention.md`), written before the code slices. Carries a
+  `security-architect` + `crypto-reviewer` sign-off (both **PASS_WITH_CONDITIONS** — the design is validated
+  against the code; the conditions are binding on slices 3–5 and recorded in the note's §7). No code.
 
-Track 4 deletion (the TTL worker) is not yet implemented; slices 3–5 remain planning docs.
+- 🟡 **Track 4 slice 3 implemented** (2026-06-21, PR _pending_) — the **`messages` prune boundary**
+  (`0044_messages_prune_role.sql`), the deletion *authority* built and proven before any worker. A dedicated
+  `argus_msg_prune` role (`nologin nobypassrls`), the `messages_tenant_isolation` re-scope `TO argus_app` (the
+  #262 fix), window-scoped prune `select`/`delete` policies (90-day ceiling), a column-scoped
+  `(id, created_at)` SELECT (never `ciphertext`), and a `created_at` index — mirroring `0043`. The live-DB RLS
+  spec proves §7 cond 1 both ways (no-GUC sweep succeeds AND the GUC-set bypass is denied). **No deletion** —
+  the role stays `NOLOGIN`; the worker is slice 4.
+
+Track 4 deletion (the TTL worker) is not yet implemented; slices 4–5 remain planning docs.
 
 ## Constraints every track must respect
 
