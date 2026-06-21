@@ -1,7 +1,7 @@
 # AWS Secure Internal Messaging App — Architecture Plan
 
 > ⚠️ **DEPRECATED / SUPERSEDED — do not follow this document.**
-> This is an early AWS-first draft kept only for history. It still recommends AWS (EKS/RDS), Angular, ASP.NET Core, and SignalR — all of which were **replaced**. The live plan is [`secure_messaging_platform_plan.md`](../secure_messaging_platform_plan.md): a **single Azure VM (Docker Compose), React + Vite PWA, NestJS, WebSocket, MLS, Postgres + RLS** (the K8s/EKS approach this draft describes was dropped — everything below is historical).
+> This is an early AWS-first draft kept only for history. It still recommends AWS (EKS/RDS), Angular, ASP.NET Core, and SignalR — all of which were **replaced**. The live plan is [`secure_messaging_platform_plan.md`](../architecture/secure_messaging_platform_plan.md): a **single Azure VM (Docker Compose), React + Vite PWA, NestJS, WebSocket, MLS, Postgres + RLS** (the K8s/EKS approach this draft describes was dropped — everything below is historical).
 
 ## 0. Executive Summary
 

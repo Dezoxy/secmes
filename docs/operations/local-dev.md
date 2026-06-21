@@ -42,7 +42,7 @@ Production is the **same Compose stack** on the single Azure VM, so the mapping 
 | `minio` | Backblaze B2 (S3-compatible) |
 | `api` (built image) | `api` container on the VM (same image) |
 
-Production runs from a separate **`compose.prod.yaml`** (standalone — not layered over this file): self-hosted Postgres + Redis, the `api`, a Caddy single-origin router that serves the PWA + proxies `/api`,`/ws`, and a cloudflared tunnel. The differences are config (B2 vs MinIO, Cloudflare Tunnel ingress, Key Vault secrets, no published ports), not architecture. See `docs/deploy.md`. This file (`compose.yaml`) stays the local-dev source.
+Production runs from a separate **`compose.prod.yaml`** (standalone — not layered over this file): self-hosted Postgres + Redis, the `api`, a Caddy single-origin router that serves the PWA + proxies `/api`,`/ws`, and a cloudflared tunnel. The differences are config (B2 vs MinIO, Cloudflare Tunnel ingress, Key Vault secrets, no published ports), not architecture. See `docs/architecture/deploy.md`. This file (`compose.yaml`) stays the local-dev source.
 
 ## Develop against it from the host (hot reload)
 

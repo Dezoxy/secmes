@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # argus — VM rollout, executed as root ON THE VM by `az vm run-command` (no SSH, no open port). cd.yml bundles
 # the exact-SHA repo infra files, ships them through the Azure control plane, unpacks them, and runs this from
-# the unpacked tree. Idempotent + fail-closed. See docs/deploy.md + docs/threat-models/vm-cd.md.
+# the unpacked tree. Idempotent + fail-closed. See docs/architecture/deploy.md + docs/threat-models/vm-cd.md.
 #
 # Sequence: install/refresh the secret-fetch unit → fetch secrets (Managed Identity → /run/argus/secrets) →
 # log in to GHCR + pull the signed images → bring up data services → run DB MIGRATIONS as the owner BEFORE
