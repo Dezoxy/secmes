@@ -153,8 +153,20 @@ pruning is implemented.
    > at page boundaries — so only a per-message cursor makes *every* held resume point prune-safe. The legacy
    > UUID `nextCursor` and a legacy bare-id `after` are both still accepted (server discriminates by UUID
    > shape → legacy anchor-lookup vs opaque → keyset). No DB/RLS/migration, no envelope change.
-2. **Threat-model note (no code)** — `docs/threat-models/message-retention.md` via `/feature-threat-model`;
+2. **✅ Threat-model note (no code)** — `docs/threat-models/message-retention.md` via `/feature-threat-model`;
    verify the 6 invariants; `security-architect` sign-off on the rule + the #262 re-scope.
+
+   > **Implemented 2026-06-21 (PR _pending_).** Wrote [`docs/threat-models/message-retention.md`](../../threat-models/message-retention.md)
+   > (6-section structure, all 6 invariants checked). Both reviewers **PASS_WITH_CONDITIONS** — the design is
+   > validated against the code; every condition is binding on the **code** slices (3/4/5) and is recorded in
+   > the note's §7 + here. Gaps the sign-off surfaced for those slices: (a) **slice 3** — the `0007`
+   > `messages_tenant_isolation` policy *throws* on an unset GUC (the prune role's normal state), so the
+   > re-scope must use the `0043` `TO argus_app` form and the RLS spec must assert BOTH the GUC-set bypass is
+   > denied AND the no-GUC sweep succeeds; (b) **slice 4** — use a **dedicated** prune role (e.g.
+   > `argus_msg_prune`), with `deploy.sh` LOGIN-NULL + a connectivity probe; (c) **slice 5** — the
+   > never-current-epoch policy is a correlated `EXISTS (epoch > this.epoch)` backed by the existing
+   > `(tenant_id, conversation_id, epoch)` index, and the worker must independently enforce
+   > contiguous-prefix-only (pin `never-max-epoch` + `no-gap-left`).
 3. **Boundary migration — `messages` only** (no deletion yet): create the prune role; re-scope
    `messages_tenant_isolation` `TO argus_app`; messages window `for select`/`for delete` policy; messages
    `(id, created_at)` SELECT + `created_at` index; **grant DELETE on `messages` only** + the #262 regression

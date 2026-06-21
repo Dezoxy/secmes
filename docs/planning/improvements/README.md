@@ -62,7 +62,12 @@ change; Track 3 is mostly activating things already designed.
   cursor now survives its anchor message being reaped. **No deletion yet** — slices 2-5 (threat model →
   `messages` boundary migration → TTL worker → commits) follow as their own PRs.
 
-Track 4 deletion (the TTL worker) is not yet implemented; slices 2-5 remain planning docs.
+- 🟡 **Track 4 slice 2 implemented** (2026-06-21, PR _pending_) — the **threat-model note**
+  (`docs/threat-models/message-retention.md`), written before the code slices. Carries a `security-architect`
+  + `crypto-reviewer` sign-off (both **PASS_WITH_CONDITIONS** — the design is validated against the code; the
+  conditions are binding on slices 3–5 and recorded in the note's §7). No code.
+
+Track 4 deletion (the TTL worker) is not yet implemented; slices 3–5 remain planning docs.
 
 ## Constraints every track must respect
 
