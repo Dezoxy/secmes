@@ -77,7 +77,9 @@ and it is the first slice.
   drains commits *in epoch order* and must `processCommit()` each one to advance, so deleting an intermediate
   `epoch < max(epoch)` row strands a device at an older epoch (it cannot apply a later commit — not merely
   "missing old history"). Reap only the **oldest contiguous prefix** of commits older than the ceiling,
-  **never leaving a gap**, and **always keep the current epoch**. **There is no existing recovery path (Codex
+  **never leaving a gap**, and **always keep the current epoch — DB-enforced in the delete policy, not just
+  the worker** (deleting the per-conversation max-epoch row would let a stale/retried commit reuse that epoch
+  and fork MLS history; see the slice-5 migration). **There is no existing recovery path (Codex
   P2):** today `drainCommits` logs an unprocessable commit and returns, and the catch-up loop silently retries
   without noticing the epoch never advanced
   ([`messaging.ts:288-301`](../../apps/web/src/lib/messaging.ts),
@@ -174,9 +176,15 @@ pruning is implemented.
   (the existing indexes are tenant-leading and can't serve a cross-tenant age scan — the same gap `0043`
   noted); **grant DELETE on `messages` only**.
 - **Commit-prune migration (slice 5, gated on the recovery signal):** re-scope `commits_tenant_isolation`
-  `TO argus_app`; commit window policy; SELECT `conversation_commits (id, created_at, conversation_id, epoch)`
-  for the contiguity rule (Codex P2); `created_at` index; **grant DELETE on `conversation_commits` here — not
-  earlier**. `conversation_welcomes` gets no role / grant / policy in this track.
+  `TO argus_app`; a commit `for delete` policy that is time-windowed **and DB-enforces "never the current
+  epoch" (Codex P2)** — its `USING` must require a newer commit to exist in the same conversation (a
+  correlated `EXISTS (… epoch > this.epoch)`) or run behind a `security definer` function, so deleting the
+  per-conversation max/current row is impossible **even if the worker query is wrong** (otherwise a later
+  stale / retried commit could reuse that epoch and fork MLS history, since `postCommit` derives the next
+  epoch from `max(epoch)`); SELECT `conversation_commits (id, created_at, conversation_id, epoch)` for that
+  predicate; `created_at` index; **grant DELETE on `conversation_commits` here — not earlier** (note the
+  correlated-`EXISTS` perf trade-off for `security-boundary-auditor` to weigh). `conversation_welcomes` gets
+  no role / grant / policy in this track.
 - New worker `infra/retention/prune-messages.sh` + `argus-message-retention.{service,timer}`.
 - `infra/stack/deploy/deploy.sh`: grant the new role LOGIN with a NULL password out-of-band + install the
   timer (mirror the existing prune/cleanup wiring).
