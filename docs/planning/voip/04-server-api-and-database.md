@@ -36,7 +36,7 @@ Sections [§1](#1-design-posture-what-is-rest-what-is-ws-what-is-ephemeral)–[�
 | TURN credentials | REST `POST /calls/turn-credentials` | No (stateless HMAC) | V1 | Short-lived, derived on demand; nothing to store |
 | Call invite / ring | REST `POST /calls/:friendUserId/invite` → WS `CallRingEvent` | No (in-memory ring state only) | V1 | Real-time, ephemeral; a dropped ring just fails the call |
 | Offer/Answer/ICE (SDP) | WS `call.signal` (single opaque frame; phase encrypted inside) | **Never** | V1 | SDP/ICE are metadata-revealing; relay only, never on disk |
-| Hangup / decline / busy | WS `call.end` | No | V1 | Transient control |
+| Hangup / decline / busy | WS `call.signal` (encrypted inner type) | No | V1 | Transient control |
 | Relay-only preference | DB column on `users` | Yes | V1 | A durable per-user setting (the one durable thing V1 adds) |
 | Call ledger (start/answer/end, reason) | DB `call_sessions` | **Yes**, metadata only | **V1.1** | Missed-call list + abuse forensics; no content, no keys |
 
@@ -59,7 +59,9 @@ All routes live in a new Nest module `apps/api/src/calls/` (`calls.module.ts`, `
 | `GET /calls/settings` | Guarded | — | `CallSettingsResponse` `{ relayOnly }` | `200`; `401` | Read relay-only preference |
 | `PUT /calls/settings` | Guarded | `UpdateCallSettingsRequest` `{ relayOnly }` | `CallSettingsResponse` | `200`; `401` | Update relay-only preference |
 
-> **Deferred to V1.1:** `POST /calls/:callId/end` (ledger finalize) and `GET /calls/missed` (missed-call list). Both depend on the `call_sessions` table, which is V1.1 (§4). In the V1 audio core, a call **ends** purely over WS (`call.end`, §3.2) with no server-side finalize step, because there is no row to finalize.
+> **Uniform 202 vs. server-issued `callId` — no oracle.** `invite` **always** returns `202` with a syntactically-valid `callId`, regardless of whether the friendship gate passed or the callee is reachable. Only a **gate-passing** invite registers that `callId` as **active** in the in-memory ring map and emits `CallRingEvent`; a no-op invite returns a fresh **inactive** `callId` (never registered, never rung). The body is thus byte-indistinguishable (no friendship/presence oracle — §7) and the fake id is inert, because the WS handlers (§3.2) reject any `callId` absent from the active ring map. Implementers must mint the active id **only after** the gate, and must never withhold or reshape the field on failure.
+
+> **Deferred to V1.1:** `POST /calls/:callId/end` (ledger finalize) and `GET /calls/missed` (missed-call list). Both depend on the `call_sessions` table, which is V1.1 (§4). In the V1 audio core, a call **ends** purely over WS (a terminal signal inside `call.signal`, §3.2) with no server-side finalize step, because there is no row to finalize.
 
 > **Why a REST `invite` at all, given WS does signaling?** Two reasons that hold even without a ledger. (1) The invite must be **server-trusted**: the tenant, the two parties, and the **friendship check** (§7) belong on an authenticated REST handler, not in the WS inbound path. (2) It mints a stable `callId` (a server-generated UUID) that the subsequent WS `call.signal` frames reference, so the gateway can correlate signaling frames to one logical call. In V1 the `callId` lives only in the gateway's in-memory ring map; in V1.1 it becomes the `call_sessions` primary key. The SDP itself never touches REST — only the WS relay carries it.
 
@@ -73,7 +75,7 @@ The single most important endpoint. It returns **time-limited, HMAC-derived** TU
 
 The shared `static-auth-secret` is delivered to **both** the API container and the coturn container as a Key Vault credential **file** (invariant 5) — see [03 §secrets](./03-infrastructure-turn-and-networking.md). The API reads it via `*_FILE` env, exactly like `SESSION_SIGNING_KEY_FILE`. It is **never logged** (invariant 2 — the derived `credential` is a secret-equivalent; logs carry only the `callId`).
 
-**Issuance is call-scoped, not merely authenticated.** The request carries the `callId` from the `invite` response (caller) or `CallRingEvent` (callee), and the handler mints credentials **only** when the requester is a participant of that active, server-authorized call (the in-memory ring map created by `invite`, which already passed the §7 friendship gate); otherwise `403`. Without this gate, any authenticated account could mint valid coturn credentials within the throttle and abuse argus's relay as an open relay. The credential itself stays a generic time-limited coturn secret — coturn never learns the `callId` — but *issuing* it is bound to an allowed call.
+**Issuance is call-scoped, not merely authenticated.** The request carries the `callId` from the `invite` response (caller) or `CallRingEvent` (callee), and the handler mints credentials **only** when the requester is a participant of that active, server-authorized call (the in-memory ring map created by `invite`, which already passed the §7 friendship gate); otherwise `403`. Without this gate, any authenticated account could mint valid coturn credentials within the throttle and abuse argus's relay as an open relay. The credential itself stays a generic time-limited coturn secret — coturn never learns the `callId` — but *issuing* it is bound to an allowed call. In the roadmap the endpoint ships in **P0-A** and this participant gate is wired in **P1-INV**, once the ring map exists (see [08](./08-roadmap-and-delivery-slices.md)).
 
 **Relay-only enforcement happens here.** In the V1 audio core relay-only is unconditional — the locked IP-privacy default is the *only* mode V1 ships (direct-P2P opt-in is V1.1, before video). The response's `iceServers` and an explicit `iceTransportPolicy` hint reflect that:
 
@@ -147,7 +149,7 @@ Add interfaces + Zod schemas alongside `MessageCreatedEvent`:
 |---|---|---|---|
 | `CallRingEvent` | server→callee | `{ callId, conversationId, callerUserId, media }` | identity `(tenant, callee-sub)` → callee's (single, V1) device |
 | `CallSignalEvent` | peer↔peer relay | `{ callId, conversationId, envelope: string /* opaque MLS ciphertext — the offer/answer/ice discriminant lives INSIDE it; the gateway never sees the call phase */ }` | conversation room `roomKey(tenant, conversationId)` |
-| `CallEndEvent` | either→peer | `{ callId, conversationId, reason }` | conversation room |
+| `CallEndEvent` | **server→client only** | `{ callId, conversationId, reason }` — `reason` limited to **server-known** lifecycle (`timeout`, `peer-gone`; V1.1: `answered-elsewhere`). Client-initiated decline/busy/cancel/hangup do **not** use this — they ride encrypted inside `call.signal`. | identity / conversation room |
 
 `CallSignalEvent.envelope` is a `z.string()` the gateway forwards verbatim — same crypto-blind treatment as `message.ciphertext`. The `offer`/`answer`/`ice` discriminant is encrypted **inside** that envelope (per [02 §2](./02-signaling-protocol-and-state-machine.md)), so neither the gateway nor the Redis backplane learns the call phase — they observe only that *a* signal was relayed (coarse timing/volume), never whether it was setup or ICE. SDP/ICE is **not** persisted and **not** parsed server-side. For `RedisRealtimeBus`, add a `CALL_CHANNEL` constant beside `CHANNEL`/`COMMIT_CHANNEL` and a `safeParse` branch in `onPayload`; fire-and-forget publish (`enableOfflineQueue:false`) like the others — if Redis is down the signal drops and the call simply fails to connect, which is the correct fail-closed mode (see the failure-modes treatment in [06 §11](./06-threat-model-and-privacy.md)).
 
@@ -155,7 +157,7 @@ Add interfaces + Zod schemas alongside `MessageCreatedEvent`:
 
 Today the gateway only accepts inbound `auth` and `subscribe`. Calling needs **client→server→peer relay**, so add `@SubscribeMessage` handlers:
 
-- A single opaque relay frame **`call.signal`** (carries the encrypted `envelope`; the offer/answer/ice discriminant is **inside** the ciphertext — never a distinct WS frame name or bus field, so the frame name itself cannot leak the call phase), plus the control frame **`call.end`**.
+- A **single** opaque relay frame **`call.signal`** — and only this one. It carries the encrypted `envelope`; **every** signal type (offer, answer, ICE, **and termination — decline/busy/cancel/hangup**) is an encrypted inner discriminant, so the gateway/Redis cannot tell setup from ICE from hang-up. There is deliberately **no** separate `call.end` inbound frame: a distinct termination frame would let the backplane single out end-of-call traffic, breaking the "server cannot tell an invite from a hangup" property ([02 §2](./02-signaling-protocol-and-state-machine.md)).
 
 Each handler:
 1. Derives identity from the **server-verified** socket binding (`VerifiedAuth.{sub,tenantId}`) — never from the frame.
@@ -164,6 +166,8 @@ Each handler:
 4. Re-emits the matching bus event. **No DB write** (true in V1; remains true in V1.1 — the ledger is written by REST `invite`/`end`, not by the signaling fast-path).
 5. Is subject to the per-socket inbound rate limit (see §8) — these frames are *not* covered by the HTTP throttler, so reuse/extend the existing `allowSubscribe` token-bucket pattern.
 
+> **How a call ends with no `call.end` frame.** Client termination (hang-up / decline / busy / cancel) is peer-relayed as an encrypted inner type inside `call.signal`; the receiving client tears down. The server never reads it — it releases its in-memory ring entry on **WS disconnect or a ring-timeout**, which is all V1 needs (no ledger to finalize). The only server→client end notifications are the **server-known** events in `CallEndEvent` (§3.1).
+
 > **In-call signaling is fragile by design — surface it (S1 / [06 §11](./06-threat-model-and-privacy.md)).** A WS-gateway restart **kills in-call signaling** (mute/hangup/renegotiation can no longer relay) while the **media stream survives** (DTLS-SRTP is peer-to-peer over the TURN relay, independent of the gateway). The in-call UI must therefore show an explicit **"signaling lost"** state rather than pretending the call is healthy. There is no auto-recovery in V1; ICE-restart / reconnection is V1.1.
 
 ### 3.3 Per-device routing — V1 single-device, V1.1 ring-all
@@ -171,7 +175,7 @@ Each handler:
 `VerifiedAuth` has **no `deviceId`**; routing is per `(tenant, sub)`.
 
 - **V1 (single device per user):** a `CallRingEvent` fans to the callee's `(tenant, sub)`, which in the single-device model is exactly one live socket. No "answered-elsewhere" coordination is needed because there are no other devices to silence. This sidesteps the multi-device-MLS prerequisite entirely (see [00 §4](./00-overview-and-goals.md)).
-- **V1.1 (multi-device ring-all):** a `CallRingEvent` fans to **all** of the callee's connected devices, and `call.answer` from one device must **cancel the ring on the others**. Handle this at the application layer: when any callee device sends `call.answer`, the server emits a `CallEndEvent{reason:'answered-elsewhere'}` to the callee's *other* sockets (identity fan-out, the answering socket excluded). The gateway already knows which socket answered (the inbound frame arrives on a specific `WebSocket`), so **no new device dimension in the token is required**; per-device *addressing* (call-transfer, group calls) is a still-later concern.
+- **V1.1 (multi-device ring-all):** a `CallRingEvent` fans to **all** of the callee's connected devices, and an answer on one device must **cancel the ring on the others**. Because the answer rides *inside* the opaque `call.signal`, the gateway cannot infer it — so ring-all needs **one explicit, minimal control signal** (e.g. a cleartext `call.accepted{callId}` the answering device sends *solely* to release sibling rings, carrying no SDP). This is an **intentional, documented metadata exception** — the server already knows the call exists and is being established — scoped to the sibling-cancel only and recorded in the threat model as "server learns a call was answered." The server then emits `CallEndEvent{reason:'answered-elsewhere'}` to the callee's *other* sockets. Per-device *addressing* (call-transfer, group calls) is a still-later concern. **All of this is V1.1; V1 is single-device and needs none of it.**
 
 ### 3.4 Presence — minimal, derived, not stored
 
@@ -351,7 +355,7 @@ Calling is a notification amplifier (every invite can ring a device), so it need
 |---|---|---|
 | `POST /calls/turn-credentials` | HTTP throttler, e.g. **30/min/user** | Credential minting is cheap but a leaked-creds farm shouldn't be free; generous enough for retry |
 | `POST /calls/:friendUserId/invite` | **Per-(caller→callee) cooldown** + global per-caller cap (e.g. 1 active ring per callee at a time; ≤ N invites/min/caller) | Stops ring-spam / "missed-call bombing" |
-| WS `call.signal` / `call.end` | Per-socket token bucket (extend `allowSubscribe`) | Inbound signaling isn't covered by the HTTP throttler; ICE can be chatty — bound it but allow trickle-ICE bursts |
+| WS `call.signal` | Per-socket token bucket (extend `allowSubscribe`) | Inbound signaling isn't covered by the HTTP throttler; ICE can be chatty — bound it but allow trickle-ICE bursts |
 | Invite to a non-friend | Silent no-op (still 202) | No oracle, no notification |
 | Repeated invites to same callee while a ring is live | Idempotent — reuse the live `callId`, don't re-ring | Prevents a single caller spamming N rings |
 
@@ -401,12 +405,12 @@ Calling adds new personal-data processing (call graph, call timing, relay-relaye
 | **P0-GDPR** | The four-artifact bundle (§9.2): revise data-residency + article-30, extend metadata-exposure, create dpia-voip-calling | TM / GDPR review |
 | **S1** | Threat-model note (`docs/threat-models/voip-call-signaling.md`) | — (docs first) |
 | **S2** | `call_relay_only` boolean on `users` (no new table) + `GET/PUT /calls/settings` | DB review (column-grant scope) |
-| **S3** | `calls` module: `POST /calls/turn-credentials` (relay-only shaping, HMAC creds, no-log) + secret wiring in fetch script | crypto/boundary review |
-| **S4** | `POST /calls/:friendUserId/invite` (friendship gate, authenticated-sender stamp, uniform 202, in-memory ring, no DB write) | boundary review |
+| **S3** | `POST /calls/:friendUserId/invite` (friendship gate, authenticated-sender stamp, uniform 202 with an inactive `callId` on no-op, in-memory ring map, no DB write) | boundary review |
+| **S4** | `calls` module: `POST /calls/turn-credentials` — **call-scoped** (validates `callId` against S3's ring map), relay-only shaping, HMAC creds, no-log + secret wiring in fetch script | crypto/boundary review |
 | **S5** | WS gateway: bus events + inbound `call.*` handlers + identity/room routing + per-socket rate limit + "signaling lost" surfacing | boundary review |
 | **S6** | OpenAPI refresh + 42Crunch ≥ 90 + controller specs (both tiers) | DoD gate |
 
-Critical path: **P0-crypto → S4** (no connecting call without the authenticated-sender path). P0-GDPR and S1 are docs-first and can land in parallel. S2 is independent. S3 and S5 can proceed in parallel after S1. S4 depends on P0-crypto + S3. S6 finalizes S3–S5. This is the ~9-item audio core that [08](./08-roadmap-and-delivery-slices.md) draws its dependency graph around.
+Critical path: **P0-crypto → S3 (invite + in-memory ring) → S4 (turn-credentials, which validates `callId` against that ring map)**. P0-GDPR and S1 are docs-first and can land in parallel. S2 is independent. **S3 (invite/ring) precedes both S4 (call-scoped creds) and S5 (gateway relay), since both validate against the ring map.** S6 finalizes S3–S5. This is the ~9-item audio core that [08](./08-roadmap-and-delivery-slices.md) draws its dependency graph around.
 
 ### 10.2 V1.1 (deferred)
 

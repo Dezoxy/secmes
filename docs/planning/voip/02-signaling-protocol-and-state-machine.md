@@ -73,7 +73,11 @@ import { z } from 'zod';
 // AFTER the friendship gate (see [04 §2.1](./04-server-api-and-database.md)): the caller receives it
 // in the invite response, the callee in `CallRingEvent`. Clients never invent it — every WS signaling
 // handler rejects a `callId` that is not an active, server-authorized ring, so a caller cannot bypass
-// the trusted invite/friendship gate by fabricating one. The schema only constrains the shape.
+// the trusted invite/friendship gate by fabricating one.
+// To keep the invite response a **uniform 202** (no friendship/presence oracle), a no-op invite
+// (gate fails or callee unreachable) still returns a well-formed but **inactive** callId — never
+// registered in the ring map and never rung — so the body is byte-indistinguishable from success
+// while the id stays inert at the WS layer. The schema only constrains the shape.
 export const CallIdSchema = z.string().uuid();
 
 // Per-call monotonic counter for ordering + replay protection (§8).
