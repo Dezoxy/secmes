@@ -42,9 +42,13 @@ const TENANT_BY_ID = 'tenants';
 // appended after the cast. It matches the two deparsed forms in use today —
 //   (tenant_id = (current_setting('app.tenant_id'::text))::uuid)
 //   (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
-// — and the `tenants` variant keyed on `id`. If a future table ever splits enforcement across separate
-// FOR INSERT / FOR SELECT policies, switch the count below to match USING and WITH CHECK independently.
-const TENANT_EQ_SHAPE = String.raw`^\((tenant_id|id) = .*current_setting\('app\.tenant_id'.*\)::uuid\)$`;
+// If a future table ever splits enforcement across separate FOR INSERT / FOR SELECT policies, switch the
+// count below to match USING and WITH CHECK independently.
+const TENANT_ID_EQ_SHAPE = String.raw`^\(tenant_id = .*current_setting\('app\.tenant_id'.*\)::uuid\)$`;
+// AGENTS.md requires isolation by `tenant_id`; only the root `tenants` table is keyed on `id`. The id-shape
+// is therefore matched ONLY for `tenants` (Codex P2) — any OTHER table that isolated on its own `id` would
+// fail the tenant_id-shape check and be flagged, not silently pass.
+const TENANTS_ID_EQ_SHAPE = String.raw`^\(id = .*current_setting\('app\.tenant_id'.*\)::uuid\)$`;
 
 interface TableRls {
   table: string;
@@ -71,12 +75,14 @@ describe.skipIf(!DB_URL)('RLS coverage (catalog-driven)', () => {
             and col.column_name = 'tenant_id'
         ) as has_tenant_id,
         -- Counts a single policy whose USING and WITH CHECK BOTH match the anchored tenant-equality
-        -- shape (see TENANT_EQ_SHAPE) — not a loose substring, so an inverted or permissive predicate
-        -- that merely mentions the GUC does not count as coverage.
+        -- shape — not a loose substring, so an inverted or permissive predicate that merely mentions
+        -- the GUC does not count. The id-keyed shape is allowed ONLY for the tenants root; every
+        -- other table must isolate on tenant_id.
         (
           select count(*) from pg_policies p
           where p.schemaname = 'public' and p.tablename = c.relname
-            and p.qual ~* ${TENANT_EQ_SHAPE} and p.with_check ~* ${TENANT_EQ_SHAPE}
+            and p.qual ~* (case when c.relname = ${TENANT_BY_ID} then ${TENANTS_ID_EQ_SHAPE} else ${TENANT_ID_EQ_SHAPE} end)
+            and p.with_check ~* (case when c.relname = ${TENANT_BY_ID} then ${TENANTS_ID_EQ_SHAPE} else ${TENANT_ID_EQ_SHAPE} end)
         )::int as tenant_policies
       from pg_class c
       join pg_namespace n on n.oid = c.relnamespace
