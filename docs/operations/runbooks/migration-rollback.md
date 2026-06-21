@@ -155,9 +155,9 @@ The schema change is incompatible with every deployed image. Restore the most re
    Postgres over the local socket as the **owner** (`-U argus`, the role `deploy.sh` uses; PG has no published
    port — invariant #3):
    ```bash
-   docker compose -f <compose> exec -T postgres psql -U argus -d postgres < globals.sql        # roles first
+   docker compose -f <compose> exec -T postgres psql -U argus -d postgres < /var/tmp/globals.sql   # roles first
    docker compose -f <compose> exec -T postgres createdb -U argus argus_restore
-   docker compose -f <compose> exec -T postgres pg_restore -U argus -d argus_restore < backup.dump
+   docker compose -f <compose> exec -T postgres pg_restore -U argus -d argus_restore < /var/tmp/backup.dump
    docker compose -f <compose> exec -T postgres psql -U argus -d argus_restore \
      -c "select version from schema_migrations order by version desc limit 5;"   # the bad migration must NOT be listed
    ```
@@ -171,9 +171,10 @@ The schema change is incompatible with every deployed image. Restore the most re
    ```
    (Both renames need **zero** active connections to either database.) Then re-apply role logins per
    `infra/backup/README.md` step 4 (argus_app's password from Key Vault; argus_backup/argus_cleanup
-   LOGIN-only) and **securely delete the plaintext dumps on BOTH ends** — on the VM and on the trusted host
-   (`shred -u globals.sql backup.dump` in each location; the age key was already shredded in step 2). They
-   hold the same cleartext PII as the live DB, so don't leave them behind.
+   LOGIN-only) and **securely delete the plaintext dumps on BOTH ends** — on the VM
+   (`shred -u /var/tmp/globals.sql /var/tmp/backup.dump`) and on the trusted host (`shred -u globals.sql
+   backup.dump` where you created them; the age key was already shredded in step 2). They hold the same
+   cleartext PII as the live DB, so don't leave them behind.
 5. **Roll forward with the fix.** The restored cluster's `schema_migrations` does **not** contain the bad
    migration, so the forward-only runner **will re-apply that exact file** on the next deploy — a new
    `0045_*.sql` won't save you, because `0044` runs first. You must therefore **correct the bad migration
