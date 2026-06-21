@@ -128,14 +128,22 @@ The schema change is incompatible with every deployed image. Restore the most re
    age -d -i age.key globals.sql.age > globals.sql   # the runbook normally pipes this straight into psql
    shred -u age.key                                  # age key no longer needed off-box; remove it now
    ```
-3. **Move the decrypted dump to the VM and restore it into the production cluster.** Copy the *decrypted*
-   `globals.sql` + `backup.dump` to the VM (e.g. `scp`) — plaintext metadata, the same sensitivity as the
-   live DB already on that box; the **age private key stays on the trusted host**. On the VM, run the restore
-   runbook's load steps (roles first, then `pg_restore`) against the production Postgres **over the local
-   socket**, into a **fresh `argus_restore`** — i.e. pipe each file into `docker compose -f <compose> exec -T
-   postgres …` (PG has no published port — invariant #3). Confirm the restored schema predates the bad
-   migration: `docker compose -f <compose> exec -T postgres psql -d argus_restore -c "select version from
-   schema_migrations order by version desc limit 5;"` — the bad migration must **not** be listed.
+3. **Move the decrypted dump to the VM (via SSM, not SSH) and restore it into the production cluster.** The
+   box has **no inbound SSH** (SSM-only; `admin_cidr = null` in `infra/aws/terraform/network.tf`, and the
+   deploy doc operates the box "no SSH"), so don't `scp` directly. Transfer over **SSM Session Manager** —
+   e.g. open an `AWS-StartPortForwardingSession` tunnel and copy through it, or stage the two files in a
+   private bucket and pull them on the box with an `aws ssm send-command` (break-glass SSH only as a last
+   resort). The files are plaintext metadata — the same sensitivity as the live DB already on that box — and
+   the **age private key stays on the trusted host**. On the VM, load roles then `pg_restore` into a **fresh
+   `argus_restore`** in the production Postgres over the local socket as the **owner** (`-U argus`, the role
+   `deploy.sh` uses; PG has no published port — invariant #3):
+   ```bash
+   docker compose -f <compose> exec -T postgres psql -U argus -d postgres < globals.sql        # roles first
+   docker compose -f <compose> exec -T postgres createdb -U argus argus_restore
+   docker compose -f <compose> exec -T postgres pg_restore -U argus -d argus_restore < backup.dump
+   docker compose -f <compose> exec -T postgres psql -U argus -d argus_restore \
+     -c "select version from schema_migrations order by version desc limit 5;"   # the bad migration must NOT be listed
+   ```
 4. **Cut the restored DB into place.** The stack connects to the `argus` database (the Key Vault DSNs end
    `…:5432/argus`); if you skip this, `deploy.sh` runs `db:migrate` against the still-bad `argus` and the
    restored snapshot is never used. With every writer stopped (step 1) and no connections to either DB, rename
@@ -146,8 +154,9 @@ The schema change is incompatible with every deployed image. Restore the most re
    ```
    (Both renames need **zero** active connections to either database.) Then re-apply role logins per
    `infra/backup/README.md` step 4 (argus_app's password from Key Vault; argus_backup/argus_cleanup
-   LOGIN-only) and **securely delete the transferred plaintext dump on the VM** (`shred -u globals.sql
-   backup.dump`).
+   LOGIN-only) and **securely delete the plaintext dumps on BOTH ends** — on the VM and on the trusted host
+   (`shred -u globals.sql backup.dump` in each location; the age key was already shredded in step 2). They
+   hold the same cleartext PII as the live DB, so don't leave them behind.
 5. **Roll forward with the fix.** The restored cluster's `schema_migrations` does **not** contain the bad
    migration, so the forward-only runner **will re-apply that exact file** on the next deploy — a new
    `0045_*.sql` won't save you, because `0044` runs first. You must therefore **correct the bad migration
