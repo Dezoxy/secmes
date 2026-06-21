@@ -6,6 +6,10 @@ import {
   UploadGrantSchema,
   displayNameSchema,
   UpdateProfileSchema,
+  DISPLAY_NAME_ALLOWED,
+  DISPLAY_NAME_MAX,
+  DISPLAY_NAME_MIN,
+  DISPLAY_NAME_PATTERN,
 } from './index.js';
 
 describe('contracts', () => {
@@ -97,5 +101,27 @@ describe('displayNameSchema', () => {
     expect(UpdateProfileSchema.safeParse({}).success).toBe(true);
     expect(UpdateProfileSchema.safeParse({ displayName: 'Brave Otter' }).success).toBe(true);
     expect(UpdateProfileSchema.safeParse({ displayName: 'no\u200bgood' }).success).toBe(false);
+  });
+
+  it('exposes the bounds/allow-list as constants so UI + spec + schema stay in lockstep', () => {
+    expect(DISPLAY_NAME_MIN).toBe(2);
+    expect(DISPLAY_NAME_MAX).toBe(32);
+    expect(DISPLAY_NAME_PATTERN).toBe("^[A-Za-z0-9 ._'-]+$");
+    expect(DISPLAY_NAME_ALLOWED).toBe("letters, numbers, spaces, and . _ - '");
+    // Messages are derived from the constants \u2014 assert the derived text the UI surfaces.
+    const tooShort = displayNameSchema.safeParse('a');
+    expect(tooShort.success).toBe(false);
+    if (!tooShort.success) {
+      expect(tooShort.error.issues[0]?.message).toBe(
+        `display name must be at least ${DISPLAY_NAME_MIN} characters`,
+      );
+    }
+    const badChar = displayNameSchema.safeParse('bad@name');
+    expect(badChar.success).toBe(false);
+    if (!badChar.success) {
+      expect(badChar.error.issues[0]?.message).toBe(
+        `display name may use ${DISPLAY_NAME_ALLOWED} only`,
+      );
+    }
   });
 });

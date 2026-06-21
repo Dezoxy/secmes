@@ -12,6 +12,7 @@ import {
 import {
   type Me,
   type UpdateProfile,
+  DISPLAY_NAME_ALLOWED,
   DISPLAY_NAME_MAX,
   DISPLAY_NAME_MIN,
   DISPLAY_NAME_PATTERN,
@@ -31,8 +32,7 @@ import { UserService } from './user.service.js';
 class UpdateProfileBody {
   @ApiProperty({
     required: false,
-    description:
-      "new display name: 2–32 chars after trimming; letters, numbers, spaces, and . _ - ' only",
+    description: `new display name: ${DISPLAY_NAME_MIN}–${DISPLAY_NAME_MAX} chars after trimming; ${DISPLAY_NAME_ALLOWED} only`,
     minLength: DISPLAY_NAME_MIN,
     maxLength: DISPLAY_NAME_MAX,
     pattern: DISPLAY_NAME_PATTERN,
