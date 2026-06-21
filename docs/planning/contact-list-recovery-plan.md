@@ -91,14 +91,14 @@ surface that task #16 removed (#233).
 - **Safety numbers exist + the spine is being built:** `safetyNumber()`
   ([packages/crypto/src/index.ts:203](packages/crypto/src/index.ts)), the `VerifySecurity` OOB panel
   ([VerifySecurity.tsx](apps/web/src/features/chat/VerifySecurity.tsx)), and
-  [fingerprint-verification.md](docs/threat-models/fingerprint-verification.md). PR #236 moves verified-state
+  [fingerprint-verification.md](../threat-models/fingerprint-verification.md). PR #236 moves verified-state
   from ephemeral `useState` to a sealed per-`peerUserId` record and wires the live "security code changed"
   signal.
 - **argus-id discovery already exists, hardened.** `UserService.lookupByArgusId`
   ([user.service.ts](apps/api/src/users/user.service.ts)) + `users.controller.ts` do exact-match-only lookup,
   uniform 404 (no oracle), bearer-auth, a 10/min rate limit, and argus-id log-injection sanitization. The
   friends backend **reuses this verbatim** — see *argus-id discovery hardening*. Threat-modeled in
-  [discovery-by-argus-id.md](docs/threat-models/discovery-by-argus-id.md).
+  [discovery-by-argus-id.md](../threat-models/discovery-by-argus-id.md).
 
 ## The friends data model (the core new design)
 
