@@ -53,7 +53,11 @@ export function ProfileEdit() {
     }
   };
 
-  const describedBy = showValidationError ? 'display-name-error' : 'display-name-help';
+  // Point the field at the error (when shown) AND always at the rule hint, so the policy guidance is
+  // still announced/visible while an error is up.
+  const describedBy = showValidationError
+    ? 'display-name-error display-name-help'
+    : 'display-name-help';
 
   return (
     <section className="rounded-2xl border border-white/5 bg-[#12121a] p-5">
@@ -90,7 +94,7 @@ export function ProfileEdit() {
             aria-describedby={describedBy}
             className="w-full rounded-xl border border-white/5 bg-[#1a1a26] px-4 py-2.5 text-sm text-white placeholder-white/30 outline-none transition-colors focus:border-purple-500/50 disabled:opacity-50 aria-[invalid=true]:border-red-400/60"
           />
-          {showValidationError ? (
+          {showValidationError && (
             <p
               id="display-name-error"
               role="alert"
@@ -99,11 +103,11 @@ export function ProfileEdit() {
             >
               {validationError}
             </p>
-          ) : (
-            <p id="display-name-help" className="mt-1.5 text-xs text-white/40">
-              {DISPLAY_NAME_HINT}
-            </p>
           )}
+          {/* Always visible — the rule guidance must not disappear while an error is shown. */}
+          <p id="display-name-help" className="mt-1.5 text-xs text-white/40">
+            {DISPLAY_NAME_HINT}
+          </p>
         </div>
 
         <div>
