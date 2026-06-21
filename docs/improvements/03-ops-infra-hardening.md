@@ -69,6 +69,12 @@ lightweight client ACK, so the client can detect a gap and fall back to the exis
 path to backfill. This rides on metadata only — **no plaintext, no keys** cross the server (AGENTS.md
 invariant #1 holds). Sequence/ACK shapes go through `@argus/contracts` (Zod) like every other frame.
 
+**Files touched (both sides).** This track is _not_ server-only: the gateway/bus emit the sequence number
+(`apps/api/src/realtime/realtime.gateway.ts`, `redis-realtime-bus.ts`) **and** the web client
+(`apps/web`) must track the per-conversation sequence, detect a gap, and trigger the `syncMessages`
+backfill — without the client side, a gap is observable but silently discarded. The follow-up PR is
+expected to span `apps/api` + `apps/web` + `@argus/contracts`.
+
 **Verify.** A gateway test that drops a frame asserts the client observes a sequence gap and triggers a
 sync backfill; `realtime.gateway.spec.ts` / `.e2e.spec.ts` extended accordingly.
 

@@ -11,8 +11,8 @@ Two gaps in an otherwise strong test suite (119 test files):
    branch logic is not pinned in isolation. (Blob storage is _not_ in this list: `s3-blob-store.spec.ts`
    already covers the implementation.)
 2. **RLS coverage is real but not exhaustive.** There are focused suites (`rls.spec.ts`,
-   `messaging-rls.spec.ts`, `friendships-rls.spec.ts`, `attachments-rls.spec.ts`), but they assert a
-   _subset_ of the 13 tenant-scoped tables by hand. A new table — or a typo in a `USING` / `WITH CHECK`
+   `messaging-rls.spec.ts`, `friendships-rls.spec.ts`, `attachments-rls.spec.ts`,
+   `audit-prune-rls.spec.ts`), but they assert a _subset_ of the 13 tenant-scoped tables by hand. A new table — or a typo in a `USING` / `WITH CHECK`
    clause on an existing one — can ship without any test catching it.
 
 ## Why it matters
