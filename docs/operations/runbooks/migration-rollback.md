@@ -112,13 +112,29 @@ The schema change is incompatible with every deployed image. Restore the most re
    after the bad migration. The same anchor is the compromise-rollback control in `infra/backup/README.md`;
    here it selects the pre-migration snapshot.) If you took the pre-migration checkpoint above, that stamp is
    the target — confirm the selected pair's stamp matches it.
-3. **Confirm the restored schema is at the pre-bad-migration version:** `select version from
-   schema_migrations order by version desc limit 5;` — the bad migration must **not** be listed.
-4. **Roll forward with the fix.** The bad migration must be **corrected in source before you re-run
-   `db:migrate`**, or the runner will simply re-apply the same broken file. Either land a corrected
-   replacement (if it was never applied beyond this cluster) or, preferably, a **new** forward migration
-   that does the right thing. Then deploy the corrected image; its migrate step brings the restored DB up to
-   the fixed head before serving (the same ordering note at the end of the restore runbook).
+3. **Confirm the restored schema is at the pre-bad-migration version** (the restore landed in
+   `argus_restore`, so check that DB): `psql -d argus_restore -c "select version from schema_migrations order
+   by version desc limit 5;"` — the bad migration must **not** be listed.
+4. **Cut the restored DB into place.** The restore lands in a fresh `argus_restore`, but the stack connects
+   to the `argus` database (the Key Vault DSNs end `…:5432/argus`). If you skip this, `deploy.sh` runs
+   `db:migrate` against the still-bad `argus` and the restored snapshot is never used. With the API stopped
+   and no other connections to either DB, rename the bad one aside and promote the restore (as the
+   owner/superuser over the postgres socket):
+   ```sql
+   ALTER DATABASE argus         RENAME TO argus_bad_<stamp>;   -- keep the bad DB for forensics; drop it later
+   ALTER DATABASE argus_restore RENAME TO argus;
+   ```
+   (Both renames need **zero** active connections to either database.) Then re-apply role logins per
+   `infra/backup/README.md` step 4 (argus_app's password from Key Vault; argus_backup/argus_cleanup
+   LOGIN-only).
+5. **Roll forward with the fix.** The restored cluster's `schema_migrations` does **not** contain the bad
+   migration, so the forward-only runner **will re-apply that exact file** on the next deploy — a new
+   `0045_*.sql` won't save you, because `0044` runs first. You must therefore **correct the bad migration
+   file itself** (`0044_*.sql`) so it's safe when it re-runs, then deploy the corrected image; its migrate
+   step brings the restored DB to the fixed head before serving. (Single-VM caveat: editing an already-shipped
+   migration is normally forbidden because other clusters may have applied it — but here there is **one**
+   cluster and it no longer has `0044` recorded, so correcting the file is the right move. In a multi-cluster
+   world you'd instead deploy an image whose migration set is corrected for every cluster.)
 
 ## Why no automatic down-migrations, and no auto-checkpoint in `deploy.sh`
 
