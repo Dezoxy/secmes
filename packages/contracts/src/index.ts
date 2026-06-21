@@ -138,6 +138,8 @@ const RESERVED_DISPLAY_NAMES = new Set(['breakglass-admin']);
 export const DISPLAY_NAME_PATTERN = "^[A-Za-z0-9 ._'-]+$";
 export const DISPLAY_NAME_MIN = 2;
 export const DISPLAY_NAME_MAX = 32;
+/** Human-readable description of the allow-list — shared by the regex error message and the UI hint. */
+export const DISPLAY_NAME_ALLOWED = "letters, numbers, spaces, and . _ - '";
 
 /**
  * Hardened display-name policy, shared by the web form and the API (single source of truth).
@@ -158,12 +160,9 @@ export const displayNameSchema = z
   .pipe(
     z
       .string()
-      .min(DISPLAY_NAME_MIN, 'display name must be at least 2 characters')
-      .max(DISPLAY_NAME_MAX, 'display name must be at most 32 characters')
-      .regex(
-        new RegExp(DISPLAY_NAME_PATTERN),
-        "display name may use letters, numbers, spaces, and . _ - ' only",
-      )
+      .min(DISPLAY_NAME_MIN, `display name must be at least ${DISPLAY_NAME_MIN} characters`)
+      .max(DISPLAY_NAME_MAX, `display name must be at most ${DISPLAY_NAME_MAX} characters`)
+      .regex(new RegExp(DISPLAY_NAME_PATTERN), `display name may use ${DISPLAY_NAME_ALLOWED} only`)
       .refine((v) => !RESERVED_DISPLAY_NAMES.has(v.toLowerCase()), {
         message: 'reserved display name',
       }),

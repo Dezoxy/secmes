@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { User } from 'lucide-react';
-import { displayNameSchema } from '@argus/contracts';
+import { DISPLAY_NAME_MAX } from '@argus/contracts';
 import { updateProfile } from '../../lib/api';
 import { useAuth } from '../auth/AuthContext';
+import { DISPLAY_NAME_HINT, displayNameFieldError } from './display-name';
 
 export function ProfileEdit() {
   const { profile, refreshProfile } = useAuth();
 
   const [displayName, setDisplayName] = useState(profile?.displayName ?? '');
+  const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const initRef = useRef(false);
 
@@ -23,30 +25,35 @@ export function ProfileEdit() {
 
   if (!profile || profile.isBreakglass) return null;
 
+  // Live validation: derived each render from the shared policy — no separate error state to keep in
+  // sync. The rule message only shows once the user has interacted (typed or blurred) so an untouched
+  // field is not pre-flagged.
+  const validationError = displayNameFieldError(displayName);
+  const showValidationError = touched && validationError !== null;
+  const canSave = !busy && validationError === null;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (busy) return;
-    // Validate against the shared policy (Latin-only, 2–32 chars) before hitting the API, so the
-    // user sets a clear reason rather than a generic "save failed" from the server's 400.
-    const parsed = displayNameSchema.safeParse(displayName);
-    if (!parsed.success) {
-      setSaved(false);
-      setError(parsed.error.issues[0]?.message ?? 'Invalid display name.');
+    if (!canSave) {
+      setTouched(true);
       return;
     }
-    setError(null);
+    setServerError(null);
     setSaved(false);
     setBusy(true);
     try {
-      await updateProfile({ displayName: parsed.data });
+      // validationError === null guarantees the value parses; trim/collapse is applied server-side too.
+      await updateProfile({ displayName: displayName.trim().replace(/ +/g, ' ') });
       await refreshProfile();
       setSaved(true);
     } catch {
-      setError('Save failed. Try again.');
+      setServerError('Save failed. Try again.');
     } finally {
       setBusy(false);
     }
   };
+
+  const describedBy = showValidationError ? 'display-name-error' : 'display-name-help';
 
   return (
     <section className="rounded-2xl border border-white/5 bg-[#12121a] p-5">
@@ -57,22 +64,46 @@ export function ProfileEdit() {
 
       <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-3">
         <div>
-          <label htmlFor="display-name" className="mb-1.5 block text-xs text-white/50">
-            Display name
-          </label>
+          <div className="mb-1.5 flex items-baseline justify-between">
+            <label htmlFor="display-name" className="block text-xs text-white/50">
+              Display name
+            </label>
+            <span className="text-[11px] tabular-nums text-white/30">
+              {displayName.length}/{DISPLAY_NAME_MAX}
+            </span>
+          </div>
           <input
             id="display-name"
             type="text"
             value={displayName}
             onChange={(e) => {
               setDisplayName(e.target.value);
+              setTouched(true);
               setSaved(false);
+              setServerError(null);
             }}
-            maxLength={32}
+            onBlur={() => setTouched(true)}
+            maxLength={DISPLAY_NAME_MAX}
             placeholder="Your name…"
             disabled={busy}
-            className="w-full rounded-xl border border-white/5 bg-[#1a1a26] px-4 py-2.5 text-sm text-white placeholder-white/30 outline-none transition-colors focus:border-purple-500/50 disabled:opacity-50"
+            aria-invalid={showValidationError || undefined}
+            aria-describedby={describedBy}
+            className="w-full rounded-xl border border-white/5 bg-[#1a1a26] px-4 py-2.5 text-sm text-white placeholder-white/30 outline-none transition-colors focus:border-purple-500/50 disabled:opacity-50 aria-[invalid=true]:border-red-400/60"
           />
+          {showValidationError ? (
+            <p
+              id="display-name-error"
+              role="alert"
+              aria-live="polite"
+              className="mt-1.5 text-xs text-red-400"
+            >
+              {validationError}
+            </p>
+          ) : (
+            <p id="display-name-help" className="mt-1.5 text-xs text-white/40">
+              {DISPLAY_NAME_HINT}
+            </p>
+          )}
         </div>
 
         <div>
@@ -82,12 +113,12 @@ export function ProfileEdit() {
           </p>
         </div>
 
-        {error && <p className="text-xs text-red-400">{error}</p>}
+        {serverError && <p className="text-xs text-red-400">{serverError}</p>}
         {saved && <p className="text-xs text-green-400">Saved.</p>}
 
         <button
           type="submit"
-          disabled={busy || !displayName.trim()}
+          disabled={!canSave}
           className="self-end rounded-xl bg-purple-500 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-purple-400 disabled:opacity-50"
         >
           {busy ? 'Saving…' : 'Save'}
