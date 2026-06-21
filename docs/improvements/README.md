@@ -21,7 +21,7 @@ non-exhaustive RLS test coverage, and several operational single-point risks.
 | 1   | [Messaging service refactor](./01-messaging-service-refactor.md)             | Readability     | Merge-conflict & onboarding cost on a 1,185-LOC file | none            |
 | 2   | [Test coverage + RLS assertions](./02-test-coverage-and-rls-assertions.md)   | Test hardening  | A typo'd RLS policy could ship a cross-tenant leak | tests only      |
 | 3   | [Ops / infra hardening](./03-ops-infra-hardening.md)                          | Operational     | No rollback story; flippable deploy gate; lossy WS | small           |
-| 4   | [Message retention & ciphertext pruning](./04-message-retention-and-pruning.md) | Retention / privacy | `messages` ciphertext grows forever — cost, breach/subpoena surface, no GDPR storage-limitation story | small (1 role + 1 worker) |
+| 4   | [Message retention & ciphertext pruning](./04-message-retention-and-pruning.md) | Retention / privacy | `messages` ciphertext grows forever — cost, breach/subpoena surface, no GDPR storage-limitation story | small (cursor fix + role + worker) |
 
 > Track 4 was added 2026-06-21 — a retention/data-minimization improvement, not part of the original
 > three-track codebase-health review. The server retains every relayed MLS ciphertext forever; this track

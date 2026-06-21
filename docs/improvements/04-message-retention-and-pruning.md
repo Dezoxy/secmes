@@ -1,10 +1,10 @@
 # Track 4 — Message retention & ciphertext pruning (bound DB growth)
 
-> **Status:** PROPOSED 2026-06-21. Server-side only — no client change and no `@argus/contracts` change. The
-> only user-visible effect: ciphertext older than the retention ceiling is no longer fetchable from the
-> server (clients keep their own local history). Ships as its own migration + worker PRs (slices below).
-> Sequenced **first** (see [README priority](./README.md)) because it should land before production starts
-> accumulating ciphertext that can never be reclaimed.
+> **Status:** PROPOSED 2026-06-21. Server-side only (one small `apps/api` catch-up-cursor fix; no client or
+> `@argus/contracts` change). The only user-visible effect: ciphertext older than the retention ceiling is no
+> longer fetchable from the server (clients keep their own local history). Ships as its own migration + worker
+> PRs (slices below). Sequenced **first** (see [README priority](./README.md)) because it should land before
+> production starts accumulating ciphertext that can never be reclaimed.
 
 ## Problem
 
@@ -31,11 +31,11 @@ offline catch-up buffer — yet that buffer is never drained. Consequences:
 
 ## Proposed approach
 
-**Strategy (v1): a hard TTL ceiling (default 90 days), server-side only.** Every message older than the
-ceiling is reaped regardless of delivery state. This bounds growth, needs no client change, and is safe for
-multi-device: a device has the **full 90-day window** to come back and catch up via `GET /sync`; only a
-device offline *longer* than the ceiling loses history it never received — the disappearing-history trade
-`message-history.md` already anticipates. The ceiling is config, tunable.
+**Strategy (v1): a hard TTL ceiling (default 90 days).** Every message older than the ceiling is reaped
+regardless of delivery state. This bounds growth and is safe for multi-device — a device has the full 90-day
+window to come back and catch up — **provided the catch-up cursor is made prune-safe first** (prerequisite
+below); only a device offline *longer* than the ceiling loses history it never received, the
+disappearing-history trade `message-history.md` already anticipates. The ceiling is config, tunable.
 
 **Why *not* delete-on-confirmed-delivery in v1 (Codex P1 — verified).** A delivery gate would reclaim hot
 conversations faster, but the delivery signal today is **per-user, not per-device**: `conversation_receipts`
@@ -46,8 +46,20 @@ online and D2 is offline for longer than any short grace but less than the TTL, 
 can pass a message and the worker would delete the only server-side ciphertext D2 can still fetch — a silent
 message-loss / behavior change. A grace window does not fix this (D2 can be offline for days). **Therefore
 delivery-confirmed pruning is deferred** until delivery is tracked **per device** (a schema + client change —
-see Out of scope). Until then the TTL ceiling is the sole, safe mechanism and the server path stays
-client-change-free.
+see Out of scope). Until then the TTL ceiling is the sole, safe mechanism and no client/contract change is
+needed.
+
+**Prerequisite — make the catch-up cursor prune-safe (Codex P2).** The full-window guarantee assumes a
+returning device can page in everything newer than where it left off. Today the web reconnect path backfills
+per conversation via `listMessages` with a **message-id cursor**, and that SQL returns an *empty* page when
+the cursor's anchor row no longer exists
+([`messaging.service.ts:616-622`](../../apps/api/src/messaging/messaging.service.ts),
+[`useConversationBackfill.ts:203-210`](../../apps/web/src/features/chat/useConversationBackfill.ts)) — so if a
+quiet conversation's last-seen message ages past the TTL and is pruned, even a *briefly*-offline device can
+stop seeing newer retained messages until a reload. **Before TTL deletion is enabled**, the cursor must
+degrade gracefully: resolve a missing anchor to the nearest-newer message by `(created_at, id)` instead of
+returning empty. This is a small `apps/api` change to `listMessages` cursor handling — no wire/contract
+change — so v1 is *not* literally zero server-code; it is the first slice.
 
 **The other two ciphertext tables, simpler rules:**
 
@@ -70,9 +82,10 @@ pruning and blob pruning stay deliberately separate; the blob side is authoritat
 **Reuse the established least-privilege prune pattern** (`0013_attachments_cleanup.sql`,
 `0043_audit_prune_role.sql` + `infra/audit-prune/prune-audit.sh`): a `nologin nobypassrls` role with
 window-scoped RLS so it can only ever see/delete past-window rows, counts-only logging, connecting over the
-in-container local-trust socket (no DB password on the host). For the TTL-only v1 predicate the role needs
-**SELECT on `(id, created_at)` only — never `ciphertext`**, which matches the column-scoped grant; the RLS
-policy enforces the 90-day time bound as the fail-closed boundary.
+in-container local-trust socket (no DB password on the host). The role reads **non-content metadata only —
+never `ciphertext` / `commit` / `welcome` blobs**: `messages (id, created_at)`, and `conversation_commits
+(id, created_at, conversation_id, epoch)` for the contiguity rule (see grants below). The RLS policy enforces
+the 90-day time bound as the fail-closed boundary.
 
 **The grant must cover every column *and table* the predicate reads (Codex P2).** PostgreSQL requires SELECT
 privilege on all columns/tables referenced in a DELETE `USING`/predicate, not just the deleted row. The TTL
@@ -96,36 +109,43 @@ delete an in-window row even after setting a tenant GUC. (This is exactly the by
 
 ### Implementation slices (safety boundary lands before any deletion)
 
-1. **Threat-model note first (no code)** — `docs/threat-models/message-retention.md` via `/feature-threat-model`;
+1. **Prune-safe catch-up cursor (no deletion)** — make `listMessages` resolve a missing cursor anchor to the
+   nearest-newer `(created_at, id)` instead of returning empty (the prerequisite above), so TTL pruning can't
+   silently break backfill. Gates: `security-boundary-auditor`, a `listMessages` cursor unit test.
+2. **Threat-model note (no code)** — `docs/threat-models/message-retention.md` via `/feature-threat-model`;
    verify the 6 invariants; `security-architect` sign-off on the rule + the #262 re-scope.
-2. **Migration: role + `TO argus_app` re-scope + window policies + `created_at` indexes** (the boundary, no
+3. **Migration: role + `TO argus_app` re-scope + window policies + `created_at` indexes** (the boundary, no
    deletion yet) + RLS spec incl. the #262 regression test. Gates: `/db-migration`, `security-boundary-auditor`,
    live-DB RLS tests in CI.
-3. **Worker (TTL-only) — this is v1, the only deletion that ships in this track** —
+4. **Worker (TTL-only) — this is v1, the only deletion that ships in this track** —
    `infra/retention/prune-messages.sh` + systemd `service`/`timer`, modeled on `infra/audit-prune/`;
    counts-only logging, fail-closed, batched with a max-rounds cap. Gates: `infra-reviewer`, shellcheck,
    dry-run against a disposable DB.
-4. **Extend to `conversation_commits` + `conversation_welcomes`** (same role; contiguity-preserving commit
+5. **Extend to `conversation_commits` + `conversation_welcomes`** (same role; contiguity-preserving commit
    reap with the current epoch always kept; welcomes TTL).
-5. **(Optional, separable) metadata-table sweepers** — see below; own PR or deferred.
-6. **(Future, prerequisite-gated) delivery-confirmed pruning** — *only after per-device delivery tracking
+6. **(Optional, separable) metadata-table sweepers** — see below; own PR or deferred.
+7. **(Future, prerequisite-gated) delivery-confirmed pruning** — *only after per-device delivery tracking
    exists* (Codex P1). Extends the worker join + the role's metadata grants. **Not part of this track's
    shipped scope** — listed so the design is complete.
 
-> **Do not collapse slices 2 and 3:** the boundary migration must be reviewed and merged before any worker
+> **Do not collapse slices 3 and 4:** the boundary migration must be reviewed and merged before any worker
 > can delete, so a boundary bug can never ship alongside live deletion.
 
 ## Files & tables touched
 
 - New migration `00NN_message_retention_role.sql`: create the prune role; **re-scope** the three isolation
-  policies `TO argus_app`; window-scoped `for select`/`for delete` policies; **column-scoped SELECT on
-  `(id, created_at)`**; plain `created_at` btree index per table (existing indexes are tenant-leading and
-  can't serve a cross-tenant age scan — the same gap `0043` noted); grant DELETE.
+  policies `TO argus_app`; window-scoped `for select`/`for delete` policies; **column-scoped SELECT matched to
+  each table's predicate** — `messages (id, created_at)`, `conversation_welcomes (id, created_at)`, and
+  **`conversation_commits (id, created_at, conversation_id, epoch)`** so the contiguity / keep-current-epoch
+  rule can actually run (Codex P2) — **never `ciphertext` / `commit` / `welcome` / `ratchet_tree`**; plain
+  `created_at` btree index per table (existing indexes are tenant-leading and can't serve a cross-tenant age
+  scan — the same gap `0043` noted); grant DELETE.
 - New worker `infra/retention/prune-messages.sh` + `argus-message-retention.{service,timer}`.
 - `infra/stack/deploy/deploy.sh`: grant the new role LOGIN with a NULL password out-of-band + install the
   timer (mirror the existing prune/cleanup wiring).
 - New `docs/threat-models/message-retention.md`.
-- **No `apps/api` code change for the server path; no `@argus/contracts`; no client.**
+- **One small `apps/api` change** — the prune-safe cursor in `listMessages` (slice 1). No `@argus/contracts`
+  / wire-format change, no client UI change.
 
 ## Other prunable data classes (slice 5 / follow-ups)
 
@@ -145,13 +165,14 @@ epoch **plus the contiguous commit chain within the retained window**, and the l
 ## Risks & what could break
 
 - **Reaping a row a device offline within the window still needs** → v1 has *no* delivery gate, so the full
-  90-day ceiling is the guarantee: any device that returns within 90 days catches up via `GET /sync`.
-  Residual: a device offline **>90 days** misses old history it never received — the accepted
+  90-day ceiling is the guarantee: any device that returns within 90 days catches up via the **prune-safe
+  backfill cursor** (slice 1). Residual: a device offline **>90 days** misses old history it never received — the accepted
   disappearing-history trade `message-history.md` already anticipates ("A future retention policy can prune").
   Document in product copy / DPA; do not engineer around it. The riskier delivery-confirmed gate is deferred
   behind a per-device-tracking prerequisite (Codex P1), so v1 cannot drop a second device's backlog.
 - **PR #262 OR-combine bypass if the re-scope is forgotten** → mandatory RLS regression spec (above).
-- **Crypto-blind boundary** → the worker selects `(id, created_at)` only, never `ciphertext`; column-scoped
+- **Crypto-blind boundary** → the worker selects **non-content metadata only** (`(id, created_at)`, plus
+  `(conversation_id, epoch)` for commits), never `ciphertext` / `commit` / `welcome` blobs; the column-scoped
   grant enforces it even with a leaked credential. Logs are **counts only**, no row ids (these rows are
   ciphertext-bearing — follow `prune-audit.sh` discipline, not the id-logging attachment worker).
 - **GDPR-erasure interaction** → erasure nulls `sender_user_id` as `argus_app`; retention deletes whole rows
@@ -162,11 +183,14 @@ epoch **plus the contiguous commit chain within the retained window**, and the l
 
 1. Seed messages with a tiny test TTL; run the worker → only rows older than the TTL disappear, newer rows
    remain (the v1 mechanism).
-2. Multi-device check: a user whose second device has been "offline" past any grace but inside the TTL → its
+2. **Prune-safe cursor:** in a quiet conversation, prune the exact message a device's saved cursor points at,
+   then reconnect that device → backfill still returns the **newer** retained messages, not an empty page
+   (Codex P2 — the slice-1 prerequisite).
+3. Multi-device check: a user whose second device has been "offline" past any grace but inside the TTL → its
    messages are **still present** after a sweep (v1 has no delivery gate, so no second-device loss — Codex P1).
-3. As the prune role, `SET app.tenant_id` to a victim tenant and try to read/delete an *in-window* message →
+4. As the prune role, `SET app.tenant_id` to a victim tenant and try to read/delete an *in-window* message →
    must return nothing / be denied (the #262 assertion).
-4. An online, caught-up client's chat history is **unchanged** after a sweep (it reads its local sealed log).
+5. An online, caught-up client's chat history is **unchanged** after a sweep (it reads its local sealed log).
 
 ## Out of scope
 
