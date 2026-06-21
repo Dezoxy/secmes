@@ -362,7 +362,7 @@ Self-hosting the data services on one VM is far cheaper than managed Azure data 
 
 ## 17. Phased Delivery
 
-> This is an earlier, looser cut. `docs/roadmap.md` is **canonical** for phasing — defer to it when they disagree.
+> This is an earlier, looser cut. `docs/planning/roadmap/README.md` is **canonical** for phasing — defer to it when they disagree.
 
 **Phase 0 — VM & pipeline**
 The Azure VM via Terraform (`infra/azure/`), Managed Identity → Key Vault, NSG deny-inbound, Cloudflare Tunnel ingress + Caddy reverse proxy, CD via `az vm run-command`, migrate-on-deploy, a "hello world" `api` live end-to-end. *Prove the pipeline before the bulk of the app logic.*

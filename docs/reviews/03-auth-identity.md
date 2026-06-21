@@ -1,6 +1,6 @@
 # Review 03 — Auth, identity & device trust
 
-> **Slice 3** of the security review campaign (`docs/security-review-campaign-plan.md`).
+> **Slice 3** of the security review campaign (`docs/planning/security-review-campaign-plan.md`).
 > **Date:** 2026-06-19 · **Reviewed against `main`** (post-#252).
 > **Method:** ultracode workflow — `crypto-reviewer` + `security-boundary-auditor` subagents (Opus, max effort): 1 recon + 6 adversarial finders (one per claim, each trying to *break* it) + a skeptic refutation pass on every finding.
 > **Result:** 4 claims **PROVEN**, 1 **PARTIAL** (`session-token-integrity` — security-critical vectors all held; two literal clauses overstated). 12 confirmed/downgraded findings, all **P3** — **except F1 on `fingerprint-binding`, which the skeptic *upgraded* in impact** (the device-linking OOB code is a brute-forceable ~30-bit backstop). No P1/P2 *forgery/privesc/cross-tenant* break surfaced, but the enrollment-code finding is the one behaviour-touching item that needs its own fix PR. The headline question — **can a malicious server silently add a device?** — is answered: **no**, the silent-add path is cryptographically closed.

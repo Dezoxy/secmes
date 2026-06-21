@@ -2,7 +2,7 @@
 
 Non-authoritative, point-in-time documents kept for history. **Do not follow these for current
 architecture or process** — the live sources are [`../secure_messaging_platform_plan.md`](../secure_messaging_platform_plan.md)
-(architecture), [`../roadmap.md`](../roadmap.md) (phasing), and `AGENTS.md` (engineering contract).
+(architecture), [`../planning/roadmap/README.md`](../planning/roadmap/README.md) (phasing), and `AGENTS.md` (engineering contract).
 
 | File | What it is |
 | --- | --- |

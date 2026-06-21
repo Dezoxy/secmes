@@ -11,9 +11,9 @@
 ## Problem
 
 The three ciphertext-bearing tables grow **without bound**. `messages` is append-only by design — the grant
-is `select, insert` only, no `delete` ([`0007_messaging.sql:96-100`](../../apps/api/src/db/migrations/0007_messaging.sql)) —
-and the same is true of `conversation_commits` ([`0023`](../../apps/api/src/db/migrations/0023_conversation_commits.sql))
-and, in practice, `conversation_welcomes` ([`0012`](../../apps/api/src/db/migrations/0012_welcomes.sql)). The
+is `select, insert` only, no `delete` ([`0007_messaging.sql:96-100`](../../../apps/api/src/db/migrations/0007_messaging.sql)) —
+and the same is true of `conversation_commits` ([`0023`](../../../apps/api/src/db/migrations/0023_conversation_commits.sql))
+and, in practice, `conversation_welcomes` ([`0012`](../../../apps/api/src/db/migrations/0012_welcomes.sql)). The
 server keeps every MLS ciphertext blob it has ever relayed, **forever**. There is retention for attachments
 (7-day TTL, blobs reaped first), `audit_events` (90 days) and `auth_sessions`, but **none for the actual
 message ciphertext** — the largest and fastest-growing data in the system.
@@ -45,7 +45,7 @@ never drift.
 **Why *not* delete-on-confirmed-delivery in v1 (Codex P1 — verified).** A delivery gate would reclaim hot
 conversations faster, but the delivery signal today is **per-user, not per-device**: `conversation_receipts`
 is keyed `unique (tenant_id, conversation_id, user_id)` with a single `delivered_through_*` watermark
-([`0010:12-22`](../../apps/api/src/db/migrations/0010_conversation_receipts.sql)), advanced by whichever of a
+([`0010:12-22`](../../../apps/api/src/db/migrations/0010_conversation_receipts.sql)), advanced by whichever of a
 user's devices acks *first* (`recordReceipt`), and `GET /sync` is likewise user-scoped. So if device D1 is
 online and D2 is offline for longer than any short grace but less than the TTL, **every** member's watermark
 can pass a message and the worker would delete the only server-side ciphertext D2 can still fetch — a silent
@@ -58,11 +58,11 @@ needed.
 returning device can page in everything newer than where it left off. Today the web reconnect path backfills
 per conversation via `listMessages` with a **message-id cursor**, and that SQL returns an *empty* page when
 the cursor's anchor row no longer exists
-([`messaging.service.ts:616-622`](../../apps/api/src/messaging/messaging.service.ts),
-[`useConversationBackfill.ts:203-210`](../../apps/web/src/features/chat/useConversationBackfill.ts)) — so if a
+([`messaging.service.ts:616-622`](../../../apps/api/src/messaging/messaging.service.ts),
+[`useConversationBackfill.ts:203-210`](../../../apps/web/src/features/chat/useConversationBackfill.ts)) — so if a
 quiet conversation's last-seen message ages past the TTL and is pruned, even a *briefly*-offline device can
 stop seeing newer retained messages until a reload. This cannot be fixed server-side alone: `after` is a bare
-**message UUID** ([`messaging.schemas.ts:23-25`](../../apps/api/src/messaging/messaging.schemas.ts)) and the
+**message UUID** ([`messaging.schemas.ts:23-25`](../../../apps/api/src/messaging/messaging.schemas.ts)) and the
 row that carried its `created_at` is exactly what pruning removes — so nothing remains to locate
 "nearest-newer" from (Codex P2). **Before TTL deletion is enabled**, pick one: (a) a **position-carrying
 cursor** — make `after` an opaque `(created_at, id)` token so the position survives the anchor's deletion (a
@@ -82,13 +82,13 @@ and it is the first slice.
   and fork MLS history; see the slice-5 migration). **There is no existing recovery path (Codex
   P2):** today `drainCommits` logs an unprocessable commit and returns, and the catch-up loop silently retries
   without noticing the epoch never advanced
-  ([`messaging.ts:288-301`](../../apps/web/src/lib/messaging.ts),
-  [`useLiveConversations.ts:447-457`](../../apps/web/src/features/chat/useLiveConversations.ts)) — so a device
+  ([`messaging.ts:288-301`](../../../apps/web/src/lib/messaging.ts),
+  [`useLiveConversations.ts:447-457`](../../../apps/web/src/features/chat/useLiveConversations.ts)) — so a device
   behind the first retained epoch would **spin / stay stuck**, not re-invite. Commit pruning therefore carries
   its own prerequisite: build an **explicit missing-commit / sync-lost signal** (detect the gap → surface
   re-invite) *before* enabling it. Until that exists, do not prune commits.
 - `conversation_welcomes` — **excluded from pruning in this track (Codex P2).** Consume = DELETE the row (no
-  `consumed_at` column — [`0012:60`](../../apps/api/src/db/migrations/0012_welcomes.sql)), so *every* row still
+  `consumed_at` column — [`0012:60`](../../../apps/api/src/db/migrations/0012_welcomes.sql)), so *every* row still
   present is **unconsumed**: the only HPKE-sealed Welcome/RatchetTree an added-while-offline device can use to
   join. There is no "safely stale" welcome to TTL-prune, so the prune role gets **no grant/policy on this
   table**. Deferred until a missing-welcome / re-invite recovery path exists (then prune only welcomes
@@ -96,7 +96,7 @@ and it is the first slice.
 
 **Attachment blobs are already handled — explicitly decoupled, no new B2 logic.** Every attachment gets a
 **7-day** `expires_at` at upload and `infra/cleanup/cleanup-attachments.sh` reaps the **B2 object first,
-then the row** ([`cleanup-attachments.sh:4-10`](../../infra/cleanup/cleanup-attachments.sh)). 7 days ≪ the
+then the row** ([`cleanup-attachments.sh:4-10`](../../../infra/cleanup/cleanup-attachments.sh)). 7 days ≪ the
 90-day message ceiling, so blobs are gone long before their message row is reaped. Message-ciphertext
 pruning and blob pruning stay deliberately separate; the blob side is authoritative.
 
@@ -120,8 +120,8 @@ that future path must spell out the exact grants, or the role simply fails the j
 ### ⚠ Mandatory PR #262 fix (verified — not cosmetic)
 
 The tenant-isolation policies on the **pruned** tables are currently **PUBLIC** (no `TO` clause):
-`messages_tenant_isolation` ([`0007:86`](../../apps/api/src/db/migrations/0007_messaging.sql)) and
-`commits_tenant_isolation` ([`0023:36`](../../apps/api/src/db/migrations/0023_conversation_commits.sql)) —
+`messages_tenant_isolation` ([`0007:86`](../../../apps/api/src/db/migrations/0007_messaging.sql)) and
+`commits_tenant_isolation` ([`0023:36`](../../../apps/api/src/db/migrations/0023_conversation_commits.sql)) —
 unlike `audit_events`/`auth_sessions`, whose policies were correctly re-scoped `TO argus_app` in `0043`.
 A new prune role's window policy **OR-combines** with a PUBLIC isolation policy, so the role could
 `set_config('app.tenant_id', <victim>)` and get a **live-row bypass**. Each table's re-scope lands **in the
@@ -191,8 +191,8 @@ pruning is implemented.
 - New `docs/threat-models/message-retention.md`.
 - **The position-carrying cursor spans the shared contract (slice 1), not just `apps/api` (Codex P2):**
   `ListMessagesQuerySchema.after` *and* `MessagePage.nextCursor` (today a UUID at
-  [`contracts/src/index.ts:345`](../../packages/contracts/src/index.ts)), the web response validation +
-  tests ([`apps/web/src/lib/api.ts:468`](../../apps/web/src/lib/api.ts)), and the OpenAPI DTO format — all
+  [`contracts/src/index.ts:345`](../../../packages/contracts/src/index.ts)), the web response validation +
+  tests ([`apps/web/src/lib/api.ts:468`](../../../apps/web/src/lib/api.ts)), and the OpenAPI DTO format — all
   updated together, backward-compatibly, or the PWA rejects any page carrying the new cursor. (The
   `syncMessages` path already uses an opaque encoded cursor — `messaging.schemas.ts:32-35` — so this aligns
   `listMessages` with an existing pattern.) Commit pruning additionally needs a **client** missing-commit /

@@ -1,10 +1,10 @@
 # What Fable 5 thinks — multi-hat repo review
 
-> An AI-assisted, multi-perspective review of the argus repo (code + `docs/roadmap.md`), written 2026-06-10.
+> An AI-assisted, multi-perspective review of the argus repo (code + `docs/planning/roadmap/README.md`), written 2026-06-10.
 > Method: five parallel deep-dives over the actual source — frontend (`apps/web`), backend (`apps/api`),
 > crypto (`packages/crypto` + `packages/contracts`), infra/CI (`infra/`, `compose*.yaml`, workflows), and the
 > docs/threat-model corpus — then consolidated here. Opinions are point-in-time; checkpoint numbers refer to
-> `docs/roadmap.md`.
+> `docs/planning/roadmap/README.md`.
 
 **TL;DR:** This is one of the most disciplined solo-built codebases I've reviewed. The security engineering
 is genuinely strong — not security theater. The real risks aren't in the code: they're operational (single

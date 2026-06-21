@@ -4,7 +4,7 @@ Per the Definition of Done in `AGENTS.md`, every **security-relevant feature** g
 
 ## Required before their phase
 
-> **Live implementation status is tracked in [`../roadmap.md`](../roadmap.md).** These notes are the original pre-code design records and keep their draft status; the roadmap reflects what has actually shipped.
+> **Live implementation status is tracked in [`../planning/roadmap/README.md`](../planning/roadmap/README.md).** These notes are the original pre-code design records and keep their draft status; the roadmap reflects what has actually shipped.
 
 | Note | Blocks | Status |
 | --- | --- | --- |

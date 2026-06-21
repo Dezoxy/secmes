@@ -20,7 +20,7 @@ name: argus-prod
 # cloudflared tunnel token (TUNNEL_TOKEN_FILE → /run/secrets/tunnel_token; cloudflared >=2025.4.0 reads
 # --token-file / TUNNEL_TOKEN_FILE). No secret is delivered via a container env var, so none surfaces in
 # `docker inspect`. Slice 3 populates all of these from Key Vault via the VM's Managed Identity (systemd); see
-# docs/roadmap.md Phase 0 #8, docs/deploy.md, and .env.prod.example.
+# docs/planning/roadmap/01-phase-0-platform-foundation.md (Phase 0 #8), docs/deploy.md, and .env.prod.example.
 # AUTH: login is passkey-only — the API mints/verifies its own EdDSA session tokens (no external IdP).
 # Zitadel/OIDC was decommissioned in Phase 6 (docs/threat-models/phase-6-decommission.md).
 
