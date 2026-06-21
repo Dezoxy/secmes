@@ -235,7 +235,7 @@ pruning is implemented.
    > (header set/omitted), a live-DB test (`min(epoch)` independent of `afterEpoch`, `null` when empty),
    > `security-boundary-auditor`, regenerated OpenAPI + 42Crunch.
 
-   > **Slice 5b implemented 2026-06-21 (PR _pending_).** Client-only; no server, contract, or wire change.
+   > **Slice 5b implemented 2026-06-21 ([#296](https://github.com/Dezoxy/secmes/pull/296)).** Client-only; no server, contract, or wire change.
    > The web client now **detects** a stranded conversation instead of spinning on it:
    > - [`listCommits`](../../../apps/web/src/lib/api.ts) reads the 5a `X-Oldest-Retained-Epoch` header (via a
    >   new, body-agnostic `onResponse` header tap in
