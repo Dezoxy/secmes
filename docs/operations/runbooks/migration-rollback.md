@@ -130,14 +130,24 @@ The schema change is incompatible with every deployed image. Restore the most re
    ```
 3. **Move the decrypted dump to the VM (via SSM, not SSH) and restore it into the production cluster.** The
    box has **no inbound SSH** (SSM-only; `admin_cidr = null` in `infra/aws/terraform/network.tf`, and the
-   deploy doc operates the box "no SSH"), so don't `scp` directly. Transfer over an **SSM Session Manager
-   port-forward tunnel** (`AWS-StartPortForwardingSession`) and copy through it (break-glass SSH only as a
-   last resort). **Do NOT stage the decrypted dump in S3/object storage** — that would put cleartext PII at
-   rest off-box, defeating the encrypt-before-it-leaves-the-box model the backups exist to uphold; keep the
-   plaintext only in transit (the tunnel) and on the two hosts. The files are plaintext metadata — the same
-   sensitivity as the live DB already on that box — and the **age private key stays on the trusted host**. On the VM, load roles then `pg_restore` into a **fresh
-   `argus_restore`** in the production Postgres over the local socket as the **owner** (`-U argus`, the role
-   `deploy.sh` uses; PG has no published port — invariant #3):
+   deploy doc operates the box "no SSH"), so don't `scp` over the public network, and **do NOT stage the
+   decrypted dump in S3/object storage** — cleartext PII at rest off-box defeats the
+   encrypt-before-it-leaves-the-box model the backups exist to uphold. Instead tunnel through **SSM Session
+   Manager** to the box's local sshd (the SG stays SSH-closed; the tunnel reaches `localhost:22` on the
+   instance) and `scp` through it — the plaintext exists only in transit and on the two hosts:
+   ```bash
+   # trusted host → box, over SSM (needs sshd on the box + SSM perms; opens NO inbound SSH rule)
+   aws ssm start-session --target <instance-id> \
+     --document-name AWS-StartPortForwardingSession \
+     --parameters '{"portNumber":["22"],"localPortNumber":["2222"]}' &
+   scp -P 2222 globals.sql backup.dump <user>@localhost:/var/tmp/
+   ```
+   (If the box runs no sshd, settle the exact transfer against the running instance and record it in the
+   canonical in-place restore cutover in `infra/backup/README.md` — don't guess.) The files are plaintext
+   metadata — the same sensitivity as the live DB already on that box — and the **age private key stays on the
+   trusted host**. On the VM, load roles then `pg_restore` into a **fresh `argus_restore`** in the production
+   Postgres over the local socket as the **owner** (`-U argus`, the role `deploy.sh` uses; PG has no published
+   port — invariant #3):
    ```bash
    docker compose -f <compose> exec -T postgres psql -U argus -d postgres < globals.sql        # roles first
    docker compose -f <compose> exec -T postgres createdb -U argus argus_restore
