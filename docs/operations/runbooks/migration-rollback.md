@@ -62,10 +62,13 @@ transaction rolled back — but a deploy applies **all pending** files, each in 
 **earlier** files in the batch already committed. Check what actually landed before assuming the old image is
 safe to restart.
 
-1. **See what actually applied.** `gh run view <run-id> --log | grep -B5 -A20 "migration failed"` (or the
-   SSM output) lists each `+  00NN_… applied` that committed, plus the Postgres error (message only, never
-   the DSN). The **failing** file is the next one in filename order after the last `applied` line (the runner
-   doesn't echo the in-flight name before it errors).
+1. **See what actually applied.** Get the authoritative list from the DB (the source of truth, however many
+   files committed): `docker compose -f <compose> exec -T postgres psql -U argus -d argus -c "select version
+   from schema_migrations order by version;"`. Cross-check the deploy log for the error and the in-flight
+   file: `gh run view <run-id> --log | grep -E '\+ .*applied|migration failed'` — this filters **every**
+   applied line plus the Postgres error (message only, never the DSN); don't use a fixed `-B`/`-A` window,
+   which truncates a large batch. The **failing** file is the next one in filename order after the last
+   recorded migration (the runner doesn't echo the in-flight name before it errors).
 2. **Restore service — if it's safe.** The deploy stopped the old API (step 4b) and exited without restarting
    it, so `/api` is **down**.
    - If **nothing** applied (the failing file was the only/first pending one), the schema is unchanged →
