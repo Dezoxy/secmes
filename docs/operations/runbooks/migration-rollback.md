@@ -55,25 +55,31 @@ before migrating; without it the run isn't restore-eligible. (Same one-shot run 
 worker's [`infra/backup/README.md`](../../../infra/backup/README.md) *Install* section. On a **first** deploy
 there is nothing to check-point — the database and the `argus_backup` role don't exist yet.)
 
-## Recovery A — failed migration (schema intact)
+## Recovery A — failed migration (schema intact, or only backward-compatible files applied)
 
-The deploy aborted with `FATAL: migrations failed — NOT serving the new image`. Because the migration's
-transaction rolled back, the schema still matches the previous release and the old API can be brought back.
+The deploy aborted with `FATAL: migrations failed — NOT serving the new image`. The **failing** migration's
+transaction rolled back — but a deploy applies **all pending** files, each in its own transaction, so any
+**earlier** files in the batch already committed. Check what actually landed before assuming the old image is
+safe to restart.
 
-1. **Restore service first.** The deploy stopped the old API before migrating (step 4b) and exited on the
-   failure **without restarting it**, so `/api` is currently **down**. The previous container still holds the
-   old image and the schema is intact, so bring it straight back: `docker compose -f <compose> start api` on
-   the box. The site is up again — now you can fix forward without time pressure.
-2. Read the failure: `gh run view <run-id> --log | grep -B5 -A20 "migration failed"` (or the SSM command
-   output) — it prints the migrations applied so far (`+  00NN_… applied`) and the Postgres error message
-   (message only, never the DSN). The failing file is the **next** one in filename order after the last
-   `applied` line (the runner doesn't echo the in-flight filename before it errors).
-3. Fix the migration **in a new branch** and merge it. If the file was never applied anywhere, correcting
-   the same `0044_*.sql` is fine; if any environment already applied it, ship a **new** `0045_*.sql` that
-   corrects forward (never edit an already-applied migration).
-4. Re-deploy. `db:migrate` is idempotent — it skips the already-applied files and applies the fix.
+1. **See what actually applied.** `gh run view <run-id> --log | grep -B5 -A20 "migration failed"` (or the
+   SSM output) lists each `+  00NN_… applied` that committed, plus the Postgres error (message only, never
+   the DSN). The **failing** file is the next one in filename order after the last `applied` line (the runner
+   doesn't echo the in-flight name before it errors).
+2. **Restore service — if it's safe.** The deploy stopped the old API (step 4b) and exited without restarting
+   it, so `/api` is **down**.
+   - If **nothing** applied (the failing file was the only/first pending one), the schema is unchanged →
+     restart the previous image: `docker compose -f <compose> start api` on the box.
+   - If **earlier files in the batch committed**, the schema is *partially advanced*. Restart the old image
+     **only if every applied file is backward-compatible** (purely additive). If any applied file is
+     destructive/incompatible, the old image is unsafe against the partial schema → go to **path B or C**
+     instead of restarting.
+3. Fix the failing migration **in a new branch**. If it was never applied anywhere, correcting the same
+   `0044_*.sql` is fine; if any environment already applied it, ship a **new** `0045_*.sql` that corrects
+   forward (never edit an already-applied migration).
+4. Re-deploy. `db:migrate` is idempotent — it skips the already-committed files and applies the rest.
 
-No restore, no data loss.
+No restore, no data loss (when the applied files are backward-compatible).
 
 ## Recovery B — roll the app image back (no data loss)
 
@@ -232,7 +238,7 @@ Record the wall-clock time; that's your real RTO for path C.
 
 | Symptom | Path | One-liner |
 | --- | --- | --- |
-| Deploy aborted: `migrations failed — NOT serving` | A | Fix the migration, redeploy (schema untouched) |
+| Deploy aborted: `migrations failed — NOT serving` | A | Check what applied; restart old image only if applied files are backward-compatible, then fix + redeploy |
 | New image misbehaves; migration was additive | B | Redeploy the previous `aws-v*` tag |
 | New image broke; schema change is destructive/incompatible | C | Restore per `infra/backup/README.md`, then redeploy a corrected image |
 | About to run a destructive migration | — | `sudo systemctl start argus-db-backup.service` first (fresh restore point) |
