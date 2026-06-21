@@ -1,9 +1,10 @@
 # Track 4 — Message retention & ciphertext pruning (bound DB growth)
 
-> **Status:** PROPOSED 2026-06-21. Server-side only — no client change, no `@argus/contracts` change,
-> no message-behavior change. Ships as its own migration + worker PRs (slices below). Sequenced **first**
-> (see [README priority](./README.md)) because it should land before production starts accumulating
-> ciphertext that can never be reclaimed.
+> **Status:** PROPOSED 2026-06-21. Server-side only — no client change and no `@argus/contracts` change. The
+> only user-visible effect: ciphertext older than the retention ceiling is no longer fetchable from the
+> server (clients keep their own local history). Ships as its own migration + worker PRs (slices below).
+> Sequenced **first** (see [README priority](./README.md)) because it should land before production starts
+> accumulating ciphertext that can never be reclaimed.
 
 ## Problem
 
@@ -30,30 +31,33 @@ offline catch-up buffer — yet that buffer is never drained. Consequences:
 
 ## Proposed approach
 
-**Strategy: delete-on-confirmed-delivery *plus* a hard TTL ceiling backstop.** Two independent safety
-properties, each covering the other's blind spot:
+**Strategy (v1): a hard TTL ceiling (default 90 days), server-side only.** Every message older than the
+ceiling is reaped regardless of delivery state. This bounds growth, needs no client change, and is safe for
+multi-device: a device has the **full 90-day window** to come back and catch up via `GET /sync`; only a
+device offline *longer* than the ceiling loses history it never received — the disappearing-history trade
+`message-history.md` already anticipates. The ceiling is config, tunable.
 
-- **Confirmed-delivery** reclaims the common case fast and safely: a `messages` row is reapable once
-  **every current member's delivery watermark is past it** — nobody can legitimately still need it.
-- **TTL ceiling** (default **90 days**) is the backstop that bounds growth even when watermarks never
-  converge (a quiet or old client that never POSTs `delivered`), set generously so it only ever fires on
-  genuinely-abandoned ciphertext.
-
-**Why not one mechanism alone:** the delivery signal is **per-user, not per-device** — `conversation_receipts`
+**Why *not* delete-on-confirmed-delivery in v1 (Codex P1 — verified).** A delivery gate would reclaim hot
+conversations faster, but the delivery signal today is **per-user, not per-device**: `conversation_receipts`
 is keyed `unique (tenant_id, conversation_id, user_id)` with a single `delivered_through_*` watermark
 ([`0010:12-22`](../../apps/api/src/db/migrations/0010_conversation_receipts.sql)), advanced by whichever of a
-user's devices acks *first* (`messaging.service.ts` `recordReceipt`). So delete-on-delivery **alone** could
-reap a row a user's second, still-offline device needs — message loss; and a client that never acks would
-pin the watermark and prevent all deletion. TTL **alone** is either too aggressive (breaks a legitimately
-long-offline device) or too lax (barely bounds growth). Together they are safe *and* bounded. Add a short
-**24h delivery-grace** so a row is never reaped the instant the last ack lands (slack for an in-flight
-second device and `GET /sync` overlap).
+user's devices acks *first* (`recordReceipt`), and `GET /sync` is likewise user-scoped. So if device D1 is
+online and D2 is offline for longer than any short grace but less than the TTL, **every** member's watermark
+can pass a message and the worker would delete the only server-side ciphertext D2 can still fetch — a silent
+message-loss / behavior change. A grace window does not fix this (D2 can be offline for days). **Therefore
+delivery-confirmed pruning is deferred** until delivery is tracked **per device** (a schema + client change —
+see Out of scope). Until then the TTL ceiling is the sole, safe mechanism and the server path stays
+client-change-free.
 
 **The other two ciphertext tables, simpler rules:**
 
-- `conversation_commits` — **TTL ceiling only**, but **never reap the current (max) epoch's commit**: a
-  long-offline device still needs the latest ratchet-advancing commit to rejoin. Reap `epoch < max(epoch)`
-  and older than the ceiling.
+- `conversation_commits` — **TTL ceiling only, contiguity-preserving (Codex P2).** A catching-up device
+  drains commits *in epoch order* and must `processCommit()` each one to advance, so deleting an intermediate
+  `epoch < max(epoch)` row strands a device at an older epoch (it cannot apply a later commit and falls into
+  sync-lost / re-invite — not merely "missing old history"). Reap only the **oldest contiguous prefix** of
+  commits older than the ceiling, **never leaving a gap**, and **always keep the current epoch**. A device
+  offline beyond the retained chain hits the existing sync-lost / re-invite path — state that explicitly as
+  the supported offline limit.
 - `conversation_welcomes` — already self-prunes on join (`consumeWelcome`); residual is stranded welcomes.
   **TTL ceiling only.** Low volume — cleanup, not the main event.
 
@@ -65,11 +69,18 @@ pruning and blob pruning stay deliberately separate; the blob side is authoritat
 
 **Reuse the established least-privilege prune pattern** (`0013_attachments_cleanup.sql`,
 `0043_audit_prune_role.sql` + `infra/audit-prune/prune-audit.sh`): a `nologin nobypassrls` role with
-window-scoped RLS so it can only ever see/delete past-window rows, **column-scoped SELECT on `(id, created_at)`
-— never `ciphertext`**, counts-only logging, connecting over the in-container local-trust socket (no DB
-password on the host). The all-current-members-delivered condition runs in the **worker's WHERE** (a join too
-expensive for an RLS `USING`); the RLS policy enforces the time bounds (24h grace + 90-day ceiling) as the
-fail-closed boundary.
+window-scoped RLS so it can only ever see/delete past-window rows, counts-only logging, connecting over the
+in-container local-trust socket (no DB password on the host). For the TTL-only v1 predicate the role needs
+**SELECT on `(id, created_at)` only — never `ciphertext`**, which matches the column-scoped grant; the RLS
+policy enforces the 90-day time bound as the fail-closed boundary.
+
+**The grant must cover every column *and table* the predicate reads (Codex P2).** PostgreSQL requires SELECT
+privilege on all columns/tables referenced in a DELETE `USING`/predicate, not just the deleted row. The TTL
+predicate reads only `messages.(id, created_at)`, so v1 is fully covered. The deferred delivery-confirmed
+path (above) would join `messages.conversation_id` against `conversation_members` / `conversation_receipts`
+watermarks — so it must *additionally* grant the role SELECT on **those non-content metadata columns/tables**
+(never `ciphertext`), or move the predicate behind a reviewed `security definer` function. The migration for
+that future path must spell out the exact grants, or the role simply fails the join.
 
 ### ⚠ Mandatory PR #262 fix (verified — not cosmetic)
 
@@ -90,14 +101,16 @@ delete an in-window row even after setting a tenant GUC. (This is exactly the by
 2. **Migration: role + `TO argus_app` re-scope + window policies + `created_at` indexes** (the boundary, no
    deletion yet) + RLS spec incl. the #262 regression test. Gates: `/db-migration`, `security-boundary-auditor`,
    live-DB RLS tests in CI.
-3. **Worker (TTL-only first)** — `infra/retention/prune-messages.sh` + systemd `service`/`timer`, modeled on
-   `infra/audit-prune/`; counts-only logging, fail-closed, batched with a max-rounds cap. Gates:
-   `infra-reviewer`, shellcheck, dry-run against a disposable DB.
-4. **Add the delivery-confirmed path** — extend the worker SQL with the all-current-members-delivered join.
-   Gate: `security-boundary-auditor` (the join can't widen visibility beyond the grace window).
-5. **Extend to `conversation_commits` + `conversation_welcomes`** (same role; current-epoch/latest-material
-   preserved).
-6. **(Optional, separable) metadata-table sweepers** — see below; own PR or deferred.
+3. **Worker (TTL-only) — this is v1, the only deletion that ships in this track** —
+   `infra/retention/prune-messages.sh` + systemd `service`/`timer`, modeled on `infra/audit-prune/`;
+   counts-only logging, fail-closed, batched with a max-rounds cap. Gates: `infra-reviewer`, shellcheck,
+   dry-run against a disposable DB.
+4. **Extend to `conversation_commits` + `conversation_welcomes`** (same role; contiguity-preserving commit
+   reap with the current epoch always kept; welcomes TTL).
+5. **(Optional, separable) metadata-table sweepers** — see below; own PR or deferred.
+6. **(Future, prerequisite-gated) delivery-confirmed pruning** — *only after per-device delivery tracking
+   exists* (Codex P1). Extends the worker join + the role's metadata grants. **Not part of this track's
+   shipped scope** — listed so the design is complete.
 
 > **Do not collapse slices 2 and 3:** the boundary migration must be reviewed and merged before any worker
 > can delete, so a boundary bug can never ship alongside live deletion.
@@ -114,7 +127,7 @@ delete an in-window row even after setting a tenant GUC. (This is exactly the by
 - New `docs/threat-models/message-retention.md`.
 - **No `apps/api` code change for the server path; no `@argus/contracts`; no client.**
 
-## Other prunable data classes (slice 6 / follow-ups)
+## Other prunable data classes (slice 5 / follow-ups)
 
 | Class | Recommendation | Safe signal |
 | --- | --- | --- |
@@ -125,15 +138,18 @@ delete an in-window row even after setting a tenant GUC. (This is exactly the by
 
 **MUST NOT be auto-pruned:** accepted `friendships` (the durable social graph); `conversation_members`
 (deleting a member is a deliberate membership op that cascade-deletes receipts/welcomes); `conversations`
-(deleting one cascades into all its messages); `audit_events` inside the 90-day Art. 30 window; the
-current-epoch commit / latest welcome material (needed for a long-offline device to rejoin).
+(deleting one cascades into all its messages); `audit_events` inside the 90-day Art. 30 window; the current
+epoch **plus the contiguous commit chain within the retained window**, and the latest welcome material
+(needed for a long-offline device to rejoin).
 
 ## Risks & what could break
 
-- **Reaping a row a long-offline device still needs** → mitigated by the all-members-delivered gate + 24h
-  grace + 90-day ceiling. Residual: a device offline **>90 days** misses old history it never received — the
-  accepted disappearing-history trade `message-history.md` already anticipates ("A future retention policy
-  can prune"). Document in product copy / DPA; do not engineer around it.
+- **Reaping a row a device offline within the window still needs** → v1 has *no* delivery gate, so the full
+  90-day ceiling is the guarantee: any device that returns within 90 days catches up via `GET /sync`.
+  Residual: a device offline **>90 days** misses old history it never received — the accepted
+  disappearing-history trade `message-history.md` already anticipates ("A future retention policy can prune").
+  Document in product copy / DPA; do not engineer around it. The riskier delivery-confirmed gate is deferred
+  behind a per-device-tracking prerequisite (Codex P1), so v1 cannot drop a second device's backlog.
 - **PR #262 OR-combine bypass if the re-scope is forgotten** → mandatory RLS regression spec (above).
 - **Crypto-blind boundary** → the worker selects `(id, created_at)` only, never `ciphertext`; column-scoped
   grant enforces it even with a leaked credential. Logs are **counts only**, no row ids (these rows are
@@ -144,15 +160,18 @@ current-epoch commit / latest welcome material (needed for a long-offline device
 
 ## How to verify by hand
 
-1. Seed two test conversations; in one, have all members POST `delivered` watermarks past the messages.
-   Run the worker → those rows are gone, the other conversation's recent rows remain.
-2. Set a tiny test TTL → rows older than it disappear even with **no** receipts (backstop works).
-3. As the prune role, `SET app.tenant_id` to a victim tenant and try to read/delete a *fresh* message →
+1. Seed messages with a tiny test TTL; run the worker → only rows older than the TTL disappear, newer rows
+   remain (the v1 mechanism).
+2. Multi-device check: a user whose second device has been "offline" past any grace but inside the TTL → its
+   messages are **still present** after a sweep (v1 has no delivery gate, so no second-device loss — Codex P1).
+3. As the prune role, `SET app.tenant_id` to a victim tenant and try to read/delete an *in-window* message →
    must return nothing / be denied (the #262 assertion).
 4. An online, caught-up client's chat history is **unchanged** after a sweep (it reads its local sealed log).
 
 ## Out of scope
 
-Disappearing-messages as a *user-facing* feature (this is operator-side retention, not per-conversation TTL
-UX); a client "older messages may be unavailable" affordance; message padding / sealed-sender; partitioning
-`messages` (a scale follow-up if volume ever demands it — `pg_partman` is not in the stack today).
+**Per-device delivery tracking** — the schema + client change that would make delivery-confirmed pruning safe;
+until it exists, retention is TTL-only (Codex P1). Disappearing-messages as a *user-facing* feature (this is
+operator-side retention, not per-conversation TTL UX); a client "older messages may be unavailable"
+affordance; message padding / sealed-sender; partitioning `messages` (a scale follow-up if volume ever
+demands it — `pg_partman` is not in the stack today).
