@@ -168,9 +168,10 @@ The schema change is incompatible with every deployed image. Restore the most re
    in the canonical in-place restore cutover in `infra/backup/README.md`. Never stage the decrypted dump in
    S3.) The files are plaintext
    metadata — the same sensitivity as the live DB already on that box — and the **age private key stays on the
-   trusted host**. On the VM, load roles then `pg_restore` into a **fresh `argus_restore`** in the production
-   Postgres over the local socket as the **owner** (`-U argus`, the role `deploy.sh` uses; PG has no published
-   port — invariant #3):
+   trusted host**. On the VM, in a **root shell** (`sudo -i` — `cloud-init.yaml` puts only `argus`/root in the
+   docker group, not `ubuntu`/`ssm-user`, and root can read the 0600 dumps in `/home/ubuntu`), load roles then
+   `pg_restore` into a **fresh `argus_restore`** in the production Postgres over the local socket as the
+   **owner** (`-U argus`, the role `deploy.sh` uses; PG has no published port — invariant #3):
    ```bash
    docker compose -f <compose> exec -T postgres psql -U argus -d postgres < /home/ubuntu/globals.sql   # roles first
    docker compose -f <compose> exec -T postgres createdb -U argus argus_restore
