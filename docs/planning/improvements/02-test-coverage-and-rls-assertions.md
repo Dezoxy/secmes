@@ -1,6 +1,6 @@
 # Track 2 — Close API spec gaps + make RLS coverage exhaustive
 
-> **Status:** IMPLEMENTED 2026-06-21. Tests only — no production code change. Highest-priority track.
+> **Status:** IMPLEMENTED 2026-06-21 ([#286](https://github.com/Dezoxy/secmes/pull/286)). Tests only — no production code change. Highest-priority track.
 
 ## Problem
 
