@@ -4,6 +4,7 @@ import { Logger } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { WsAdapter } from '@nestjs/platform-ws';
 import { SwaggerModule } from '@nestjs/swagger';
+import { OLDEST_RETAINED_EPOCH_HEADER } from '@argus/contracts';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module.js';
 import { createOpenApiDocument } from './openapi.js';
@@ -42,10 +43,13 @@ async function bootstrap(): Promise<void> {
   // X-Argus-Refresh is the CSRF defense-in-depth header; must be in allowedHeaders.
   // Never echo arbitrary origins or use a wildcard with credentials.
   const frontendOrigin = process.env['FRONTEND_ORIGIN'] ?? 'http://localhost:5173';
+  // exposedHeaders: custom response headers are invisible to the browser's fetch() unless explicitly
+  // exposed. X-Oldest-Retained-Epoch (GET /commits) carries the sync-lost signal the web client reads.
   app.enableCors({
     origin: frontendOrigin,
     credentials: true,
     allowedHeaders: ['Authorization', 'Content-Type', 'X-Argus-Refresh', 'X-Confirm-Delete'],
+    exposedHeaders: [OLDEST_RETAINED_EPOCH_HEADER],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   });
 
