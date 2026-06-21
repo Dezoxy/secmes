@@ -110,32 +110,37 @@ The schema change is incompatible with every deployed image. Restore the most re
    systemctl is-active argus-db-backup.service argus-attachment-cleanup.service argus-audit-prune.service
    ```
    Re-arm the timers only **after** the corrected deploy is healthy (end of step 5).
-2. **Restore the pre-migration pair** by following the **Restore runbook in
-   [`infra/backup/README.md`](../../../infra/backup/README.md)** verbatim — do not improvise. It fetches
-   the age private key from Key Vault, **verifies the Ed25519 signature** and re-hashes both objects against
-   the signed manifest, then restores **roles first, then the database** into a fresh `argus_restore`
-   database. **Set `COMPROMISE_BEFORE` to an instant just before the bad migration/deploy** (e.g. the
-   deploy's start time). Otherwise the picker takes the *newest* valid pair — and if the nightly timer (or an
-   operator checkpoint) ran *after* the bad migration, that pair already contains the bad schema, so you'd
-   restore the very state you're rolling back. (Leaving it unset is safe only if you're certain no backup ran
-   after the bad migration. The same anchor is the compromise-rollback control in `infra/backup/README.md`;
-   here it selects the pre-migration snapshot.) If you took the pre-migration checkpoint above, that stamp is
-   the target — confirm the selected pair's stamp matches it.
-3. **Confirm the restored schema is at the pre-bad-migration version** (the restore landed in
-   `argus_restore`, so check that DB): `psql -d argus_restore -c "select version from schema_migrations order
-   by version desc limit 5;"` — the bad migration must **not** be listed.
-4. **Cut the restored DB into place.** The restore lands in a fresh `argus_restore`, but the stack connects
-   to the `argus` database (the Key Vault DSNs end `…:5432/argus`). If you skip this, `deploy.sh` runs
-   `db:migrate` against the still-bad `argus` and the restored snapshot is never used. With the API stopped
-   and no other connections to either DB, rename the bad one aside and promote the restore (as the
-   owner/superuser over the postgres socket):
+2. **Select, verify, and decrypt the pre-migration pair on a TRUSTED HOST — not the VM.** The age private
+   key must never touch the production box (a compromised VM must not be able to read backups), so run the
+   **Restore runbook in [`infra/backup/README.md`](../../../infra/backup/README.md)** on your workstation: it
+   fetches the age key from Key Vault, **verifies the Ed25519 signature** + re-hashes both objects against the
+   signed manifest, and `age -d`s them to a plaintext `globals.sql` (roles) + `backup.dump` (custom-format
+   DB). **Set `COMPROMISE_BEFORE` to an instant just before the bad migration/deploy** — otherwise the picker
+   takes the *newest* valid pair, and if the nightly timer (or an operator checkpoint) ran *after* the bad
+   migration that pair already contains the bad schema, so you'd restore the very state you're rolling back.
+   (Leaving it unset is safe only if you're certain no backup ran after the bad migration; the same anchor is
+   the compromise-rollback control. If you took the pre-migration checkpoint above, confirm the selected stamp
+   matches it.)
+3. **Move the decrypted dump to the VM and restore it into the production cluster.** Copy the *decrypted*
+   `globals.sql` + `backup.dump` to the VM (e.g. `scp`) — plaintext metadata, the same sensitivity as the
+   live DB already on that box; the **age private key stays on the trusted host**. On the VM, run the restore
+   runbook's load steps (roles first, then `pg_restore`) against the production Postgres **over the local
+   socket**, into a **fresh `argus_restore`** — i.e. pipe each file into `docker compose -f <compose> exec -T
+   postgres …` (PG has no published port — invariant #3). Confirm the restored schema predates the bad
+   migration: `docker compose -f <compose> exec -T postgres psql -d argus_restore -c "select version from
+   schema_migrations order by version desc limit 5;"` — the bad migration must **not** be listed.
+4. **Cut the restored DB into place.** The stack connects to the `argus` database (the Key Vault DSNs end
+   `…:5432/argus`); if you skip this, `deploy.sh` runs `db:migrate` against the still-bad `argus` and the
+   restored snapshot is never used. With every writer stopped (step 1) and no connections to either DB, rename
+   the bad one aside and promote the restore (owner over the postgres socket):
    ```sql
    ALTER DATABASE argus         RENAME TO argus_bad_<stamp>;   -- keep the bad DB for forensics; drop it later
    ALTER DATABASE argus_restore RENAME TO argus;
    ```
    (Both renames need **zero** active connections to either database.) Then re-apply role logins per
    `infra/backup/README.md` step 4 (argus_app's password from Key Vault; argus_backup/argus_cleanup
-   LOGIN-only).
+   LOGIN-only) and **securely delete the transferred plaintext dump on the VM** (`shred -u globals.sql
+   backup.dump`).
 5. **Roll forward with the fix.** The restored cluster's `schema_migrations` does **not** contain the bad
    migration, so the forward-only runner **will re-apply that exact file** on the next deploy — a new
    `0045_*.sql` won't save you, because `0044` runs first. You must therefore **correct the bad migration
