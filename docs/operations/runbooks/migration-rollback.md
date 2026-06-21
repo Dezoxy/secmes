@@ -111,16 +111,23 @@ The schema change is incompatible with every deployed image. Restore the most re
    ```
    Re-arm the timers only **after** the corrected deploy is healthy (end of step 5).
 2. **Select, verify, and decrypt the pre-migration pair on a TRUSTED HOST — not the VM.** The age private
-   key must never touch the production box (a compromised VM must not be able to read backups), so run the
-   **Restore runbook in [`infra/backup/README.md`](../../../infra/backup/README.md)** on your workstation: it
-   fetches the age key from Key Vault, **verifies the Ed25519 signature** + re-hashes both objects against the
-   signed manifest, and `age -d`s them to a plaintext `globals.sql` (roles) + `backup.dump` (custom-format
-   DB). **Set `COMPROMISE_BEFORE` to an instant just before the bad migration/deploy** — otherwise the picker
-   takes the *newest* valid pair, and if the nightly timer (or an operator checkpoint) ran *after* the bad
-   migration that pair already contains the bad schema, so you'd restore the very state you're rolling back.
-   (Leaving it unset is safe only if you're certain no backup ran after the bad migration; the same anchor is
-   the compromise-rollback control. If you took the pre-migration checkpoint above, confirm the selected stamp
-   matches it.)
+   key must never touch the production box (a compromised VM must not be able to read backups). On your
+   workstation run **only the selection + verification + decryption part** of the Restore runbook in
+   [`infra/backup/README.md`](../../../infra/backup/README.md) — its **step 1** (set `EP`/`BUCKET`, check the
+   pinned verify key, fetch the age key from Key Vault, then walk newest-first to the pair whose **Ed25519
+   signature verifies** and whose objects re-hash to the signed manifest). **Set `COMPROMISE_BEFORE` to an
+   instant just before the bad migration/deploy** — otherwise the walk takes the *newest* valid pair, and if
+   the nightly timer (or an operator checkpoint) ran *after* the bad migration that pair already contains the
+   bad schema, so you'd restore the very state you're rolling back. (Leaving it unset is safe only if you're
+   certain no backup ran after the bad migration; the same anchor is the compromise-rollback control. If you
+   took the pre-migration checkpoint above, confirm the selected stamp matches it.) Step 1 leaves `backup.dump`
+   (decrypted) and `globals.sql.age` (still encrypted) on the workstation; **do NOT run the runbook's
+   steps 2–5 here** — those load into the *workstation's* cluster and then shred the key + dump. Instead, write
+   the globals to a file and drop the key before transferring plaintext:
+   ```bash
+   age -d -i age.key globals.sql.age > globals.sql   # the runbook normally pipes this straight into psql
+   shred -u age.key                                  # age key no longer needed off-box; remove it now
+   ```
 3. **Move the decrypted dump to the VM and restore it into the production cluster.** Copy the *decrypted*
    `globals.sql` + `backup.dump` to the VM (e.g. `scp`) — plaintext metadata, the same sensitivity as the
    live DB already on that box; the **age private key stays on the trusted host**. On the VM, run the restore
