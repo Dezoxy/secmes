@@ -31,7 +31,7 @@ good database state, then roll forward with a fix** — not run a reverse script
 
 | Situation | What happened to the schema | Recovery | Data loss |
 | --- | --- | --- | --- |
-| **Migration failed** (deploy aborted at step 5) | Unchanged — the failed migration's transaction rolled back | **A** — fix the migration, redeploy | None |
+| **Migration failed** (deploy aborted at step 5) | The failed file rolled back, but **earlier files in the same batch already committed** — so "unchanged" only if it was the lone/first pending file | **A** — check what applied, fix, redeploy (→ B/C if an applied file is incompatible) | None (if applied files are backward-compatible) |
 | **Migration succeeded, app breaks, change was backward-compatible** (additive: new nullable column/table/index) | Changed, but the previous image still works against it | **B** — roll the app image back, then fix forward | None |
 | **Migration succeeded, app breaks, change was NOT backward-compatible** (dropped/renamed/retyped a column, tightened a constraint) | Changed in a way the old image can't use | **C** — restore from backup, then redeploy a corrected image | **Back to the last snapshot** |
 
