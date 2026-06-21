@@ -337,6 +337,13 @@ export const FetchedMessageSchema = z.object({
   epoch: z.number().int().nonnegative(),
   attachmentObjectKey: objectKey.nullable(),
   createdAt: z.string().datetime(),
+  /**
+   * Opaque keyset position for THIS message — echo it as `after` to resume strictly after it. Prune-safe:
+   * it carries the `(created_at, id)` directly, so the server can still locate "rows newer than here" even
+   * after this message is deleted (a bare id can no longer be resolved once pruned). Optional: absent on
+   * the live WS push (not paginated) and on responses from servers predating this field; treat as opaque.
+   */
+  cursor: z.string().min(1).max(256).optional(),
 });
 export type FetchedMessage = z.infer<typeof FetchedMessageSchema>;
 

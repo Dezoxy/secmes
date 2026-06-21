@@ -29,7 +29,12 @@ async function pair(
   return { alice, aliceConv, bobConv };
 }
 
-function fetched(id: string, senderUserId: string, ciphertext: string): FetchedMessage {
+function fetched(
+  id: string,
+  senderUserId: string,
+  ciphertext: string,
+  cursor?: string,
+): FetchedMessage {
   return {
     id,
     senderUserId,
@@ -39,6 +44,7 @@ function fetched(id: string, senderUserId: string, ciphertext: string): FetchedM
     epoch: 0,
     attachmentObjectKey: null,
     createdAt: '2026-01-01T00:00:00Z',
+    cursor,
   };
 }
 
@@ -229,6 +235,26 @@ describe('backfillConversation', () => {
     expect(fetch).toHaveBeenCalledWith('c1', { after: 'm9', limit: 100 });
     expect(result.messages.map((m) => m.text)).toEqual(['decryptable']); // garbage skipped, batch survives
     expect(result.cursor).toBe('m11');
+  });
+
+  it('threads each message opaque cursor as the resume position, ignoring the legacy page cursor', async () => {
+    const engine = await MlsEngine.create();
+    const { alice, aliceConv, bobConv } = await pair(engine);
+    const ks = await DeviceKeystore.open(engine);
+    const key = await importUnlockKey(new Uint8Array(32).fill(1));
+    const deps: MessagingDeps = { keystore: ks, device: alice, sessionKey: key };
+
+    const b1 = toBase64(await bobConv.encrypt('one'));
+    const b2 = toBase64(await bobConv.encrypt('two'));
+    fetch.mockResolvedValueOnce({
+      messages: [fetched('m1', 'bob-user', b1, 'cur-1'), fetched('m2', 'bob-user', b2, 'cur-2')],
+      nextCursor: 'm2', // legacy page cursor — must be IGNORED in favour of the prune-safe per-message one
+    });
+
+    const result = await backfillConversation(deps, 'c1', aliceConv, 'alice-user');
+
+    expect(result.messages.map((m) => m.text)).toEqual(['one', 'two']);
+    expect(result.cursor).toBe('cur-2'); // opaque per-message token, not the bare id 'm2'
   });
 
   it('does not persist when nothing decrypted (only own/empty)', async () => {

@@ -134,7 +134,7 @@ pruning is implemented.
 
 ### Implementation slices (safety boundary lands before any deletion)
 
-1. **Prune-safe catch-up cursor (no deletion)** — make `after` / `MessagePage.nextCursor` a position-carrying
+1. **✅ Prune-safe catch-up cursor (no deletion)** — make `after` / `MessagePage.nextCursor` a position-carrying
    `(created_at, id)` token across `@argus/contracts` + `apps/api` + web response validation + OpenAPI (or add
    the retained-window fallback) so backfill survives a pruned anchor (prerequisite above). **Cached-PWA-safe
    rollout (Codex P2):** old bundles validate `nextCursor` as `z.string().uuid()`, so an opaque token breaks
@@ -143,6 +143,16 @@ pruning is implemented.
    `messaging.schemas.ts:15`), keeping the UUID `nextCursor` valid for old clients; only enable TTL deletion
    after the client side is adopted. Gates: `security-boundary-auditor`, a `listMessages` anchor-pruned cursor
    test + web response test + a stale-PWA-compat test.
+
+   > **Implemented 2026-06-21 (PR _pending_).** Instantiated the "new field" as a **per-message opaque
+   > `cursor`** on `FetchedMessage` (not a page-level `nextCursorV2`), reusing the proven `/sync`
+   > `encodeKeysetCursor` (microsecond `(created_at, id)`, base64url). The client echoes it as `after`;
+   > it never builds a cursor itself (no format coupling, no ms-truncation footgun). **Why per-message:** the
+   > web backfill's stored resume anchor is a *single message's* position — set mid-page at MLS epoch breaks
+   > and at the caught-up partial-page end ([`messaging.ts`](../../../apps/web/src/lib/messaging.ts)), not just
+   > at page boundaries — so only a per-message cursor makes *every* held resume point prune-safe. The legacy
+   > UUID `nextCursor` and a legacy bare-id `after` are both still accepted (server discriminates by UUID
+   > shape → legacy anchor-lookup vs opaque → keyset). No DB/RLS/migration, no envelope change.
 2. **Threat-model note (no code)** — `docs/threat-models/message-retention.md` via `/feature-threat-model`;
    verify the 6 invariants; `security-architect` sign-off on the rule + the #262 re-scope.
 3. **Boundary migration — `messages` only** (no deletion yet): create the prune role; re-scope

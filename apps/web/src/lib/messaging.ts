@@ -113,7 +113,12 @@ export interface DecryptedMessage {
 /** Decrypted peer messages from a backfill, plus the high-water cursor to resume from next time. */
 export interface BackfillResult {
   messages: DecryptedMessage[];
-  /** The last server message id observed (pass as `after` next time to fetch only newer rows). */
+  /**
+   * Opaque keyset cursor of the last observed message (pass as `after` next time to fetch only newer rows).
+   * Prune-safe: it carries the message's (created_at, id), so it still resolves "newer than here" even if
+   * that message is later reaped by retention. Falls back to the bare id only against a server too old to
+   * stamp per-message cursors.
+   */
   cursor: string | undefined;
   /**
    * Set to the epoch of the first un-decryptable message when the backfill stopped early because a
@@ -159,7 +164,9 @@ export async function backfillConversation(
           nextEpoch = m.epoch;
           break;
         }
-        cursor = m.id; // high-water mark — advance past everything at the current epoch
+        // High-water mark — advance past everything at the current epoch. Prefer the server's prune-safe
+        // per-message cursor; fall back to the bare id only against a server predating that field.
+        cursor = m.cursor ?? m.id;
         if (m.senderUserId === selfUserId) continue; // can't decrypt our own; shown via local echo
         try {
           const plaintext = await conversation.decrypt(fromBase64(m.ciphertext));
@@ -185,8 +192,10 @@ export async function backfillConversation(
           );
         }
       }
-      if (nextEpoch !== undefined || !res.nextCursor || res.messages.length === 0) break;
-      cursor = res.nextCursor;
+      // Stop on an epoch gap (caller must drain commits first) or a non-full page (caught up — a partial
+      // page means no more rows). The per-message assignment above already advanced `cursor` to the last
+      // message's prune-safe token, so there is no separate page cursor to take.
+      if (nextEpoch !== undefined || res.messages.length < FETCH_PAGE) break;
     }
 
     if (advanced) {

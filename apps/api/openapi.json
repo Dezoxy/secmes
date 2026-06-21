@@ -4525,11 +4525,10 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "format": "uuid",
-              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
-              "maxLength": 36
+              "maxLength": 256,
+              "pattern": "^[A-Za-z0-9_-]+$"
             },
-            "description": "exclusive cursor — a message id (use the previous page nextCursor)"
+            "description": "exclusive cursor — a message's opaque `cursor` from a prior page (prune-safe), or a legacy message id"
           },
           {
             "name": "limit",
@@ -4546,7 +4545,7 @@
         ],
         "responses": {
           "200": {
-            "description": "a page of ciphertext messages + next cursor",
+            "description": "a page of ciphertext messages (each with its own cursor) + a legacy page cursor",
             "content": {
               "application/json": {
                 "schema": {
@@ -9054,6 +9053,12 @@
             "format": "date-time",
             "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
             "maxLength": 40
+          },
+          "cursor": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "opaque keyset cursor for this message — echo as `after` to resume strictly after it (prune-safe)",
+            "pattern": "^[A-Za-z0-9_-]+$"
           }
         },
         "required": [
@@ -9081,7 +9086,7 @@
             "type": "string",
             "nullable": true,
             "format": "uuid",
-            "description": "pass as `after` to fetch the next page; null when no more",
+            "description": "LEGACY page cursor (last message id) for older clients; null when not a full page. New clients page off each per-message prune-safe cursor instead.",
             "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
             "maxLength": 36
           }

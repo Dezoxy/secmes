@@ -37,15 +37,22 @@ describe('CreateConversationSchema', () => {
 });
 
 describe('ListMessagesQuerySchema', () => {
-  it('defaults limit to 50 and accepts a coerced string limit + uuid cursor', () => {
+  it('defaults limit to 50 and accepts a coerced string limit + a cursor (legacy id or opaque token)', () => {
     expect(ListMessagesQuerySchema.parse({})).toEqual({ limit: 50 });
-    const r = ListMessagesQuerySchema.parse({ limit: '20', after: uuid });
-    expect(r).toEqual({ limit: 20, after: uuid });
+    // legacy bare-id cursor (cached PWA bundles)
+    expect(ListMessagesQuerySchema.parse({ limit: '20', after: uuid })).toEqual({
+      limit: 20,
+      after: uuid,
+    });
+    // opaque per-message cursor (base64url (created_at, id) token) — accepted; shape checked server-side
+    const opaque = Buffer.from(`2026-01-01T00:00:00.000000Z|${uuid}`, 'utf8').toString('base64url');
+    expect(ListMessagesQuerySchema.parse({ after: opaque })).toEqual({ limit: 50, after: opaque });
   });
-  it('rejects limit out of range, a non-uuid cursor, and unknown keys', () => {
+  it('rejects limit out of range, an empty/over-long cursor, and unknown keys', () => {
     expect(ListMessagesQuerySchema.safeParse({ limit: 0 }).success).toBe(false);
     expect(ListMessagesQuerySchema.safeParse({ limit: 101 }).success).toBe(false);
-    expect(ListMessagesQuerySchema.safeParse({ after: 'nope' }).success).toBe(false);
+    expect(ListMessagesQuerySchema.safeParse({ after: '' }).success).toBe(false);
+    expect(ListMessagesQuerySchema.safeParse({ after: 'x'.repeat(257) }).success).toBe(false);
     expect(ListMessagesQuerySchema.safeParse({ limit: 10, x: 1 }).success).toBe(false);
   });
 });

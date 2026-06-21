@@ -129,6 +129,15 @@ class FetchedMessageDto {
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
+
+  @ApiProperty({
+    type: String,
+    required: false,
+    maxLength: 256,
+    description:
+      'opaque keyset cursor for this message — echo as `after` to resume strictly after it (prune-safe)',
+  })
+  cursor?: string;
 }
 
 class CommitWelcomeBodyDto {
@@ -229,7 +238,8 @@ class MessagePageDto {
     required: false,
     nullable: true,
     format: 'uuid',
-    description: 'pass as `after` to fetch the next page; null when no more',
+    description:
+      'LEGACY page cursor (last message id) for older clients; null when not a full page. New clients page off each per-message prune-safe cursor instead.',
   })
   nextCursor!: string | null;
 }
@@ -346,12 +356,13 @@ export class MessagingController {
   @ApiQuery({
     name: 'after',
     required: false,
-    schema: { type: 'string', format: 'uuid' },
-    description: 'exclusive cursor — a message id (use the previous page nextCursor)',
+    schema: { type: 'string', maxLength: 256 },
+    description:
+      "exclusive cursor — a message's opaque `cursor` from a prior page (prune-safe), or a legacy message id",
   })
   @ApiOkResponse({
     type: MessagePageDto,
-    description: 'a page of ciphertext messages + next cursor',
+    description: 'a page of ciphertext messages (each with its own cursor) + a legacy page cursor',
   })
   @ApiNotFoundResponse({ description: 'conversation not found or caller is not a member' })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
