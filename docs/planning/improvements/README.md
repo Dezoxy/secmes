@@ -45,9 +45,10 @@ change; Track 3 is mostly activating things already designed.
 - 🟡 **Track 3 items A/B/C implemented** (2026-06-21, [#287](https://github.com/Dezoxy/secmes/pull/287), PR 3a) — a migration-rollback runbook
   (`docs/operations/runbooks/migration-rollback.md`) plus a "Release safety controls" section in
   `aws-first-deploy.md` documenting locked Terraform remote state + the per-release approval gate.
-  **Correction:** the live deploy path is **AWS**, not the Azure VM this track assumed — so the runbooks are
-  AWS-primary, B & C were found **already active** there, and the Azure twin is a deferred follow-up. Item
-  **D** (realtime sequence numbers) ships separately as **PR 3b**. Docs only.
+  **Correction:** the **first environment deployed is AWS** (its release-safety controls are already active);
+  the single-Azure-VM path (still production-of-record in `deploy.md`) is **not yet armed** and these controls
+  are a **hard prerequisite before arming it**. Item **D** (realtime sequence numbers) ships separately as
+  **PR 3b**. Docs only.
 
 Track 3 item D + Track 4 remain planning docs.
 
