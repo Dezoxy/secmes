@@ -167,4 +167,4 @@ The honest "what remains and why." Each row: severity, whether it blocks beta, a
 
 ---
 
-*Source slice notes (authoritative for per-claim evidence):* `docs/reviews/01-crypto-core.md`, `docs/reviews/02-server-boundary.md`, `docs/reviews/03-auth-identity.md`, `docs/reviews/04-metadata-privacy.md`, `docs/reviews/05-client-pwa.md`, `docs/reviews/06-infra-deploy.md`. *Campaign plan:* `docs/security-review-campaign-plan.md`. *The compliance-grade overclaims:* `docs/gdpr/article-30-records.md` (`:78` cleanup-worker attestation + stale `key_backups` rows at `:48`/`:80`/`:94`).
+*Source slice notes (authoritative for per-claim evidence):* `docs/reviews/01-crypto-core.md`, `docs/reviews/02-server-boundary.md`, `docs/reviews/03-auth-identity.md`, `docs/reviews/04-metadata-privacy.md`, `docs/reviews/05-client-pwa.md`, `docs/reviews/06-infra-deploy.md`. *Campaign plan:* `docs/planning/security-review-campaign-plan.md`. *The compliance-grade overclaims:* `docs/gdpr/article-30-records.md` (`:78` cleanup-worker attestation + stale `key_backups` rows at `:48`/`:80`/`:94`).

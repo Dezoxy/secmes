@@ -35,7 +35,7 @@ change; Track 3 is mostly activating things already designed.
 
 ## Constraints every track must respect
 
-All work stays inside the [AGENTS.md](../../AGENTS.md) non-negotiable invariants — most relevant here:
+All work stays inside the [AGENTS.md](../../../AGENTS.md) non-negotiable invariants — most relevant here:
 
 - The server stays **crypto-blind**; refactors must not move any plaintext/key handling onto the server.
 - Every tenant-scoped table keeps `tenant_id` + an enforced RLS policy (Track 2 _verifies_ this, never relaxes it).

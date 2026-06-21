@@ -3,7 +3,7 @@
 Privacy-first, end-to-end-encrypted messaging platform delivered as an installable PWA.
 The server is **crypto-blind**: it stores ciphertext + metadata only.
 
-Architecture: [`docs/secure_messaging_platform_plan.md`](docs/secure_messaging_platform_plan.md). Phasing & checkpoint status: [`docs/roadmap.md`](docs/roadmap.md).
+Architecture: [`docs/secure_messaging_platform_plan.md`](docs/secure_messaging_platform_plan.md). Phasing & checkpoint status: [`docs/planning/roadmap/README.md`](docs/planning/roadmap/README.md).
 
 > **Deployment (2026-06):** the target is a **single Azure VM** (EU, `germanywestcentral`) running the
 > stack via **Docker Compose** — self-hosted **Postgres + Redis** plus API + web + Caddy +
@@ -48,7 +48,7 @@ compose.prod.yaml      # prod stack (+ web, Caddy, cloudflared, observability) �
 ## Status: feature-complete, awaiting deploy arming
 
 The application is built end-to-end (Phases 0–7 plus group chat and multi-device sync — see
-[`docs/roadmap.md`](docs/roadmap.md)). What remains is **operational**, not feature work:
+[`docs/planning/roadmap/README.md`](docs/planning/roadmap/README.md)). What remains is **operational**, not feature work:
 
 - the **one-time Azure arming** of the gated deploy pipeline — the Terraform, the prod Compose stack +
   ingress, the Key Vault secret delivery, and the full build/scan/sign → GHCR → `az vm run-command`

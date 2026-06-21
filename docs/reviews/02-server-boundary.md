@@ -1,6 +1,6 @@
 # Review 02 — Server boundary
 
-> **Slice 2** of the security review campaign (`docs/security-review-campaign-plan.md`).
+> **Slice 2** of the security review campaign (`docs/planning/security-review-campaign-plan.md`).
 > **Date:** 2026-06-19 · **Reviewed against `main`** (post-#251).
 > **Method:** ultracode workflow — 12 `security-boundary-auditor` subagents (Opus, max effort): 1 recon + 6
 > adversarial finders (one per claim) + a skeptic refutation pass on every finding.

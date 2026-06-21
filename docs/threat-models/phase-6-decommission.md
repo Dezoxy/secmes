@@ -1,6 +1,6 @@
 # Threat model — Phase 6: decommission Zitadel/OIDC + the enterprise surface
 
-Phase 6 of `docs/private-messenger-redesign-plan.md`. Passkey auth (Phases 0–5) is the sole login path; this
+Phase 6 of `docs/planning/private-messenger-redesign-plan.md`. Passkey auth (Phases 0–5) is the sole login path; this
 phase removes the now-dead Zitadel/OIDC machinery and the enterprise surface, and minimises stored PII. Ships
 as two PRs:
 
