@@ -348,8 +348,6 @@ export function SettingsPanel({
             displayName={serverHandle}
             avatar={avatar}
             profileError={profileError}
-            onAvatarChange={setAvatar}
-            onProfileErrorChange={setProfileError}
           />
         </section>
 

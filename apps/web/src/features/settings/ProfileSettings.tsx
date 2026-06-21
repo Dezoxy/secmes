@@ -1,7 +1,6 @@
-import { useState, type ChangeEvent } from 'react';
-import { Check, Copy, Image } from 'lucide-react';
-import { MAX_AVATAR_DATA_URI_LENGTH } from '../chat/seed';
-import { Avatar, Button, ErrorState } from '../ui';
+import { useState } from 'react';
+import { Check, Copy, Image, Sparkles } from 'lucide-react';
+import { Avatar, Button, ErrorState, StateBlock } from '../ui';
 import { createSafeUiError } from '../../lib/safe-ui-error';
 
 export interface AnonymousProfile {
@@ -15,76 +14,24 @@ interface ProfileSettingsProps {
   displayName: string | null;
   avatar: string;
   profileError: string | null;
-  onAvatarChange: (avatar: string) => void;
-  onProfileErrorChange: (message: string | null) => void;
 }
 
 const INPUT =
   'w-full rounded-xl border border-white/5 bg-[#1a1a26] px-4 py-2.5 text-sm text-white placeholder-white/30 transition-all focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20';
 const SUBTLE_BUTTON =
   'inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-medium text-white/70 transition-colors hover:border-purple-500/40 hover:text-white';
-const ALLOWED_AVATAR_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
-const AVATAR_CANVAS_SIZE = 192;
-
-function loadImage(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const image = new window.Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error('failed to load avatar'));
-    image.src = url;
-  });
-}
-
-async function compressAvatar(file: File): Promise<string> {
-  const objectUrl = window.URL.createObjectURL(file);
-  try {
-    const image = await loadImage(objectUrl);
-    const canvas = document.createElement('canvas');
-    canvas.width = AVATAR_CANVAS_SIZE;
-    canvas.height = AVATAR_CANVAS_SIZE;
-
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error('failed to prepare avatar');
-
-    const sourceWidth = image.naturalWidth || image.width;
-    const sourceHeight = image.naturalHeight || image.height;
-    const sourceSize = Math.min(sourceWidth, sourceHeight);
-    const sourceX = Math.max(0, (sourceWidth - sourceSize) / 2);
-    const sourceY = Math.max(0, (sourceHeight - sourceSize) / 2);
-
-    context.fillStyle = '#111827';
-    context.fillRect(0, 0, AVATAR_CANVAS_SIZE, AVATAR_CANVAS_SIZE);
-    context.drawImage(
-      image,
-      sourceX,
-      sourceY,
-      sourceSize,
-      sourceSize,
-      0,
-      0,
-      AVATAR_CANVAS_SIZE,
-      AVATAR_CANVAS_SIZE,
-    );
-
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
-    if (dataUrl.length > MAX_AVATAR_DATA_URI_LENGTH) {
-      throw new Error('avatar is too large');
-    }
-    return dataUrl;
-  } finally {
-    window.URL.revokeObjectURL(objectUrl);
-  }
-}
 
 export function ProfileSettings({
   profile,
   displayName,
   avatar,
   profileError,
-  onAvatarChange,
-  onProfileErrorChange,
 }: ProfileSettingsProps) {
   const [copied, setCopied] = useState(false);
+  // Custom photo upload is intentionally disabled for now — the profile always uses a generated
+  // avatar (no user-supplied image ever enters the app). Clicking the button reveals a notice
+  // instead of opening a file picker.
+  const [photoSoon, setPhotoSoon] = useState(false);
 
   const copyId = async () => {
     try {
@@ -93,24 +40,6 @@ export function ProfileSettings({
       window.setTimeout(() => setCopied(false), 1400);
     } catch {
       setCopied(false);
-    }
-  };
-
-  const uploadAvatar = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    if (!ALLOWED_AVATAR_TYPES.has(file.type)) {
-      onProfileErrorChange('Use PNG, JPG, WebP, or GIF.');
-      event.target.value = '';
-      return;
-    }
-    try {
-      onAvatarChange(await compressAvatar(file));
-      onProfileErrorChange(null);
-    } catch {
-      onProfileErrorChange('Avatar could not be processed. Use a smaller image.');
-    } finally {
-      event.target.value = '';
     }
   };
 
@@ -123,17 +52,17 @@ export function ProfileSettings({
           size="xl"
           className="ring-2 ring-purple-500/40"
         />
-        <label className={SUBTLE_BUTTON}>
+        <button type="button" className={SUBTLE_BUTTON} onClick={() => setPhotoSoon(true)}>
           <Image className="h-4 w-4" />
           Upload photo
-          <input
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            className="hidden"
-            onChange={(event) => void uploadAvatar(event)}
-          />
-        </label>
+        </button>
       </div>
+
+      {photoSoon && (
+        <StateBlock icon={Sparkles} title="Coming soon" compact role="status" ariaLive="polite">
+          Photo upload isn&apos;t available yet — your profile uses a generated avatar.
+        </StateBlock>
+      )}
 
       <div>
         <span className="mb-2 block text-sm font-medium text-white/70">Display name</span>

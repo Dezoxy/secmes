@@ -21,6 +21,11 @@
 >
 > What remains current: handle **generation** (CSPRNG `Adjective Animal` as the first-registration default)
 > and that the server only ever sees this **metadata**, never message content.
+>
+> **Update (this slice):** the **generated avatar is the only avatar** — custom photo upload is disabled in
+> the UI (no user-supplied image enters the app). And while the handle stays user-editable, the chosen name is
+> now constrained by a hardened, shared `displayNameSchema` (Latin-only, 2–32 chars, rejects zero-width /
+> RTL-override / homoglyph / emoji / Zalgo). See `profile-edit.md` §7–§8 for the shipped policy and rationale.
 
 ## 1. Feature & data flow
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { displayNameSchema } from '@argus/contracts';
 
 import {
   generateHandle,
@@ -37,5 +38,18 @@ describe('handle-words', () => {
     const seen = new Set(Array.from({ length: 200 }, () => generateHandle()));
     // 200 draws from 40k should yield many distinct values; a stuck generator would collapse to ~1.
     expect(seen.size).toBeGreaterThan(150);
+  });
+
+  // The auto-assigned handle must always satisfy the hardened display-name policy, so registration can
+  // never mint a name a user would then be unable to keep or edit. Guard the worst case statically
+  // (longest adjective + space + longest animal ≤ 32) and a large random sample dynamically.
+  it('every possible handle is a valid display name (Latin, ≤ 32 chars)', () => {
+    const longestAdjective = Math.max(...HANDLE_ADJECTIVES.map((w) => w.length));
+    const longestAnimal = Math.max(...HANDLE_ANIMALS.map((w) => w.length));
+    expect(longestAdjective + 1 + longestAnimal).toBeLessThanOrEqual(32);
+
+    for (let i = 0; i < 500; i += 1) {
+      expect(displayNameSchema.safeParse(generateHandle()).success).toBe(true);
+    }
   });
 });
