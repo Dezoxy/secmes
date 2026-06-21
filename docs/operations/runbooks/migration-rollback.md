@@ -60,14 +60,18 @@ there is nothing to check-point — the database and the `argus_backup` role don
 The deploy aborted with `FATAL: migrations failed — NOT serving the new image`. Because the migration's
 transaction rolled back, the schema still matches the previous release and the old API can be brought back.
 
-1. Read the failure: `gh run view <run-id> --log | grep -B5 -A20 "migration failed"` (or the SSM command
+1. **Restore service first.** The deploy stopped the old API before migrating (step 4b) and exited on the
+   failure **without restarting it**, so `/api` is currently **down**. The previous container still holds the
+   old image and the schema is intact, so bring it straight back: `docker compose -f <compose> start api` on
+   the box. The site is up again — now you can fix forward without time pressure.
+2. Read the failure: `gh run view <run-id> --log | grep -B5 -A20 "migration failed"` (or the SSM command
    output) — it prints the migrations applied so far (`+  00NN_… applied`) and the Postgres error message
    (message only, never the DSN). The failing file is the **next** one in filename order after the last
    `applied` line (the runner doesn't echo the in-flight filename before it errors).
-2. Fix the migration **in a new branch** and merge it. If the file was never applied anywhere, correcting
+3. Fix the migration **in a new branch** and merge it. If the file was never applied anywhere, correcting
    the same `0044_*.sql` is fine; if any environment already applied it, ship a **new** `0045_*.sql` that
    corrects forward (never edit an already-applied migration).
-3. Re-deploy. `db:migrate` is idempotent — it skips the already-applied files and applies the fix.
+4. Re-deploy. `db:migrate` is idempotent — it skips the already-applied files and applies the fix.
 
 No restore, no data loss.
 
@@ -101,8 +105,13 @@ The schema change is incompatible with every deployed image. Restore the most re
    [`infra/backup/README.md`](../../../infra/backup/README.md)** verbatim — do not improvise. It fetches
    the age private key from Key Vault, **verifies the Ed25519 signature** and re-hashes both objects against
    the signed manifest, then restores **roles first, then the database** into a fresh `argus_restore`
-   database. For an ordinary bad-migration rollback leave `COMPROMISE_BEFORE` unset (newest valid pair);
-   that anchor is only for a **suspected key compromise**, not a migration mistake.
+   database. **Set `COMPROMISE_BEFORE` to an instant just before the bad migration/deploy** (e.g. the
+   deploy's start time). Otherwise the picker takes the *newest* valid pair — and if the nightly timer (or an
+   operator checkpoint) ran *after* the bad migration, that pair already contains the bad schema, so you'd
+   restore the very state you're rolling back. (Leaving it unset is safe only if you're certain no backup ran
+   after the bad migration. The same anchor is the compromise-rollback control in `infra/backup/README.md`;
+   here it selects the pre-migration snapshot.) If you took the pre-migration checkpoint above, that stamp is
+   the target — confirm the selected pair's stamp matches it.
 3. **Confirm the restored schema is at the pre-bad-migration version:** `select version from
    schema_migrations order by version desc limit 5;` — the bad migration must **not** be listed.
 4. **Roll forward with the fix.** The bad migration must be **corrected in source before you re-run

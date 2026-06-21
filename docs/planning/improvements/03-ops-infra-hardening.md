@@ -65,7 +65,8 @@ local `.terraform/` can `init` and `plan` with **no diff**.
 > ✅ **Documented (PR 3a).** On the **live AWS path** the `aws-experiment` GitHub Environment already has
 > required reviewers, and the IAM deploy role's OIDC trust is bound to
 > `repo:OWNER/REPO:environment:aws-experiment` (`infra/aws/terraform/iam.tf:102`), so each `aws-v*` tag pauses
-> for approval before the root SSM command runs — and a token from any other ref can't assume the role. The
+> for approval before the root SSM command runs — and only a job running in that approval-gated environment can
+> assume the role (the binding is to the environment + its approval, not a branch/ref). The
 > **Azure** `prod` environment (`cd.yml`) is the deferred twin. Captured with verify steps in the "Release
 > safety controls" section of [`docs/operations/runbooks/aws-first-deploy.md`](../../operations/runbooks/aws-first-deploy.md).
 

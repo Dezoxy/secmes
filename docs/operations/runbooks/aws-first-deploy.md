@@ -62,8 +62,10 @@ loss and blocks a concurrent `apply`. One-time bootstrap (already done if `backe
 `aws-v*` tag **pauses for your approval before the root SSM command runs**. The IAM deploy role's OIDC trust
 is bound to that exact environment subject —
 `repo:OWNER/REPO:environment:aws-experiment` (`infra/aws/terraform/iam.tf:102`,
-`var.github_deploy_environment`) — so a token from any other branch/ref can't assume the deploy role: the
-approval gate can't be side-stepped.
+`var.github_deploy_environment`) — so **only a job running in the `aws-experiment` environment can assume the
+deploy role**, and entering that environment requires reviewer approval. The binding is to the environment +
+its approval gate, **not** to a branch/tag — any workflow that runs in `aws-experiment` mints the same
+subject — so keep the environment's protection rules (including any branch/tag restrictions) in place.
 
 - **Verify:** push a throwaway `aws-v*` tag (with `ENABLE_DEPLOY_AWS=true`) → the run builds images, then
   the `deploy` job sits in **"Waiting"** on `aws-experiment` until you approve; an unapproved run never
