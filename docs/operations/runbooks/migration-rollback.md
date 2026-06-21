@@ -51,17 +51,19 @@ journalctl -u argus-db-backup.service -n 30        # expect: "uploaded argus-glo
 
 This reuses the blessed path — an off-host, WORM (B2 Object Lock), **age-encrypted and Ed25519-signed**
 pair — so it adds **no new code and writes no cleartext to disk**. Confirm the **success marker** line
-before migrating; without it the run isn't restore-eligible. (Same one-shot pattern as `infra/b2/README.md`
-§4. On a **first** deploy there is nothing to check-point — the database and the `argus_backup` role don't
-exist yet.)
+before migrating; without it the run isn't restore-eligible. (Same one-shot run documented in the backup
+worker's [`infra/backup/README.md`](../../../infra/backup/README.md) *Install* section. On a **first** deploy
+there is nothing to check-point — the database and the `argus_backup` role don't exist yet.)
 
 ## Recovery A — failed migration (schema intact)
 
 The deploy aborted with `FATAL: migrations failed — NOT serving the new image`. Because the migration's
 transaction rolled back, the schema still matches the previous release and the old API can be brought back.
 
-1. Read the failure: `gh run view <run-id> --log | grep -A20 "migration failed"` (or the SSM command
-   output) — it prints the failing file and the Postgres error (message only, never the DSN).
+1. Read the failure: `gh run view <run-id> --log | grep -B5 -A20 "migration failed"` (or the SSM command
+   output) — it prints the migrations applied so far (`+  00NN_… applied`) and the Postgres error message
+   (message only, never the DSN). The failing file is the **next** one in filename order after the last
+   `applied` line (the runner doesn't echo the in-flight filename before it errors).
 2. Fix the migration **in a new branch** and merge it. If the file was never applied anywhere, correcting
    the same `0044_*.sql` is fine; if any environment already applied it, ship a **new** `0045_*.sql` that
    corrects forward (never edit an already-applied migration).
