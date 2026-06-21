@@ -167,10 +167,23 @@ pruning is implemented.
    > never-current-epoch policy is a correlated `EXISTS (epoch > this.epoch)` backed by the existing
    > `(tenant_id, conversation_id, epoch)` index, and the worker must independently enforce
    > contiguous-prefix-only (pin `never-max-epoch` + `no-gap-left`).
-3. **Boundary migration — `messages` only** (no deletion yet): create the prune role; re-scope
+3. **✅ Boundary migration — `messages` only** (no deletion yet): create the prune role; re-scope
    `messages_tenant_isolation` `TO argus_app`; messages window `for select`/`for delete` policy; messages
    `(id, created_at)` SELECT + `created_at` index; **grant DELETE on `messages` only** + the #262 regression
    spec. Gates: `/db-migration`, `security-boundary-auditor`, live-DB RLS tests in CI.
+
+   > **Implemented 2026-06-21 (PR _pending_).** [`0044_messages_prune_role.sql`](../../../apps/api/src/db/migrations/0044_messages_prune_role.sql) —
+   > a **dedicated** `argus_msg_prune` role (`nologin nobypassrls`, §7 cond 2), the `messages_tenant_isolation`
+   > re-scope `TO argus_app` (the #262 fix), window-scoped `for select`/`for delete` prune policies
+   > (`created_at < now() - interval '90 days'`), a **column-scoped** `grant select (id, created_at), delete`
+   > (never `ciphertext`), and a plain `messages_created_at_idx` for the cross-tenant age scan — line-for-line
+   > the `0043` pattern. The live-DB spec
+   > [`messages-prune-rls.spec.ts`](../../../apps/api/src/db/messages-prune-rls.spec.ts) pins §7 cond 1 **both
+   > ways**: the prune role's no-GUC sweep **succeeds** (would *throw* if the re-scope were wrong) AND a
+   > GUC-set cross-tenant bypass is **denied**; plus past-window delete works, in-window survives, app
+   > isolation is unchanged, and reading `ciphertext` is denied at the column-grant level. **No deletion** —
+   > the role stays `NOLOGIN` (nothing connects as it yet); the `deploy.sh` LOGIN-NULL + connectivity probe
+   > and the TTL worker are **slice 4**.
 4. **Worker (TTL-only) — this is v1, the only deletion that ships in this track** —
    `infra/retention/prune-messages.sh` + systemd `service`/`timer`, modeled on `infra/audit-prune/`;
    counts-only logging, fail-closed, batched with a max-rounds cap. Gates: `infra-reviewer`, shellcheck,
