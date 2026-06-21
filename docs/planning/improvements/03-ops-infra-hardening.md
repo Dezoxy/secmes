@@ -1,7 +1,7 @@
 # Track 3 — Operational / infra hardening
 
-> **Status:** items **A, B, C IMPLEMENTED as runbooks** 2026-06-21 ([#287](https://github.com/Dezoxy/secmes/pull/287), PR 3a — docs only); item **D** (realtime
-> sequence numbers) remains **PROPOSED** and ships as its own follow-up PR (3b). **Correction:** the **first
+> **Status:** **TRACK COMPLETE.** Items **A, B, C IMPLEMENTED as runbooks** 2026-06-21 ([#287](https://github.com/Dezoxy/secmes/pull/287),
+> PR 3a — docs only); item **D** (realtime delivery-gap detection) **IMPLEMENTED** 2026-06-21 ([#288](https://github.com/Dezoxy/secmes/pull/288), PR 3b). **Correction:** the **first**
 > environment being deployed is AWS** (`infra/aws/`, `cd-aws.yml`, the `aws-experiment` environment — see the
 > AWS first-deploy runbook), so the runbooks are **AWS-primary** and items B & C were found **already active
 > there**. The single-Azure-VM path (`cd.yml`, still described as production in `README.md` /
@@ -16,7 +16,7 @@
 | A. Migration rollback          | Forward-only SQL migrations (44 files, head 0043), no down-path                      | ✅ **Runbook shipped** (PR 3a)                  |
 | B. Terraform remote state      | **AWS**: S3 backend already the default/enabled; **Azure** twin still commented/local | ✅ **Documented** (AWS active; Azure required before arming) |
 | C. CD per-release approval     | **AWS** `aws-experiment` env has required reviewers; **Azure** `prod` not yet set    | ✅ **Documented** (AWS active; Azure required before arming) |
-| D. Realtime delivery guarantee | Redis pub/sub fan-out, frames have no sequence/ACK                                   | ⏳ **PROPOSED** — own follow-up PR (3b)         |
+| D. Realtime delivery guarantee | Redis pub/sub fan-out, frames have no sequence/ACK                                   | ✅ **Implemented** ([#288](https://github.com/Dezoxy/secmes/pull/288), PR 3b) — ephemeral per-socket gap counter |
 
 ## A. Migration rollback procedure (net-new)
 
@@ -88,12 +88,29 @@ checklist item in the deploy runbook so arming can't skip it.
 **Verify.** A dry tagged release pauses at the `deploy` job awaiting approval; an unapproved run cannot
 execute `az vm run-command`.
 
-## D. Realtime ACK / sequence numbers (net-new)
+## D. Realtime delivery-gap detection (net-new)
 
-> ⏳ **Deferred to its own follow-up PR (3b).** This is a real cross-cutting feature (a `seq` field in
-> `@argus/contracts`, a per-conversation monotonic sequence assigned at message-write in `apps/api`, the web
-> client tracking/gap-detecting it, plus E2E) on the realtime **hot path**, so it gets a `security-architect`
-> + `crypto-reviewer` design pass first rather than being bundled with the A/B/C docs.
+> ✅ **Implemented (PR 3b).** Preceded by a `security-architect` + `crypto-reviewer` design pass (both agreed on
+> the posture; crypto-reviewer PASS_WITH_CONDITIONS, all met). **The written proposal below was corrected on two
+> load-bearing points** (same staleness pattern as Tracks 1/2):
+>
+> 1. **Ephemeral per-socket, not persisted at message-write.** The counter (`deliverySeq` + `deliveryPrevSeq`)
+>    is stamped at **fan-out** as in-memory per-`(socket, conversation)` state on the gateway connection — the
+>    lossy hop is the live socket, not the DB. This needs **zero schema change / no RLS surface / no new
+>    at-rest metadata**, and dissolves the race-safety, gaplessness, and pruned-hole edge cases a persisted
+>    write-time column would create. Added to `@argus/contracts` (`MessageEventSchema`) as **optional** siblings
+>    of `conversationId`, **outside** the MLS envelope; named `delivery*` and documented as carrying no
+>    cryptographic guarantee (distinct from the MLS `epoch` / ratchet generation).
+> 2. **No server-consumed ACK in v1.** The goal — client detects a gap and self-heals — needs only the
+>    **outbound** counter; the client re-fetches over the existing `(created_at, id)` catch-up (dedup by id).
+>    Dropping the inbound ACK makes it **structurally impossible** to wire delivery into deletion — the exact
+>    Track 4 per-user-vs-per-device boundary. A persisted commit-order watermark (the enterprise variant that
+>    makes `/sync` self-sufficient) stays a deferred, separate design. **Tail-withholding remains an accepted
+>    relay residual** (documented in `realtime-delivery.md` §6).
+>
+> Files: `packages/contracts/src/index.ts`, `apps/api/src/realtime/realtime.gateway.ts`,
+> `apps/web/src/lib/ws.ts`, `apps/web/src/features/chat/useLiveConversations.ts` (+ gateway/ws/classifier
+> specs), and threat-model notes in `docs/threat-models/realtime-delivery.md` / `metadata-exposure.md`.
 
 **Problem.** `apps/api/src/realtime/realtime.gateway.ts` fans out over Redis pub/sub
 (`redis-realtime-bus.ts`), which is fire-and-forget: a frame dropped on a flaky socket or delivered out of
@@ -118,9 +135,10 @@ sync backfill; `realtime.gateway.spec.ts` / `.e2e.spec.ts` extended accordingly.
 
 - **B and C are gated infra/settings actions** — they require explicit human confirmation and happen
   during Azure arming, not in this docs PR.
-- **D touches the hot realtime path**; sequence assignment must be race-safe under the single-VM Redis bus
-  and must not change at-rest message ordering or storage. Keep it additive and backward-compatible so an
-  old client ignoring the new fields still works.
+- **D touches the hot realtime path** — addressed in PR 3b by making the counter **ephemeral per-socket** (no
+  shared/persisted sequence to coordinate, so race-safety is by construction on the single-threaded event
+  loop), leaving at-rest message ordering/storage untouched, and adding the fields as **optional** so an old
+  client ignoring them still works.
 - **A must not imply automatic destructive rollback** — the runbook is restore-based and human-driven.
 
 ## Out of scope

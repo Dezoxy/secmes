@@ -125,7 +125,81 @@ describe('createMessageSocket', () => {
     };
     last().deliver({ event: 'message', data: { conversationId: 'conv-1', message } });
     expect(got).toHaveLength(1);
-    expect(got[0]).toEqual({ conversationId: 'conv-1', message });
+    expect(got[0]).toEqual({
+      conversationId: 'conv-1',
+      message,
+      deliverySeq: undefined,
+      deliveryPrevSeq: undefined,
+    });
+    sock.close();
+  });
+
+  it('passes the transport delivery counter (deliverySeq/deliveryPrevSeq) through to onMessage', async () => {
+    const got: IncomingMessage[] = [];
+    const sock = createMessageSocket({
+      url: 'wss://host/ws',
+      token: async () => 't',
+      onMessage: (m) => got.push(m),
+      WebSocketImpl: Impl,
+    });
+    last().open();
+    await flush();
+    last().deliver({ event: 'ready', data: {} });
+
+    const message = {
+      id: 'm1',
+      senderUserId: 'bob',
+      clientMessageId: 'c1',
+      ciphertext: 'AAAA',
+      alg: 'MLS_1.0',
+      epoch: 0,
+      attachmentObjectKey: null,
+      createdAt: 't',
+    };
+    // First frame on a socket: prevSeq null. Then a contiguous frame: seq 2, prevSeq 1.
+    last().deliver({
+      event: 'message',
+      data: { conversationId: 'c', message, deliverySeq: 1, deliveryPrevSeq: null },
+    });
+    last().deliver({
+      event: 'message',
+      data: { conversationId: 'c', message, deliverySeq: 2, deliveryPrevSeq: 1 },
+    });
+    expect(got.map((m) => [m.deliverySeq, m.deliveryPrevSeq])).toEqual([
+      [1, null],
+      [2, 1],
+    ]);
+    sock.close();
+  });
+
+  it('ignores a malformed delivery counter (wrong types → undefined, never throws)', async () => {
+    const got: IncomingMessage[] = [];
+    const sock = createMessageSocket({
+      url: 'wss://host/ws',
+      token: async () => 't',
+      onMessage: (m) => got.push(m),
+      WebSocketImpl: Impl,
+    });
+    last().open();
+    await flush();
+    last().deliver({ event: 'ready', data: {} });
+
+    const message = {
+      id: 'm1',
+      senderUserId: 'bob',
+      clientMessageId: 'c1',
+      ciphertext: 'AAAA',
+      alg: 'MLS_1.0',
+      epoch: 0,
+      attachmentObjectKey: null,
+      createdAt: 't',
+    };
+    last().deliver({
+      event: 'message',
+      data: { conversationId: 'c', message, deliverySeq: 'oops', deliveryPrevSeq: 'nope' },
+    });
+    expect(got).toHaveLength(1);
+    expect(got[0]).toMatchObject({ deliverySeq: undefined, deliveryPrevSeq: undefined });
     sock.close();
   });
 

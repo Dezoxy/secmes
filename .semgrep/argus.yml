@@ -68,6 +68,20 @@ rules:
       # argon2d / argon2i followed by a non-`d` char or end-of-token; argon2id (argon2 + i + d) never matches.
       - pattern-regex: \bargon2[di]([^d]|$)
 
+  - id: argus-no-transport-seq-in-crypto
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >
+      The realtime transport delivery counter (deliverySeq / deliveryPrevSeq, Track 3 item D) is metadata-only
+      and must NEVER enter packages/crypto. It is not the MLS epoch or ratchet generation and carries no
+      cryptographic guarantee — feeding it into a KDF/nonce/AAD or using it to select ratchet state would be
+      hand-rolled crypto and a nonce-reuse risk. Keep gap detection in the gateway + web client; the crypto
+      layer must not know this symbol exists.
+    paths:
+      include: ['packages/crypto/**']
+    patterns:
+      - pattern-regex: \bdelivery(Seq|PrevSeq)\b
+
   - id: argus-no-secret-logging
     languages: [typescript, javascript]
     severity: ERROR

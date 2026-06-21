@@ -34,6 +34,38 @@ import { foldOwnMessageStatuses, type PeerWatermarks } from './receipts';
 import type { Conversation, User } from './seed';
 import { currentUser, generatedAvatar } from './seed';
 
+// Coalescing window for transport-gap backfills (Track 3 item D). A burst of out-of-order/dropped live
+// frames in one conversation collapses into a single catch-up fetch rather than one per frame — bounds the
+// self-inflicted REST load and avoids a backfill storm on a flaky link.
+const GAP_BACKFILL_DEBOUNCE_MS = 250;
+
+/**
+ * Decide what a `message` frame's transport delivery counter implies for gap detection (Track 3 item D).
+ * Pure: given the last-seen deliverySeq for a conversation and this frame's deliverySeq/deliveryPrevSeq,
+ * return the new last-seen value and whether a live frame was missed (→ re-fetch over the existing backfill).
+ * The counter is a HINT only — it never gates decryption or ordering (MLS + the (created_at,id) cursor own
+ * those). Rules:
+ *  - absent deliverySeq ⇒ detection unavailable (older gateway): keep state, no gap.
+ *  - deliveryPrevSeq === null ⇒ the gateway's first frame on this socket+room: (re)baseline, no gap.
+ *  - deliverySeq <= last ⇒ duplicate / late-arriving reorder: keep position, no gap (dedup-by-id covers content).
+ *  - otherwise contiguous iff deliveryPrevSeq === last; a numeric prevSeq with no baseline (we never saw the
+ *    leading frame(s)) is therefore a gap. A missing prevSeq falls back to the raw seq step (seq === last+1).
+ */
+export function classifyDeliveryFrame(
+  last: number | undefined,
+  deliverySeq: number | undefined,
+  deliveryPrevSeq: number | null | undefined,
+): { last: number | undefined; gap: boolean } {
+  if (typeof deliverySeq !== 'number') return { last, gap: false };
+  if (deliveryPrevSeq === null) return { last: deliverySeq, gap: false };
+  if (last !== undefined && deliverySeq <= last) return { last, gap: false };
+  const contiguous =
+    typeof deliveryPrevSeq === 'number'
+      ? last !== undefined && deliveryPrevSeq === last
+      : last !== undefined && deliverySeq === last + 1;
+  return { last: deliverySeq, gap: !contiguous };
+}
+
 interface UseLiveConversationsOptions {
   device: DeviceKeys | null;
   pool: DeviceKeys[] | null;
@@ -165,6 +197,16 @@ export function useLiveConversations({
   // The PEER's latest delivered/read watermarks per conversation (checkpoint 31). Seeded from GET /receipts
   // on subscribe and advanced by live `receipt` WS frames; folded onto our own messages to drive ticks.
   const peerWatermarks = useRef(new Map<string, PeerWatermarks>());
+
+  // Transport delivery-gap detection (Track 3 item D). lastDeliverySeq holds the last per-(socket,
+  // conversation) `deliverySeq` we saw; a non-contiguous next frame means a live frame was dropped/reordered.
+  // We STILL decrypt the live frame inline (the WS frame is the reliable copy and is never discarded) and,
+  // on a detected gap, ALSO schedule a debounced backfill to recover the missed EARLIER frame over the
+  // existing catch-up path. gapBackfillTimers coalesces a burst of gaps per conversation into one fetch. The
+  // seq is a HINT only — it never gates decryption or ordering (MLS + the (created_at,id) cursor own those);
+  // it carries no cryptographic guarantee. Both reset on (re)subscribe and on removal.
+  const lastDeliverySeq = useRef(new Map<string, number>());
+  const gapBackfillTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const addLive = useCallback((conversationId: string, conversation: MlsGroup): void => {
     liveGroups.current.set(conversationId, conversation);
@@ -359,6 +401,41 @@ export function useLiveConversations({
     }
     setConnectionStatus('connecting');
     const deps = messagingDeps;
+
+    // Interleaved catch-up for one conversation: backfill at the current epoch, then — if messages at a
+    // future epoch were seen — drain commits to EXACTLY that epoch (not beyond) and backfill again, until
+    // no further epoch gaps. Preserves forward secrecy (epoch-N keys consumed only after all epoch-N
+    // messages decrypt). Shared by the on-subscribe catch-up and the transport-gap backfill.
+    const runCatchUp = (conversationId: string): void => {
+      const group = liveGroups.current.get(conversationId);
+      if (!group) return;
+      void (async () => {
+        for (;;) {
+          const result = await backfillInto(conversationId, group, selfUserId);
+          const nextEpoch = result?.nextEpoch;
+          if (nextEpoch === undefined) break;
+          await processCommitEvent(deps, conversationId, group, { epoch: nextEpoch }, nextEpoch);
+        }
+      })().catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.warn('catch-up failed', conversationId, err instanceof Error ? err.message : err);
+      });
+    };
+
+    // Debounced backfill on a detected transport gap. Coalesces a burst per conversation
+    // (GAP_BACKFILL_DEBOUNCE_MS) into one catch-up so a flaky link can't trigger a backfill storm. The
+    // catch-up recovers the missed EARLIER frame(s); the live frame that exposed the gap is decrypted inline
+    // (onMessage) and never discarded.
+    const scheduleGapBackfill = (conversationId: string): void => {
+      const timers = gapBackfillTimers.current;
+      if (timers.has(conversationId)) return; // a catch-up is already scheduled — coalesce onto it
+      const timer = setTimeout(() => {
+        timers.delete(conversationId);
+        runCatchUp(conversationId);
+      }, GAP_BACKFILL_DEBOUNCE_MS);
+      timers.set(conversationId, timer);
+    };
+
     const socket = createMessageSocket({
       token: accessToken,
       onStatus: setConnectionStatus,
@@ -402,7 +479,25 @@ export function useLiveConversations({
         // drainWelcomes is idempotent — it skips already-joined conversations.
         drainRef.current();
       },
-      onMessage: ({ conversationId, message }) => {
+      onMessage: ({ conversationId, message, deliverySeq, deliveryPrevSeq }) => {
+        // Transport gap detection (Track 3 item D): a break in the per-(socket, conversation) counter means
+        // a live frame was dropped/reordered, so re-fetch over the existing backfill. classifyDeliveryFrame
+        // owns the decision (pure + unit-tested); the seq is a HINT only, never gating decryption/ordering.
+        const { last: nextLast, gap } = classifyDeliveryFrame(
+          lastDeliverySeq.current.get(conversationId),
+          deliverySeq,
+          deliveryPrevSeq,
+        );
+        if (nextLast !== undefined) lastDeliverySeq.current.set(conversationId, nextLast);
+        // On a detected gap, schedule a backfill to recover the missed EARLIER frame(s). We still decrypt
+        // THIS frame inline below — the live WS frame is the reliable copy and is never discarded (the
+        // backfill's keyset cursor can skip a late-committing earlier-`created_at` row, so dropping the
+        // in-hand frame in favour of a re-fetch could lose it). MLS caches skipped-generation keys, so the
+        // backfill can still decrypt the earlier frame out of order; a same-sender burst exceeding that
+        // bounded cache (`retainKeysForGenerations`) before the backfill runs is an accepted
+        // delivery-completeness residual, backstopped by the reconnect connect-protocol (realtime-delivery.md §6).
+        if (gap) scheduleGapBackfill(conversationId);
+
         const group = liveGroups.current.get(conversationId);
         if (!group) return;
         void (async () => {
@@ -437,34 +532,16 @@ export function useLiveConversations({
       },
       onReceipt: applyReceipt,
       onSubscribed: (conversationId) => {
-        const group = liveGroups.current.get(conversationId);
-        if (group) {
-          // Interleaved catch-up: backfill at the current epoch, then — if messages at a future
-          // epoch were encountered — drain commits to EXACTLY that epoch (not beyond), then backfill
-          // again. Repeat until the backfill sees no further epoch gaps. This preserves forward
-          // secrecy: keys for epoch N are consumed only after all epoch-N messages are decrypted.
-          void (async () => {
-            for (;;) {
-              const result = await backfillInto(conversationId, group, selfUserId);
-              const nextEpoch = result?.nextEpoch;
-              if (nextEpoch === undefined) break;
-              await processCommitEvent(
-                deps,
-                conversationId,
-                group,
-                { epoch: nextEpoch },
-                nextEpoch,
-              );
-            }
-          })().catch((err: unknown) => {
-            // eslint-disable-next-line no-console
-            console.warn(
-              'subscribe: catch-up failed',
-              conversationId,
-              err instanceof Error ? err.message : err,
-            );
-          });
+        // A fresh room join (re)starts the gateway's per-socket counter, so drop any stale baseline — the
+        // first live frame (deliveryPrevSeq === null) re-establishes it. Also cancel any pending gap timer:
+        // the REST catch-up below already covers anything missed up to now.
+        lastDeliverySeq.current.delete(conversationId);
+        const pendingTimer = gapBackfillTimers.current.get(conversationId);
+        if (pendingTimer) {
+          clearTimeout(pendingTimer);
+          gapBackfillTimers.current.delete(conversationId);
         }
+        runCatchUp(conversationId);
         seedReceipts(conversationId); // seed historical delivered/read ticks once in the room
       },
       // A Welcome is waiting (added to a conversation while connected): drain now — join → subscribe →
@@ -472,6 +549,12 @@ export function useLiveConversations({
       onWelcome: () => drainRef.current(),
       onRemoved: (conversationId) => {
         liveGroups.current.delete(conversationId);
+        lastDeliverySeq.current.delete(conversationId);
+        const pending = gapBackfillTimers.current.get(conversationId);
+        if (pending) {
+          clearTimeout(pending);
+          gapBackfillTimers.current.delete(conversationId);
+        }
         setLiveIds((prev) => {
           if (!prev.has(conversationId)) return prev;
           const next = new Set(prev);
@@ -513,6 +596,10 @@ export function useLiveConversations({
     return () => {
       socket.close();
       socketRef.current = null;
+      // Cancel any pending gap backfills; this socket (and its per-socket counters) is gone.
+      for (const timer of gapBackfillTimers.current.values()) clearTimeout(timer);
+      gapBackfillTimers.current.clear();
+      lastDeliverySeq.current.clear();
     };
   }, [
     applyReceipt,
