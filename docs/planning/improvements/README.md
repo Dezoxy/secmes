@@ -42,7 +42,7 @@ change; Track 3 is mostly activating things already designed.
   catalog-driven `db/rls-coverage.spec.ts` that fails CI if any non-allowlisted `public` table lacks forced
   `app.tenant_id` RLS. (It already surfaced the drift: 19 tenant-scoped tables today, not the "13" the docs
   repeated.) Tests only.
-- 🟡 **Track 3 items A/B/C implemented** (2026-06-21, PR 3a) — a migration-rollback runbook
+- 🟡 **Track 3 items A/B/C implemented** (2026-06-21, [#287](https://github.com/Dezoxy/secmes/pull/287), PR 3a) — a migration-rollback runbook
   (`docs/operations/runbooks/migration-rollback.md`) plus a "Release safety controls" section in
   `aws-first-deploy.md` documenting locked Terraform remote state + the per-release approval gate.
   **Correction:** the live deploy path is **AWS**, not the Azure VM this track assumed — so the runbooks are
