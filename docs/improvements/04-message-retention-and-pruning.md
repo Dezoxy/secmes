@@ -165,10 +165,10 @@ delete an in-window row even after setting a tenant GUC. (This is exactly the by
 
 | Class | Recommendation | Safe signal |
 | --- | --- | --- |
-| `device_enrollments` | Prune resolved/expired rows (schema says "GC'd externally" but no worker exists) | `status != 'pending' AND coalesce(resolved_at, expires_at) < now() - 30d` |
+| `device_enrollments` | Prune resolved rows **and abandoned-pending rows** (schema says "GC'd externally" but no worker exists; pending auto-expires after 15 min) | `(status != 'pending' AND coalesce(resolved_at, expires_at) < now() - 30d) OR (status = 'pending' AND expires_at < now())` |
 | `webauthn_challenges` | Add a sweeper for abandoned ceremonies (delete-on-use is primary) | `expires_at < now()` |
 | `key_packages` | Prune spent one-time packages (never reused once claimed) | `claimed_at is not null AND claimed_at < now() - 30d` |
-| `stripe_events` | Low priority; schema explicitly defers | `created_at < now() - 365d` |
+| `stripe_events` | Low priority; schema explicitly defers | `received_at < now() - 365d` |
 
 **MUST NOT be auto-pruned:** accepted `friendships` (the durable social graph); `conversation_members`
 (deleting a member is a deliberate membership op that cascade-deletes receipts/welcomes); `conversations`
