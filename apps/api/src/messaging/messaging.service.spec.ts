@@ -295,6 +295,15 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     await expect(
       svc.listMessages(bobAuth, conv, { limit: 50, after: 'not-a-valid-cursor!!' }),
     ).rejects.toBeInstanceOf(BadRequestException);
+    // A JS-normalizable-but-impossible calendar date (Feb 30): Date.parse accepts it, but Postgres
+    // ::timestamptz rejects it — must be a clean 400 here, never a 500 mid-query (Codex P2).
+    const impossible = Buffer.from(
+      `2026-02-30T00:00:00.000000Z|${crypto.randomUUID()}`,
+      'utf8',
+    ).toString('base64url');
+    await expect(
+      svc.listMessages(bobAuth, conv, { limit: 50, after: impossible }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('a non-member (same tenant) cannot list — 404', async () => {

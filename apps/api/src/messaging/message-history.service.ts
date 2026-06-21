@@ -50,12 +50,37 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 function encodeKeysetCursor(createdAtIso: string, id: string): string {
   return Buffer.from(`${createdAtIso}|${id}`, 'utf8').toString('base64url');
 }
+// Validate the cursor timestamp STRICTLY: it must be the exact UTC ISO form the server emits
+// (to_char 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AND a real calendar instant. `Date.parse` alone is too lenient
+// — it normalizes impossible dates like 2026-02-30 (→ Mar 2), which Postgres `::timestamptz` then REJECTS,
+// turning a malformed cursor into a 500 mid-query instead of the clean 400 we throw here BEFORE opening a
+// transaction. The Date.UTC round-trip rejects out-of-range/rolled-over components (Codex P2).
+const CURSOR_TS_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.\d{1,6}Z$/;
+function isEmittedTimestamp(s: string): boolean {
+  const m = CURSOR_TS_RE.exec(s);
+  if (!m) return false;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const h = Number(m[4]);
+  const mi = Number(m[5]);
+  const se = Number(m[6]);
+  const dt = new Date(Date.UTC(y, mo - 1, d, h, mi, se));
+  return (
+    dt.getUTCFullYear() === y &&
+    dt.getUTCMonth() === mo - 1 &&
+    dt.getUTCDate() === d &&
+    dt.getUTCHours() === h &&
+    dt.getUTCMinutes() === mi &&
+    dt.getUTCSeconds() === se
+  );
+}
 function decodeKeysetCursor(token: string): { createdAt: string; id: string } {
   const decoded = Buffer.from(token, 'base64url').toString('utf8');
   const sep = decoded.lastIndexOf('|');
   const createdAt = sep >= 0 ? decoded.slice(0, sep) : '';
   const id = sep >= 0 ? decoded.slice(sep + 1) : '';
-  if (!UUID_RE.test(id) || Number.isNaN(Date.parse(createdAt))) {
+  if (!UUID_RE.test(id) || !isEmittedTimestamp(createdAt)) {
     throw new BadRequestException('invalid cursor');
   }
   return { createdAt, id };
