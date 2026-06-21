@@ -141,6 +141,8 @@ export function useConversationBackfill({
   sessionKey,
   setConversations,
 }: ConversationBackfillOptions): ConversationBackfillResult {
+  // Per-conversation resume cursor (the last message's opaque, prune-safe keyset token) → echoed as `after`
+  // on the next backfill so it survives that message being reaped by retention.
   const fetchCursors = useRef(new Map<string, string>());
   const backfilling = useRef(new Set<string>());
   const backfillPending = useRef(new Set<string>());

@@ -55,6 +55,28 @@ describe('contracts', () => {
     expect(ok.success).toBe(true);
   });
 
+  it('accepts a per-message prune-safe cursor, and is back-compat when it is absent', () => {
+    const base = {
+      id: '00000000-0000-4000-8000-000000000001',
+      senderUserId: '00000000-0000-4000-8000-000000000002',
+      clientMessageId: '00000000-0000-4000-8000-000000000003',
+      ciphertext: 'Y2lwaGVydGV4dA==',
+      alg: 'MLS_1.0',
+      epoch: 0,
+      attachmentObjectKey: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    };
+    // forward: a new server stamps an opaque per-message cursor + keeps the legacy UUID nextCursor
+    const withCursor = MessagePageSchema.safeParse({
+      messages: [{ ...base, cursor: 'MjAyNi0wMS0wMVQwMDowMDowMC4wMDAwMDBafGFiYw' }],
+      nextCursor: '00000000-0000-4000-8000-000000000001',
+    });
+    expect(withCursor.success).toBe(true);
+    // backward: an old server omits `cursor` entirely — still valid (optional)
+    const withoutCursor = MessagePageSchema.safeParse({ messages: [base], nextCursor: null });
+    expect(withoutCursor.success).toBe(true);
+  });
+
   it('rejects presigned URLs where only attachment object keys are allowed', () => {
     const bad = UploadGrantSchema.safeParse({
       objectKey: 'https://storage.example.com/bucket/object',

@@ -223,6 +223,80 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     expect(p3.nextCursor).toBeNull();
   });
 
+  // ── prune-safe per-message cursor (Track 4 slice 1) ──────────────────────────────────────────────
+  it('stamps an opaque per-message cursor (base64url, distinct from the id) on every listed message', async () => {
+    const conv = await newConversation();
+    await svc.sendMessage(bobAuth, conv, msg());
+    await svc.sendMessage(bobAuth, conv, msg());
+    const page = await svc.listMessages(bobAuth, conv, { limit: 50 });
+    expect(page.messages).toHaveLength(2);
+    for (const m of page.messages) {
+      expect(m.cursor).toMatch(/^[A-Za-z0-9_-]+$/); // opaque base64url token
+      expect(m.cursor).not.toBe(m.id); // carries (created_at, id), not the bare id
+    }
+  });
+
+  it('paginates via the opaque per-message cursor without overlap', async () => {
+    const conv = await newConversation();
+    const sent: string[] = [];
+    for (let i = 0; i < 5; i++) sent.push((await svc.sendMessage(bobAuth, conv, msg())).messageId);
+
+    const p1 = await svc.listMessages(bobAuth, conv, { limit: 2 });
+    expect(p1.messages.map((m) => m.id)).toEqual(sent.slice(0, 2));
+    // a new client resumes from the LAST message's opaque cursor (what it echoes as `after`)
+    const p2 = await svc.listMessages(bobAuth, conv, {
+      limit: 2,
+      after: p1.messages.at(-1)!.cursor!,
+    });
+    expect(p2.messages.map((m) => m.id)).toEqual(sent.slice(2, 4));
+    const p3 = await svc.listMessages(bobAuth, conv, {
+      limit: 2,
+      after: p2.messages.at(-1)!.cursor!,
+    });
+    expect(p3.messages.map((m) => m.id)).toEqual(sent.slice(4));
+  });
+
+  it('the opaque cursor survives its anchor being pruned; a legacy id cursor does not', async () => {
+    const conv = await newConversation();
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) ids.push((await svc.sendMessage(bobAuth, conv, msg())).messageId);
+
+    // capture the FIRST message's opaque cursor, then delete that message (simulates a TTL prune)
+    const opaqueAfterPruned = (await svc.listMessages(bobAuth, conv, { limit: 1 })).messages[0]!
+      .cursor!;
+    await sql`delete from messages where id = ${ids[0]!}`;
+
+    // position-carrying opaque cursor still resolves "rows newer than here" → messages 2 & 3
+    const recovered = await svc.listMessages(bobAuth, conv, {
+      limit: 50,
+      after: opaqueAfterPruned,
+    });
+    expect(recovered.messages.map((m) => m.id)).toEqual([ids[1], ids[2]]);
+
+    // contrast — the bug this slice fixes: a LEGACY bare-id cursor at the pruned anchor returns an EMPTY
+    // page (old clients fall back to a reload; pruning only arms once new clients are adopted).
+    const legacy = await svc.listMessages(bobAuth, conv, { limit: 50, after: ids[0] });
+    expect(legacy.messages).toEqual([]);
+  });
+
+  it('still accepts a legacy bare-message-id `after` (cached PWA bundles)', async () => {
+    const conv = await newConversation();
+    const sent: string[] = [];
+    for (let i = 0; i < 3; i++) sent.push((await svc.sendMessage(bobAuth, conv, msg())).messageId);
+    const p1 = await svc.listMessages(bobAuth, conv, { limit: 1 });
+    expect(p1.nextCursor).toBe(sent[0]); // legacy page cursor unchanged
+    const p2 = await svc.listMessages(bobAuth, conv, { limit: 50, after: p1.nextCursor! });
+    expect(p2.messages.map((m) => m.id)).toEqual([sent[1], sent[2]]);
+  });
+
+  it('rejects a malformed opaque cursor with 400, before any row lookup (no oracle)', async () => {
+    const conv = await newConversation();
+    await svc.sendMessage(bobAuth, conv, msg());
+    await expect(
+      svc.listMessages(bobAuth, conv, { limit: 50, after: 'not-a-valid-cursor!!' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('a non-member (same tenant) cannot list — 404', async () => {
     const conv = await newConversation();
     await svc.sendMessage(bobAuth, conv, msg());

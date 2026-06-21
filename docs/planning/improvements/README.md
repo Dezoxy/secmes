@@ -21,7 +21,7 @@ non-exhaustive RLS test coverage, and several operational single-point risks.
 | 1   | ✅ [Messaging service refactor](./01-messaging-service-refactor.md)          | Readability     | Merge-conflict & onboarding cost on a 1,185-LOC file | none            |
 | 2   | ✅ [Test coverage + RLS assertions](./02-test-coverage-and-rls-assertions.md) | Test hardening  | A typo'd RLS policy could ship a cross-tenant leak | tests only      |
 | 3   | ✅ [Ops / infra hardening](./03-ops-infra-hardening.md)                       | Operational     | No rollback story; flippable deploy gate; lossy WS | small           |
-| 4   | [Message retention & ciphertext pruning](./04-message-retention-and-pruning.md) | Retention / privacy | `messages` ciphertext grows forever — cost, breach/subpoena surface, no GDPR storage-limitation story | small (cursor contract + role + worker) |
+| 4   | 🟡 [Message retention & ciphertext pruning](./04-message-retention-and-pruning.md) | Retention / privacy | `messages` ciphertext grows forever — cost, breach/subpoena surface, no GDPR storage-limitation story | small (cursor contract + role + worker) |
 
 > Track 4 was added 2026-06-21 — a retention/data-minimization improvement, not part of the original
 > three-track codebase-health review. The server retains every relayed MLS ciphertext forever; this track
@@ -55,7 +55,14 @@ change; Track 3 is mostly activating things already designed.
   column/RLS surface) instead of persisted-at-write, and **no server-consumed ACK** (keeps the Track 4
   delete-on-delivery boundary intact). Metadata-only, outside the MLS envelope. **Track 3 is now complete.**
 
-Track 4 (message retention & pruning) remains a planning doc.
+- 🟡 **Track 4 slice 1 implemented** (2026-06-21, PR _pending_) — the **prune-safe catch-up cursor**, the
+  safety prerequisite that must land before any deletion. `listMessages` now stamps each message with an
+  opaque, position-carrying `(created_at, id)` `cursor` (reusing the proven `/sync` encoding) that the client
+  echoes as `after`; the legacy bare-message-id cursor stays valid, so cached PWA bundles keep paging. A
+  cursor now survives its anchor message being reaped. **No deletion yet** — slices 2-5 (threat model →
+  `messages` boundary migration → TTL worker → commits) follow as their own PRs.
+
+Track 4 deletion (the TTL worker) is not yet implemented; slices 2-5 remain planning docs.
 
 ## Constraints every track must respect
 

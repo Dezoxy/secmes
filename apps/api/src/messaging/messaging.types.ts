@@ -58,11 +58,20 @@ export interface FetchedMessage {
   epoch: number;
   attachmentObjectKey: string | null;
   createdAt: string;
+  /**
+   * Opaque keyset cursor for this message — echo as `after` to resume strictly after it. Prune-safe (it
+   * carries `(created_at, id)`, so it survives this row's deletion). Populated by `listMessages`; absent on
+   * the live WS push (single, not paginated). Optional so the WS frame and `SyncedMessage` need not set it.
+   */
+  cursor?: string;
 }
 
 export interface MessagePage {
   messages: FetchedMessage[];
-  /** Cursor (last message id) to pass as `after` for the next page, or null when the page wasn't full. */
+  /**
+   * LEGACY page cursor: the last message id, to pass as `after` for the next page (null when not a full
+   * page). Kept for cached PWA bundles. New clients page off each message's prune-safe `cursor` instead.
+   */
   nextCursor: string | null;
 }
 

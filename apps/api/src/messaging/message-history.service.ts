@@ -28,23 +28,29 @@ const MessageRowSchema = z.object({
   created_at: z.coerce.date(),
 });
 
-// The sync row adds the conversation id (cross-conversation stream) + a full-precision created_at text
-// for the opaque cursor (the driver's JS Date is only ms — too lossy to page on).
-const SyncRowSchema = MessageRowSchema.extend({
-  conversation_id: z.string().uuid(),
+// listMessages adds a full-precision created_at text for the opaque per-message cursor (the driver's JS
+// Date is only ms — too lossy to page on; a same-ms cursor would never advance past its own row).
+const MessageRowWithCursorSchema = MessageRowSchema.extend({
   created_at_iso: z.string(),
+});
+
+// The sync row adds the conversation id (cross-conversation stream) + the same full-precision created_at.
+const SyncRowSchema = MessageRowWithCursorSchema.extend({
+  conversation_id: z.string().uuid(),
 });
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// The sync cursor is an OPAQUE token carrying the (created_at, id) the client last saw — NOT a message
-// id the server looks up. This avoids (a) an existence/timing oracle (no per-id lookup) and (b) breaking
-// a client whose last-seen message is in a conversation they've since left (no membership dependency on
-// the cursor). The client treats it as opaque and echoes back the previous page's nextCursor.
-function encodeSyncCursor(createdAtIso: string, id: string): string {
+// A keyset cursor is an OPAQUE token carrying the (created_at, id) the client last saw — NOT a message id
+// the server looks up. Shared by the cross-conversation `syncMessages` and per-conversation `listMessages`
+// pagination. This avoids (a) an existence/timing oracle (no per-id lookup) and (b) breaking a client whose
+// last-seen message is in a conversation they've since left (no membership dependency on the cursor), and —
+// because it carries the position directly — it stays valid even after the anchor message is pruned (Track
+// 4 retention). The client treats it as opaque and echoes back the previous page's cursor.
+function encodeKeysetCursor(createdAtIso: string, id: string): string {
   return Buffer.from(`${createdAtIso}|${id}`, 'utf8').toString('base64url');
 }
-function decodeSyncCursor(token: string): { createdAt: string; id: string } {
+function decodeKeysetCursor(token: string): { createdAt: string; id: string } {
   const decoded = Buffer.from(token, 'base64url').toString('utf8');
   const sep = decoded.lastIndexOf('|');
   const createdAt = sep >= 0 ? decoded.slice(0, sep) : '';
@@ -64,27 +70,39 @@ export class MessageHistoryService {
    * List a conversation's messages (CIPHERTEXT ONLY) in chronological order for a MEMBER. AUTHZ: same
    * membership 404 as send — non-members / cross-tenant / non-existent conversations leak nothing. The
    * server returns the opaque ciphertext + routing metadata verbatim; it never decrypts. Keyset
-   * pagination on (created_at, id): pass the previous page's `nextCursor` as `after` to continue.
+   * pagination on (created_at, id): each message carries a prune-safe opaque `cursor`; echo the last one
+   * you saw as `after` to continue. The legacy bare-message-id `after` (older clients) is still accepted.
    */
   async listMessages(
     auth: VerifiedAuth,
     conversationId: string,
     query: ListMessagesQuery,
   ): Promise<MessagePage> {
+    // `after` accepts EITHER a legacy bare message id (cached PWA bundles) OR an opaque per-message
+    // `cursor` token (an encoded (created_at, id) — new, prune-safe). Decode the opaque form up front so a
+    // malformed token throws 400 before opening a transaction. Both forms feed the keyset via BOUND params.
+    const opaqueCursor =
+      query.after && !UUID_RE.test(query.after) ? decodeKeysetCursor(query.after) : null;
     return withTenant(auth.tenantId, async (tx) => {
       const user = await requireUser(tx, auth);
       await requireMembership(tx, conversationId, user);
 
-      // Exclusive keyset cursor: rows strictly after the cursor row in (created_at, id) order. The cursor
-      // row is looked up under RLS AND scoped to this conversation, so a foreign/invalid `after` resolves
-      // to NULL → an empty page (safe). `conversationId`/`after` are bound parameters (not
-      // string-interpolated) — no SQL injection.
-      const cursor = query.after
-        ? sql`and (m.created_at, m.id) > (select created_at, id from messages where id = ${query.after} and conversation_id = ${conversationId})`
-        : sql``;
+      // Exclusive keyset cursor: rows strictly after the cursor position in (created_at, id) order.
+      //  - opaque token  → use its (created_at, id) DIRECTLY (no row lookup) so it still resolves even
+      //    after the anchor message is pruned (Track 4), and is no existence/timing oracle.
+      //  - legacy id     → look the anchor row up under RLS AND scoped to this conversation, so a
+      //    foreign/invalid/already-pruned id resolves to NULL → an empty page (safe; old clients predate
+      //    pruning). `conversationId`/`after` are bound parameters — no SQL injection.
+      let cursor = sql``;
+      if (opaqueCursor) {
+        cursor = sql`and (m.created_at, m.id) > (${opaqueCursor.createdAt}::timestamptz, ${opaqueCursor.id}::uuid)`;
+      } else if (query.after) {
+        cursor = sql`and (m.created_at, m.id) > (select created_at, id from messages where id = ${query.after} and conversation_id = ${conversationId})`;
+      }
       const rows = (await tx.execute(sql`
         select m.id, m.sender_user_id, m.client_message_id, m.ciphertext, m.alg, m.epoch,
-               m.attachment_object_key, m.created_at
+               m.attachment_object_key, m.created_at,
+               to_char(m.created_at at time zone 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as created_at_iso
         from messages m
         where m.conversation_id = ${conversationId} ${cursor}
         order by m.created_at asc, m.id asc
@@ -94,7 +112,7 @@ export class MessageHistoryService {
       const messages: FetchedMessage[] = rows.map((raw) => {
         // safeParse + content-free error: a ZodError can echo the offending value (which holds
         // `ciphertext`); never let message content reach an error/log (invariant #2).
-        const parsed = MessageRowSchema.safeParse(raw);
+        const parsed = MessageRowWithCursorSchema.safeParse(raw);
         if (!parsed.success) throw new Error('message row shape drift');
         const r = parsed.data;
         return {
@@ -106,9 +124,12 @@ export class MessageHistoryService {
           epoch: r.epoch,
           attachmentObjectKey: r.attachment_object_key,
           createdAt: r.created_at.toISOString(),
+          // Prune-safe per-message resume token (built from the FULL-precision created_at, never the ms
+          // Date). New clients page off this; old clients use `nextCursor` below.
+          cursor: encodeKeysetCursor(r.created_at_iso, r.id),
         };
       });
-      // A full page implies more may exist → hand back the last id as the next cursor.
+      // LEGACY page cursor for old clients: a full page implies more may exist → hand back the last id.
       const last = messages.at(-1);
       const nextCursor = last && messages.length === query.limit ? last.id : null;
       return { messages, nextCursor };
@@ -131,7 +152,7 @@ export class MessageHistoryService {
     // Decode the opaque cursor up front (throws 400 on a malformed token). The (created_at, id) is used
     // directly in the keyset — no message lookup, so it's neither an existence oracle nor dependent on
     // the caller still being a member of the cursor message's conversation. Bound params, no injection.
-    const cursorPos = query.after ? decodeSyncCursor(query.after) : null;
+    const cursorPos = query.after ? decodeKeysetCursor(query.after) : null;
     return withTenant(auth.tenantId, async (tx) => {
       const user = await requireUser(tx, auth);
 
@@ -175,7 +196,7 @@ export class MessageHistoryService {
       // only for an empty page (nothing after the cursor → the client keeps its prior cursor). The client
       // decides whether to keep paging by whether it received a full page (`messages.length === limit`).
       const lastRow = parsedRows.at(-1);
-      const nextCursor = lastRow ? encodeSyncCursor(lastRow.created_at_iso, lastRow.id) : null;
+      const nextCursor = lastRow ? encodeKeysetCursor(lastRow.created_at_iso, lastRow.id) : null;
       return { messages, nextCursor };
     });
   }
