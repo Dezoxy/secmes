@@ -1,6 +1,6 @@
 # Track 3 — Operational / infra hardening
 
-> **Status:** items **A, B, C IMPLEMENTED as runbooks** 2026-06-21 (PR 3a — docs only); item **D** (realtime
+> **Status:** items **A, B, C IMPLEMENTED as runbooks** 2026-06-21 ([#287](https://github.com/Dezoxy/secmes/pull/287), PR 3a — docs only); item **D** (realtime
 > sequence numbers) remains **PROPOSED** and ships as its own follow-up PR (3b). **Correction:** the live
 > deploy path is **AWS** (`infra/aws/`, `cd-aws.yml`, the `aws-experiment` environment), not the Azure VM
 > this doc originally assumed — so the runbooks are **AWS-primary**, items B & C were found **already active
