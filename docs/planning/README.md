@@ -30,3 +30,10 @@ plus **DRAFT** / **REVISED** / **ARCHIVE**. Dates are ISO (`YYYY-MM-DD`).
 - [`improvements/`](improvements/) — health-review follow-ups (messaging-service refactor, RLS test
   coverage, ops hardening, message retention). See [`improvements/README.md`](improvements/README.md) for
   priority order and constraints.
+
+## Feature plans
+
+- [`voip/`](voip/) — 1:1 end-to-end-encrypted **voice/video calling** (WebRTC P2P + self-hosted coturn,
+  relay-by-default, PWA-only). 12-file set, consilium-reviewed (6.3/10, sound-with-fixes). **Status:
+  PROPOSED** — planning only, not yet approved for build (needs a `security-architect` pass on TURN
+  ingress + the anti-MITM crypto path). Start at [`voip/README.md`](voip/README.md).
