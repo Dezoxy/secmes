@@ -134,7 +134,9 @@ The schema change is incompatible with every deployed image. Restore the most re
    steps 2–5 here** — those load into the *workstation's* cluster and then shred the key + dump. Instead, write
    the globals to a file and drop the key before transferring plaintext:
    ```bash
+   umask 077                                         # decrypted dumps land 0600 — they are cleartext PII
    age -d -i age.key globals.sql.age > globals.sql   # the runbook normally pipes this straight into psql
+   chmod 600 globals.sql backup.dump                 # backup.dump was written by the restore runbook's step 1
    shred -u age.key                                  # age key no longer needed off-box; remove it now
    ```
 3. **Move the decrypted dump to the VM (via SSM, not SSH) and restore it into the production cluster.** The
@@ -153,7 +155,9 @@ The schema change is incompatible with every deployed image. Restore the most re
      --instance-os-user ubuntu --ssh-public-key file:///tmp/restore_key.pub
    aws ssm start-session --target <id> --document-name AWS-StartPortForwardingSession \
      --parameters '{"portNumber":["22"],"localPortNumber":["2222"]}' &
-   scp -P 2222 -i /tmp/restore_key globals.sql backup.dump ubuntu@localhost:/var/tmp/
+   # land them in ~ubuntu (mode 0750 — not world-readable, unlike /var/tmp) and lock to 0600 on arrival:
+   scp -P 2222 -i /tmp/restore_key globals.sql backup.dump ubuntu@localhost:
+   ssh -p 2222 -i /tmp/restore_key ubuntu@localhost 'chmod 600 ~/globals.sql ~/backup.dump'
    shred -u /tmp/restore_key /tmp/restore_key.pub
    ```
    (Verify the os-user / AZ / AMI specifics against the running instance; the fully-verified transfer belongs
@@ -164,9 +168,9 @@ The schema change is incompatible with every deployed image. Restore the most re
    Postgres over the local socket as the **owner** (`-U argus`, the role `deploy.sh` uses; PG has no published
    port — invariant #3):
    ```bash
-   docker compose -f <compose> exec -T postgres psql -U argus -d postgres < /var/tmp/globals.sql   # roles first
+   docker compose -f <compose> exec -T postgres psql -U argus -d postgres < /home/ubuntu/globals.sql   # roles first
    docker compose -f <compose> exec -T postgres createdb -U argus argus_restore
-   docker compose -f <compose> exec -T postgres pg_restore -U argus -d argus_restore < /var/tmp/backup.dump
+   docker compose -f <compose> exec -T postgres pg_restore -U argus -d argus_restore < /home/ubuntu/backup.dump
    docker compose -f <compose> exec -T postgres psql -U argus -d argus_restore \
      -c "select version from schema_migrations order by version desc limit 5;"   # the bad migration must NOT be listed
    ```
@@ -187,7 +191,7 @@ The schema change is incompatible with every deployed image. Restore the most re
    (Both renames need **zero** active connections to either database.) Then re-apply role logins per
    `infra/backup/README.md` step 4 (argus_app's password from Key Vault; argus_backup/argus_cleanup
    LOGIN-only) and **securely delete the plaintext dumps on BOTH ends** — on the VM
-   (`shred -u /var/tmp/globals.sql /var/tmp/backup.dump`) and on the trusted host (`shred -u globals.sql
+   (`shred -u /home/ubuntu/globals.sql /home/ubuntu/backup.dump`) and on the trusted host (`shred -u globals.sql
    backup.dump` where you created them; the age key was already shredded in step 2). They hold the same
    cleartext PII as the live DB, so don't leave them behind.
 5. **Roll forward with the fix.** The restored cluster's `schema_migrations` does **not** contain the bad
