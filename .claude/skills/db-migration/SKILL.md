@@ -40,3 +40,9 @@ DROP TABLE <name>;
 ```
 
 After generating, route the change through the **security-boundary-auditor** subagent.
+
+## Automatic guard
+`apps/api/src/db/rls-coverage.spec.ts` enumerates every `public` table from the live catalog and fails CI if
+any non-allowlisted table lacks `tenant_id` + **forced** RLS with an `app.tenant_id` policy. A new tenant
+table that skips the rules above turns it red automatically — if your table is genuinely tenant-less, add it
+to that spec's commented allowlist (a reviewed exception), don't weaken the policy.
