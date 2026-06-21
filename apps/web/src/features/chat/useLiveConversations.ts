@@ -582,13 +582,31 @@ export function useLiveConversations({
           // before decrypting. Passing maxEpoch = message.epoch prevents the drain from overshooting
           // and consuming keys that belong to messages still in-flight at intermediate epochs.
           if (message.epoch > group.epoch) {
-            await processCommitEvent(
+            const drain = await processCommitEvent(
               deps,
               conversationId,
               group,
               { epoch: message.epoch },
               message.epoch,
             );
+            // Track 4 slice 5b — if the drain couldn't reach the live message's epoch because the
+            // commit that would advance the group was pruned, this conversation is sync-lost. Without
+            // this check a freshly-subscribed device with no backlog (so runCatchUp found no gap) would
+            // silently log the message as undecryptable below and only recover on an unrelated
+            // reconnect. A transient stall falls through and self-heals via the catch-up/gap paths.
+            if (group.epoch < message.epoch) {
+              const state = classifyCommitDrain({
+                localEpoch: group.epoch,
+                targetEpoch: message.epoch,
+                oldestRetainedEpoch: drain.oldestRetainedEpoch,
+              });
+              if (state === 'sync-lost') {
+                // eslint-disable-next-line no-console
+                console.warn('ws message: conversation sync-lost (commit pruned)', conversationId);
+                onSyncLost?.(conversationId);
+                return; // unreachable epoch — don't attempt an undecryptable read
+              }
+            }
           }
           const decrypted = await receiveLiveMessage(
             deps,
