@@ -1,0 +1,74 @@
+# argus — prune messages older than the 90-day retention ceiling (Track 4 slice 4). Triggered by the .timer
+# (daily). Install: copy this dir to /opt/argus/retention, place the units in /etc/systemd/system, then
+#   systemctl daemon-reload && systemctl enable --now argus-message-retention.timer
+# On the real deploy, deploy.sh step 5c stages + installs + arms this automatically. Manual dry run:
+#   systemctl start argus-message-retention  (then check `journalctl -u argus-message-retention`)
+#
+# This unit is DB-only: it reaches Postgres in-container via `docker compose exec` and needs NO secret, NO
+# credential file, and NO network egress. So it is hardened STRICTER than argus-attachment-cleanup — no
+# LoadCredential, no AWS HOME/cache dir, AF_UNIX-only address families, and MemoryDenyWriteExecute=true
+# (the attachment worker cannot set MDWE because AWS CLI v2 maps W+X memory; this worker runs no such binary).
+# Identical posture to argus-audit-prune.service (the proven pattern this clones) — only the role/table differ.
+[Unit]
+Description=argus — prune messages past the 90-day retention ceiling (TTL retention enforcement)
+Documentation=https://github.com/Dezoxy/secmes/blob/main/docs/threat-models/message-retention.md
+# The worker runs `docker compose exec` against the postgres container, so it needs the Docker daemon up —
+# order after it (and pull it up if idle) so a timer firing after a reboot, before Docker is ready, doesn't
+# fail. If Docker is genuinely down the exec fails and OnFailure= alerts.
+After=docker.service
+Wants=docker.service
+# No argus-secrets.service dependency: this worker uses no Key Vault secret (local-trust socket, no password).
+# On any failure fire the notifier template (see infra/notify/).
+OnFailure=argus-notify-failure@%p.service
+
+[Service]
+Type=oneshot
+User=argus
+Group=argus
+TimeoutStartSec=900
+
+# --- Non-secret config. The DB is reached IN-CONTAINER via `docker compose exec` — PG has no published host
+#     port (invariant #3), so there is no PGHOST/PGPORT/PGPASSFILE and no DB password anywhere. COMPOSE_FILE +
+#     COMPOSE_PROJECT_NAME let `docker compose` attach to the deployed stack; PGUSER/PGDATABASE are the role/db
+#     the in-container client connects as. ---
+Environment=COMPOSE_FILE=/opt/argus/compose.prod.yaml
+Environment=COMPOSE_PROJECT_NAME=argus-prod
+Environment=PGUSER=argus_msg_prune
+Environment=PGDATABASE=argus
+
+# `docker compose` needs the staged compose tree to resolve from; run from the app dir.
+WorkingDirectory=/opt/argus
+
+ExecStart=/opt/argus/retention/prune-messages.sh
+
+# --- Hardening: least-privilege oneshot that reaches ONLY the docker socket (to exec psql in-container).
+#     `argus` is already in the docker group (cloud-init), so this grants no NEW privilege. ---
+NoNewPrivileges=true
+# ProtectSystem=full (not strict): the docker client must reach /run/docker.sock; strict would make /run
+# read-only and block the connect. full still keeps /usr,/boot,/etc read-only; CapabilityBoundingSet stays empty.
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectHostname=true
+ProtectClock=true
+ProtectProc=invisible
+ProcSubset=pid
+# AF_UNIX (docker socket) + AF_NETLINK (the docker/compose Go client opens a kernel-local netlink socket
+# during net-stack init — interface/route enumeration; denying it can fail the CLI with EAFNOSUPPORT). Neither
+# is network egress: AF_NETLINK is kernel-local, AF_UNIX is the local socket. AF_INET/AF_INET6 stay OFF — that
+# is the meaningful tightening vs. the attachment worker (which needs them for B2); this worker has no egress.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+LockPersonality=true
+# No W+X binary here (no AWS CLI v2 PyInstaller bundle), so we CAN deny writable-executable memory — a
+# mitigation the attachment worker must omit.
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+UMask=0077

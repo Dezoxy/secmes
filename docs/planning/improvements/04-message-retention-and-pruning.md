@@ -188,6 +188,20 @@ pruning is implemented.
    `infra/retention/prune-messages.sh` + systemd `service`/`timer`, modeled on `infra/audit-prune/`;
    counts-only logging, fail-closed, batched with a max-rounds cap. Gates: `infra-reviewer`, shellcheck,
    dry-run against a disposable DB.
+
+   > **Implemented 2026-06-21 (PR _pending_).** The v1 TTL deletion now ships.
+   > [`infra/retention/prune-messages.sh`](../../../infra/retention/prune-messages.sh) — a single-table clone
+   > of `prune-audit.sh`: connects in-container as `argus_msg_prune` (no password), batch-deletes `messages`
+   > with `created_at < now() - interval '90 days'` (the **same literal as the `0044` RLS policy** — the RLS
+   > `DELETE` policy is the DB-enforced hard floor regardless), loops to `PRUNE_MAX_ROUNDS`, logs **counts
+   > only** (`pruned_messages=N`, never a row id — §7 cond 5), and **fails closed** (`exit 1` → `OnFailure`
+   > alert) if the DB is unreachable. Daily systemd `timer` +
+   > [hardened `service`](../../../infra/retention/argus-message-retention.service) (no `LoadCredential`, no
+   > egress — `AF_UNIX`/`AF_NETLINK` only, `MemoryDenyWriteExecute=true`).
+   > [`deploy.sh`](../../../infra/stack/deploy/deploy.sh) wires §7 cond 2: `ALTER ROLE argus_msg_prune WITH
+   > LOGIN PASSWORD NULL` out-of-band **plus a connectivity probe** that fails the deploy if the role can't
+   > connect (so retention can never silently never-run). **No app code, no migration, no contract change.**
+   > `conversation_commits` pruning (slice 5) stays deferred — no `DELETE` grant on it exists.
 5. **Extend to `conversation_commits`** — *only once the client missing-commit / sync-lost recovery signal
    exists* (Codex P2). This slice's migration re-scopes `commits_tenant_isolation` `TO argus_app`, adds the
    commit window policy + `(id, created_at, conversation_id, epoch)` SELECT + `created_at` index, and **grants

@@ -399,10 +399,11 @@ esac
 # secret is passed; if local trust is ever disabled, psql fails and `set -e` aborts (fail-closed).
 if ! docker compose -f "$COMPOSE" exec -T postgres \
   psql -U argus -d argus -v ON_ERROR_STOP=1 -q >/dev/null <<SQL; then
-ALTER ROLE argus_app     WITH LOGIN PASSWORD '${_app_pw}';
-ALTER ROLE argus_cleanup WITH LOGIN PASSWORD NULL;
-ALTER ROLE argus_backup  WITH LOGIN PASSWORD NULL;
-ALTER ROLE argus_prune   WITH LOGIN PASSWORD NULL;
+ALTER ROLE argus_app       WITH LOGIN PASSWORD '${_app_pw}';
+ALTER ROLE argus_cleanup   WITH LOGIN PASSWORD NULL;
+ALTER ROLE argus_backup    WITH LOGIN PASSWORD NULL;
+ALTER ROLE argus_prune     WITH LOGIN PASSWORD NULL;
+ALTER ROLE argus_msg_prune WITH LOGIN PASSWORD NULL;
 SQL
   _app_pw=""
   log "FATAL: failed to provision runtime role logins"
@@ -427,10 +428,11 @@ log "deploying + arming backup/cleanup workers"
 # can't target the production buckets; the age recipient is PUBLIC.
 # Stage the worker + notifier scripts where the units' ExecStart points
 # (/opt/argus/{backup,cleanup,audit-prune,notify}).
-install -d -m 0755 "$APP_DIR/backup" "$APP_DIR/cleanup" "$APP_DIR/audit-prune" "$APP_DIR/notify"
+install -d -m 0755 "$APP_DIR/backup" "$APP_DIR/cleanup" "$APP_DIR/audit-prune" "$APP_DIR/retention" "$APP_DIR/notify"
 install -m 0755 "$REPO_ROOT/infra/backup/backup-db.sh" "$APP_DIR/backup/backup-db.sh"
 install -m 0755 "$REPO_ROOT/infra/cleanup/cleanup-attachments.sh" "$APP_DIR/cleanup/cleanup-attachments.sh"
 install -m 0755 "$REPO_ROOT/infra/audit-prune/prune-audit.sh" "$APP_DIR/audit-prune/prune-audit.sh"
+install -m 0755 "$REPO_ROOT/infra/retention/prune-messages.sh" "$APP_DIR/retention/prune-messages.sh"
 install -m 0755 "$REPO_ROOT/infra/notify/notify-failure.sh" "$APP_DIR/notify/notify-failure.sh"
 # Install the units, then substitute the REPLACE_WITH_* placeholders on the INSTALLED copies (same idiom as
 # the argus-secrets KV-name substitution in step 1). `|` delimiter: age keys + B2 key-ids contain no `|`.
@@ -443,6 +445,10 @@ install -m 0644 "$REPO_ROOT/infra/cleanup/argus-attachment-cleanup.timer" /etc/s
 # The audit-prune worker (F1/AR-1) is DB-only — no REPLACE_WITH_* placeholders, no bucket, no key, no secret.
 install -m 0644 "$REPO_ROOT/infra/audit-prune/argus-audit-prune.service" /etc/systemd/system/argus-audit-prune.service
 install -m 0644 "$REPO_ROOT/infra/audit-prune/argus-audit-prune.timer" /etc/systemd/system/argus-audit-prune.timer
+# The message-retention worker (Track 4 slice 4) is likewise DB-only — same in-container local-trust path, no
+# placeholder/bucket/key/secret. The v1 TTL deletion: prunes messages past the 90-day ceiling (migration 0044).
+install -m 0644 "$REPO_ROOT/infra/retention/argus-message-retention.service" /etc/systemd/system/argus-message-retention.service
+install -m 0644 "$REPO_ROOT/infra/retention/argus-message-retention.timer" /etc/systemd/system/argus-message-retention.timer
 install -m 0644 "$REPO_ROOT/infra/notify/argus-notify-failure@.service" /etc/systemd/system/argus-notify-failure@.service
 # Per-worker B2 credentials, each scoped to the bucket it touches (least-privilege; no reliance on the
 # over-broad cross-bucket key — BKP-2): the backup worker → the db-backups key (B2_APP_KEY_ID + the
@@ -458,8 +464,8 @@ sed -i "s|REPLACE_WITH_AGE_PUBLIC_KEY|${BACKUP_AGE_RECIPIENT}|" /etc/systemd/sys
 sed -i "s|REPLACE_WITH_BACKUP_BUCKET|${BACKUP_S3_BUCKET}|" /etc/systemd/system/argus-db-backup.service
 sed -i "s|REPLACE_WITH_ATTACHMENT_BUCKET|${S3_BUCKET}|" /etc/systemd/system/argus-attachment-cleanup.service
 systemctl daemon-reload
-systemctl enable --now argus-db-backup.timer argus-attachment-cleanup.timer argus-audit-prune.timer >/dev/null 2>&1 || {
-  log "FATAL: could not enable the backup/cleanup/audit-prune timers"
+systemctl enable --now argus-db-backup.timer argus-attachment-cleanup.timer argus-audit-prune.timer argus-message-retention.timer >/dev/null 2>&1 || {
+  log "FATAL: could not enable the backup/cleanup/audit-prune/message-retention timers"
   exit 1
 }
 # PROVE the connectivity the BKP-1 finding flagged as broken — via the SAME path the nightly worker now uses:
@@ -484,7 +490,16 @@ if ! docker compose -f "$COMPOSE" exec -T postgres \
   log "FATAL: argus_prune cannot connect to Postgres — the audit-prune worker would never run (F1/AR-1)"
   exit 1
 fi
-log "DB connectivity OK — nightly backup + daily cleanup + daily audit-prune timers armed"
+# Same proof for the message-retention worker (Track 4 slice 4): argus_msg_prune connecting IN-CONTAINER over
+# the local-trust socket — the exact path the daily timer uses. A prune role that can't connect would silently
+# never enforce the message TTL (threat-model §7 cond 2), so gate the deploy on it. Logs status only.
+log "probing message-retention DB connectivity (argus_msg_prune, in-container)"
+if ! docker compose -f "$COMPOSE" exec -T postgres \
+  psql -U argus_msg_prune -d argus -tAc 'select 1' >/dev/null 2>&1; then
+  log "FATAL: argus_msg_prune cannot connect to Postgres — the message-retention worker would never run (Track 4 slice 4)"
+  exit 1
+fi
+log "DB connectivity OK — nightly backup + daily cleanup + daily audit-prune + daily message-retention timers armed"
 
 # --- 6. Bring up the full stack. cloudflared's token is delivered as a mounted credential FILE
 #        (TUNNEL_TOKEN_FILE → /run/secrets/tunnel_token; cloudflared >=2025.4.0), NOT a TUNNEL_TOKEN env var —
