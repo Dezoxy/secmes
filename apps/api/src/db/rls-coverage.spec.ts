@@ -50,12 +50,31 @@ const TENANT_ID_EQ_SHAPE = String.raw`^\(tenant_id = .*current_setting\('app\.te
 // fail the tenant_id-shape check and be flagged, not silently pass.
 const TENANTS_ID_EQ_SHAPE = String.raw`^\(id = .*current_setting\('app\.tenant_id'.*\)::uuid\)$`;
 
+// PostgreSQL OR-combines permissive policies, so a single tenant-shaped policy is NOT enough: a second
+// app-visible policy (granted to argus_app or PUBLIC) with a permissive predicate — e.g. SELECT USING
+// (true), the prune-role bypass class — would silently re-open cross-tenant reads (Codex P2; cf. #262).
+// The guard therefore also fails on ANY app-visible policy whose USING/WITH CHECK is not the tenant shape,
+// unless it is one of these explicitly-reviewed, row-scoped carve-outs. Cleanup/prune policies are granted
+// to argus_cleanup / argus_prune (NOT app-visible) so they are out of scope here. Each entry is
+// `<table>.<policyname>`; the "no stale carve-out" test below fails if one ever disappears.
+const CARVE_OUT_POLICIES = new Set<string>([
+  // Pre-tenant session refresh: a single row matched by app.session_refresh_hash, not a bulk read.
+  'auth_sessions.auth_sessions_refresh_lookup',
+  // Pre-tenant invite accept: a single row matched by app.invite_token_hash.
+  'tenant_invites.tenant_invites_accept_flow',
+  // Invite passkey consume: a single invite row matched by app.current_invite_id.
+  'tenant_invites.tenant_invites_passkey_consume',
+]);
+
 interface TableRls {
   table: string;
   rls_enabled: boolean;
   rls_forced: boolean;
   has_tenant_id: boolean;
   tenant_policies: number;
+  // App-visible (argus_app / PUBLIC) policies with a non-tenant-shaped USING or WITH CHECK — the
+  // permissive-policy / OR-combine risk. Each must be in CARVE_OUT_POLICIES or it's a violation.
+  app_visible_extra_policies: string[];
 }
 
 describe.skipIf(!DB_URL)('RLS coverage (catalog-driven)', () => {
@@ -83,7 +102,20 @@ describe.skipIf(!DB_URL)('RLS coverage (catalog-driven)', () => {
           where p.schemaname = 'public' and p.tablename = c.relname
             and p.qual ~* (case when c.relname = ${TENANT_BY_ID} then ${TENANTS_ID_EQ_SHAPE} else ${TENANT_ID_EQ_SHAPE} end)
             and p.with_check ~* (case when c.relname = ${TENANT_BY_ID} then ${TENANTS_ID_EQ_SHAPE} else ${TENANT_ID_EQ_SHAPE} end)
-        )::int as tenant_policies
+        )::int as tenant_policies,
+        -- Any policy granted to argus_app or PUBLIC whose USING or WITH CHECK is present but NOT the
+        -- tenant shape — i.e. could widen app visibility beyond the tenant. Cleanup/prune policies are
+        -- granted to argus_cleanup / argus_prune and are excluded here. Filtered against CARVE_OUT_POLICIES.
+        coalesce((
+          select array_agg(p.policyname::text order by p.policyname)
+          from pg_policies p
+          where p.schemaname = 'public' and p.tablename = c.relname
+            and p.roles && array['argus_app', 'public']::name[]
+            and (
+              (p.qual is not null and p.qual !~* (case when c.relname = ${TENANT_BY_ID} then ${TENANTS_ID_EQ_SHAPE} else ${TENANT_ID_EQ_SHAPE} end))
+              or (p.with_check is not null and p.with_check !~* (case when c.relname = ${TENANT_BY_ID} then ${TENANTS_ID_EQ_SHAPE} else ${TENANT_ID_EQ_SHAPE} end))
+            )
+        ), array[]::text[]) as app_visible_extra_policies
       from pg_class c
       join pg_namespace n on n.oid = c.relnamespace
       where n.nspname = 'public' and c.relkind = 'r'
@@ -123,7 +155,24 @@ describe.skipIf(!DB_URL)('RLS coverage (catalog-driven)', () => {
           `${r.table}: no policy whose USING and WITH CHECK both reference current_setting('app.tenant_id')`,
         );
       }
+      // OR-combine guard: any app-visible policy that isn't tenant-shaped must be a reviewed carve-out.
+      const extras = (r.app_visible_extra_policies ?? []).filter(
+        (name) => !CARVE_OUT_POLICIES.has(`${r.table}.${name}`),
+      );
+      if (extras.length > 0) {
+        violations.push(
+          `${r.table}: app-visible policy not tenant-scoped and not in CARVE_OUT_POLICIES: ${extras.join(', ')}`,
+        );
+      }
     }
     expect(violations).toEqual([]);
+  });
+
+  it('carve-out allowlist has no stale entries (each is still a present app-visible policy)', () => {
+    const present = new Set(
+      rows.flatMap((r) => (r.app_visible_extra_policies ?? []).map((name) => `${r.table}.${name}`)),
+    );
+    const stale = [...CARVE_OUT_POLICIES].filter((entry) => !present.has(entry));
+    expect(stale).toEqual([]);
   });
 });
