@@ -1,10 +1,11 @@
 # Track 4 — Message retention & ciphertext pruning (bound DB growth)
 
-> **Status:** PROPOSED 2026-06-21. Server-side only (one small `apps/api` catch-up-cursor fix; no client or
-> `@argus/contracts` change). The only user-visible effect: ciphertext older than the retention ceiling is no
-> longer fetchable from the server (clients keep their own local history). Ships as its own migration + worker
-> PRs (slices below). Sequenced **first** (see [README priority](./README.md)) because it should land before
-> production starts accumulating ciphertext that can never be reclaimed.
+> **Status:** PROPOSED 2026-06-21. Mostly server-side, with **gated prerequisites before any deletion**: a
+> position-carrying backfill cursor (a small `ListMessagesQuery` change), and — for commit pruning — a client
+> missing-commit / sync-lost signal. No message wire-format / envelope change. The only user-visible effect:
+> ciphertext older than the retention ceiling is no longer fetchable from the server (clients keep their own
+> local history). Ships as its own slices (below). Sequenced **first** (see [README priority](./README.md))
+> because it should land before production starts accumulating ciphertext that can never be reclaimed.
 
 ## Problem
 
@@ -56,20 +57,30 @@ the cursor's anchor row no longer exists
 ([`messaging.service.ts:616-622`](../../apps/api/src/messaging/messaging.service.ts),
 [`useConversationBackfill.ts:203-210`](../../apps/web/src/features/chat/useConversationBackfill.ts)) — so if a
 quiet conversation's last-seen message ages past the TTL and is pruned, even a *briefly*-offline device can
-stop seeing newer retained messages until a reload. **Before TTL deletion is enabled**, the cursor must
-degrade gracefully: resolve a missing anchor to the nearest-newer message by `(created_at, id)` instead of
-returning empty. This is a small `apps/api` change to `listMessages` cursor handling — no wire/contract
-change — so v1 is *not* literally zero server-code; it is the first slice.
+stop seeing newer retained messages until a reload. This cannot be fixed server-side alone: `after` is a bare
+**message UUID** ([`messaging.schemas.ts:23-25`](../../apps/api/src/messaging/messaging.schemas.ts)) and the
+row that carried its `created_at` is exactly what pruning removes — so nothing remains to locate
+"nearest-newer" from (Codex P2). **Before TTL deletion is enabled**, pick one: (a) a **position-carrying
+cursor** — make `after` an opaque `(created_at, id)` token so the position survives the anchor's deletion (a
+small, backward-compatible cursor-shape change to `ListMessagesQuery`); or (b) a **retained-window fallback** —
+when the anchor is unknown/pruned, restart paging from the oldest retained message. Recommended: (a). Either
+way this is a real (if small) change touching `apps/api` *and* the query schema — so v1 is *not* zero-code —
+and it is the first slice.
 
 **The other two ciphertext tables, simpler rules:**
 
 - `conversation_commits` — **TTL ceiling only, contiguity-preserving (Codex P2).** A catching-up device
   drains commits *in epoch order* and must `processCommit()` each one to advance, so deleting an intermediate
-  `epoch < max(epoch)` row strands a device at an older epoch (it cannot apply a later commit and falls into
-  sync-lost / re-invite — not merely "missing old history"). Reap only the **oldest contiguous prefix** of
-  commits older than the ceiling, **never leaving a gap**, and **always keep the current epoch**. A device
-  offline beyond the retained chain hits the existing sync-lost / re-invite path — state that explicitly as
-  the supported offline limit.
+  `epoch < max(epoch)` row strands a device at an older epoch (it cannot apply a later commit — not merely
+  "missing old history"). Reap only the **oldest contiguous prefix** of commits older than the ceiling,
+  **never leaving a gap**, and **always keep the current epoch**. **There is no existing recovery path (Codex
+  P2):** today `drainCommits` logs an unprocessable commit and returns, and the catch-up loop silently retries
+  without noticing the epoch never advanced
+  ([`messaging.ts:288-301`](../../apps/web/src/lib/messaging.ts),
+  [`useLiveConversations.ts:447-457`](../../apps/web/src/features/chat/useLiveConversations.ts)) — so a device
+  behind the first retained epoch would **spin / stay stuck**, not re-invite. Commit pruning therefore carries
+  its own prerequisite: build an **explicit missing-commit / sync-lost signal** (detect the gap → surface
+  re-invite) *before* enabling it. Until that exists, do not prune commits.
 - `conversation_welcomes` — already self-prunes on join (`consumeWelcome`); residual is stranded welcomes.
   **TTL ceiling only.** Low volume — cleanup, not the main event.
 
@@ -109,9 +120,10 @@ delete an in-window row even after setting a tenant GUC. (This is exactly the by
 
 ### Implementation slices (safety boundary lands before any deletion)
 
-1. **Prune-safe catch-up cursor (no deletion)** — make `listMessages` resolve a missing cursor anchor to the
-   nearest-newer `(created_at, id)` instead of returning empty (the prerequisite above), so TTL pruning can't
-   silently break backfill. Gates: `security-boundary-auditor`, a `listMessages` cursor unit test.
+1. **Prune-safe catch-up cursor (no deletion)** — make `after` a position-carrying `(created_at, id)` token
+   (or add the retained-window fallback) so backfill survives a pruned anchor (prerequisite above), so TTL
+   pruning can't silently break catch-up. Gates: `security-boundary-auditor`, a `listMessages` cursor unit
+   test (anchor-pruned case).
 2. **Threat-model note (no code)** — `docs/threat-models/message-retention.md` via `/feature-threat-model`;
    verify the 6 invariants; `security-architect` sign-off on the rule + the #262 re-scope.
 3. **Migration: role + `TO argus_app` re-scope + window policies + `created_at` indexes** (the boundary, no
@@ -122,7 +134,8 @@ delete an in-window row even after setting a tenant GUC. (This is exactly the by
    counts-only logging, fail-closed, batched with a max-rounds cap. Gates: `infra-reviewer`, shellcheck,
    dry-run against a disposable DB.
 5. **Extend to `conversation_commits` + `conversation_welcomes`** (same role; contiguity-preserving commit
-   reap with the current epoch always kept; welcomes TTL).
+   reap with the current epoch always kept; welcomes TTL). **Gated on** the client missing-commit / sync-lost
+   signal (build it first, or do not prune commits — Codex P2).
 6. **(Optional, separable) metadata-table sweepers** — see below; own PR or deferred.
 7. **(Future, prerequisite-gated) delivery-confirmed pruning** — *only after per-device delivery tracking
    exists* (Codex P1). Extends the worker join + the role's metadata grants. **Not part of this track's
@@ -144,8 +157,9 @@ delete an in-window row even after setting a tenant GUC. (This is exactly the by
 - `infra/stack/deploy/deploy.sh`: grant the new role LOGIN with a NULL password out-of-band + install the
   timer (mirror the existing prune/cleanup wiring).
 - New `docs/threat-models/message-retention.md`.
-- **One small `apps/api` change** — the prune-safe cursor in `listMessages` (slice 1). No `@argus/contracts`
-  / wire-format change, no client UI change.
+- **A small `apps/api` + query-schema change** — the position-carrying cursor in `listMessages` /
+  `ListMessagesQuery` (slice 1; backward-compatible). Commit pruning additionally needs a **client**
+  missing-commit / sync-lost signal (prerequisite to slice 5). No message wire-format / envelope change.
 
 ## Other prunable data classes (slice 5 / follow-ups)
 
