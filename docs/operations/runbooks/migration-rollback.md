@@ -136,14 +136,20 @@ The schema change is incompatible with every deployed image. Restore the most re
    Manager** to the box's local sshd (the SG stays SSH-closed; the tunnel reaches `localhost:22` on the
    instance) and `scp` through it — the plaintext exists only in transit and on the two hosts:
    ```bash
-   # trusted host → box, over SSM (needs sshd on the box + SSM perms; opens NO inbound SSH rule)
-   aws ssm start-session --target <instance-id> \
-     --document-name AWS-StartPortForwardingSession \
+   # The SG opens NO inbound SSH; sshd runs on the Ubuntu AMI but has NO authorized keys (no key_name /
+   # ssh_authorized_keys in infra/aws/terraform), so push a SHORT-LIVED key via EC2 Instance Connect, then
+   # tunnel + scp inside its ~60s window:
+   ssh-keygen -t ed25519 -N '' -f /tmp/restore_key
+   aws ec2-instance-connect send-ssh-public-key --instance-id <id> --availability-zone <az> \
+     --instance-os-user ubuntu --ssh-public-key file:///tmp/restore_key.pub
+   aws ssm start-session --target <id> --document-name AWS-StartPortForwardingSession \
      --parameters '{"portNumber":["22"],"localPortNumber":["2222"]}' &
-   scp -P 2222 globals.sql backup.dump <user>@localhost:/var/tmp/
+   scp -P 2222 -i /tmp/restore_key globals.sql backup.dump ubuntu@localhost:/var/tmp/
+   shred -u /tmp/restore_key /tmp/restore_key.pub
    ```
-   (If the box runs no sshd, settle the exact transfer against the running instance and record it in the
-   canonical in-place restore cutover in `infra/backup/README.md` — don't guess.) The files are plaintext
+   (Verify the os-user / AZ / AMI specifics against the running instance; the fully-verified transfer belongs
+   in the canonical in-place restore cutover in `infra/backup/README.md`. Never stage the decrypted dump in
+   S3.) The files are plaintext
    metadata — the same sensitivity as the live DB already on that box — and the **age private key stays on the
    trusted host**. On the VM, load roles then `pg_restore` into a **fresh `argus_restore`** in the production
    Postgres over the local socket as the **owner** (`-U argus`, the role `deploy.sh` uses; PG has no published
