@@ -112,16 +112,20 @@ The schema change is incompatible with every deployed image. Restore the most re
    timers (attachment-cleanup, audit-prune, and the nightly backup) connect to `argus` and issue DELETEs or
    hold connections — one firing mid-restore can break the `ALTER DATABASE … RENAME` (active connection) or
    mutate the restored DB before the corrected rollout. Stop the API (a redeploy already did, at step 4b)
-   **and** the timers, then confirm none is mid-run:
+   **and** the timers **and any in-flight service runs** (stopping a timer does **not** kill a service that's
+   already executing), then confirm none is active:
    ```bash
    docker compose -f <compose> stop api      # if a redeploy hasn't already
-   sudo systemctl stop argus-db-backup.timer argus-attachment-cleanup.timer argus-audit-prune.timer
-   systemctl is-active argus-db-backup.service argus-attachment-cleanup.service argus-audit-prune.service
+   sudo systemctl stop argus-db-backup.timer argus-attachment-cleanup.timer argus-audit-prune.timer \
+                       argus-db-backup.service argus-attachment-cleanup.service argus-audit-prune.service
+   systemctl is-active argus-db-backup.service argus-attachment-cleanup.service argus-audit-prune.service  # expect: inactive
    ```
    Re-arm the timers only **after** the corrected deploy is healthy (end of step 5).
 2. **Select, verify, and decrypt the pre-migration pair on a TRUSTED HOST — not the VM.** The age private
    key must never touch the production box (a compromised VM must not be able to read backups). On your
-   workstation run **only the selection + verification + decryption part** of the Restore runbook in
+   workstation **first set `umask 077`** (so every file the restore runbook writes — including the decrypted
+   `backup.dump` — is created 0600, never world-readable), then run **only the selection + verification +
+   decryption part** of the Restore runbook in
    [`infra/backup/README.md`](../../../infra/backup/README.md) — its **step 1** (set `EP`/`BUCKET`, check the
    pinned verify key, fetch the age key from Key Vault, then walk newest-first to the pair whose **Ed25519
    signature verifies** and whose objects re-hash to the signed manifest). **Set `COMPROMISE_BEFORE` to an
