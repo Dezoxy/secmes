@@ -1,6 +1,6 @@
 # Track 1 — Split the messaging service (structural refactor, zero behavior change)
 
-> **Status:** IMPLEMENTED 2026-06-21. Pure structural refactor — no behavior change, no new endpoints.
+> **Status:** IMPLEMENTED 2026-06-21 ([#285](https://github.com/Dezoxy/secmes/pull/285)). Pure structural refactor — no behavior change, no new endpoints.
 
 ## Problem
 
