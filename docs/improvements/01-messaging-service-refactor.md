@@ -1,0 +1,65 @@
+# Track 1 — Split the messaging service (structural refactor, zero behavior change)
+
+> **Status:** PROPOSED 2026-06-21. Pure structural refactor — no behavior change, no new endpoints.
+
+## Problem
+
+`apps/api/src/messaging/messaging.service.ts` is **1,185 lines** — the largest application file in the
+repo — and carries six unrelated responsibilities in one class: conversation lifecycle, MLS welcome
+handling, message send/receive, commit processing, history listing, sync, and delivery receipts. Its
+companion `messaging.service.spec.ts` is 747 lines.
+
+## Why it matters
+
+This file is the single biggest merge-conflict surface and the steepest local onboarding read in the API.
+Nothing is _broken_ — it is well-tested — but every messaging change funnels through one class, so two
+parallel features almost always collide here, and a new engineer must hold all six concerns in their head
+at once. Shrinking the cognitive unit is the highest readability payoff in the codebase.
+
+## Proposed approach
+
+Keep `MessagingService` as the **single public entry point** (controllers and the realtime gateway keep
+calling the exact same methods), and delegate to focused collaborator services it holds via constructor
+injection. The public method surface stays byte-for-byte identical:
+
+`isMember`, `createConversation`, `deliverWelcome`, `listMyWelcomes`, `getWelcomeMaterial`,
+`consumeWelcome`, `sendMessage`, `listMessages`, `syncMessages`, `recordReceipt` (+ commit handling).
+
+Proposed collaborator split (new files under `apps/api/src/messaging/`):
+
+- `conversation.service.ts` — `createConversation`, `isMember`, membership/epoch checks.
+- `welcome.service.ts` — `deliverWelcome`, `listMyWelcomes`, `getWelcomeMaterial`, `consumeWelcome`.
+- `message-delivery.service.ts` — `sendMessage`, commit staging/processing, idempotency (`clientMessageId`).
+- `message-history.service.ts` — `listMessages`, `syncMessages`, `recordReceipt`.
+
+`MessagingService` becomes a thin façade that wires these together and preserves cross-cutting ordering
+(e.g. a send that also advances a commit). Each collaborator is registered in `messaging.module.ts`.
+
+## Files touched
+
+- New: `apps/api/src/messaging/{conversation,welcome,message-delivery,message-history}.service.ts`
+- Edit: `apps/api/src/messaging/messaging.service.ts` (becomes the façade), `messaging.module.ts` (providers).
+- Tests: `messaging.service.spec.ts` stays green as the contract test; optionally add per-collaborator specs.
+- Untouched: controllers, DTOs, `@argus/contracts`, all SQL/RLS — no wire or schema change.
+
+## Risks & what could break
+
+- **Transaction / RLS boundary drift.** Today the work runs under one `withTenant` transaction; splitting
+  must not break that into multiple transactions or move a query outside the tenant context. The
+  collaborators must run inside the façade's existing transaction scope.
+- **Hidden ordering coupling.** `sendMessage` interacts with commit staging; the façade must preserve the
+  current call order. The existing spec covers this — keep it green throughout.
+- **Circular injection.** Collaborators must not inject `MessagingService` back. Shared helpers go in a
+  plain util module, not a service.
+
+## How to verify by hand
+
+1. `pnpm --filter @argus/api test` — `messaging.service.spec.ts` passes unchanged (proves no behavior change).
+2. `pnpm --filter @argus/api typecheck` — no type regressions across the façade boundary.
+3. Diff the public surface: the methods listed above are still public on `MessagingService` with identical
+   signatures (a `git diff` of the class declaration should show only bodies delegating out).
+4. `pnpm --filter @argus/web test:e2e` chat suites still pass (send/receive/sync unchanged end-to-end).
+
+## Out of scope
+
+Any change to message behavior, endpoints, contracts, or the DB schema. This is mechanical only.
