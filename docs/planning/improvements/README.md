@@ -48,7 +48,7 @@ change; Track 3 is mostly activating things already designed.
   **Correction:** the **first environment deployed is AWS** (its release-safety controls are already active);
   the single-Azure-VM path (still production-of-record in `deploy.md`) is **not yet armed** and these controls
   are a **hard prerequisite before arming it**. Docs only.
-- ✅ **Track 3 item D implemented** (2026-06-21, PR 3b) — realtime **delivery-gap detection**: an **ephemeral
+- ✅ **Track 3 item D implemented** (2026-06-21, [#288](https://github.com/Dezoxy/secmes/pull/288), PR 3b) — realtime **delivery-gap detection**: an **ephemeral
   per-socket** `deliverySeq`/`deliveryPrevSeq` the gateway stamps at fan-out so the client notices a
   dropped/reordered live frame and self-heals over the existing `(created_at, id)` backfill. Corrected the
   written proposal on two points after the security-architect + crypto-reviewer pass: ephemeral (no DB

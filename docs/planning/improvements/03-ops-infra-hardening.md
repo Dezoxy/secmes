@@ -1,7 +1,7 @@
 # Track 3 — Operational / infra hardening
 
 > **Status:** **TRACK COMPLETE.** Items **A, B, C IMPLEMENTED as runbooks** 2026-06-21 ([#287](https://github.com/Dezoxy/secmes/pull/287),
-> PR 3a — docs only); item **D** (realtime delivery-gap detection) **IMPLEMENTED** 2026-06-21 (PR 3b). **Correction:** the **first**
+> PR 3a — docs only); item **D** (realtime delivery-gap detection) **IMPLEMENTED** 2026-06-21 ([#288](https://github.com/Dezoxy/secmes/pull/288), PR 3b). **Correction:** the **first**
 > environment being deployed is AWS** (`infra/aws/`, `cd-aws.yml`, the `aws-experiment` environment — see the
 > AWS first-deploy runbook), so the runbooks are **AWS-primary** and items B & C were found **already active
 > there**. The single-Azure-VM path (`cd.yml`, still described as production in `README.md` /
@@ -16,7 +16,7 @@
 | A. Migration rollback          | Forward-only SQL migrations (44 files, head 0043), no down-path                      | ✅ **Runbook shipped** (PR 3a)                  |
 | B. Terraform remote state      | **AWS**: S3 backend already the default/enabled; **Azure** twin still commented/local | ✅ **Documented** (AWS active; Azure required before arming) |
 | C. CD per-release approval     | **AWS** `aws-experiment` env has required reviewers; **Azure** `prod` not yet set    | ✅ **Documented** (AWS active; Azure required before arming) |
-| D. Realtime delivery guarantee | Redis pub/sub fan-out, frames have no sequence/ACK                                   | ✅ **Implemented** (PR 3b) — ephemeral per-socket gap counter |
+| D. Realtime delivery guarantee | Redis pub/sub fan-out, frames have no sequence/ACK                                   | ✅ **Implemented** ([#288](https://github.com/Dezoxy/secmes/pull/288), PR 3b) — ephemeral per-socket gap counter |
 
 ## A. Migration rollback procedure (net-new)
 
