@@ -71,14 +71,15 @@ subject — so keep the environment's protection rules (including any branch/tag
   the `deploy` job sits in **"Waiting"** on `aws-experiment` until you approve; an unapproved run never
   reaches `aws ssm send-command`.
 
-> **Azure twin (deferred — not the live deploy path).** The single-Azure-VM path
-> (`infra/azure/terraform`, `cd.yml`) mirrors both controls but is **not armed**:
-> `infra/azure/terraform/versions.tf:15-23` still has the `backend "azurerm"` block **commented** (local
-> state), and `cd.yml`'s `environment: prod` (line 130) + `var.github_deploy_subject` still need the same
-> required-reviewer config. Activate both only when/if the Azure VM is armed: create the tfstate RG
-> `argus-tfstate` / storage account `argustfstate` / container `tfstate` out-of-band, uncomment the block,
-> `terraform init -migrate-state`; and set required reviewers on the `prod` environment with the OIDC subject
-> bound to `repo:OWNER/REPO:environment:prod`.
+> **Azure twin — not yet armed; both controls are a prerequisite before it goes to production.** The
+> single-Azure-VM path (`infra/azure/terraform`, `cd.yml`), still described as production in
+> [`docs/architecture/deploy.md`](../../architecture/deploy.md), mirrors both controls but **currently has
+> neither**: `infra/azure/terraform/versions.tf:15-23` still has the `backend "azurerm"` block **commented**
+> (local state), and `cd.yml`'s `environment: prod` (line 130) + `var.github_deploy_subject` still need the
+> required-reviewer config. **Do both before arming that path** (do not deploy Azure production without them):
+> create the tfstate RG `argus-tfstate` / storage account `argustfstate` / container `tfstate` out-of-band,
+> uncomment the block, `terraform init -migrate-state`; and set required reviewers on the `prod` environment
+> with the OIDC subject bound to `repo:OWNER/REPO:environment:prod`.
 
 ---
 

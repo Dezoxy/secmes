@@ -1,19 +1,21 @@
 # Track 3 — Operational / infra hardening
 
 > **Status:** items **A, B, C IMPLEMENTED as runbooks** 2026-06-21 ([#287](https://github.com/Dezoxy/secmes/pull/287), PR 3a — docs only); item **D** (realtime
-> sequence numbers) remains **PROPOSED** and ships as its own follow-up PR (3b). **Correction:** the live
-> deploy path is **AWS** (`infra/aws/`, `cd-aws.yml`, the `aws-experiment` environment), not the Azure VM
-> this doc originally assumed — so the runbooks are **AWS-primary**, items B & C were found **already active
-> there**, and the Azure twin is documented as a deferred follow-up. None of this blocks shipping; it removes
-> single-point risks before GA.
+> sequence numbers) remains **PROPOSED** and ships as its own follow-up PR (3b). **Correction:** the **first
+> environment being deployed is AWS** (`infra/aws/`, `cd-aws.yml`, the `aws-experiment` environment — see the
+> AWS first-deploy runbook), so the runbooks are **AWS-primary** and items B & C were found **already active
+> there**. The single-Azure-VM path (`cd.yml`, still described as production in `README.md` /
+> `docs/architecture/deploy.md`) is **not yet armed** and currently has **neither** control — so configuring
+> its remote state + required reviewers is a **hard prerequisite before that path is armed for production**,
+> not an optional follow-up. None of this blocks shipping; it removes single-point risks before GA.
 
 ## Summary of the four items
 
 | Item                           | State today                                                                          | Status                                          |
 | ------------------------------ | ----------------------------------------------------------------------------------- | ----------------------------------------------- |
 | A. Migration rollback          | Forward-only SQL migrations (44 files, head 0043), no down-path                      | ✅ **Runbook shipped** (PR 3a)                  |
-| B. Terraform remote state      | **AWS**: S3 backend already the default/enabled; **Azure** twin still commented/local | ✅ **Documented** (AWS active; Azure deferred)  |
-| C. CD per-release approval     | **AWS** `aws-experiment` env has required reviewers; **Azure** `prod` not yet set    | ✅ **Documented** (AWS active; Azure deferred)  |
+| B. Terraform remote state      | **AWS**: S3 backend already the default/enabled; **Azure** twin still commented/local | ✅ **Documented** (AWS active; Azure required before arming) |
+| C. CD per-release approval     | **AWS** `aws-experiment` env has required reviewers; **Azure** `prod` not yet set    | ✅ **Documented** (AWS active; Azure required before arming) |
 | D. Realtime delivery guarantee | Redis pub/sub fan-out, frames have no sequence/ACK                                   | ⏳ **PROPOSED** — own follow-up PR (3b)         |
 
 ## A. Migration rollback procedure (net-new)
@@ -40,12 +42,14 @@ N+1, then follow the runbook to land back at N. Document the exact commands and 
 
 ## B. Activate Terraform remote state (activate existing design)
 
-> ✅ **Documented (PR 3a) + correction.** On the **live AWS path**, remote state is **already the
+> ✅ **Documented (PR 3a) + correction.** On the **AWS path** (deployed first), remote state is **already the
 > default/enabled** — `infra/aws/terraform/versions.tf` has `backend "s3" {}` (encrypted + DynamoDB-locked +
 > versioned), bootstrapped via `make -C infra/aws bootstrap`; there is **nothing to activate**. The text
-> below describes the **Azure** twin, which is **not** the deploy path (Azure is Key-Vault-via-Arc only): its
-> `azurerm` backend stays commented and activation is a deferred follow-up. See the "Release safety controls"
-> section in [`docs/operations/runbooks/aws-first-deploy.md`](../../operations/runbooks/aws-first-deploy.md).
+> below describes the **Azure** twin: the single-Azure-VM path (still described as production in
+> `docs/architecture/deploy.md`) runs on **local state** and is **not yet armed** — so activating its
+> `azurerm` backend is a **hard prerequisite before that path is armed for production**, not an optional
+> follow-up. See the "Release safety controls" section in
+> [`docs/operations/runbooks/aws-first-deploy.md`](../../operations/runbooks/aws-first-deploy.md).
 
 **Problem.** `infra/azure/terraform/versions.tf` runs on **local state** today and the file itself warns:
 state holds sensitive ids and must move to an encrypted, locking remote backend before CI/sharing. With
@@ -62,13 +66,14 @@ local `.terraform/` can `init` and `plan` with **no diff**.
 
 ## C. CD per-release approval gate (one-time GitHub setting)
 
-> ✅ **Documented (PR 3a).** On the **live AWS path** the `aws-experiment` GitHub Environment already has
-> required reviewers, and the IAM deploy role's OIDC trust is bound to
+> ✅ **Documented (PR 3a).** On the **AWS path** (deployed first) the `aws-experiment` GitHub Environment
+> already has required reviewers, and the IAM deploy role's OIDC trust is bound to
 > `repo:OWNER/REPO:environment:aws-experiment` (`infra/aws/terraform/iam.tf:102`), so each `aws-v*` tag pauses
 > for approval before the root SSM command runs — and only a job running in that approval-gated environment can
-> assume the role (the binding is to the environment + its approval, not a branch/ref). The
-> **Azure** `prod` environment (`cd.yml`) is the deferred twin. Captured with verify steps in the "Release
-> safety controls" section of [`docs/operations/runbooks/aws-first-deploy.md`](../../operations/runbooks/aws-first-deploy.md).
+> assume the role (the binding is to the environment + its approval, not a branch/ref). The **Azure** `prod`
+> environment (`cd.yml`) has **no** required reviewers yet — configuring them is a **hard prerequisite before
+> the Azure path is armed for production**. Captured with verify steps in the "Release safety controls"
+> section of [`docs/operations/runbooks/aws-first-deploy.md`](../../operations/runbooks/aws-first-deploy.md).
 
 **Problem.** `.github/workflows/cd.yml` already has a two-layer gate: the `vars.ENABLE_DEPLOY` master
 kill-switch _and_ `environment: prod` (lines ~117–130, with comments instructing that `prod` be given
