@@ -71,7 +71,7 @@ when the anchor is unknown/pruned, restart paging from the oldest retained messa
 way this is a real (if small) change touching `apps/api` *and* the query schema — so v1 is *not* zero-code —
 and it is the first slice.
 
-**The other two ciphertext tables, simpler rules:**
+**The other ciphertext tables:**
 
 - `conversation_commits` — **TTL ceiling only, contiguity-preserving (Codex P2).** A catching-up device
   drains commits *in epoch order* and must `processCommit()` each one to advance, so deleting an intermediate
@@ -85,12 +85,12 @@ and it is the first slice.
   behind the first retained epoch would **spin / stay stuck**, not re-invite. Commit pruning therefore carries
   its own prerequisite: build an **explicit missing-commit / sync-lost signal** (detect the gap → surface
   re-invite) *before* enabling it. Until that exists, do not prune commits.
-- `conversation_welcomes` — already self-prunes on join (`consumeWelcome`). **Prune only consumed /
-  superseded welcomes by TTL; never an *unconsumed* one (Codex P2)** — for a device added while offline that
-  HPKE-sealed Welcome/RatchetTree row is the *only* way it can ever enter the MLS group, so deleting it
-  strands the device with membership metadata but no entry path. Pruning an unconsumed welcome is allowed only
-  once a missing-welcome / re-invite recovery path exists (same prerequisite class as commits). Low volume —
-  cleanup, not the main event.
+- `conversation_welcomes` — **excluded from pruning in this track (Codex P2).** Consume = DELETE the row (no
+  `consumed_at` column — [`0012:60`](../../apps/api/src/db/migrations/0012_welcomes.sql)), so *every* row still
+  present is **unconsumed**: the only HPKE-sealed Welcome/RatchetTree an added-while-offline device can use to
+  join. There is no "safely stale" welcome to TTL-prune, so the prune role gets **no grant/policy on this
+  table**. Deferred until a missing-welcome / re-invite recovery path exists (then prune only welcomes
+  superseded by a newer one, or for departed devices). Low volume regardless.
 
 **Attachment blobs are already handled — explicitly decoupled, no new B2 logic.** Every attachment gets a
 **7-day** `expires_at` at upload and `infra/cleanup/cleanup-attachments.sh` reaps the **B2 object first,
@@ -117,15 +117,16 @@ that future path must spell out the exact grants, or the role simply fails the j
 
 ### ⚠ Mandatory PR #262 fix (verified — not cosmetic)
 
-The tenant-isolation policies on all three target tables are currently **PUBLIC** (no `TO` clause):
-`messages_tenant_isolation` ([`0007:86`](../../apps/api/src/db/migrations/0007_messaging.sql)),
-`commits_tenant_isolation` ([`0023:36`](../../apps/api/src/db/migrations/0023_conversation_commits.sql)),
-`conversation_welcomes_tenant_isolation` ([`0012:50`](../../apps/api/src/db/migrations/0012_welcomes.sql)) —
+The tenant-isolation policies on the **pruned** tables are currently **PUBLIC** (no `TO` clause):
+`messages_tenant_isolation` ([`0007:86`](../../apps/api/src/db/migrations/0007_messaging.sql)) and
+`commits_tenant_isolation` ([`0023:36`](../../apps/api/src/db/migrations/0023_conversation_commits.sql)) —
 unlike `audit_events`/`auth_sessions`, whose policies were correctly re-scoped `TO argus_app` in `0043`.
 A new prune role's window policy **OR-combines** with a PUBLIC isolation policy, so the role could
 `set_config('app.tenant_id', <victim>)` and get a **live-row bypass**. The Track-04 migration **must**
-re-scope each isolation policy `TO argus_app`, and an RLS spec must assert the prune role cannot read or
-delete an in-window row even after setting a tenant GUC. (This is exactly the bypass Codex caught on #262.)
+re-scope each pruned table's isolation policy `TO argus_app`, and an RLS spec must assert the prune role
+cannot read or delete an in-window row even after setting a tenant GUC. (This is exactly the bypass Codex
+caught on #262.) `conversation_welcomes` is not pruned here, so its policy is left untouched until welcome
+pruning is implemented.
 
 ### Implementation slices (safety boundary lands before any deletion)
 
@@ -147,9 +148,10 @@ delete an in-window row even after setting a tenant GUC. (This is exactly the by
    `infra/retention/prune-messages.sh` + systemd `service`/`timer`, modeled on `infra/audit-prune/`;
    counts-only logging, fail-closed, batched with a max-rounds cap. Gates: `infra-reviewer`, shellcheck,
    dry-run against a disposable DB.
-5. **Extend to `conversation_commits` + `conversation_welcomes`** (same role; contiguity-preserving commit
-   reap with the current epoch always kept; welcomes TTL). **Gated on** the client missing-commit / sync-lost
-   signal (build it first, or do not prune commits — Codex P2).
+5. **Extend to `conversation_commits`** (same role; contiguity-preserving reap with the current epoch always
+   kept). **Gated on** the client missing-commit / sync-lost signal (build it first, or do not prune commits —
+   Codex P2). `conversation_welcomes` is **deferred** (every row is unconsumed; needs a re-invite recovery
+   path first).
 6. **(Optional, separable) metadata-table sweepers** — see below; own PR or deferred.
 7. **(Future, prerequisite-gated) delivery-confirmed pruning** — *only after per-device delivery tracking
    exists* (Codex P1). Extends the worker join + the role's metadata grants. **Not part of this track's
@@ -160,13 +162,13 @@ delete an in-window row even after setting a tenant GUC. (This is exactly the by
 
 ## Files & tables touched
 
-- New migration `00NN_message_retention_role.sql`: create the prune role; **re-scope** the three isolation
-  policies `TO argus_app`; window-scoped `for select`/`for delete` policies; **column-scoped SELECT matched to
-  each table's predicate** — `messages (id, created_at)`, `conversation_welcomes (id, created_at)`, and
+- New migration `00NN_message_retention_role.sql`: create the prune role; **re-scope** the `messages` and
+  `conversation_commits` isolation policies `TO argus_app`; window-scoped `for select`/`for delete` policies;
+  **column-scoped SELECT matched to each table's predicate** — `messages (id, created_at)` and
   **`conversation_commits (id, created_at, conversation_id, epoch)`** so the contiguity / keep-current-epoch
-  rule can actually run (Codex P2) — **never `ciphertext` / `commit` / `welcome` / `ratchet_tree`**; plain
-  `created_at` btree index per table (existing indexes are tenant-leading and can't serve a cross-tenant age
-  scan — the same gap `0043` noted); grant DELETE.
+  rule can actually run (Codex P2) — **never `ciphertext` / `commit` blobs**; plain `created_at` btree index
+  per pruned table (existing indexes are tenant-leading and can't serve a cross-tenant age scan — the same gap
+  `0043` noted); grant DELETE on those two tables only (**not** `conversation_welcomes`).
 - New worker `infra/retention/prune-messages.sh` + `argus-message-retention.{service,timer}`.
 - `infra/stack/deploy/deploy.sh`: grant the new role LOGIN with a NULL password out-of-band + install the
   timer (mirror the existing prune/cleanup wiring).
@@ -192,8 +194,9 @@ delete an in-window row even after setting a tenant GUC. (This is exactly the by
 **MUST NOT be auto-pruned:** accepted `friendships` (the durable social graph); `conversation_members`
 (deleting a member is a deliberate membership op that cascade-deletes receipts/welcomes); `conversations`
 (deleting one cascades into all its messages); `audit_events` inside the 90-day Art. 30 window; the current
-epoch **plus the contiguous commit chain within the retained window**, and the latest welcome material
-(needed for a long-offline device to rejoin).
+epoch **plus the contiguous commit chain within the retained window**; and **all `conversation_welcomes`**
+(consume = DELETE, so every remaining row is an unconsumed Welcome a device still needs to join — excluded
+from this track entirely).
 
 ## Risks & what could break
 
