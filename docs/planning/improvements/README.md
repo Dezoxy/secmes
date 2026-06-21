@@ -38,7 +38,7 @@ change; Track 3 is mostly activating things already designed.
 - ✅ **Track 1 implemented** (2026-06-21, [#285](https://github.com/Dezoxy/secmes/pull/285)) —
   `messaging.service.ts` split into four collaborators behind an unchanged façade; the 45-test contract spec
   passes unchanged.
-- ✅ **Track 2 implemented** (2026-06-21) — three live-DB service specs (`admin`, `user`, `devices`) plus a
+- ✅ **Track 2 implemented** (2026-06-21, [#286](https://github.com/Dezoxy/secmes/pull/286)) — three live-DB service specs (`admin`, `user`, `devices`) plus a
   catalog-driven `db/rls-coverage.spec.ts` that fails CI if any non-allowlisted `public` table lacks forced
   `app.tenant_id` RLS. (It already surfaced the drift: 19 tenant-scoped tables today, not the "13" the docs
   repeated.) Tests only.
