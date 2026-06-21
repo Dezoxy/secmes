@@ -4827,6 +4827,17 @@
         ],
         "responses": {
           "200": {
+            "headers": {
+              "X-Oldest-Retained-Epoch": {
+                "description": "Oldest commit epoch the server still retains for this conversation (metadata only — never the commit blob). Omitted when the conversation has no commits. A client whose local epoch is below this value has lost a pruned commit it can never fetch (sync-lost).",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "format": "int64",
+                  "maximum": 9007199254740991
+                }
+              }
+            },
             "description": "",
             "content": {
               "application/json": {

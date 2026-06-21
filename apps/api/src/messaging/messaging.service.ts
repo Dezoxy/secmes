@@ -142,7 +142,7 @@ export class MessagingService {
     auth: VerifiedAuth,
     conversationId: string,
     query: ListCommitsQuery,
-  ): Promise<FetchedCommit[]> {
+  ): Promise<{ commits: FetchedCommit[]; oldestRetainedEpoch: number | null }> {
     return this.delivery.listCommits(auth, conversationId, query);
   }
 

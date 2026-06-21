@@ -144,6 +144,31 @@ by their specs (none blocks this note):
 5. **(all slices)** Logs counts-only, never row ids; commit pruning stays gated on the client
    missing-commit / sync-lost signal.
 
+## 8. Sync-lost recovery (the cond-5 prerequisite) — design update 2026-06-21
+
+A follow-up `security-architect` pass (after slice 4 shipped) confirmed the cond-5 signal does **not** exist
+**and** surfaced that a device behind the **oldest *retained* commit epoch** spins forever **today** —
+`drainCommits` stops at the first unprocessable commit and the catch-up loop silently retries (a latent bug,
+independent of pruning). The prerequisite is therefore being built as its own slices **before** any commit
+pruning:
+
+- **Recovery mechanism = re-add by an existing member via a fresh Welcome** — reuse the already-reviewed
+  `enrollDevice` → `joinConversationFromPool` path, which **re-runs the out-of-band safety-number
+  verification**. We deliberately do **not** add MLS external-commit ("rejoin myself"): it would be new crypto
+  surface (invariant #4), need published GroupInfo (new server metadata), and let a device re-insert itself
+  without a member's identity check (weaker device trust). Re-add keeps the deletion authority with the group.
+- **5a (server, this prerequisite's first slice):** `listCommits` exposes the **oldest retained commit
+  epoch** — `min(epoch)` over the whole conversation, in the same RLS-scoped, member-gated transaction — as
+  the **`X-Oldest-Retained-Epoch`** response header. **Metadata only**: an integer the server already returns
+  per-commit; it never reads or returns the `commit` blob, so invariant #1 holds and the disclosure delta is
+  strictly less than what `FetchedCommit.epoch` already carries. A header (not a body field) keeps stale PWAs
+  validating the body as `CommitPageSchema` working.
+- **5b/5c:** the client uses `oldestRetainedEpoch > localEpoch` (vs. a bounded transient-retry budget) to
+  detect a genuine pruned/lost gap, then drives the re-add recovery + a UI affordance.
+
+**Deferred:** the actual commit pruning (the cond-3/4 boundary migration + worker) waits behind 5a–5c **and**
+group-chat GA — 1:1 conversations write zero commit rows, so pruning is premature at current scale.
+
 **Sign-off:** `security-architect` — **PASS_WITH_CONDITIONS** (conditions 1–3 above). `crypto-reviewer` —
 **PASS_WITH_CONDITIONS** (crypto-blind metadata-only prune path, DB-enforced never-current-epoch, welcomes
 excluded, disappearing-history is the only crypto-relevant residual and is accepted; no new crypto). Both

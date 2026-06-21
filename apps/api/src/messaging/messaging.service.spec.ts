@@ -197,6 +197,38 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     );
   });
 
+  it('listCommits reports oldestRetainedEpoch = min(epoch) over the whole conversation, independent of afterEpoch', async () => {
+    const conv = await newConversation();
+
+    // No commits yet (e.g. a 1:1 that never committed) → null.
+    const empty = await svc.listCommits(aliceAuth, conv, { afterEpoch: 0, limit: 50 });
+    expect(empty.commits).toEqual([]);
+    expect(empty.oldestRetainedEpoch).toBeNull();
+
+    // Seed three commits (epochs 1–3) directly — bypasses postCommit's membership reconciliation.
+    for (const epoch of [1, 2, 3]) {
+      await sql`insert into conversation_commits
+        (tenant_id, conversation_id, sender_user_id, client_commit_id, epoch, commit)
+        values (${tenantA}, ${conv}, ${aliceId}, ${crypto.randomUUID()}, ${epoch}, 'Y29tbWl0')`;
+    }
+    const full = await svc.listCommits(aliceAuth, conv, { afterEpoch: 0, limit: 50 });
+    expect(full.commits.map((c) => c.epoch)).toEqual([1, 2, 3]);
+    expect(full.oldestRetainedEpoch).toBe(1);
+
+    // Prune the oldest commit → oldestRetainedEpoch advances to 2 even though the page (afterEpoch=2)
+    // starts later. This is exactly the signal a sync-lost client needs: its local epoch < oldest retained.
+    await sql`delete from conversation_commits
+      where tenant_id = ${tenantA} and conversation_id = ${conv} and epoch = 1`;
+    const pruned = await svc.listCommits(aliceAuth, conv, { afterEpoch: 2, limit: 50 });
+    expect(pruned.commits.map((c) => c.epoch)).toEqual([3]);
+    expect(pruned.oldestRetainedEpoch).toBe(2);
+
+    // Clear our seeded commit rows so the shared tenant teardown isn't blocked by the NO ACTION
+    // users FK on conversation_commits.sender_user_id (the conversations cascade and the users
+    // cascade race during `delete from tenants`).
+    await sql`delete from conversation_commits where tenant_id = ${tenantA} and conversation_id = ${conv}`;
+  });
+
   // ── fetch / list (checkpoint 27 server half) ─────────────────────────────────────────────────────
   it('a member lists messages in chronological order; ciphertext is returned verbatim', async () => {
     const conv = await newConversation();
