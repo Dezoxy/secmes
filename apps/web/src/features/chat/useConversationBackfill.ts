@@ -142,11 +142,7 @@ export function useConversationBackfill({
   setConversations,
 }: ConversationBackfillOptions): ConversationBackfillResult {
   const fetchCursors = useRef(new Map<string, string>());
-  // Per-conversation in-flight backfill promise. A caller that arrives while a backfill is already running
-  // AWAITS that run's completion (and enqueues another pass via backfillPending) instead of returning early —
-  // so a caller gating on completion (e.g. the gap catch-up's deferral in useLiveConversations) stays active
-  // until the queued pass has actually drained, not just been scheduled.
-  const inFlightBackfills = useRef(new Map<string, Promise<{ nextEpoch: number | undefined }>>());
+  const backfilling = useRef(new Set<string>());
   const backfillPending = useRef(new Set<string>());
   // Conversations whose peer naming has been attempted this session (gate, not a guarantee — withPeerNamed
   // itself no-ops when the conversation was already named by the join/creator path).
@@ -189,49 +185,41 @@ export function useConversationBackfill({
   );
 
   const backfillInto = useCallback(
-    (
+    async (
       conversationId: string,
       group: MlsGroup,
       selfUserId: string,
     ): Promise<{ nextEpoch: number | undefined }> => {
-      if (!messagingDeps) return Promise.resolve({ nextEpoch: undefined });
-      // A backfill is already running for this conversation: enqueue one more pass and AWAIT that owner run
-      // (don't return early). The owner's do/while picks up the enqueued pass, so the returned promise
-      // resolves only after this conversation's backfill is fully idle — which callers gate their deferral on.
-      const running = inFlightBackfills.current.get(conversationId);
-      if (running) {
+      if (!messagingDeps) return { nextEpoch: undefined };
+      if (backfilling.current.has(conversationId)) {
         backfillPending.current.add(conversationId);
-        return running;
+        return { nextEpoch: undefined };
       }
-      const deps = messagingDeps;
-      const run = (async (): Promise<{ nextEpoch: number | undefined }> => {
-        let lastNextEpoch: number | undefined;
-        try {
-          do {
-            backfillPending.current.delete(conversationId);
-            const after = fetchCursors.current.get(conversationId);
-            const { messages, cursor, nextEpoch } = await backfillConversation(
-              deps,
-              conversationId,
-              group,
-              selfUserId,
-              after,
-            );
-            lastNextEpoch = nextEpoch;
-            if (cursor) fetchCursors.current.set(conversationId, cursor);
-            mergeIncoming(conversationId, messages);
-          } while (backfillPending.current.has(conversationId));
-        } catch (err) {
-          // eslint-disable-next-line no-console
-          console.warn('backfill failed', conversationId, err instanceof Error ? err.message : err);
-        } finally {
+      backfilling.current.add(conversationId);
+      let lastNextEpoch: number | undefined;
+      try {
+        do {
           backfillPending.current.delete(conversationId);
-          inFlightBackfills.current.delete(conversationId);
-        }
-        return { nextEpoch: lastNextEpoch };
-      })();
-      inFlightBackfills.current.set(conversationId, run);
-      return run;
+          const after = fetchCursors.current.get(conversationId);
+          const { messages, cursor, nextEpoch } = await backfillConversation(
+            messagingDeps,
+            conversationId,
+            group,
+            selfUserId,
+            after,
+          );
+          lastNextEpoch = nextEpoch;
+          if (cursor) fetchCursors.current.set(conversationId, cursor);
+          mergeIncoming(conversationId, messages);
+        } while (backfillPending.current.has(conversationId));
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('backfill failed', conversationId, err instanceof Error ? err.message : err);
+      } finally {
+        backfilling.current.delete(conversationId);
+        backfillPending.current.delete(conversationId);
+      }
+      return { nextEpoch: lastNextEpoch };
     },
     [messagingDeps, mergeIncoming],
   );
