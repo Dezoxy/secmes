@@ -1,6 +1,6 @@
 # Track 1 — Split the messaging service (structural refactor, zero behavior change)
 
-> **Status:** PROPOSED 2026-06-21. Pure structural refactor — no behavior change, no new endpoints.
+> **Status:** IMPLEMENTED 2026-06-21. Pure structural refactor — no behavior change, no new endpoints.
 
 ## Problem
 
@@ -25,22 +25,25 @@ injection. The public method surface stays byte-for-byte identical:
 `isMember`, `createConversation`, `deliverWelcome`, `listMyWelcomes`, `getWelcomeMaterial`,
 `consumeWelcome`, `sendMessage`, `listMessages`, `syncMessages`, `recordReceipt` (+ commit handling).
 
-Proposed collaborator split (new files under `apps/api/src/messaging/`):
+Collaborator split (new files under `apps/api/src/messaging/`):
 
-- `conversation.service.ts` — `createConversation`, `isMember`, membership/epoch checks.
-- `welcome.service.ts` — `deliverWelcome`, `listMyWelcomes`, `getWelcomeMaterial`, `consumeWelcome`.
-- `message-delivery.service.ts` — `sendMessage`, commit staging/processing, idempotency (`clientMessageId`).
-- `message-history.service.ts` — `listMessages`, `syncMessages`, `recordReceipt`.
+- `conversation.service.ts` — `isMember`, `createConversation`, `getConversationMembers`.
+- `welcome.service.ts` — `deliverWelcome`, `listMyWelcomes`, `getWelcomeMaterial`, `consumeWelcome` (+ the private device-proof check).
+- `message-delivery.service.ts` — `sendMessage`, `postCommit`, `listCommits` (the MLS commit chain + `clientMessageId` idempotency).
+- `message-history.service.ts` — `listMessages`, `syncMessages`, `recordReceipt`, `getReceipts` (+ the read-path row/cursor helpers).
+- `messaging.types.ts` — the shared return-type interfaces, re-exported by the façade so existing import paths are unchanged.
 
-`MessagingService` becomes a thin façade that wires these together and preserves cross-cutting ordering
-(e.g. a send that also advances a commit). Each collaborator is registered in `messaging.module.ts`.
+`MessagingService` stays a thin façade that composes these and preserves each method's self-contained
+`withTenant` transaction. The collaborators are **constructed by the façade**, not registered as separate
+DI providers — this keeps the public DI surface and the contract spec (`messaging.service.spec.ts`)
+byte-for-byte unchanged, so `messaging.module.ts` is untouched.
 
 ## Files touched
 
-- New: `apps/api/src/messaging/{conversation,welcome,message-delivery,message-history}.service.ts`
-- Edit: `apps/api/src/messaging/messaging.service.ts` (becomes the façade), `messaging.module.ts` (providers).
-- Tests: `messaging.service.spec.ts` stays green as the contract test; optionally add per-collaborator specs.
-- Untouched: controllers, DTOs, `@argus/contracts`, all SQL/RLS — no wire or schema change.
+- New: `apps/api/src/messaging/{conversation,welcome,message-delivery,message-history}.service.ts` + `messaging.types.ts`.
+- Edit: `apps/api/src/messaging/messaging.service.ts` (becomes the façade).
+- Tests: `messaging.service.spec.ts` passed **unchanged** as the contract test (45/45 against a live Postgres).
+- Untouched: `messaging.module.ts`, controllers, DTOs, `@argus/contracts`, all SQL/RLS — no wire or schema change.
 
 ## Risks & what could break
 
