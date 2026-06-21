@@ -201,15 +201,17 @@ export function useLiveConversations({
   // Transport delivery-gap detection (Track 3 item D). lastDeliverySeq holds the last per-(socket,
   // conversation) `deliverySeq` we saw; a non-contiguous next frame means a live frame was dropped/reordered,
   // so we re-fetch over the existing backfill. gapBackfillTimers coalesces a burst of gaps per conversation
-  // into one fetch. `catchingUp` holds conversations whose live frames we DEFER (don't decrypt inline) until
-  // their gap backfill completes — so the backfill decrypts from the durable cursor in generation ORDER and
-  // never consumes a later generation before the missed earlier one (MLS's skipped-key cache is bounded —
-  // `retainKeysForGenerations`, 10 by default — so a burst could otherwise evict it and lose the message).
-  // All reset on (re)subscribe and on removal. The seq is a HINT only — it never gates decryption or ordering
-  // (MLS + the (created_at,id) cursor own those); it carries no cryptographic guarantee.
+  // into one fetch. `catchUpDepth` counts a conversation's outstanding catch-up obligations (scheduled-but-
+  // not-fired timers + in-flight catch-ups); while > 0 we DEFER inline live decryption (see onMessage) so the
+  // backfill decrypts from the durable cursor in generation ORDER and never consumes a later generation before
+  // the missed earlier one (MLS's skipped-key cache is bounded — `retainKeysForGenerations`, 10 by default —
+  // so a burst could otherwise evict it and lose the message). A counter, not a flag, so a gap seen while an
+  // earlier catch-up is still running keeps the deferral active until every queued pass settles. All reset on
+  // (re)subscribe and on removal. The seq is a HINT only — it never gates decryption or ordering (MLS + the
+  // (created_at,id) cursor own those); it carries no cryptographic guarantee.
   const lastDeliverySeq = useRef(new Map<string, number>());
   const gapBackfillTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
-  const catchingUp = useRef(new Set<string>());
+  const catchUpDepth = useRef(new Map<string, number>());
 
   const addLive = useCallback((conversationId: string, conversation: MlsGroup): void => {
     liveGroups.current.set(conversationId, conversation);
@@ -425,17 +427,24 @@ export function useLiveConversations({
       });
     };
 
-    // Debounced backfill on a detected transport gap. Marks the conversation `catchingUp` immediately (so
-    // onMessage stops decrypting its live frames inline — see there) and coalesces a burst per conversation
-    // (GAP_BACKFILL_DEBOUNCE_MS) into one fetch. The catch-up re-decrypts from the durable cursor in
-    // generation order; once it settles we clear `catchingUp` and live decryption resumes.
+    // Debounced backfill on a detected transport gap. Raises the conversation's catch-up obligation count
+    // immediately (so onMessage stops decrypting its live frames inline — see there) and coalesces a burst
+    // per conversation (GAP_BACKFILL_DEBOUNCE_MS) into one fetch. The catch-up re-decrypts from the durable
+    // cursor in generation order. Live decryption resumes only when EVERY scheduled/in-flight catch-up for
+    // the conversation has settled — a gap observed *while* an earlier catch-up is still fetching raises the
+    // count again, so the deferral can't be cleared out from under a still-pending pass.
     const scheduleGapBackfill = (conversationId: string): void => {
-      catchingUp.current.add(conversationId);
       const timers = gapBackfillTimers.current;
-      if (timers.has(conversationId)) return; // a fetch is already scheduled — coalesce
+      if (timers.has(conversationId)) return; // a catch-up is already scheduled — coalesce onto it
+      const depth = catchUpDepth.current;
+      depth.set(conversationId, (depth.get(conversationId) ?? 0) + 1); // a new catch-up obligation
       const timer = setTimeout(() => {
         timers.delete(conversationId);
-        void runCatchUp(conversationId).finally(() => catchingUp.current.delete(conversationId));
+        void runCatchUp(conversationId).finally(() => {
+          const remaining = (depth.get(conversationId) ?? 0) - 1;
+          if (remaining > 0) depth.set(conversationId, remaining);
+          else depth.delete(conversationId); // last obligation done → live decryption resumes
+        });
       }, GAP_BACKFILL_DEBOUNCE_MS);
       timers.set(conversationId, timer);
     };
@@ -498,7 +507,7 @@ export function useLiveConversations({
         // from the durable cursor in generation order, so we never advance/consume the receive ratchet past
         // the missed earlier message (whose skipped key MLS only caches for a bounded window). The frame is
         // durably stored, so the backfill picks it up and dedup-by-id avoids a double-render.
-        if (catchingUp.current.has(conversationId)) return;
+        if ((catchUpDepth.current.get(conversationId) ?? 0) > 0) return;
 
         const group = liveGroups.current.get(conversationId);
         if (!group) return;
@@ -535,10 +544,15 @@ export function useLiveConversations({
       onReceipt: applyReceipt,
       onSubscribed: (conversationId) => {
         // A fresh room join (re)starts the gateway's per-socket counter, so drop any stale baseline — the
-        // first live frame (deliveryPrevSeq === null) re-establishes it. Also clear any stale catch-up gate.
-        // The REST catch-up below already covers anything missed up to now, so no gap backfill is needed here.
+        // first live frame (deliveryPrevSeq === null) re-establishes it. Also cancel any pending gap timer
+        // and clear the catch-up gate: the REST catch-up below already covers anything missed up to now.
         lastDeliverySeq.current.delete(conversationId);
-        catchingUp.current.delete(conversationId);
+        const pendingTimer = gapBackfillTimers.current.get(conversationId);
+        if (pendingTimer) {
+          clearTimeout(pendingTimer);
+          gapBackfillTimers.current.delete(conversationId);
+        }
+        catchUpDepth.current.delete(conversationId);
         runCatchUp(conversationId);
         seedReceipts(conversationId); // seed historical delivered/read ticks once in the room
       },
@@ -548,7 +562,7 @@ export function useLiveConversations({
       onRemoved: (conversationId) => {
         liveGroups.current.delete(conversationId);
         lastDeliverySeq.current.delete(conversationId);
-        catchingUp.current.delete(conversationId);
+        catchUpDepth.current.delete(conversationId);
         const pending = gapBackfillTimers.current.get(conversationId);
         if (pending) {
           clearTimeout(pending);
@@ -599,7 +613,7 @@ export function useLiveConversations({
       for (const timer of gapBackfillTimers.current.values()) clearTimeout(timer);
       gapBackfillTimers.current.clear();
       lastDeliverySeq.current.clear();
-      catchingUp.current.clear();
+      catchUpDepth.current.clear();
     };
   }, [
     applyReceipt,
