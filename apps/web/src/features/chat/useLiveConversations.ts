@@ -502,12 +502,19 @@ export function useLiveConversations({
           deliveryPrevSeq,
         );
         if (nextLast !== undefined) lastDeliverySeq.current.set(conversationId, nextLast);
-        if (gap) scheduleGapBackfill(conversationId);
-        // While catching up after a gap, DON'T decrypt this frame inline — the pending backfill re-decrypts
-        // from the durable cursor in generation order, so we never advance/consume the receive ratchet past
-        // the missed earlier message (whose skipped key MLS only caches for a bounded window). The frame is
-        // durably stored, so the backfill picks it up and dedup-by-id avoids a double-render.
-        if ((catchUpDepth.current.get(conversationId) ?? 0) > 0) return;
+        // Defer inline decryption when this frame is a gap OR a catch-up is already outstanding for the
+        // conversation. EVERY deferred frame (re)schedules a catch-up so a backfill pass is GUARANTEED to
+        // run that fetches it: the frame is already durably stored (the gateway fans out post-commit), and
+        // scheduleGapBackfill either coalesces onto a not-yet-fired timer (whose later fetch includes it) or
+        // schedules a fresh trailing pass (the in-flight one may have already read past it). Without this, a
+        // contiguous frame landing mid-catch-up could be neither decrypted inline nor backfilled, and —
+        // lastDeliverySeq having advanced — no later gap would expose the miss until an unrelated reconnect.
+        // The backfill decrypts from the durable cursor in generation order, so we never consume a later
+        // generation before the missed earlier one (whose skipped key MLS only caches for a bounded window).
+        if (gap || (catchUpDepth.current.get(conversationId) ?? 0) > 0) {
+          scheduleGapBackfill(conversationId);
+          return;
+        }
 
         const group = liveGroups.current.get(conversationId);
         if (!group) return;
