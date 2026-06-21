@@ -122,10 +122,12 @@ The tenant-isolation policies on the **pruned** tables are currently **PUBLIC** 
 `commits_tenant_isolation` ([`0023:36`](../../apps/api/src/db/migrations/0023_conversation_commits.sql)) —
 unlike `audit_events`/`auth_sessions`, whose policies were correctly re-scoped `TO argus_app` in `0043`.
 A new prune role's window policy **OR-combines** with a PUBLIC isolation policy, so the role could
-`set_config('app.tenant_id', <victim>)` and get a **live-row bypass**. The Track-04 migration **must**
-re-scope each pruned table's isolation policy `TO argus_app`, and an RLS spec must assert the prune role
-cannot read or delete an in-window row even after setting a tenant GUC. (This is exactly the bypass Codex
-caught on #262.) `conversation_welcomes` is not pruned here, so its policy is left untouched until welcome
+`set_config('app.tenant_id', <victim>)` and get a **live-row bypass**. Each table's re-scope lands **in the
+same migration that first gives the prune role a policy over it** — `messages` in the boundary migration
+(slice 3), `conversation_commits` in the commit-prune migration (slice 5) — never ahead of need; each ships
+with an RLS spec asserting the prune role cannot read or delete an in-window row even after setting a tenant
+GUC. (This is exactly the bypass Codex caught on #262.) `conversation_welcomes` is not pruned here, so its
+policy is left untouched until welcome
 pruning is implemented.
 
 ### Implementation slices (safety boundary lands before any deletion)
@@ -141,17 +143,21 @@ pruning is implemented.
    test + web response test + a stale-PWA-compat test.
 2. **Threat-model note (no code)** — `docs/threat-models/message-retention.md` via `/feature-threat-model`;
    verify the 6 invariants; `security-architect` sign-off on the rule + the #262 re-scope.
-3. **Migration: role + `TO argus_app` re-scope + window policies + `created_at` indexes** (the boundary, no
-   deletion yet) + RLS spec incl. the #262 regression test. Gates: `/db-migration`, `security-boundary-auditor`,
-   live-DB RLS tests in CI.
+3. **Boundary migration — `messages` only** (no deletion yet): create the prune role; re-scope
+   `messages_tenant_isolation` `TO argus_app`; messages window `for select`/`for delete` policy; messages
+   `(id, created_at)` SELECT + `created_at` index; **grant DELETE on `messages` only** + the #262 regression
+   spec. Gates: `/db-migration`, `security-boundary-auditor`, live-DB RLS tests in CI.
 4. **Worker (TTL-only) — this is v1, the only deletion that ships in this track** —
    `infra/retention/prune-messages.sh` + systemd `service`/`timer`, modeled on `infra/audit-prune/`;
    counts-only logging, fail-closed, batched with a max-rounds cap. Gates: `infra-reviewer`, shellcheck,
    dry-run against a disposable DB.
-5. **Extend to `conversation_commits`** (same role; contiguity-preserving reap with the current epoch always
-   kept). **Gated on** the client missing-commit / sync-lost signal (build it first, or do not prune commits —
-   Codex P2). `conversation_welcomes` is **deferred** (every row is unconsumed; needs a re-invite recovery
-   path first).
+5. **Extend to `conversation_commits`** — *only once the client missing-commit / sync-lost recovery signal
+   exists* (Codex P2). This slice's migration re-scopes `commits_tenant_isolation` `TO argus_app`, adds the
+   commit window policy + `(id, created_at, conversation_id, epoch)` SELECT + `created_at` index, and **grants
+   DELETE on `conversation_commits` here — not in the boundary migration**, so no DELETE capability over
+   commits exists before pruning is safe. Worker does the contiguity-preserving reap, current epoch always
+   kept. `conversation_welcomes` stays **deferred** (every row is unconsumed; needs a re-invite recovery path
+   first).
 6. **(Optional, separable) metadata-table sweepers** — see below; own PR or deferred.
 7. **(Future, prerequisite-gated) delivery-confirmed pruning** — *only after per-device delivery tracking
    exists* (Codex P1). Extends the worker join + the role's metadata grants. **Not part of this track's
@@ -162,13 +168,15 @@ pruning is implemented.
 
 ## Files & tables touched
 
-- New migration `00NN_message_retention_role.sql`: create the prune role; **re-scope** the `messages` and
-  `conversation_commits` isolation policies `TO argus_app`; window-scoped `for select`/`for delete` policies;
-  **column-scoped SELECT matched to each table's predicate** — `messages (id, created_at)` and
-  **`conversation_commits (id, created_at, conversation_id, epoch)`** so the contiguity / keep-current-epoch
-  rule can actually run (Codex P2) — **never `ciphertext` / `commit` blobs**; plain `created_at` btree index
-  per pruned table (existing indexes are tenant-leading and can't serve a cross-tenant age scan — the same gap
-  `0043` noted); grant DELETE on those two tables only (**not** `conversation_welcomes`).
+- **Boundary migration `00NN_message_retention_role.sql` (slice 3, `messages` only):** create the prune role;
+  re-scope `messages_tenant_isolation` `TO argus_app`; messages window `for select`/`for delete` policy;
+  **column-scoped SELECT `messages (id, created_at)` — never `ciphertext`**; plain `created_at` btree index
+  (the existing indexes are tenant-leading and can't serve a cross-tenant age scan — the same gap `0043`
+  noted); **grant DELETE on `messages` only**.
+- **Commit-prune migration (slice 5, gated on the recovery signal):** re-scope `commits_tenant_isolation`
+  `TO argus_app`; commit window policy; SELECT `conversation_commits (id, created_at, conversation_id, epoch)`
+  for the contiguity rule (Codex P2); `created_at` index; **grant DELETE on `conversation_commits` here — not
+  earlier**. `conversation_welcomes` gets no role / grant / policy in this track.
 - New worker `infra/retention/prune-messages.sh` + `argus-message-retention.{service,timer}`.
 - `infra/stack/deploy/deploy.sh`: grant the new role LOGIN with a NULL password out-of-band + install the
   timer (mirror the existing prune/cleanup wiring).
