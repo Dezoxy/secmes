@@ -69,7 +69,11 @@ The union is specified **once, complete**, including the V1.1 variants (`call.re
 ```ts
 import { z } from 'zod';
 
-// A call is identified by a client-minted UUID, unique per call attempt.
+// A call is identified by a UUID **minted server-side** by `POST /calls/:friendUserId/invite`,
+// AFTER the friendship gate (see [04 §2.1](./04-server-api-and-database.md)): the caller receives it
+// in the invite response, the callee in `CallRingEvent`. Clients never invent it — every WS signaling
+// handler rejects a `callId` that is not an active, server-authorized ring, so a caller cannot bypass
+// the trusted invite/friendship gate by fabricating one. The schema only constrains the shape.
 export const CallIdSchema = z.string().uuid();
 
 // Per-call monotonic counter for ordering + replay protection (§8).

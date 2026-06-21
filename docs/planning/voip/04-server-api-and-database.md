@@ -35,7 +35,7 @@ Sections [§1](#1-design-posture-what-is-rest-what-is-ws-what-is-ephemeral)–[�
 |---|---|---|---|---|
 | TURN credentials | REST `POST /calls/turn-credentials` | No (stateless HMAC) | V1 | Short-lived, derived on demand; nothing to store |
 | Call invite / ring | REST `POST /calls/:friendUserId/invite` → WS `CallRingEvent` | No (in-memory ring state only) | V1 | Real-time, ephemeral; a dropped ring just fails the call |
-| Offer/Answer/ICE (SDP) | WS `call.offer` / `call.answer` / `call.ice` | **Never** | V1 | SDP/ICE are metadata-revealing; relay only, never on disk |
+| Offer/Answer/ICE (SDP) | WS `call.signal` (single opaque frame; phase encrypted inside) | **Never** | V1 | SDP/ICE are metadata-revealing; relay only, never on disk |
 | Hangup / decline / busy | WS `call.end` | No | V1 | Transient control |
 | Relay-only preference | DB column on `users` | Yes | V1 | A durable per-user setting (the one durable thing V1 adds) |
 | Call ledger (start/answer/end, reason) | DB `call_sessions` | **Yes**, metadata only | **V1.1** | Missed-call list + abuse forensics; no content, no keys |
@@ -54,14 +54,14 @@ All routes live in a new Nest module `apps/api/src/calls/` (`calls.module.ts`, `
 
 | Method & path | Auth | Request (Zod) | Response | Status contract | Purpose |
 |---|---|---|---|---|---|
-| `POST /calls/turn-credentials` | Guarded | `TurnCredentialsRequest` `{ }` (empty) | `TurnCredentialsResponse` | `200` ok; `401` no auth; `429` throttled | Mint ephemeral TURN creds + ICE config (always relay-only in V1) |
+| `POST /calls/turn-credentials` | Guarded | `TurnCredentialsRequest` `{ callId }` | `TurnCredentialsResponse` | `200` ok; `401` no auth; `403` not a participant of an active call; `429` throttled | Mint ephemeral TURN creds + ICE config for a **server-authorized** call (always relay-only in V1) |
 | `POST /calls/:friendUserId/invite` | Guarded | `CreateCallRequest` | `CreateCallResponse` `{ callId }` | `202` accepted (uniform); `401`; `429` | Mint a transient `callId` + emit ring; uniform 202 = no presence oracle. **No DB write in V1.** |
 | `GET /calls/settings` | Guarded | — | `CallSettingsResponse` `{ relayOnly }` | `200`; `401` | Read relay-only preference |
 | `PUT /calls/settings` | Guarded | `UpdateCallSettingsRequest` `{ relayOnly }` | `CallSettingsResponse` | `200`; `401` | Update relay-only preference |
 
 > **Deferred to V1.1:** `POST /calls/:callId/end` (ledger finalize) and `GET /calls/missed` (missed-call list). Both depend on the `call_sessions` table, which is V1.1 (§4). In the V1 audio core, a call **ends** purely over WS (`call.end`, §3.2) with no server-side finalize step, because there is no row to finalize.
 
-> **Why a REST `invite` at all, given WS does signaling?** Two reasons that hold even without a ledger. (1) The invite must be **server-trusted**: the tenant, the two parties, and the **friendship check** (§7) belong on an authenticated REST handler, not in the WS inbound path. (2) It mints a stable `callId` (a server-generated UUID) that the subsequent WS `call.offer`/`call.ice` frames reference, so the gateway can correlate signaling frames to one logical call. In V1 the `callId` lives only in the gateway's in-memory ring map; in V1.1 it becomes the `call_sessions` primary key. The SDP itself never touches REST — only the WS relay carries it.
+> **Why a REST `invite` at all, given WS does signaling?** Two reasons that hold even without a ledger. (1) The invite must be **server-trusted**: the tenant, the two parties, and the **friendship check** (§7) belong on an authenticated REST handler, not in the WS inbound path. (2) It mints a stable `callId` (a server-generated UUID) that the subsequent WS `call.signal` frames reference, so the gateway can correlate signaling frames to one logical call. In V1 the `callId` lives only in the gateway's in-memory ring map; in V1.1 it becomes the `call_sessions` primary key. The SDP itself never touches REST — only the WS relay carries it.
 
 ### 2.2 `POST /calls/turn-credentials` — ephemeral TURN creds
 
@@ -73,11 +73,13 @@ The single most important endpoint. It returns **time-limited, HMAC-derived** TU
 
 The shared `static-auth-secret` is delivered to **both** the API container and the coturn container as a Key Vault credential **file** (invariant 5) — see [03 §secrets](./03-infrastructure-turn-and-networking.md). The API reads it via `*_FILE` env, exactly like `SESSION_SIGNING_KEY_FILE`. It is **never logged** (invariant 2 — the derived `credential` is a secret-equivalent; logs carry only the `callId`).
 
+**Issuance is call-scoped, not merely authenticated.** The request carries the `callId` from the `invite` response (caller) or `CallRingEvent` (callee), and the handler mints credentials **only** when the requester is a participant of that active, server-authorized call (the in-memory ring map created by `invite`, which already passed the §7 friendship gate); otherwise `403`. Without this gate, any authenticated account could mint valid coturn credentials within the throttle and abuse argus's relay as an open relay. The credential itself stays a generic time-limited coturn secret — coturn never learns the `callId` — but *issuing* it is bound to an allowed call.
+
 **Relay-only enforcement happens here.** In the V1 audio core relay-only is unconditional — the locked IP-privacy default is the *only* mode V1 ships (direct-P2P opt-in is V1.1, before video). The response's `iceServers` and an explicit `iceTransportPolicy` hint reflect that:
 
 ```ts
 // packages/contracts/src/index.ts  (shared) + apps/api server-local mirror
-export const TurnCredentialsRequestSchema = z.object({}).strict();
+export const TurnCredentialsRequestSchema = z.object({ callId: CallIdSchema }).strict();
 
 export const IceServerSchema = z.object({
   urls: z.array(z.string().min(1)).min(1),     // e.g. ["turns:turn.4rgus.com:5349?transport=tcp"]
@@ -127,7 +129,7 @@ Per the DoD, each new/changed controller gets a spec with **both** tiers, using 
 
 - **Tier 1 — contract (`reflectRouteMeta`)**: assert every route is **guarded** (not `@Public`), and pin the status contract: `turn-credentials`→200, `invite`→202, `settings`→200. (V1.1 adds `end`→204, `missed`→200.)
 - **Tier 2 — behaviour (direct instantiation, faked `CallsService`/`FriendsService`)**:
-  - `turn-credentials`: never returns a `stun:` server; `iceTransportPolicy==='relay'`; the `credential` field is present and the handler does **not** pass it to any logger (assert via a spy on the logger).
+  - `turn-credentials`: never returns a `stun:` server; `iceTransportPolicy==='relay'`; the `credential` field is present and the handler does **not** pass it to any logger (assert via a spy on the logger); a `callId` the requester is **not** a participant of is rejected with `403` (no open-relay issuance).
   - `invite`: returns **202 with an identical body** whether the friendship is accepted, absent, or the callee is offline (no oracle); never throws a 403/404 that distinguishes those cases; performs **no DB write** in V1 (assert no repository/insert call on the faked service).
   - `settings`: `PUT` round-trips `relayOnly`; `GET` reflects the stored value.
 
@@ -144,22 +146,23 @@ Add interfaces + Zod schemas alongside `MessageCreatedEvent`:
 | Event | Direction | Payload (metadata/opaque only) | Routing |
 |---|---|---|---|
 | `CallRingEvent` | server→callee | `{ callId, conversationId, callerUserId, media }` | identity `(tenant, callee-sub)` → callee's (single, V1) device |
-| `CallSignalEvent` | peer↔peer relay | `{ callId, conversationId, kind: 'offer'\|'answer'\|'ice', payload: string /* opaque SDP/ICE, server-blind */ }` | conversation room `roomKey(tenant, conversationId)` |
+| `CallSignalEvent` | peer↔peer relay | `{ callId, conversationId, envelope: string /* opaque MLS ciphertext — the offer/answer/ice discriminant lives INSIDE it; the gateway never sees the call phase */ }` | conversation room `roomKey(tenant, conversationId)` |
 | `CallEndEvent` | either→peer | `{ callId, conversationId, reason }` | conversation room |
 
-`CallSignalEvent.payload` is a `z.string()` the gateway forwards verbatim — same crypto-blind treatment as `message.ciphertext`. SDP/ICE is **not** persisted and **not** parsed server-side. For `RedisRealtimeBus`, add a `CALL_CHANNEL` constant beside `CHANNEL`/`COMMIT_CHANNEL` and a `safeParse` branch in `onPayload`; fire-and-forget publish (`enableOfflineQueue:false`) like the others — if Redis is down the signal drops and the call simply fails to connect, which is the correct fail-closed mode (see the failure-modes treatment in [06 §11](./06-threat-model-and-privacy.md)).
+`CallSignalEvent.envelope` is a `z.string()` the gateway forwards verbatim — same crypto-blind treatment as `message.ciphertext`. The `offer`/`answer`/`ice` discriminant is encrypted **inside** that envelope (per [02 §2](./02-signaling-protocol-and-state-machine.md)), so neither the gateway nor the Redis backplane learns the call phase — they observe only that *a* signal was relayed (coarse timing/volume), never whether it was setup or ICE. SDP/ICE is **not** persisted and **not** parsed server-side. For `RedisRealtimeBus`, add a `CALL_CHANNEL` constant beside `CHANNEL`/`COMMIT_CHANNEL` and a `safeParse` branch in `onPayload`; fire-and-forget publish (`enableOfflineQueue:false`) like the others — if Redis is down the signal drops and the call simply fails to connect, which is the correct fail-closed mode (see the failure-modes treatment in [06 §11](./06-threat-model-and-privacy.md)).
 
 ### 3.2 Inbound frames (the genuinely new shape)
 
 Today the gateway only accepts inbound `auth` and `subscribe`. Calling needs **client→server→peer relay**, so add `@SubscribeMessage` handlers:
 
-- `call.offer`, `call.answer`, `call.ice`, `call.end`.
+- A single opaque relay frame **`call.signal`** (carries the encrypted `envelope`; the offer/answer/ice discriminant is **inside** the ciphertext — never a distinct WS frame name or bus field, so the frame name itself cannot leak the call phase), plus the control frame **`call.end`**.
 
 Each handler:
 1. Derives identity from the **server-verified** socket binding (`VerifiedAuth.{sub,tenantId}`) — never from the frame.
 2. Validates membership of the referenced `conversationId` via `MessagingService.isMember` (same authz as `onSubscribe`; non-members get the indistinguishable `conversation not found`).
-3. Re-emits the matching bus event. **No DB write** (true in V1; remains true in V1.1 — the ledger is written by REST `invite`/`end`, not by the signaling fast-path).
-4. Is subject to the per-socket inbound rate limit (see §8) — these frames are *not* covered by the HTTP throttler, so reuse/extend the existing `allowSubscribe` token-bucket pattern.
+3. Validates the `callId` against the gateway's **active ring map** — a frame for an unknown call, or one the sender is not a participant of, is dropped. The server-issued `callId` from `invite` is the authorization token; a client cannot fabricate one to relay into a call it was never invited to.
+4. Re-emits the matching bus event. **No DB write** (true in V1; remains true in V1.1 — the ledger is written by REST `invite`/`end`, not by the signaling fast-path).
+5. Is subject to the per-socket inbound rate limit (see §8) — these frames are *not* covered by the HTTP throttler, so reuse/extend the existing `allowSubscribe` token-bucket pattern.
 
 > **In-call signaling is fragile by design — surface it (S1 / [06 §11](./06-threat-model-and-privacy.md)).** A WS-gateway restart **kills in-call signaling** (mute/hangup/renegotiation can no longer relay) while the **media stream survives** (DTLS-SRTP is peer-to-peer over the TURN relay, independent of the gateway). The in-call UI must therefore show an explicit **"signaling lost"** state rather than pretending the call is healthy. There is no auto-recovery in V1; ICE-restart / reconnection is V1.1.
 
@@ -207,8 +210,8 @@ create table if not exists call_sessions (
   id                uuid primary key default gen_random_uuid(),
   tenant_id         uuid not null references tenants(id) on delete cascade,
   conversation_id   uuid not null,
-  initiator_user_id uuid not null,
-  callee_user_id    uuid not null,
+  initiator_user_id uuid,             -- nullable: pseudonymized to NULL on this party's GDPR erasure
+  callee_user_id    uuid,             -- nullable: pseudonymized to NULL on this party's GDPR erasure
   media             text not null check (media in ('audio','video')),
   state             text not null default 'ringing'
                       check (state in ('ringing','answered','ended')),
@@ -221,10 +224,12 @@ create table if not exists call_sessions (
   -- composite-FK tenant pinning (defence-in-depth beneath RLS)
   constraint call_conv_fk   foreign key (tenant_id, conversation_id)
                             references conversations (tenant_id, id) on delete cascade,
+  -- party FKs do NOT cascade: erasing one user must not delete the counterpart's call history.
+  -- gdpr.service pseudonymizes the erased party's column to NULL first (then the user delete succeeds).
   constraint call_init_fk   foreign key (tenant_id, initiator_user_id)
-                            references users (tenant_id, id) on delete cascade,
+                            references users (tenant_id, id) on delete no action,
   constraint call_callee_fk foreign key (tenant_id, callee_user_id)
-                            references users (tenant_id, id) on delete cascade,
+                            references users (tenant_id, id) on delete no action,
   -- a row is either live or terminal-consistent
   constraint call_terminal_ck check (
     (state <> 'ended') or (ended_at is not null and end_reason is not null)
@@ -274,6 +279,7 @@ Notes:
 - **App-layer party predicate**, not a second RLS policy (the friendships convention): every `CallsService` query adds `and (initiator_user_id = :me or callee_user_id = :me)`. RLS only enforces tenant isolation; "caller is a party" is app logic → wrong caller → 0 rows → uniform 404.
 - **No `device_id` columns.** The V1.1 ledger stays single-dimensioned on users; per-device addressing is a later concern (§3.3). Adding device columns only when ring-all/transfer needs them avoids dead schema.
 - **30-day prune key is `started_at`** (not `created_at`): aligns the ledger's age semantics with the call's real start; the dedicated `started_at` btree (non-tenant-leading) is what the cross-tenant prune scan needs, exactly as `0044` adds a plain `created_at` index for messages.
+- **GDPR erasure preserves the counterpart (Art. 17 / Art. 20).** The two party FKs are `on delete no action` (**not** `cascade`) and the party columns are nullable: erasing one user **pseudonymizes** their `initiator_user_id` / `callee_user_id` to `NULL` in `gdpr.service` (the same null-the-reference pattern messages use) so the other party's missed-call/history row survives; the table is also added to `gdpr.service.exportAccount` so a user's own call metadata rides their Art. 20 export. A row with both parties erased is anonymous metadata that ages out under the 30-day prune.
 
 ---
 
@@ -345,7 +351,7 @@ Calling is a notification amplifier (every invite can ring a device), so it need
 |---|---|---|
 | `POST /calls/turn-credentials` | HTTP throttler, e.g. **30/min/user** | Credential minting is cheap but a leaked-creds farm shouldn't be free; generous enough for retry |
 | `POST /calls/:friendUserId/invite` | **Per-(caller→callee) cooldown** + global per-caller cap (e.g. 1 active ring per callee at a time; ≤ N invites/min/caller) | Stops ring-spam / "missed-call bombing" |
-| WS `call.offer/answer/ice/end` | Per-socket token bucket (extend `allowSubscribe`) | Inbound signaling isn't covered by the HTTP throttler; ICE can be chatty — bound it but allow trickle-ICE bursts |
+| WS `call.signal` / `call.end` | Per-socket token bucket (extend `allowSubscribe`) | Inbound signaling isn't covered by the HTTP throttler; ICE can be chatty — bound it but allow trickle-ICE bursts |
 | Invite to a non-friend | Silent no-op (still 202) | No oracle, no notification |
 | Repeated invites to same callee while a ring is live | Idempotent — reuse the live `callId`, don't re-ring | Prevents a single caller spamming N rings |
 
@@ -378,7 +384,8 @@ Calling adds new personal-data processing (call graph, call timing, relay-relaye
 
 ### 9.3 V1.1 additions
 
-- [ ] **`call_sessions`**: `tenant_id` + RLS (ENABLE+FORCE, `to argus_app`) + leading `tenant_id` index + `started_at` prune index + composite FKs + dedicated `argus_call_prune` role with 30-day window-scoped policies. (`/db-migration` skill scaffolds this.)
+- [ ] **`call_sessions`**: `tenant_id` + RLS (ENABLE+FORCE, `to argus_app`) + leading `tenant_id` index + `started_at` prune index + composite FKs (**party FKs `on delete no action`, party columns nullable**) + dedicated `argus_call_prune` role with 30-day window-scoped policies. (`/db-migration` skill scaffolds this.)
+- [ ] **GDPR wiring for `call_sessions`**: extend `apps/api/src/users/gdpr.service.ts` to (a) **pseudonymize** the erased user's `initiator_user_id` / `callee_user_id` to `NULL` (preserving the counterpart's row) before the user delete, and (b) include the user's own call metadata in `exportAccount`; add specs for both.
 - [ ] **`POST /calls/:callId/end` + `GET /calls/missed`** in OpenAPI (guarded; `end`→204, `missed`→200) + their controller-spec rows (404-no-IDOR on `end`, metadata-only serialization on `missed`).
 - [ ] **`argus_call_prune` TTL worker** (`infra/retention/prune-call-sessions.sh` + systemd timer).
 
