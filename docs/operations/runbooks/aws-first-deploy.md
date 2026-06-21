@@ -39,6 +39,45 @@ doc is the "what to do, in order, the first time."
 `deploy.sh` is **fail-closed**: a missing mandatory KV secret or an unset required var aborts the
 whole rollout before the app starts.
 
+## Release safety controls (Terraform state + approval gate)
+
+Two standing controls protect **every** release on this AWS path (Track 3 ops-hardening — both already
+active here; this section is the reference + how-to-verify, plus the deferred Azure twin).
+
+**1. Remote, locked Terraform state.** `infra/aws/terraform/versions.tf` uses `backend "s3" {}` — the
+**default** for the real AWS deploy: encrypted, versioned, DynamoDB-locked S3 state that survives laptop
+loss and blocks a concurrent `apply`. One-time bootstrap (already done if `backend.hcl` exists):
+`make -C infra/aws bootstrap` creates the bucket + lock table and writes `backend.hcl`, then
+`terraform -chdir=infra/aws/terraform init -backend-config=backend.hcl` (see
+[`infra/aws/terraform/README.md`](../../../infra/aws/terraform/README.md)).
+
+- **Verify:** `terraform -chdir=infra/aws/terraform state list` reads from S3; a fresh clone with no local
+  `.terraform/` can `init -backend-config=backend.hcl` and `plan` with **no diff**.
+- **Why it matters:** with local/stale state plus a live box, `terraform apply` can try to **re-create the
+  running host**. Remote + locked state removes that single point of failure.
+
+**2. Per-release human approval.** The `deploy` job in `cd-aws.yml` is gated twice — the
+`vars.ENABLE_DEPLOY_AWS` master kill-switch **and** `environment: aws-experiment` (line 126). The
+`aws-experiment` GitHub Environment carries **required reviewers** (✅ in the pre-flight above), so each
+`aws-v*` tag **pauses for your approval before the root SSM command runs**. The IAM deploy role's OIDC trust
+is bound to that exact environment subject —
+`repo:OWNER/REPO:environment:aws-experiment` (`infra/aws/terraform/iam.tf:102`,
+`var.github_deploy_environment`) — so a token from any other branch/ref can't assume the deploy role: the
+approval gate can't be side-stepped.
+
+- **Verify:** push a throwaway `aws-v*` tag (with `ENABLE_DEPLOY_AWS=true`) → the run builds images, then
+  the `deploy` job sits in **"Waiting"** on `aws-experiment` until you approve; an unapproved run never
+  reaches `aws ssm send-command`.
+
+> **Azure twin (deferred — not the live deploy path).** The single-Azure-VM path
+> (`infra/azure/terraform`, `cd.yml`) mirrors both controls but is **not armed**:
+> `infra/azure/terraform/versions.tf:15-23` still has the `backend "azurerm"` block **commented** (local
+> state), and `cd.yml`'s `environment: prod` (line 130) + `var.github_deploy_subject` still need the same
+> required-reviewer config. Activate both only when/if the Azure VM is armed: create the tfstate RG
+> `argus-tfstate` / storage account `argustfstate` / container `tfstate` out-of-band, uncomment the block,
+> `terraform init -migrate-state`; and set required reviewers on the `prod` environment with the OIDC subject
+> bound to `repo:OWNER/REPO:environment:prod`.
+
 ---
 
 ## Pre-flight checklist

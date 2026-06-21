@@ -1,21 +1,32 @@
 # Track 3 — Operational / infra hardening
 
-> **Status:** PROPOSED 2026-06-21. Two items are net-new; two are _activating_ designs already in the repo.
-> Sits behind the first Azure deploy — none of this blocks shipping, but it removes single-point risks
-> before the platform is armed.
+> **Status:** items **A, B, C IMPLEMENTED as runbooks** 2026-06-21 (PR 3a — docs only); item **D** (realtime
+> sequence numbers) remains **PROPOSED** and ships as its own follow-up PR (3b). **Correction:** the live
+> deploy path is **AWS** (`infra/aws/`, `cd-aws.yml`, the `aws-experiment` environment), not the Azure VM
+> this doc originally assumed — so the runbooks are **AWS-primary**, items B & C were found **already active
+> there**, and the Azure twin is documented as a deferred follow-up. None of this blocks shipping; it removes
+> single-point risks before GA.
 
 ## Summary of the four items
 
-| Item                          | State today                                                                 | Work required                          |
-| ----------------------------- | -------------------------------------------------------------------------- | -------------------------------------- |
-| A. Migration rollback         | 44 forward-only SQL migrations, no down-path                               | **Net-new**: documented procedure      |
-| B. Terraform remote state     | `azurerm` backend already written (commented) in `versions.tf`, local for now | **Activate** the documented backend    |
-| C. CD per-release approval    | `prod` GitHub Environment already wired in `cd.yml`; reviewers not yet set  | **One-time GitHub setting** (no code)   |
-| D. Realtime delivery guarantee | Redis pub/sub fan-out, frames have no sequence/ACK                          | **Net-new**: ACK / sequence numbers    |
+| Item                           | State today                                                                          | Status                                          |
+| ------------------------------ | ----------------------------------------------------------------------------------- | ----------------------------------------------- |
+| A. Migration rollback          | Forward-only SQL migrations (44 files, head 0043), no down-path                      | ✅ **Runbook shipped** (PR 3a)                  |
+| B. Terraform remote state      | **AWS**: S3 backend already the default/enabled; **Azure** twin still commented/local | ✅ **Documented** (AWS active; Azure deferred)  |
+| C. CD per-release approval     | **AWS** `aws-experiment` env has required reviewers; **Azure** `prod` not yet set    | ✅ **Documented** (AWS active; Azure deferred)  |
+| D. Realtime delivery guarantee | Redis pub/sub fan-out, frames have no sequence/ACK                                   | ⏳ **PROPOSED** — own follow-up PR (3b)         |
 
 ## A. Migration rollback procedure (net-new)
 
-**Problem.** `apps/api/src/db/migrate.ts` applies 44 forward-only migrations; there is no down-migration
+> ✅ **Implemented (PR 3a):** [`docs/operations/runbooks/migration-rollback.md`](../../operations/runbooks/migration-rollback.md)
+> — three recovery paths (failed migration / roll the app image back / restore), each with its data-loss
+> trade-off; recovery references the restore runbook in `infra/backup/README.md` (no duplication). The
+> pre-migration checkpoint ships as a documented **operator step** (`systemctl start argus-db-backup.service`,
+> the existing signed+encrypted worker), **not** auto-wired into `deploy.sh`: the deploy deliberately doesn't
+> couple rollout to a B2 round-trip and `argus_backup` only exists after migrate, so auto-wiring is a deferred
+> follow-up (recorded in the runbook).
+
+**Problem.** `apps/api/src/db/migrate.ts` applies forward-only migrations (44 files, head `0043`); there is no down-migration
 or documented recovery. If a schema change breaks production, the operator has no rehearsed path back.
 
 **Approach.** This is primarily a _runbook_, not a framework. Add `docs/operations/runbooks/migration-rollback.md`
@@ -28,6 +39,13 @@ _not_ proposed — migrations run ~once per slice and the backup-restore path is
 N+1, then follow the runbook to land back at N. Document the exact commands and timing.
 
 ## B. Activate Terraform remote state (activate existing design)
+
+> ✅ **Documented (PR 3a) + correction.** On the **live AWS path**, remote state is **already the
+> default/enabled** — `infra/aws/terraform/versions.tf` has `backend "s3" {}` (encrypted + DynamoDB-locked +
+> versioned), bootstrapped via `make -C infra/aws bootstrap`; there is **nothing to activate**. The text
+> below describes the **Azure** twin, which is **not** the deploy path (Azure is Key-Vault-via-Arc only): its
+> `azurerm` backend stays commented and activation is a deferred follow-up. See the "Release safety controls"
+> section in [`docs/operations/runbooks/aws-first-deploy.md`](../../operations/runbooks/aws-first-deploy.md).
 
 **Problem.** `infra/azure/terraform/versions.tf` runs on **local state** today and the file itself warns:
 state holds sensitive ids and must move to an encrypted, locking remote backend before CI/sharing. With
@@ -44,6 +62,13 @@ local `.terraform/` can `init` and `plan` with **no diff**.
 
 ## C. CD per-release approval gate (one-time GitHub setting)
 
+> ✅ **Documented (PR 3a).** On the **live AWS path** the `aws-experiment` GitHub Environment already has
+> required reviewers, and the IAM deploy role's OIDC trust is bound to
+> `repo:OWNER/REPO:environment:aws-experiment` (`infra/aws/terraform/iam.tf:102`), so each `aws-v*` tag pauses
+> for approval before the root SSM command runs — and a token from any other ref can't assume the role. The
+> **Azure** `prod` environment (`cd.yml`) is the deferred twin. Captured with verify steps in the "Release
+> safety controls" section of [`docs/operations/runbooks/aws-first-deploy.md`](../../operations/runbooks/aws-first-deploy.md).
+
 **Problem.** `.github/workflows/cd.yml` already has a two-layer gate: the `vars.ENABLE_DEPLOY` master
 kill-switch _and_ `environment: prod` (lines ~117–130, with comments instructing that `prod` be given
 required reviewers). The Environment is referenced but its **protection rules are not yet configured**, so
@@ -58,6 +83,11 @@ checklist item in the deploy runbook so arming can't skip it.
 execute `az vm run-command`.
 
 ## D. Realtime ACK / sequence numbers (net-new)
+
+> ⏳ **Deferred to its own follow-up PR (3b).** This is a real cross-cutting feature (a `seq` field in
+> `@argus/contracts`, a per-conversation monotonic sequence assigned at message-write in `apps/api`, the web
+> client tracking/gap-detecting it, plus E2E) on the realtime **hot path**, so it gets a `security-architect`
+> + `crypto-reviewer` design pass first rather than being bundled with the A/B/C docs.
 
 **Problem.** `apps/api/src/realtime/realtime.gateway.ts` fans out over Redis pub/sub
 (`redis-realtime-bus.ts`), which is fire-and-forget: a frame dropped on a flaky socket or delivered out of

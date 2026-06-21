@@ -20,7 +20,7 @@ non-exhaustive RLS test coverage, and several operational single-point risks.
 | --- | ---------------------------------------------------------------------------- | --------------- | -------------------------------------------------- | --------------- |
 | 1   | ✅ [Messaging service refactor](./01-messaging-service-refactor.md)          | Readability     | Merge-conflict & onboarding cost on a 1,185-LOC file | none            |
 | 2   | ✅ [Test coverage + RLS assertions](./02-test-coverage-and-rls-assertions.md) | Test hardening  | A typo'd RLS policy could ship a cross-tenant leak | tests only      |
-| 3   | [Ops / infra hardening](./03-ops-infra-hardening.md)                          | Operational     | No rollback story; flippable deploy gate; lossy WS | small           |
+| 3   | 🟡 [Ops / infra hardening](./03-ops-infra-hardening.md)                       | Operational     | No rollback story; flippable deploy gate; lossy WS | small           |
 | 4   | [Message retention & ciphertext pruning](./04-message-retention-and-pruning.md) | Retention / privacy | `messages` ciphertext grows forever — cost, breach/subpoena surface, no GDPR storage-limitation story | small (cursor contract + role + worker) |
 
 > Track 4 was added 2026-06-21 — a retention/data-minimization improvement, not part of the original
@@ -42,8 +42,14 @@ change; Track 3 is mostly activating things already designed.
   catalog-driven `db/rls-coverage.spec.ts` that fails CI if any non-allowlisted `public` table lacks forced
   `app.tenant_id` RLS. (It already surfaced the drift: 19 tenant-scoped tables today, not the "13" the docs
   repeated.) Tests only.
+- 🟡 **Track 3 items A/B/C implemented** (2026-06-21, PR 3a) — a migration-rollback runbook
+  (`docs/operations/runbooks/migration-rollback.md`) plus a "Release safety controls" section in
+  `aws-first-deploy.md` documenting locked Terraform remote state + the per-release approval gate.
+  **Correction:** the live deploy path is **AWS**, not the Azure VM this track assumed — so the runbooks are
+  AWS-primary, B & C were found **already active** there, and the Azure twin is a deferred follow-up. Item
+  **D** (realtime sequence numbers) ships separately as **PR 3b**. Docs only.
 
-Tracks 3–4 remain planning docs.
+Track 3 item D + Track 4 remain planning docs.
 
 ## Constraints every track must respect
 
