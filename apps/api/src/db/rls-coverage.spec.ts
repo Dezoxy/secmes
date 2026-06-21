@@ -35,6 +35,17 @@ const TENANTLESS_ALLOWLIST = new Map<string, string>([
 // RLS policy but (correctly) no `tenant_id` column — the column check is skipped for it alone.
 const TENANT_BY_ID = 'tenants';
 
+// The canonical tenant-equality SHAPE (anchored) — deliberately NOT a loose `%app.tenant_id%` substring.
+// A substring match would accept an inverted predicate (`tenant_id <> …`) or an appended `OR true`, both
+// of which still *mention* the GUC while breaking isolation (Codex P2). This anchors the whole expression
+// to `(<col> = …current_setting('app.tenant_id')…::uuid)`, so the operator must be `=` and nothing may be
+// appended after the cast. It matches the two deparsed forms in use today —
+//   (tenant_id = (current_setting('app.tenant_id'::text))::uuid)
+//   (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
+// — and the `tenants` variant keyed on `id`. If a future table ever splits enforcement across separate
+// FOR INSERT / FOR SELECT policies, switch the count below to match USING and WITH CHECK independently.
+const TENANT_EQ_SHAPE = String.raw`^\((tenant_id|id) = .*current_setting\('app\.tenant_id'.*\)::uuid\)$`;
+
 interface TableRls {
   table: string;
   rls_enabled: boolean;
@@ -59,14 +70,13 @@ describe.skipIf(!DB_URL)('RLS coverage (catalog-driven)', () => {
           where col.table_schema = 'public' and col.table_name = c.relname
             and col.column_name = 'tenant_id'
         ) as has_tenant_id,
-        -- Counts a single policy carrying the tenant predicate in BOTH USING and WITH CHECK (the
-        -- FOR ALL isolation policy every tenant table uses today). If a future table ever splits
-        -- enforcement across separate FOR INSERT / FOR SELECT policies, change this to count USING
-        -- refs and WITH CHECK refs independently so the split case is not a false positive.
+        -- Counts a single policy whose USING and WITH CHECK BOTH match the anchored tenant-equality
+        -- shape (see TENANT_EQ_SHAPE) — not a loose substring, so an inverted or permissive predicate
+        -- that merely mentions the GUC does not count as coverage.
         (
           select count(*) from pg_policies p
           where p.schemaname = 'public' and p.tablename = c.relname
-            and p.qual ilike '%app.tenant_id%' and p.with_check ilike '%app.tenant_id%'
+            and p.qual ~* ${TENANT_EQ_SHAPE} and p.with_check ~* ${TENANT_EQ_SHAPE}
         )::int as tenant_policies
       from pg_class c
       join pg_namespace n on n.oid = c.relnamespace
