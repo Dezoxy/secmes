@@ -67,15 +67,24 @@ change; Track 3 is mostly activating things already designed.
   `security-architect` + `crypto-reviewer` sign-off (both **PASS_WITH_CONDITIONS** — the design is validated
   against the code; the conditions are binding on slices 3–5 and recorded in the note's §7). No code.
 
-- 🟡 **Track 4 slice 3 implemented** (2026-06-21, PR _pending_) — the **`messages` prune boundary**
-  (`0044_messages_prune_role.sql`), the deletion *authority* built and proven before any worker. A dedicated
-  `argus_msg_prune` role (`nologin nobypassrls`), the `messages_tenant_isolation` re-scope `TO argus_app` (the
-  #262 fix), window-scoped prune `select`/`delete` policies (90-day ceiling), a column-scoped
-  `(id, created_at)` SELECT (never `ciphertext`), and a `created_at` index — mirroring `0043`. The live-DB RLS
-  spec proves §7 cond 1 both ways (no-GUC sweep succeeds AND the GUC-set bypass is denied). **No deletion** —
-  the role stays `NOLOGIN`; the worker is slice 4.
+- 🟡 **Track 4 slice 3 implemented** (2026-06-21, [#291](https://github.com/Dezoxy/secmes/pull/291)) — the
+  **`messages` prune boundary** (`0044_messages_prune_role.sql`), the deletion *authority* built and proven
+  before any worker. A dedicated `argus_msg_prune` role (`nologin nobypassrls`), the
+  `messages_tenant_isolation` re-scope `TO argus_app` (the #262 fix), window-scoped prune `select`/`delete`
+  policies (90-day ceiling), a column-scoped `(id, created_at)` SELECT (never `ciphertext`), and a
+  `created_at` index — mirroring `0043`. The live-DB RLS spec proves §7 cond 1 both ways (no-GUC sweep
+  succeeds AND the GUC-set bypass is denied). **No deletion** — the role stays `NOLOGIN`; the worker is slice 4.
 
-Track 4 deletion (the TTL worker) is not yet implemented; slices 4–5 remain planning docs.
+- 🟡 **Track 4 slice 4 implemented** (2026-06-21, PR _pending_) — the **TTL prune worker**, the v1 deletion
+  (and the only deletion this track ships). `infra/retention/prune-messages.sh` + a daily systemd
+  `service`/`timer`, a single-table clone of `infra/audit-prune/`: connects in-container as `argus_msg_prune`
+  (no password), batch-deletes `messages` past the 90-day ceiling (same literal as the `0044` RLS policy — the
+  DB-enforced hard floor), logs **counts only**, and **fails closed**. `deploy.sh` adds the role's
+  `LOGIN PASSWORD NULL` + a connectivity probe (§7 cond 2). No app code, migration, or contract change.
+
+Track 4's v1 message TTL deletion now ships (slice 4); slice 5 (`conversation_commits` pruning, gated on a
+client missing-commit / sync-lost recovery signal that does not yet exist) remains a planning doc, so Track 4
+stays 🟡.
 
 ## Constraints every track must respect
 

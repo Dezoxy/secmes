@@ -1,0 +1,12 @@
+# argus — daily timer for the message-retention TTL prune worker. The window is 90 days, so a daily sweep
+# keeps the per-run backlog tiny. RandomizedDelaySec staggers it off the other nightly/daily timers.
+[Unit]
+Description=argus — daily message-retention prune (90-day ceiling)
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target
