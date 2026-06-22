@@ -2,7 +2,6 @@ import { useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   Search,
-  Plus,
   UserMinus,
   UserPlus,
   Users,
@@ -53,9 +52,8 @@ interface ConversationListProps {
   currentUserProfile?: User;
   /** Opens account settings. */
   onSettings?: (trigger: HTMLButtonElement) => void;
-  /** Starts the claim → verify → create flow. Absent in demo mode (no unlocked device) → button hidden. */
-  onNewConversation?: () => void;
-  /** Starts the group create flow. Absent in demo mode → button hidden. */
+  /** Starts the group create flow. Absent in demo mode → button hidden. (1:1 chats start from the
+   *  Friends list via onTapFriend, so there is no separate "new 1:1" button.) */
   onNewGroup?: () => void;
   /** Shows the installed-app update action when a newer PWA shell is waiting. */
   updateReady?: boolean;
@@ -89,7 +87,6 @@ export function ConversationList({
   onSelect,
   currentUserProfile = currentUser,
   onSettings,
-  onNewConversation,
   onNewGroup,
   updateReady = false,
   onApplyUpdate,
@@ -544,30 +541,18 @@ export function ConversationList({
         </button>
       </div>
 
-      {/* New Conversation / New Group */}
-      {(onNewConversation || onNewGroup) && (
-        <div className={`px-4 pt-4 pb-2 ${onNewConversation && onNewGroup ? 'flex gap-2' : ''}`}>
-          {onNewConversation && (
-            <Button
-              onClick={onNewConversation}
-              size="lg"
-              className={`shadow-purple-500/25 hover:-translate-y-0.5 hover:shadow-purple-500/40 active:translate-y-0 ${onNewGroup ? 'flex-1' : 'w-full'}`}
-            >
-              <Plus className="w-4 h-4" />
-              {onNewGroup ? '1:1' : 'New Conversation'}
-            </Button>
-          )}
-          {onNewGroup && (
-            <Button
-              onClick={onNewGroup}
-              size="lg"
-              variant="subtle"
-              className={`shadow-purple-500/10 hover:-translate-y-0.5 active:translate-y-0 ${onNewConversation ? 'flex-1' : 'w-full'}`}
-            >
-              <Users className="w-4 h-4" />
-              Group
-            </Button>
-          )}
+      {/* New Group (1:1 chats start from the Friends list via onTapFriend). */}
+      {onNewGroup && (
+        <div className="px-4 pt-4 pb-2">
+          <Button
+            onClick={onNewGroup}
+            size="lg"
+            variant="subtle"
+            className="w-full shadow-purple-500/10 hover:-translate-y-0.5 active:translate-y-0"
+          >
+            <Users className="w-4 h-4" />
+            Group
+          </Button>
         </div>
       )}
 
