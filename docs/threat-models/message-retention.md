@@ -163,8 +163,14 @@ pruning:
   per-commit; it never reads or returns the `commit` blob, so invariant #1 holds and the disclosure delta is
   strictly less than what `FetchedCommit.epoch` already carries. A header (not a body field) keeps stale PWAs
   validating the body as `CommitPageSchema` working.
-- **5b/5c:** the client uses `oldestRetainedEpoch > localEpoch` (vs. a bounded transient-retry budget) to
-  detect a genuine pruned/lost gap, then drives the re-add recovery + a UI affordance.
+- **5b (client detection — implemented 2026-06-21):** the commit drain now reports whether it advanced plus
+  the oldest retained epoch, and a pure, unit-tested `classifyCommitDrain` resolves a non-advancing drain to
+  **`sync-lost`** exactly when `oldestRetainedEpoch > localEpoch` (the commit needed to advance is gone),
+  otherwise `transient` (retry within a bounded budget). This closes the spin-forever latent bug: a genuine
+  gap now escalates to an `onSyncLost` callback and stops, instead of looping. **No content/keys involved** —
+  `oldestRetainedEpoch` is metadata that never gates decryption or ordering. Client-only; no server/contract
+  change. (Recovery action + UI are 5c.)
+- **5c:** on `sync-lost`, drive the re-add recovery via the existing member/Welcome path + a UI affordance.
 
 **Deferred:** the actual commit pruning (the cond-3/4 boundary migration + worker) waits behind 5a–5c **and**
 group-chat GA — 1:1 conversations write zero commit rows, so pruning is premature at current scale.

@@ -32,6 +32,53 @@ describe('typed API client boundary', () => {
     );
   });
 
+  it('taps the response (so callers can read headers) on success, but never on an error status', async () => {
+    token.mockResolvedValue('tok');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(serviceInfo), {
+        status: 200,
+        headers: { 'X-Oldest-Retained-Epoch': '7' },
+      }),
+    );
+    let seen: string | null = 'unset';
+    const result = await requestJson({
+      path: '/example',
+      responseSchema: ServiceInfoSchema,
+      onResponse: (res) => {
+        seen = res.headers.get('X-Oldest-Retained-Epoch');
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(seen).toBe('7'); // header readable, body still validated below
+
+    // On an unexpected status the tap must NOT fire (no body/headers leak past the contract boundary).
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('nope', { status: 500 }));
+    let fired = false;
+    await requestJson({
+      path: '/example',
+      responseSchema: ServiceInfoSchema,
+      onResponse: () => {
+        fired = true;
+      },
+    });
+    expect(fired).toBe(false);
+  });
+
+  it('a throwing onResponse callback never fails the request', async () => {
+    token.mockResolvedValue('tok');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(serviceInfo), { status: 200 }),
+    );
+    const result = await requestJson({
+      path: '/example',
+      responseSchema: ServiceInfoSchema,
+      onResponse: () => {
+        throw new Error('reader blew up');
+      },
+    });
+    expect(result).toEqual({ ok: true, status: 200, data: serviceInfo });
+  });
+
   it('returns a typed HTTP error without reading or exposing response bodies', async () => {
     token.mockResolvedValue('secret-token');
     const body = 'https://storage.example.com/file?sig=do-not-show';

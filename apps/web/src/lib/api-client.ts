@@ -43,6 +43,12 @@ interface ApiRequestBase<TBody> {
   requestSchema?: ApiSchema<TBody>;
   expectedStatuses?: readonly number[];
   fetcher?: Fetcher;
+  /**
+   * Tap the raw `Response` on a successful (expected-status) reply — before the body is consumed — so a
+   * caller can read response HEADERS (the body still flows through Zod validation as usual). Used by
+   * `listCommits` to read the `X-Oldest-Retained-Epoch` metadata header. Never read/log the body here.
+   */
+  onResponse?: (res: Response) => void;
 }
 
 interface ApiJsonRequest<TBody, TResponse> extends ApiRequestBase<TBody> {
@@ -83,6 +89,16 @@ export async function requestJson<TResponse, TBody = undefined>(
   const expectedStatuses = request.expectedStatuses ?? DEFAULT_JSON_STATUSES;
   if (!expectedStatuses.includes(res.data.status)) {
     return httpFailure(res.data.status);
+  }
+
+  // Header tap (before body consumption): lets a caller read response metadata headers. Body still
+  // flows through the Zod validation below. Wrapped so a throwing callback can't sink the request.
+  if (request.onResponse) {
+    try {
+      request.onResponse(res.data);
+    } catch {
+      /* a header reader must never fail the request */
+    }
   }
 
   let json: unknown;

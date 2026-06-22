@@ -88,6 +88,7 @@ import {
   FriendRequestListResponseSchema,
   SendFriendRequestSchema,
   SendFriendRequestResponseSchema,
+  OLDEST_RETAINED_EPOCH_HEADER,
   type Friend,
   type FriendRequest,
   type FriendRequestBox,
@@ -583,21 +584,33 @@ export async function postCommit(
 /**
  * Fetch commits after `afterEpoch` in ascending epoch order (GET /conversations/:id/commits).
  * Used by the commit drain state machine to catch up after a commit event or reconnect.
+ *
+ * Returns the commit page PLUS `oldestRetainedEpoch`: the server's oldest still-retained commit epoch
+ * for the whole conversation, read from the `X-Oldest-Retained-Epoch` response header (Track 4 slice
+ * 5a — metadata only, never the commit blob). `null` when the header is absent (no commit rows yet, or
+ * a server too old to send it). The drain compares it against the local epoch to tell a transient stall
+ * (commit still retained → retry) from a genuine gap (the needed commit was pruned → sync-lost).
  */
 export async function listCommits(
   conversationId: string,
   opts: { afterEpoch?: number; limit?: number } = {},
-): Promise<FetchedCommit[]> {
+): Promise<{ commits: FetchedCommit[]; oldestRetainedEpoch: number | null }> {
   const params = new URLSearchParams();
   if (opts.afterEpoch !== undefined) params.set('afterEpoch', String(opts.afterEpoch));
   if (opts.limit !== undefined) params.set('limit', String(opts.limit));
   const qs = params.toString();
-  return unwrapApiResult(
-    await requestJson({
-      path: `/conversations/${encodeURIComponent(conversationId)}/commits${qs ? `?${qs}` : ''}`,
-      responseSchema: CommitPageSchema,
-    }),
-  );
+  let oldestRetainedEpoch: number | null = null;
+  const result = await requestJson({
+    path: `/conversations/${encodeURIComponent(conversationId)}/commits${qs ? `?${qs}` : ''}`,
+    responseSchema: CommitPageSchema,
+    onResponse: (res) => {
+      const raw = res.headers.get(OLDEST_RETAINED_EPOCH_HEADER);
+      if (raw === null || raw.trim() === '') return; // absent (or empty) — Number('') would be a false 0
+      const parsed = Number(raw);
+      if (Number.isInteger(parsed) && parsed >= 0) oldestRetainedEpoch = parsed; // epochs are non-negative
+    },
+  });
+  return { commits: unwrapApiResult(result), oldestRetainedEpoch };
 }
 
 /**
