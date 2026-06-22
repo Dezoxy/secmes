@@ -1,0 +1,19 @@
+# Trivy vulnerability ignores — TEMPORARY and justified. Each entry MUST be removed once a fix ships.
+# Trivy reads this file from the repo root (cwd) automatically, so it applies to every image scan
+# (cd-aws.yml and cd.yml).
+#
+# ---------------------------------------------------------------------------------------------------
+# CVE-2026-42504 — Go stdlib (net/textproto) malicious-MIME-header DoS, fixed in Go 1.26.4.
+#
+# This is baked into caddy's COMPILED binary in caddy:2-alpine (built with Go 1.26.3) — it is NOT an
+# apk package, so it cannot be patched in-image (apk upgrade does not touch it). No caddy:2-alpine
+# image rebuilt on Go >= 1.26.4 exists yet, so there is no shippable fix today.
+#
+# Risk accepted for the AWS experiment box (decided with the operator): caddy is reachable ONLY via
+# the Cloudflare Tunnel (no public ports — see the deploy topology), which shrinks the DoS surface;
+# and the flaw is a denial-of-service, not RCE. This is the ingress image only; the api image is
+# unaffected (no Go binary).
+#
+# REMOVE this entry once caddy publishes an image built on Go >= 1.26.4 — a fresh re-tag will then
+# pass the Trivy gate cleanly. Tracked as a follow-up task.
+CVE-2026-42504

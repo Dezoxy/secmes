@@ -26,7 +26,7 @@ RUN pnpm --filter @argus/api --prod deploy /app
 FROM node:24-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
-RUN apk add --no-cache wget # for the healthcheck
+RUN apk --no-cache upgrade && apk add --no-cache wget # upgrade OS pkgs (CVE patching) + healthcheck wget
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/package.json ./package.json
