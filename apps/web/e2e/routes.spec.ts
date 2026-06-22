@@ -19,12 +19,22 @@ for (const route of routeShells) {
   });
 }
 
-test('the product route shell back button returns to the previous screen', async ({ page }) => {
-  await page.goto('/chat');
+test('the route shell back button steps back through in-app history', async ({ page }) => {
   await page.goto('/settings');
-  await expect(page.getByRole('heading', { name: 'Account settings' })).toBeVisible();
+  // In-app navigation (PUSH) to another shell so there is genuine Argus history to return to.
+  await page.getByRole('link', { name: 'Security', exact: true }).click();
+  await expect(page).toHaveURL(/\/security$/);
 
-  // Smart back: with in-app history it steps back to where we came from (chat).
+  await page.getByRole('button', { name: 'Go back' }).click();
+  await expect(page).toHaveURL(/\/settings$/);
+});
+
+test('the route shell back button falls back to chat on a deep link with no in-app history', async ({
+  page,
+}) => {
+  // Direct load → React Router's first location has key "default", so there is nowhere in-app to go
+  // back to. Smart back must land on /chat rather than navigating off-site.
+  await page.goto('/settings');
   await page.getByRole('button', { name: 'Go back' }).click();
   await expect(page).toHaveURL(/\/chat$/);
 });

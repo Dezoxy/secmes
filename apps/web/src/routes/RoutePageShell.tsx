@@ -43,15 +43,17 @@ export function RoutePageShell({
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Smart back: return to the previous screen if we have in-app history, else fall back to chat
-  // (covers deep links / fresh PWA loads where there is nowhere meaningful to go back to).
+  // Smart back: only step back when there is genuine in-app history. React Router stamps the first
+  // location of a session with key "default"; any in-app navigation produces a unique key. Keying off
+  // that (rather than window.history.length, which also counts external/prior-tab entries) keeps deep
+  // links, fresh PWA loads, and external referrers landing on /chat instead of navigating off-site.
   const handleBack = useCallback(() => {
-    if (window.history.length > 1) {
+    if (location.key !== 'default') {
       navigate(-1);
     } else {
       navigate('/chat');
     }
-  }, [navigate]);
+  }, [location.key, navigate]);
 
   return (
     <AuthenticatedRouteBoundary>
