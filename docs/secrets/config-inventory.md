@@ -48,7 +48,7 @@ All non-secret by definition (repo *variables*, not *secrets*).
 | `B2_APP_KEY_ID` | `00360fff542dcd80000000007` | db-backups B2 key **id** (separate key) | templated into `argus-db-backup.service` | Key id, not the secret. ↔ `argus-b2-app-key` |
 | `B2_CORS_KEY_ID` | `00360fff542dcd80000000006` | CORS app-key **id** | `deploy.sh` step 6c (skip if empty) | Key id only. ↔ `argus-b2-cors-app-key` |
 | `BACKUP_S3_BUCKET` | `db-q7m2z9x4v6n8p3k1` | Private db-backups bucket (WORM) | templated into `argus-db-backup.service` | A bucket name; keeps experiment dumps out of the prod backup bucket |
-| `BACKUP_AGE_RECIPIENT` | `age1u3l07w20yf…drnse` | age **public** recipient for the nightly dump | templated into `argus-db-backup.service` | A **public** key — only the offline private half decrypts |
+| `BACKUP_AGE_RECIPIENT` | `age1u3l07w20yf…drnse` | age **public** recipient for the nightly dump | templated into `argus-db-backup.service` | A **public** key; the private half is `argus-backup-age-key` in Key Vault — readable by the box's MI, so it does **not** protect backups from host compromise (see secrets-inventory §7) |
 | `ENABLE_42CRUNCH` | `false` | Toggles the 42Crunch CI audit (not the AWS path) | CI audit job | A CI feature flag |
 
 ### DEPRECATED — delete (do not recreate)

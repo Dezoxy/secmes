@@ -34,7 +34,11 @@ holds **no stored Azure credential**:
   `argus-ghcr-token`, `argus-b2-cors-app-key`.
 - The KV firewall additionally binds data-plane access to the EC2 Elastic IP.
 
-**No long-lived cloud credential exists anywhere on the box or in any env file.**
+**No long-lived AWS/Azure control-plane credential exists on the box** — AWS access
+is OIDC → STS (temporary), Azure access is the Arc MI (an ephemeral per-fetch token).
+Third-party *service* credentials (the B2/S3 keys, the Cloudflare tunnel token) **are**
+present at runtime, but only as **tmpfs credential files** under `/run/argus/secrets`
+(never in env, never on persistent disk).
 
 ## 1. Signing keys (token + backup authenticity)
 
@@ -178,8 +182,8 @@ set (§8) and Zitadel set (§9).
 ### ⚠️ The set-once placeholder trap
 Set-once secrets are burned at a component's **first init** (or pinned out-of-band)
 and never reconciled — `populate.sh` SKIPS them even under `--rotate`. If a
-set-once secret (`argus-session-signing-key`, `argus-backup-signing-key`, the
-Postgres/GlitchTip owner passwords, the Grafana admin password) was seeded as a
+set-once secret (`argus-backup-signing-key`, the Postgres/GlitchTip owner
+passwords, the Grafana admin password) was seeded as a
 `REPLACE-` placeholder **and a component already initialised against it**, you
 **cannot promote it in place**. Recovery = **recreate the vault by bumping
 `var.prefix`** (which changes the vault name) so a clean vault is seeded before any
