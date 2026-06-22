@@ -11,7 +11,9 @@ FROM node:26-alpine AS web-build
 ENV CI=true
 # Don't pull Playwright browsers during install (web's devDeps include @playwright/test; e2e isn't built here).
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-RUN corepack enable
+# pnpm via npm, pinned to the repo's packageManager. corepack is unbundled in newer Node base images
+# (node:26 has no corepack → `corepack enable` exits 127), so don't rely on it.
+RUN npm install -g pnpm@9.12.0
 WORKDIR /repo
 # Whole-repo copy (a root .dockerignore prunes node_modules/.git/dist) so every workspace manifest the
 # lockfile references is present. Full install (not filtered): the root `prepare` lifecycle builds every
