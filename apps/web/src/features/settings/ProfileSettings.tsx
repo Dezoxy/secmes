@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Check, Copy, Image, Sparkles } from 'lucide-react';
-import { Avatar, Button, ErrorState, StateBlock } from '../ui';
+import { Check, Copy, Image } from 'lucide-react';
+import { Avatar, Button, ErrorState, useToast } from '../ui';
 import { createSafeUiError } from '../../lib/safe-ui-error';
 import { dicebearAvatar, isCustomPhoto } from '../../lib/dicebear';
 import { MAX_AVATAR_DATA_URI_LENGTH } from '../chat/seed';
@@ -40,11 +40,10 @@ export function ProfileSettings({
     canEditName && !isCustomPhoto(avatar, MAX_AVATAR_DATA_URI_LENGTH)
       ? dicebearAvatar(serverProfile.userId)
       : avatar;
+  const { toast } = useToast();
   const [copied, setCopied] = useState(false);
-  // Custom photo upload is intentionally disabled for now — the profile always uses a generated
-  // avatar (no user-supplied image ever enters the app). Clicking the button reveals a notice
-  // instead of opening a file picker.
-  const [photoSoon, setPhotoSoon] = useState(false);
+  // Custom photo upload isn't built yet — the profile always uses a generated avatar (no user-supplied
+  // image ever enters the app). Clicking the button shows a transient notice instead of a file picker.
 
   const copyId = async () => {
     try {
@@ -65,17 +64,15 @@ export function ProfileSettings({
           size="xl"
           className="ring-2 ring-purple-500/40"
         />
-        <button type="button" className={SUBTLE_BUTTON} onClick={() => setPhotoSoon(true)}>
+        <button
+          type="button"
+          className={SUBTLE_BUTTON}
+          onClick={() => toast('Photo upload is coming soon')}
+        >
           <Image className="h-4 w-4" />
           Upload photo
         </button>
       </div>
-
-      {photoSoon && (
-        <StateBlock icon={Sparkles} title="Coming soon" compact role="status" ariaLive="polite">
-          Photo upload isn&apos;t available yet — your profile uses a generated avatar.
-        </StateBlock>
-      )}
 
       {canEditName ? (
         <DisplayNameEditor />

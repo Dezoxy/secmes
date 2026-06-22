@@ -16,11 +16,10 @@ test('settings can be opened from chat', async ({ page }) => {
   await expect(page.getByText('Anonymous account settings')).toHaveCount(0);
   await expect(page.getByText('Auto-assigned. Unique within your organization.')).toHaveCount(0);
 
-  // Custom photo upload is deferred: the button shows a "coming soon" notice instead of a file picker,
+  // Custom photo upload is deferred: clicking shows a transient toast instead of a file picker,
   // so the profile always uses the generated avatar (no user-supplied image enters the app).
   await page.getByRole('button', { name: 'Upload photo' }).click();
-  await expect(page.getByText('Coming soon')).toBeVisible();
-  await expect(page.getByText(/Photo upload isn.t available yet/)).toBeVisible();
+  await expect(page.getByText('Photo upload is coming soon')).toBeVisible();
 });
 
 test('mobile settings opens sections from the menu', async ({ page }) => {

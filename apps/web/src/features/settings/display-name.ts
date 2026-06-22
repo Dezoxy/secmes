@@ -5,7 +5,8 @@ import {
   DISPLAY_NAME_MIN,
 } from '@argus/contracts';
 
-/** Always-visible guidance shown under the display-name field (mirrors the enforced rule). */
+/** The character/length policy string, surfaced as an error toast when a save is attempted with an
+ *  invalid name (no longer shown as permanent helper text under the field). */
 export const DISPLAY_NAME_HINT = `${DISPLAY_NAME_MIN}–${DISPLAY_NAME_MAX} characters: ${DISPLAY_NAME_ALLOWED}`;
 
 /**

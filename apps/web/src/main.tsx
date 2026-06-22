@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { AuthProvider } from './features/auth/AuthContext';
 import { PwaUpdateProvider } from './features/pwa/PwaUpdateProvider';
+import { ToastProvider } from './features/ui';
 import './index.css';
 
 const root = document.getElementById('root');
@@ -14,7 +15,9 @@ createRoot(root).render(
     <BrowserRouter>
       <AuthProvider>
         <PwaUpdateProvider>
-          <App />
+          <ToastProvider>
+            <App />
+          </ToastProvider>
         </PwaUpdateProvider>
       </AuthProvider>
     </BrowserRouter>
