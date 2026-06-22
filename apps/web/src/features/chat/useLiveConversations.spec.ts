@@ -3,6 +3,7 @@ import type { Conversation } from './seed';
 import { currentUser } from './seed';
 import {
   addLiveId,
+  classifyCommitDrain,
   classifyDeliveryFrame,
   liveConversationShell,
   prependConversationIfMissing,
@@ -138,5 +139,48 @@ describe('classifyDeliveryFrame (delivery-gap detection)', () => {
   it('missing prevSeq falls back to the raw seq step (defensive)', () => {
     expect(classifyDeliveryFrame(4, 5, undefined)).toEqual({ last: 5, gap: false }); // contiguous step
     expect(classifyDeliveryFrame(4, 7, undefined)).toEqual({ last: 7, gap: true }); // jumped
+  });
+});
+
+// Track 4 slice 5b — commit-drain classification. classifyCommitDrain is the pure decision behind the
+// catch-up loop / onCommit handler: a drain that COULDN'T advance is either a transient stall (retry) or a
+// genuine, unrecoverable gap (sync-lost → recovery). The oldest retained commit epoch (5a header) decides:
+// if the commit that would advance the group (stamped at the local epoch) is already pruned, retrying is
+// futile. The epoch is metadata only — it never gates decryption or ordering.
+describe('classifyCommitDrain (sync-lost detection)', () => {
+  it('already at/past the target ⇒ in-sync (guard; callers only call this on a stall)', () => {
+    expect(classifyCommitDrain({ localEpoch: 5, targetEpoch: 5, oldestRetainedEpoch: 0 })).toBe(
+      'in-sync',
+    );
+    expect(classifyCommitDrain({ localEpoch: 6, targetEpoch: 5, oldestRetainedEpoch: null })).toBe(
+      'in-sync',
+    );
+  });
+
+  it('behind, and the needed commit is PRUNED (oldest retained > local) ⇒ sync-lost', () => {
+    // local at epoch 2 needs the commit stamped at epoch 2; the server's oldest retained is 5 → it's gone.
+    expect(classifyCommitDrain({ localEpoch: 2, targetEpoch: 6, oldestRetainedEpoch: 5 })).toBe(
+      'sync-lost',
+    );
+    // Boundary: oldest retained is exactly local+1 — the local-epoch commit is already gone.
+    expect(classifyCommitDrain({ localEpoch: 2, targetEpoch: 3, oldestRetainedEpoch: 3 })).toBe(
+      'sync-lost',
+    );
+  });
+
+  it('behind, but the needed commit is still retained (oldest retained ≤ local) ⇒ transient', () => {
+    // oldest retained == local: the commit stamped at the local epoch is still there — just not applied yet.
+    expect(classifyCommitDrain({ localEpoch: 2, targetEpoch: 5, oldestRetainedEpoch: 2 })).toBe(
+      'transient',
+    );
+    expect(classifyCommitDrain({ localEpoch: 4, targetEpoch: 5, oldestRetainedEpoch: 0 })).toBe(
+      'transient',
+    );
+  });
+
+  it('behind, server reported no oldest epoch (null — old server / no rows) ⇒ transient, never a false gap', () => {
+    expect(classifyCommitDrain({ localEpoch: 2, targetEpoch: 5, oldestRetainedEpoch: null })).toBe(
+      'transient',
+    );
   });
 });

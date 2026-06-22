@@ -270,7 +270,10 @@ export function useConversationHistoryRehydration({
             // member's. Epoch-only checks are insufficient: if two clients staged at the same epoch
             // and ours lost the race (409), another commit exists at that epoch but our post-commit
             // state would be on a divergent ratchet branch.
-            const commits = await listCommits(conversationId, { afterEpoch: epoch - 1, limit: 1 });
+            const { commits } = await listCommits(conversationId, {
+              afterEpoch: epoch - 1,
+              limit: 1,
+            });
             return commits.some((c) => c.epoch === epoch && c.clientCommitId === clientCommitId);
           },
         );
