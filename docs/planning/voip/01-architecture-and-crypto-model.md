@@ -58,7 +58,7 @@ await pc.setLocalDescription(offer);
 
 const signal = {
   kind: 'call.offer',
-  callId,                       // CSPRNG (crypto.randomUUID), see §8
+  callId,                       // server-minted by POST /calls/:friendUserId/invite (caller) or from CallRingEvent (callee)
   sdp: offer.sdp,              // contains a=fingerprint:sha-256 ... (audio-only m-line in V1)
   media: 'audio',             // V1 = audio only; 'video' is V1.1
 };
@@ -157,7 +157,7 @@ The per-user **relay-only** setting (default ON, and the *only* mode exercised i
 - Reuse existing safety-number verification as the MITM **root** of trust (no new UX; the *enforcement* on the signal is new code).
 
 **Should (V1):**
-- Per-call CSPRNG `callId`; metadata-only logging where any is kept (IDs/timestamps), never SDP/ICE/keys. (Note: V1 keeps **no `call_sessions` ledger** — see [./04-server-api-and-database.md](./04-server-api-and-database.md); the metadata ledger + prune chain is V1.1.)
+- Per-call **server-minted** `callId` (from the invite response / `CallRingEvent`, not client-generated — see [02 §2.1](./02-signaling-protocol-and-state-machine.md)); metadata-only logging where any is kept (IDs/timestamps), never SDP/ICE/keys. (Note: V1 keeps **no `call_sessions` ledger** — see [./04-server-api-and-database.md](./04-server-api-and-database.md); the metadata ledger + prune chain is V1.1.)
 
 **Nice to have (post-V1, not required):**
 - Optional in-call SAS/word-comparison surfaced from the conversation safety number for an extra in-call confirmation.
@@ -174,7 +174,7 @@ The per-user **relay-only** setting (default ON, and the *only* mode exercised i
 ## 8. CSPRNG & no-hand-rolled-crypto notes (invariant #4)
 
 - **No hand-rolled crypto anywhere in the call path.** DTLS-SRTP is provided by the browser's WebRTC stack (BoringSSL/libwebrtc-grade); MLS comes exclusively from `packages/crypto` (ts-mls, RFC 9420). The argus call code writes **no** primitives — it only (a) calls `RTCPeerConnection`, (b) wraps the SDP via the existing `Conversation.encrypt`, and (c) unwraps + verifies the sender via the **new authenticated decrypt path** (which is plumbing over ts-mls framing, not a new primitive). SFrame, when it lands, comes from a vetted library keyed by `mlsExporter`, not a bespoke cipher.
-- **CSPRNG only.** `callId` and any signaling nonces use `crypto.randomUUID()` / `crypto.getRandomValues()` — **never `Math.random`** (existing repo invariant). DTLS certificate generation and SRTP keying material are produced by the browser's CSPRNG-backed WebRTC implementation; MLS HPKE/AEAD randomness is ts-mls's CSPRNG. The per-conversation op-mutex in `Conversation` already prevents AEAD (key, nonce) reuse when encrypting signaling alongside chat.
+- **CSPRNG only.** Signaling **nonces** use `crypto.randomUUID()` / `crypto.getRandomValues()` — **never `Math.random`** (existing repo invariant). (The `callId` is **server-minted**, not client CSPRNG — see [02 §2.1](./02-signaling-protocol-and-state-machine.md).) DTLS certificate generation and SRTP keying material are produced by the browser's CSPRNG-backed WebRTC implementation; MLS HPKE/AEAD randomness is ts-mls's CSPRNG. The per-conversation op-mutex in `Conversation` already prevents AEAD (key, nonce) reuse when encrypting signaling alongside chat.
 - **Never log/persist secrets (invariant #2).** SDP (carries fingerprints + ICE), ICE candidates, DTLS/SRTP keys, and any future exporter-derived media key are **never** written to logs or the DB. The signaling channel forwards opaque MLS ciphertext only; V1 persists no call ledger at all, and any V1.1 `call_sessions` row is **metadata-only** (see [./04-server-api-and-database.md](./04-server-api-and-database.md)).
 
 ---
@@ -239,7 +239,7 @@ sequenceDiagram
   Note over A,B: Both already in the same MLS conversation,<br/>safety number verified out-of-band (existing UX).<br/>V1 = both apps in foreground (real ring).
 
   A->>A: getUserMedia(audio); createOffer();<br/>setLocalDescription (SDP has a=fingerprint)
-  A->>A: Conversation.encrypt({kind:'call.offer', callId(CSPRNG), sdp, media:'audio'})
+  A->>A: Conversation.encrypt({kind:'call.offer', callId(from invite), sdp, media:'audio'})
   A->>S: signal frame = opaque MLS ciphertext
   S-->>B: forward opaque ciphertext (no decrypt)
   B->>B: authenticated decrypt -> verifies MLS SENDER == expected friend<br/>(NEW Phase-0 decrypt path; reject if mismatch)
@@ -271,7 +271,7 @@ sequenceDiagram
 
 - **Crypto — NEW Phase-0 work (crypto-reviewer-gated):** `packages/crypto/src/index.ts` — add the **authenticated-sender decrypt path** to `Conversation` (returns plaintext + verified MLS sender identity). Reuses existing `MlsEngine`, `Conversation.encrypt`, `safetyNumber*`. Deferred `Conversation.exportKey` (§4, S12) wraps the already-present-in-ts-mls `mlsExporter`.
 - **Signaling client + call state (V1):** `apps/web/src/lib/ws.ts` (new `call_*` frames), new `apps/web/src/features/chat/useCall.ts`, new `apps/web/src/lib/media-devices.ts` (`getUserMedia`, **audio constraints only in V1**); inert call buttons already exist at `apps/web/src/features/chat/ChatHeader.tsx` (lines ~252–265). See [./02-signaling-protocol-and-state-machine.md](./02-signaling-protocol-and-state-machine.md) and [./05-frontend-pwa-and-webrtc.md](./05-frontend-pwa-and-webrtc.md).
-- **Gateway relay (V1):** new `call.offer/answer/ice/hangup` handlers + bus events in `apps/api/src/realtime/` (ephemeral, **no DB write** in V1 — depart from the durable-then-notify pattern). See [./02-signaling-protocol-and-state-machine.md](./02-signaling-protocol-and-state-machine.md) and [./04-server-api-and-database.md](./04-server-api-and-database.md).
+- **Gateway relay (V1):** new `call.signal` (single opaque relay) + `call.release` (state control) handlers + bus events (incl. server-originated `CallEndEvent`) in `apps/api/src/realtime/` (ephemeral, **no DB write** in V1 — depart from the durable-then-notify pattern). See [./02-signaling-protocol-and-state-machine.md](./02-signaling-protocol-and-state-machine.md) and [./04-server-api-and-database.md](./04-server-api-and-database.md).
 - **Relay infra (V1):** coturn service + the Cloudflare-Tunnel-vs-UDP resolution, NSG/SG inbound rules, KV-delivered TURN secret + `turns:` cert, **plus the P0 coturn healthcheck + uptime alert + runbook stub** (relay-default ⇒ coturn availability == calling availability). See [./03-infrastructure-turn-and-networking.md](./03-infrastructure-turn-and-networking.md).
 - **Threat-model + GDPR artifacts (required before coding, Phase-0 DoD):** the MLS-sender/fingerprint MITM defense, signaling-metadata-over-Redis, and ephemeral best-effort drop semantics are written up in [./06-threat-model-and-privacy.md](./06-threat-model-and-privacy.md) and land as updates to the four canonical repo artifacts — revise `docs/gdpr/data-residency.md` (coturn relay row), revise `docs/gdpr/article-30-records.md` (new processing activity + APNs/FCM sub-processor + retention), **extend** `docs/threat-models/metadata-exposure.md` (call-graph/call-timing/relay-peer-IP rows), and **create** `docs/gdpr/dpia-voip-calling.md` (legal basis per activity).
 
