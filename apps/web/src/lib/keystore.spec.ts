@@ -403,33 +403,6 @@ describe('DeviceKeystore — sealed at rest under the passkey-PRF unlock key', (
     expect((await ks.loadConversations(device2, key)).size).toBe(0);
   });
 
-  it('deleteConversationState clears ONLY group state — message history + verified peers survive (5c self-heal safety)', async () => {
-    // Track 4 slice 5c pins the safety property recoverSyncLost relies on: dropping a sync-lost
-    // conversation's broken MLS ratchet must NOT take its decrypted history or its verified-peer trust
-    // with it (those live in separate stores). If this ever regresses, the self-heal becomes lossy.
-    const engine = await MlsEngine.create();
-    const key = await unlockKey();
-    const ks = await DeviceKeystore.open(engine);
-    const device = await ks.getOrCreateDevice('alice', key);
-    const peer = await engine.generateDeviceKeys('peer');
-    const conv = await engine.createConversation('c1', device);
-    await conv.addMember(peer.publicPackage);
-    await ks.saveConversationState(device, 'c1', conv, key);
-    await ks.appendMessages(device, 'c1', key, [
-      msg('m1', 'kept history', '2026-01-01T00:00:01.000Z'),
-    ]);
-    const numbers = ['11111 22222 33333 44444 55555 66666 77777 88888'];
-    await ks.saveVerifiedPeer('user-peer', numbers, key);
-
-    await ks.deleteConversationState('c1'); // the 5c sync-lost self-heal — drops only the ratchet
-
-    expect((await ks.loadConversations(device, key)).has('c1')).toBe(false); // group state gone
-    expect((await ks.loadMessageLog(device, 'c1', key)).map((m) => m.content)).toEqual([
-      'kept history', // MSGLOG_STORE untouched
-    ]);
-    expect(await ks.loadVerifiedPeer('user-peer', key)).toEqual(numbers); // VERIFIED_PEERS_STORE untouched
-  });
-
   it('message log: append → reload → history round-trips under the same unlock key', async () => {
     const engine = await MlsEngine.create();
     const key = await unlockKey();

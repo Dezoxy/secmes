@@ -98,19 +98,21 @@ change; Track 3 is mostly activating things already designed.
   advance was pruned). The catch-up loop + `onCommit` escalate a real gap to an `onSyncLost` callback (wired in
   5c) — closing the spin-forever latent bug. Client-only; no server, contract, migration, or wire change.
 
-- 🟡 **Track 4 slice 5c implemented** (2026-06-21, PR _pending_) — **sync-lost recovery + UI affordance**. A
-  `security-architect` pass found the originally-planned *active* re-add unimplementable in v1 (no cross-device
-  "stranded" signal without new server state; replacing a stale leaf needs the unbuilt MLS remove+add/PCS path),
-  so 5c is **detect → surface → self-heal**: on `sync-lost` the stranded device drops its **broken group state
-  only** (a new `recover-sync-lost.ts` driver — the decrypted message log + verified-peer trust are separate
-  stores, preserved) and re-drives the existing Welcome drain, then re-joins **fresh** at the current epoch
-  through the unchanged member/Welcome path (full out-of-band safety-number re-check) the moment a current
-  member re-adds it. `ChatScreen` shows a "Conversation out of sync — older messages may be unavailable" banner
-  and suppresses the composer until re-join. **Active cross-device re-add is deferred to 5c-2** (group-chat GA,
-  same trigger as 5d/5e). Client-only; no server, contract, migration, or wire change.
+- 🟡 **Track 4 slice 5c implemented** (2026-06-21, PR _pending_) — **sync-lost UI affordance (detect + stop)**.
+  A `security-architect` pass plus the Codex review found the planned *recovery action* unimplementable in v1:
+  nothing produces a fresh Welcome for an already-rostered device (no cross-device "stranded" signal without new
+  server state; `enrollDevice` skips current members; replacing a stale leaf needs the unbuilt MLS
+  remove+add/PCS path). Clearing durable state + re-driving the drain would be a premature half-mechanism (lists
+  nothing; the delete races a concurrent ratchet save), so 5c is scoped to the honest standalone half: on
+  `sync-lost`, `signalSyncLost` **drops the doomed group from the in-memory live set** (live paths stop
+  attempting a ratchet that can't advance) and `ChatScreen` shows a "Conversation out of sync" banner +
+  suppresses the composer — with **no** promise of automatic reconnection. Durable state is left intact (a
+  reload re-detects + re-surfaces; no vanished conversation, no delete to race). **The whole recovery mechanism
+  — clear broken state + re-add via the member/Welcome path — is deferred to 5c-2** (group-chat GA, same trigger
+  as 5d/5e). Client-only; no server, contract, migration, or wire change.
 
 Track 4's v1 message TTL deletion ships (slice 4); the commit-pruning tail is re-sliced — its prerequisite is
-landing now (5a–5c done; active re-add 5c-2 + the actual pruning 5d–5e deferred until group chat is GA). Track 4 stays 🟡.
+landing now (5a–5c done; the recovery mechanism 5c-2 + the actual pruning 5d–5e deferred until group chat is GA). Track 4 stays 🟡.
 
 ## Constraints every track must respect
 

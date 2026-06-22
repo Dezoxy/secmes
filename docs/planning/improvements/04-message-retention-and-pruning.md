@@ -212,20 +212,25 @@ pruning is implemented.
    - **5a — server: expose the oldest retained commit epoch** (read-only header; no deletion/migration).
    - **5b — client: detect "sync-lost"** (the drain reports advance/stall; a true gap is `oldestRetainedEpoch
      > localEpoch`, distinguished from a transient stall with a bounded retry budget).
-   - **5c — recovery: sync-lost → self-heal + a UI affordance.** A `security-architect` pass (2026-06-21)
-     found the original "active re-add on a sibling's sync-lost" **unimplementable** in v1: `onSyncLost`
-     fires only on the *stranded* device, no cross-device "I'm stranded" signal exists (and adding one is
-     the published-GroupInfo server surface the threat model rules out), `conversation_members` is
-     per-*user* so a live sibling can't see a stale leaf from the server, and `enrollDevice` would skip a
-     re-add anyway (replacing a stale leaf needs the unbuilt MLS remove+add/PCS path). So 5c is **detect →
-     surface → self-heal**: the stranded device drops its broken group state and re-drives the existing
-     Welcome drain, then re-joins **fresh** through the existing member/Welcome path (full out-of-band
-     safety-number re-check, fresh KeyPackage) the moment a current member re-adds it. No new
-     server/crypto surface.
-   - **5c-2 (deferred) — active cross-device re-add.** Proactively pushing a fresh Welcome to a stranded
-     sibling needs either new server state (the cross-device "stranded" signal / published-GroupInfo
-     surface the threat model rules out) or the MLS remove+add (PCS) path the crypto wrapper does not yet
-     implement. Un-defer with group-chat GA (same trigger as 5d–5e).
+   - **5c — sync-lost → an honest UI affordance (detect + stop).** A `security-architect` pass plus the
+     Codex review (2026-06-21) found the originally-planned *recovery action* **unimplementable** in v1:
+     `onSyncLost` fires only on the *stranded* device, no cross-device "I'm stranded" signal exists (adding
+     one is the published-GroupInfo server surface the threat model rules out), `conversation_members` is
+     per-*user* so a live sibling can't see a stale leaf, and **nothing produces a fresh Welcome for an
+     already-rostered device** (`enrollDevice` skips members already in the roster; replacing a stale leaf
+     needs the unbuilt MLS remove+add/PCS path). Clearing durable state + re-driving the Welcome drain in
+     v1 would therefore be a premature half-mechanism (it lists nothing, and the delete races a concurrent
+     ratchet save). So 5c is scoped to its honest standalone half: **drop the doomed group from the
+     in-memory live set** (the live paths stop attempting a ratchet that can't advance) and **surface an
+     "out of sync" banner + suppress the composer**. Durable state is left intact (a reload simply
+     re-detects + re-surfaces — no vanished conversation, no delete to race). Client-only; no server/crypto
+     surface.
+   - **5c-2 (deferred) — the recovery mechanism: re-add via the member/Welcome path.** The whole active
+     recovery — clear the broken durable state and re-establish the conversation so the device re-joins
+     **fresh** (full out-of-band safety-number re-check, fresh KeyPackage) — lands together here. It needs
+     either new server state (the cross-device "stranded" signal / published-GroupInfo surface the threat
+     model rules out) or the MLS remove+add (PCS) path the crypto wrapper does not yet implement. Un-defer
+     with group-chat GA (same trigger as 5d–5e).
    - **5d (deferred) — commit-prune boundary migration**: re-scope `commits_tenant_isolation` `TO argus_app`,
      window policies, the correlated `EXISTS (epoch > this.epoch)` never-current-epoch DELETE policy,
      column-scoped grant (never the `commit` blob), **first DELETE grant on commits** (§7 cond 3/4).
@@ -268,25 +273,24 @@ pruning is implemented.
    >   (epoch-overshoot discipline preserved).
 
    > **Slice 5c implemented 2026-06-21 (PR _pending_).** Client-only; no server, contract, migration, or
-   > wire change. Recovery + the UI affordance for the `sync-lost` state 5b detects:
-   > - A new recovery driver [`recover-sync-lost.ts`](../../../apps/web/src/lib/recover-sync-lost.ts) —
-   >   `recoverSyncLost` drops the broken conversation's sealed **group state only**
-   >   (`keystore.deleteConversationState`, which leaves the decrypted **message log** and the
-   >   **verified-peer** trust records — separate stores — intact) and re-drives the existing Welcome
-   >   drain so the device becomes re-addable.
-   > - [`useLiveConversations`](../../../apps/web/src/features/chat/useLiveConversations.ts) now wires its
-   >   three `sync-lost` fire sites through a single `signalSyncLost` = `onSyncLost?.()` (UI signal) +
-   >   `recoverSyncLost` (self-heal). When a current member re-adds the device, the **unchanged**
-   >   `joinPendingConversations` path re-joins it **fresh** at the current epoch — same out-of-band
-   >   safety-number re-check, a fresh one-time KeyPackage, no key reuse; the `maxEpoch` discipline is
-   >   untouched.
+   > wire change. The honest standalone half of recovery — surface the `sync-lost` state 5b detects and
+   > stop attempting it (the recovery *action* is deferred to 5c-2; see the bullets above for why it's
+   > unimplementable in v1):
+   > - [`useLiveConversations`](../../../apps/web/src/features/chat/useLiveConversations.ts) wires its three
+   >   `sync-lost` fire sites through one `signalSyncLost`, which **drops the doomed group from the
+   >   in-memory `liveGroups`** (so the catch-up / commit-drain / live-message paths stop attempting a
+   >   ratchet that can't advance — idempotent across all three via their `if (!group) return` guard) and
+   >   calls `onSyncLost?.()` (the UI signal). Durable group state is **left intact** — a reload simply
+   >   re-detects and re-surfaces, and there is no delete to race a concurrent ratchet save. The `maxEpoch`
+   >   discipline is untouched.
    > - [`ChatScreen`](../../../apps/web/src/features/chat/ChatScreen.tsx) stamps a `recovery: 'sync-lost'`
    >   flag on the conversation (`Conversation` type, [`seed.ts`](../../../apps/web/src/features/chat/seed.ts))
-   >   and renders a "Conversation out of sync — older messages may be unavailable" banner, suppressing the
-   >   composer until the conversation re-joins (the flag clears automatically). **Active cross-device
-   >   re-add is deferred to 5c-2** (above). Gates: unit tests (`recoverSyncLost` behaviour + a keystore
-   >   pin proving history/verified-peer survive the delete), an E2E guard (no affordance on a healthy
-   >   chat) + a documented skip for the backend-dependent flow, `crypto-reviewer` + `security-boundary-auditor`.
+   >   and renders a "Conversation out of sync" banner ("…fell too far behind to sync. New messages may not
+   >   appear and older ones may be unavailable.") + suppresses the composer. The copy makes **no** promise
+   >   of automatic reconnection — re-establishment is 5c-2.
+   > - Gates: an E2E guard (no affordance on a healthy chat) + a documented skip for the backend-dependent
+   >   sync-lost→recovered flow; `crypto-reviewer` + `security-boundary-auditor`. The detection itself stays
+   >   covered by 5b's `classifyCommitDrain` unit tests.
 6. **(Optional, separable) metadata-table sweepers** — see below; own PR or deferred.
 7. **(Future, prerequisite-gated) delivery-confirmed pruning** — *only after per-device delivery tracking
    exists* (Codex P1). Extends the worker join + the role's metadata grants. **Not part of this track's

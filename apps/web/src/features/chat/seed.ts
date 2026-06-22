@@ -66,9 +66,10 @@ export type Conversation = {
   creatorId?: string;
   /**
    * Track 4 slice 5c — set to 'sync-lost' when the conversation's MLS epoch can no longer advance (the
-   * commit it needs was pruned, or the device was offline beyond retention). Drives the "needs
-   * reconnecting" affordance and suppresses the composer (there is no live group to send into). Cleared
-   * automatically when the conversation re-joins fresh (the join path replaces the shell). Absent = healthy.
+   * commit it needs was pruned, or the device was offline beyond retention). Drives the "out of sync"
+   * affordance and suppresses the composer (there is no live group to send into). v1 only surfaces the
+   * state; re-establishing the conversation (re-add via the member/Welcome path) is slice 5c-2. Absent =
+   * healthy.
    */
   recovery?: 'sync-lost';
 };

@@ -11,7 +11,6 @@ import { accessToken } from '../../lib/auth';
 import { fetchReceipts, listEnrollments, listMyConversations } from '../../lib/api';
 import { enrollDevice } from '../../lib/enroll';
 import { joinPendingConversations } from '../../lib/join';
-import { recoverSyncLost } from '../../lib/recover-sync-lost';
 import {
   receiveLiveMessage,
   processCommitEvent,
@@ -141,9 +140,11 @@ interface UseLiveConversationsOptions {
    * Track 4 slice 5b/5c — called when a conversation is detected as "sync-lost": the commit needed to
    * advance its MLS epoch has been pruned (or the device was offline beyond retention), so catch-up can
    * never close the gap by retrying. The argument is the conversation id (metadata only). This is the
-   * UI signal — the consumer (5c) stamps a "needs reconnecting" affordance on the conversation. The
-   * self-heal (drop the broken group state + re-drive the Welcome drain so the device re-joins fresh
-   * when a member re-adds it) is performed by the hook itself via `recoverSyncLost`; see `signalSyncLost`.
+   * UI signal — the consumer (5c) stamps an "out of sync" affordance on the conversation. The hook also
+   * drops the doomed group from `liveGroups` so the live paths stop attempting it (see `signalSyncLost`).
+   * The actual RECOVERY (re-add the device via the member/Welcome path so it re-joins fresh) is slice
+   * 5c-2 — a stranded device can't re-add itself, and nothing produces a fresh Welcome for an
+   * already-rostered device today, so v1 surfaces the state rather than promising auto-recovery.
    */
   onSyncLost?: (conversationId: string) => void;
 }
@@ -199,25 +200,6 @@ export function replaceOrPrependConversation(
   const next = [...conversations];
   next[idx] = conversation;
   return next;
-}
-
-/**
- * Track 4 slice 5c — when a conversation re-joins (notably the sync-lost recovery path), carry over its
- * existing decrypted transcript instead of resetting to the fresh shell's empty `messages`. A recovered
- * conversation's history lives only in the local UI + sealed MSGLOG — its pre-Welcome messages were
- * pruned server-side and cannot be re-fetched by backfill — so replacing it with an empty shell would
- * drop that history from view until the next app reload. Backfill dedups by message id, so carrying the
- * messages over can never double them. A normal first join has no existing entry (or only an empty
- * placeholder), so this returns the shell unchanged.
- */
-export function preserveTranscriptOnRejoin(
-  conversations: Conversation[],
-  shell: Conversation,
-): Conversation {
-  const existing = conversations.find((c) => c.id === shell.id);
-  return existing && existing.messages.length > 0
-    ? { ...shell, messages: existing.messages, unreadCount: existing.unreadCount }
-    : shell;
 }
 
 export function setsEqual(a: string[], b: string[]): boolean {
@@ -384,11 +366,7 @@ export function useLiveConversations({
       onJoined: ({ conversationId, conversation, senderUserId, peerSafetyNumbers }) => {
         addLive(conversationId, conversation);
         const shell = liveConversationShell(conversationId, currentUserProfile);
-        // Preserve an existing transcript across a re-join (sync-lost recovery) — a fresh shell has empty
-        // `messages`, but a recovered conversation still holds its decrypted history here + in MSGLOG.
-        setConversations((prev) =>
-          replaceOrPrependConversation(prev, preserveTranscriptOnRejoin(prev, shell)),
-        );
+        setConversations((prev) => replaceOrPrependConversation(prev, shell));
         // Persist the peerUserId mapping only when the sender is the real peer — not self. In the
         // device-enrollment flow, an existing own device sends the Welcome to D2, making senderUserId
         // equal to selfUserId; persisting that would map the conversation to ourselves.
@@ -474,17 +452,18 @@ export function useLiveConversations({
     setConnectionStatus('connecting');
     const deps = messagingDeps;
 
-    // Track 4 slice 5c — a conversation is sync-lost (the commit it needs is gone). Do two things:
-    // signal the UI (onSyncLost → the consumer stamps a "needs reconnecting" affordance) AND self-heal.
-    // The stranded device can't re-add itself, so recoverSyncLost drops its broken group state and
-    // re-drives the Welcome drain — it re-joins FRESH (full safety-number re-check, new KeyPackage) once
-    // a current member re-adds it. Idempotent across the three fire sites: once the group is dropped
-    // from liveGroups, the other sites short-circuit on their `if (!group) return` guard.
+    // Track 4 slice 5c — a conversation is sync-lost (the commit it needs to advance is gone). Drop the
+    // doomed group from liveGroups so the live paths stop attempting a ratchet that can never advance
+    // (the other fire sites then short-circuit on their `if (!group) return` guard — idempotent across
+    // all three), and signal the UI to surface the "out of sync" affordance. We deliberately do NOT
+    // clear durable group state or attempt a re-join here: a stranded device can't re-add itself, and
+    // nothing produces a fresh Welcome for an already-rostered device in v1 (enrollDevice skips a device
+    // already in the roster). That active recovery — re-add via the member/Welcome path so it re-joins
+    // fresh — is slice 5c-2. Keeping GROUP_STORE means a reload simply re-detects + re-surfaces (no
+    // vanished conversation), and there is no delete to race a concurrent ratchet save.
     const signalSyncLost = (conversationId: string): void => {
+      liveGroups.current.delete(conversationId);
       onSyncLost?.(conversationId);
-      void recoverSyncLost(deps.keystore, conversationId, liveGroups.current, () =>
-        drainRef.current(),
-      );
     };
 
     // Interleaved catch-up for one conversation: backfill at the current epoch, then — if messages at a

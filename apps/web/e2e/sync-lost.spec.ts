@@ -21,7 +21,7 @@ test('healthy conversation shows no sync-lost affordance and keeps the composer'
   // A seed conversation is selected by default and is healthy (no `recovery` flag) — neither the
   // banner title nor its body copy should render.
   await expect(page.getByText('Conversation out of sync')).toHaveCount(0);
-  await expect(page.getByText('Older messages may be unavailable.')).toHaveCount(0);
+  await expect(page.getByText('fell too far behind to sync')).toHaveCount(0);
   // The composer stays available on a healthy conversation (the suppression is sync-lost-only).
   await expect(page.getByPlaceholder('Type a message...')).toBeVisible();
 });

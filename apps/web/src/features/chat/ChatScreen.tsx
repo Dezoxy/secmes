@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MessageCircle, RefreshCw, X } from 'lucide-react';
+import { MessageCircle, Unplug, X } from 'lucide-react';
 import { safetyNumberFromMember } from '@argus/crypto';
 import type { UserLookupResult, Friend, FriendRequest } from '../../lib/api';
 import {
@@ -257,9 +257,9 @@ export default function ChatScreen() {
       setNumbersByConv((prev) => ({ ...prev, [conversationId]: safetyNumber }));
     }, []),
     // Track 4 slice 5c — a conversation can no longer advance its MLS epoch (the commit it needs was
-    // pruned / offline beyond retention). Stamp a "needs reconnecting" affordance; the hook itself does
-    // the self-heal (drops the broken group state + re-drives the Welcome drain). The flag clears
-    // automatically when the conversation re-joins fresh — the join path replaces the conversation shell.
+    // pruned / offline beyond retention). Stamp an "out of sync" affordance; the hook has already dropped
+    // the doomed group from liveGroups so the live paths stop attempting it. Re-establishing the
+    // conversation (re-add via the member/Welcome path) is slice 5c-2 — v1 surfaces the state.
     onSyncLost: useCallback((conversationId: string) => {
       setConversations((prev) =>
         prev.map((c) => (c.id === conversationId ? { ...c, recovery: 'sync-lost' as const } : c)),
@@ -279,9 +279,9 @@ export default function ChatScreen() {
   // The hooks that consume the real selectedIsLive (receipt-sending, backfill) already guard on
   // messagingDeps, which is null in demo mode, so they remain no-ops.
   const effectiveSelectedIsLive = demoMode ? !!selectedId : selectedIsLive;
-  // Track 4 slice 5c — the selected conversation is sync-lost (its MLS group was dropped by the
-  // self-heal). Show the "needs reconnecting" affordance and suppress the composer: there is no live
-  // group to encrypt into until a member re-adds this device and it re-joins.
+  // Track 4 slice 5c — the selected conversation is sync-lost (its doomed MLS group was dropped from
+  // liveGroups). Show the "out of sync" affordance and suppress the composer: there is no live group to
+  // encrypt into, and v1 does not auto-recover (re-establishment is slice 5c-2).
   const selectedIsSyncLost = selectedConversation?.recovery === 'sync-lost';
 
   const handleSend = useMessageSending({
@@ -740,7 +740,7 @@ export default function ChatScreen() {
               )}
               {selectedIsSyncLost && (
                 <StateBlock
-                  icon={RefreshCw}
+                  icon={Unplug}
                   title="Conversation out of sync"
                   variant="offline"
                   compact
@@ -748,8 +748,8 @@ export default function ChatScreen() {
                   ariaLive="polite"
                   className="mx-4 mt-3"
                 >
-                  Older messages may be unavailable. This conversation will reconnect automatically
-                  once a device that still holds its keys re-establishes the secure session.
+                  This conversation fell too far behind to sync. New messages may not appear and
+                  older ones may be unavailable.
                 </StateBlock>
               )}
               <MessageList conversation={selectedConversation} onImageClick={setPreviewImage} />
