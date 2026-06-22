@@ -56,7 +56,7 @@ decrypts).
 | `argus-postgres-owner-password` | Postgres superuser/owner (`argus`) password | Postgres container at **first init** (`POSTGRES_PASSWORD_FILE`) | `put_once` (32 alnum); TF generates | **SET-ONCE** — first-init only; rotating in KV breaks migration auth (DR-only) |
 | `argus-migration-database-url` | Owner DSN used to run migrations before serving | `deploy.sh` fetches it deploy-transiently, stages 0400 on tmpfs, runs migrations, then `shred`s it | Derived in `populate.sh` from the set-once owner password | **SET-ONCE** (tracks the owner password) |
 | `argus-database-url` | App DSN with the dedicated **`argus_app`** password — the non-bypass, RLS-bound runtime role | API at boot (`DATABASE_URL_FILE`); `deploy.sh` parses the password and `ALTER ROLE argus_app … PASSWORD` each deploy | `populate.sh` `put` (own 32-alnum password) | **Rotatable** — deploy re-applies the login |
-| `argus-glitchtip-db-password` | GlitchTip's dedicated Postgres owner password | `glitchtip-db` at first init — **skipped on the lean box** (`ARGUS_SKIP_GLITCHTIP=1`) | `put_once`; TF generates | **SET-ONCE** |
+| `argus-glitchtip-db-password` | GlitchTip's dedicated Postgres owner password | `glitchtip-db` at first init. **Fetch-mandatory** in KV even though the GlitchTip container is skipped on the lean box (`ARGUS_SKIP_GLITCHTIP=1`) | `put_once`; TF generates | **SET-ONCE** |
 | `argus-backup-db-password` | (legacy) `argus_backup` login password | **VESTIGIAL** — worker now uses in-container local trust; `deploy.sh` sets the role `PASSWORD NULL` | `put`; TF generates | Inert (retirement is a tracked follow-up) |
 | `argus-cleanup-db-password` | (legacy) `argus_cleanup` login password | **VESTIGIAL** — same as above | `put`; TF generates | Inert |
 
@@ -98,7 +98,7 @@ tunnel token makes the site unreachable until re-supplied.
 | Secret | Purpose | Consumer | Origin | Lifecycle |
 |---|---|---|---|---|
 | `argus-grafana-admin-password` | Grafana admin login | Grafana at **first init** (`GF_SECURITY_ADMIN_PASSWORD__FILE`) | `put_once` (24 alnum); TF generates | **SET-ONCE** — Grafana stores it in its own DB; rotating in KV has no effect on the live UI |
-| `argus-glitchtip-secret-key` | GlitchTip Django `SECRET_KEY` (session signing) — **skipped on the lean box** | GlitchTip via env each boot | `put` (50 alnum); TF generates | **Rotatable** |
+| `argus-glitchtip-secret-key` | GlitchTip Django `SECRET_KEY` (session signing) | GlitchTip via env each boot. **Fetch-mandatory** in KV — the container is skipped on the lean box but the boot fetch still requires the secret present | `put` (50 alnum); TF generates | **Rotatable** |
 
 Both expose **metadata/metrics only — never message content** (invariant #6).
 
@@ -156,17 +156,24 @@ ever runs Zitadel: `argus-zitadel-masterkey` (**set-once, data-loss if lost**),
 ## 10. Operator reference
 
 ### Mandatory to boot (the stack won't reach healthy without these)
-`argus-session-signing-key`, `argus-backup-signing-key` (the fetch presence-gate
-404s and fails closed if absent), `argus-database-url`,
-`argus-migration-database-url`, `argus-postgres-owner-password`,
-`argus-redis-password`, `argus-tunnel-token`, `argus-ghcr-token`,
-`argus-s3-secret-access-key`, `argus-b2-app-key`.
+The boot fetch (`fetch-keyvault-secrets.sh`) reads its `SECRETS[]` set
+**unconditionally** — a 404 on any of these fails the boot closed:
+`argus-session-signing-key`, `argus-backup-signing-key`, `argus-database-url`,
+`argus-postgres-owner-password`, `argus-redis-password`, `argus-tunnel-token`,
+`argus-s3-secret-access-key`, `argus-b2-app-key`, `argus-grafana-admin-password`,
+`argus-glitchtip-db-password`, `argus-glitchtip-secret-key`. Plus the
+deploy-transient `argus-migration-database-url` and `argus-ghcr-token` (fetched by
+`deploy.sh`, not the boot fetch, but still required to deploy).
+
+> The three Grafana/GlitchTip secrets are **fetch-mandatory (must exist in KV)**
+> even though `ARGUS_SKIP_GLITCHTIP=1` stops the GlitchTip *containers* on the lean
+> box — `populate.sh` + Terraform provision them, so they are present (Grafana
+> itself does run on the lean box).
 
 ### Optional / conditional
-`argus-b2-cors-app-key` (only if `B2_CORS_KEY_ID` set); the GlitchTip secrets
-(skipped on the lean box); `argus-grafana-admin-password` (observability tier);
-`argus-backup-age-key` (restore only — but catastrophic if lost); the arming set
-(§8) and Zitadel set (§9).
+`argus-b2-cors-app-key` (only if `B2_CORS_KEY_ID` set); `argus-backup-age-key`
+(restore only — never in the boot fetch — but catastrophic if lost); the arming
+set (§8) and Zitadel set (§9).
 
 ### ⚠️ The set-once placeholder trap
 Set-once secrets are burned at a component's **first init** (or pinned out-of-band)
