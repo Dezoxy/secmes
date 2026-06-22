@@ -22,6 +22,7 @@
 import type { Conversation as MlsGroup } from '@argus/crypto';
 
 import type { DeviceKeystore } from './keystore';
+import { conversationLock, withLock } from './locks';
 
 /**
  * Recover a sync-lost conversation by clearing its broken local MLS state and re-driving the Welcome
@@ -51,12 +52,21 @@ export async function recoverSyncLost(
   redrainWelcomes: () => void,
 ): Promise<void> {
   try {
-    // Drop the in-memory group FIRST so any concurrent live handler (a racing catch-up / commit drain)
-    // sees no group and short-circuits, rather than operating on a ratchet we are about to invalidate.
-    liveGroups.delete(conversationId);
-    await keystore.deleteConversationState(conversationId);
-    // Now that no durable group state remains, the join drain's `hasConversationState` gate is false,
-    // so a fresh Welcome for this conversation will be joined + persisted instead of skipped as a replay.
+    // Clear under the SAME per-conversation ratchet lock the live ops use — `sendLiveMessage`,
+    // `receiveLiveMessage`, and `drainCommits` all `saveConversationState` while holding
+    // `conversationLock(conversationId)`. Without it, an in-flight receive/drain that already captured
+    // the (now stale) group could `saveConversationState` AFTER we delete, recreating the GROUP_STORE
+    // row; the next fresh Welcome would then be treated as already-owned (`hasConversationState`) and
+    // skipped, stalling recovery. Holding the lock means no save runs concurrently with the delete, so
+    // the delete is the last write to this conversation's group state. Drop the in-memory group first so
+    // any handler that reads `liveGroups` after this short-circuits on its `if (!group) return` guard.
+    await withLock(conversationLock(conversationId), async () => {
+      liveGroups.delete(conversationId);
+      await keystore.deleteConversationState(conversationId);
+    });
+    // Re-drive the Welcome drain OUTSIDE the lock (a fresh join takes the lock itself). With no durable
+    // group state, the join drain's `hasConversationState` gate is now false, so a fresh Welcome for this
+    // conversation is joined + persisted instead of skipped as a replay.
     redrainWelcomes();
   } catch (err) {
     // Recovery is best-effort: a later reconnect re-runs the drain anyway. Log id-only — never content

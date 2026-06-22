@@ -7,6 +7,7 @@ import {
   classifyDeliveryFrame,
   liveConversationShell,
   prependConversationIfMissing,
+  preserveTranscriptOnRejoin,
   setsEqual,
 } from './useLiveConversations';
 
@@ -182,5 +183,41 @@ describe('classifyCommitDrain (sync-lost detection)', () => {
     expect(classifyCommitDrain({ localEpoch: 2, targetEpoch: 5, oldestRetainedEpoch: null })).toBe(
       'transient',
     );
+  });
+});
+
+// Track 4 slice 5c — re-joining a recovered (sync-lost) conversation must not wipe its transcript. The
+// fresh shell has empty messages, but the recovered conversation still holds its decrypted history (the
+// pre-Welcome messages were pruned server-side and can't be re-fetched), so we carry it over.
+describe('preserveTranscriptOnRejoin', () => {
+  const shell = liveConversationShell('conv-x', currentUser);
+  const withMessages: Conversation = {
+    ...shell,
+    messages: [
+      {
+        id: 'm1',
+        senderId: 'peer',
+        content: 'kept',
+        timestamp: new Date('2026-01-01T00:00:00.000Z'),
+        status: 'read',
+      },
+    ],
+    unreadCount: 3,
+  };
+
+  it('carries the existing transcript + unread count onto the fresh shell', () => {
+    const result = preserveTranscriptOnRejoin([withMessages], shell);
+    expect(result.messages).toEqual(withMessages.messages);
+    expect(result.unreadCount).toBe(3);
+    // It is the shell augmented, not the old object — participants/identity come from the fresh join.
+    expect(result.participants).toBe(shell.participants);
+  });
+
+  it('returns the shell unchanged for a normal first join (no existing entry)', () => {
+    expect(preserveTranscriptOnRejoin([], shell)).toBe(shell);
+  });
+
+  it('returns the shell unchanged when the existing entry has no messages (empty placeholder)', () => {
+    expect(preserveTranscriptOnRejoin([shell], shell)).toBe(shell);
   });
 });

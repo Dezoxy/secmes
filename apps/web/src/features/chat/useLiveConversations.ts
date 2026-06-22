@@ -201,6 +201,25 @@ export function replaceOrPrependConversation(
   return next;
 }
 
+/**
+ * Track 4 slice 5c — when a conversation re-joins (notably the sync-lost recovery path), carry over its
+ * existing decrypted transcript instead of resetting to the fresh shell's empty `messages`. A recovered
+ * conversation's history lives only in the local UI + sealed MSGLOG — its pre-Welcome messages were
+ * pruned server-side and cannot be re-fetched by backfill — so replacing it with an empty shell would
+ * drop that history from view until the next app reload. Backfill dedups by message id, so carrying the
+ * messages over can never double them. A normal first join has no existing entry (or only an empty
+ * placeholder), so this returns the shell unchanged.
+ */
+export function preserveTranscriptOnRejoin(
+  conversations: Conversation[],
+  shell: Conversation,
+): Conversation {
+  const existing = conversations.find((c) => c.id === shell.id);
+  return existing && existing.messages.length > 0
+    ? { ...shell, messages: existing.messages, unreadCount: existing.unreadCount }
+    : shell;
+}
+
 export function setsEqual(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
@@ -365,7 +384,11 @@ export function useLiveConversations({
       onJoined: ({ conversationId, conversation, senderUserId, peerSafetyNumbers }) => {
         addLive(conversationId, conversation);
         const shell = liveConversationShell(conversationId, currentUserProfile);
-        setConversations((prev) => replaceOrPrependConversation(prev, shell));
+        // Preserve an existing transcript across a re-join (sync-lost recovery) — a fresh shell has empty
+        // `messages`, but a recovered conversation still holds its decrypted history here + in MSGLOG.
+        setConversations((prev) =>
+          replaceOrPrependConversation(prev, preserveTranscriptOnRejoin(prev, shell)),
+        );
         // Persist the peerUserId mapping only when the sender is the real peer — not self. In the
         // device-enrollment flow, an existing own device sends the Welcome to D2, making senderUserId
         // equal to selfUserId; persisting that would map the conversation to ourselves.
