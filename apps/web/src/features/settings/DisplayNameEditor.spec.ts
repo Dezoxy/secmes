@@ -4,17 +4,19 @@ import { createElement, act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { hooks } = vi.hoisted(() => ({
+const { hooks, mockToast } = vi.hoisted(() => ({
   hooks: {
     profile: null as null | Record<string, unknown>,
     refreshProfile: vi.fn().mockResolvedValue(undefined),
   },
+  mockToast: vi.fn(),
 }));
 
 vi.mock('../../lib/api', () => ({ updateProfile: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../auth/AuthContext', () => ({
   useAuth: () => ({ profile: hooks.profile, refreshProfile: hooks.refreshProfile }),
 }));
+vi.mock('../ui', () => ({ useToast: () => ({ toast: mockToast }) }));
 
 import { DisplayNameEditor } from './DisplayNameEditor';
 
@@ -36,6 +38,7 @@ function mount() {
 
 afterEach(() => {
   hooks.profile = null;
+  mockToast.mockClear();
 });
 
 describe('DisplayNameEditor', () => {
@@ -54,6 +57,34 @@ describe('DisplayNameEditor', () => {
       b.textContent?.includes('Save'),
     );
     expect(save).toBe(true);
+
+    await act(async () => root.unmount());
+  });
+
+  it('toasts the character policy (error) and marks the field invalid when saving an invalid name', async () => {
+    hooks.profile = { ...BOUND };
+    const { container, root } = mount();
+    await act(async () => {
+      root.render(createElement(DisplayNameEditor));
+    });
+
+    const input = container.querySelector<HTMLInputElement>('#display-name')!;
+    // React tracks the value internally — set via the native setter, then fire `input` to trigger onChange.
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, '!!!');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      container
+        .querySelector('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+
+    expect(mockToast).toHaveBeenCalledTimes(1);
+    expect(mockToast.mock.calls[0]?.[1]).toMatchObject({ variant: 'error' });
+    // The field stays flagged after the (self-dismissing) toast.
+    expect(input.getAttribute('aria-invalid')).toBe('true');
 
     await act(async () => root.unmount());
   });

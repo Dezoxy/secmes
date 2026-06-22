@@ -17,6 +17,9 @@ export function DisplayNameEditor() {
 
   const [displayName, setDisplayName] = useState(profile?.displayName ?? '');
   const [busy, setBusy] = useState(false);
+  // Persistent invalid cue: the error toast self-dismisses, so mark the field so a screen reader that
+  // returns to it still knows the value is invalid (WCAG ARIA21). Cleared on the next edit.
+  const [hasError, setHasError] = useState(false);
   const initRef = useRef(false);
 
   // Populate once when the profile first becomes available after session restore.
@@ -35,6 +38,7 @@ export function DisplayNameEditor() {
     // Validate on submit and surface the character/length policy as a toast (not as permanent helper text).
     if (displayNameFieldError(displayName) !== null) {
       toast(DISPLAY_NAME_HINT, { variant: 'error' });
+      setHasError(true);
       return;
     }
     setBusy(true);
@@ -65,11 +69,15 @@ export function DisplayNameEditor() {
           id="display-name"
           type="text"
           value={displayName}
-          onChange={(e) => setDisplayName(e.target.value)}
+          onChange={(e) => {
+            setDisplayName(e.target.value);
+            setHasError(false);
+          }}
           maxLength={DISPLAY_NAME_MAX}
           placeholder="Your name…"
           disabled={busy}
-          className="w-full rounded-xl border border-white/5 bg-[#1a1a26] px-4 py-2.5 text-sm text-white placeholder-white/30 outline-none transition-colors focus:border-purple-500/50 disabled:opacity-50"
+          aria-invalid={hasError || undefined}
+          className="w-full rounded-xl border border-white/5 bg-[#1a1a26] px-4 py-2.5 text-sm text-white placeholder-white/30 outline-none transition-colors focus:border-purple-500/50 disabled:opacity-50 aria-[invalid=true]:border-red-400/60"
         />
       </div>
 
