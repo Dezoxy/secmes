@@ -19,7 +19,8 @@ and when, how it is delivered, and what happens if it leaks or is lost.
 
 All runtime secrets live in **Azure Key Vault** `argus-exp-kv-4ad322` (vault name
 pattern `${var.prefix}-kv-<sha1[:6]>`, experiment prefix `argus-exp`). The EC2 box
-holds **no stored Azure credential**:
+holds **no long-lived Azure runtime credential** (one bootstrap secret aside,
+catalogued at the end of this section):
 
 - At boot, `argus-secrets.service` (`infra/stack/secrets/fetch-keyvault-secrets.sh`)
   obtains a **short-lived Key Vault bearer token from the Azure Arc HIMDS** local
@@ -39,6 +40,16 @@ is OIDC → STS (temporary), Azure access is the Arc MI (an ephemeral per-fetch 
 Third-party *service* credentials (the B2/S3 keys, the Cloudflare tunnel token) **are**
 present at runtime, but only as **tmpfs credential files** under `/run/argus/secrets`
 (never in env, never on persistent disk).
+
+**Bootstrap exception — the Arc onboarding credential.** Establishing the box's Arc
+identity needs a one-time secret: Terraform creates
+`azuread_application_password.arc_onboarding` (a service-principal password) and stores
+it in an **AWS SSM SecureString** (KMS-encrypted); cloud-init reads it **once** to
+onboard the box to Azure Arc, after which the box uses only the Arc MI. **Store:** AWS
+SSM Parameter Store (+ Terraform state — use the encrypted, locked S3 backend).
+**Rotate:** rotate the SP password and re-apply Terraform. **If leaked:** an attacker
+could onboard a machine under that onboarding SP — rotate immediately. **If lost:**
+re-create via Terraform; no data impact.
 
 ## 1. Signing keys (token + backup authenticity)
 
@@ -175,9 +186,11 @@ deploy-transient `argus-migration-database-url` and `argus-ghcr-token` (fetched 
 > itself does run on the lean box).
 
 ### Optional / conditional
-`argus-b2-cors-app-key` (only if `B2_CORS_KEY_ID` set); `argus-backup-age-key`
-(restore only — never in the boot fetch — but catastrophic if lost); the arming
-set (§8) and Zitadel set (§9).
+`argus-b2-cors-app-key` — **populate-required**: `populate-keyvault.sh` prompts for
+it unconditionally and fails without it, even though its *runtime* use is gated on
+`B2_CORS_KEY_ID` (`deploy.sh` skips CORS convergence when that's unset). So supply it
+at the `populate` prompt regardless. `argus-backup-age-key` (restore only — never in
+the boot fetch — but catastrophic if lost); the arming set (§8) and Zitadel set (§9).
 
 ### ⚠️ The set-once placeholder trap
 Set-once secrets are burned at a component's **first init** (or pinned out-of-band)
