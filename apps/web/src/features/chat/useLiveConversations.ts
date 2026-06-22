@@ -11,6 +11,7 @@ import { accessToken } from '../../lib/auth';
 import { fetchReceipts, listEnrollments, listMyConversations } from '../../lib/api';
 import { enrollDevice } from '../../lib/enroll';
 import { joinPendingConversations } from '../../lib/join';
+import { recoverSyncLost } from '../../lib/recover-sync-lost';
 import {
   receiveLiveMessage,
   processCommitEvent,
@@ -137,10 +138,12 @@ interface UseLiveConversationsOptions {
    */
   onSafetyNumberResolved?: (conversationId: string, safetyNumber: string) => void;
   /**
-   * Track 4 slice 5b — called when a conversation is detected as "sync-lost": the commit needed to
+   * Track 4 slice 5b/5c — called when a conversation is detected as "sync-lost": the commit needed to
    * advance its MLS epoch has been pruned (or the device was offline beyond retention), so catch-up can
-   * never close the gap by retrying. The argument is the conversation id (metadata only). 5b only
-   * DETECTS and reports; recovery (re-add via Welcome) + the UI affordance land in 5c, which wires this.
+   * never close the gap by retrying. The argument is the conversation id (metadata only). This is the
+   * UI signal — the consumer (5c) stamps a "needs reconnecting" affordance on the conversation. The
+   * self-heal (drop the broken group state + re-drive the Welcome drain so the device re-joins fresh
+   * when a member re-adds it) is performed by the hook itself via `recoverSyncLost`; see `signalSyncLost`.
    */
   onSyncLost?: (conversationId: string) => void;
 }
@@ -448,6 +451,19 @@ export function useLiveConversations({
     setConnectionStatus('connecting');
     const deps = messagingDeps;
 
+    // Track 4 slice 5c — a conversation is sync-lost (the commit it needs is gone). Do two things:
+    // signal the UI (onSyncLost → the consumer stamps a "needs reconnecting" affordance) AND self-heal.
+    // The stranded device can't re-add itself, so recoverSyncLost drops its broken group state and
+    // re-drives the Welcome drain — it re-joins FRESH (full safety-number re-check, new KeyPackage) once
+    // a current member re-adds it. Idempotent across the three fire sites: once the group is dropped
+    // from liveGroups, the other sites short-circuit on their `if (!group) return` guard.
+    const signalSyncLost = (conversationId: string): void => {
+      onSyncLost?.(conversationId);
+      void recoverSyncLost(deps.keystore, conversationId, liveGroups.current, () =>
+        drainRef.current(),
+      );
+    };
+
     // Interleaved catch-up for one conversation: backfill at the current epoch, then — if messages at a
     // future epoch were seen — drain commits to EXACTLY that epoch (not beyond) and backfill again, until
     // no further epoch gaps. Preserves forward secrecy (epoch-N keys consumed only after all epoch-N
@@ -486,7 +502,7 @@ export function useLiveConversations({
           if (state === 'sync-lost') {
             // eslint-disable-next-line no-console
             console.warn('catch-up: conversation sync-lost (commit pruned)', conversationId);
-            onSyncLost?.(conversationId);
+            signalSyncLost(conversationId);
             break;
           }
           transientStalls += 1;
@@ -603,7 +619,7 @@ export function useLiveConversations({
               if (state === 'sync-lost') {
                 // eslint-disable-next-line no-console
                 console.warn('ws message: conversation sync-lost (commit pruned)', conversationId);
-                onSyncLost?.(conversationId);
+                signalSyncLost(conversationId);
                 return; // unreachable epoch — don't attempt an undecryptable read
               }
             }
@@ -688,7 +704,7 @@ export function useLiveConversations({
           if (state === 'sync-lost') {
             // eslint-disable-next-line no-console
             console.warn('commit drain: conversation sync-lost (commit pruned)', conversationId);
-            onSyncLost?.(conversationId);
+            signalSyncLost(conversationId);
           }
         })().catch((err: unknown) => {
           // eslint-disable-next-line no-console

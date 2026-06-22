@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MessageCircle, X } from 'lucide-react';
+import { MessageCircle, RefreshCw, X } from 'lucide-react';
 import { safetyNumberFromMember } from '@argus/crypto';
 import type { UserLookupResult, Friend, FriendRequest } from '../../lib/api';
 import {
@@ -49,6 +49,7 @@ import {
   IconButton,
   Modal,
   ReconnectBanner,
+  StateBlock,
   conversationEnterMotion,
   modalBackdropEnterMotion,
   modalPanelEnterMotion,
@@ -255,6 +256,15 @@ export default function ChatScreen() {
     onSafetyNumberResolved: useCallback((conversationId: string, safetyNumber: string) => {
       setNumbersByConv((prev) => ({ ...prev, [conversationId]: safetyNumber }));
     }, []),
+    // Track 4 slice 5c — a conversation can no longer advance its MLS epoch (the commit it needs was
+    // pruned / offline beyond retention). Stamp a "needs reconnecting" affordance; the hook itself does
+    // the self-heal (drops the broken group state + re-drives the Welcome drain). The flag clears
+    // automatically when the conversation re-joins fresh — the join path replaces the conversation shell.
+    onSyncLost: useCallback((conversationId: string) => {
+      setConversations((prev) =>
+        prev.map((c) => (c.id === conversationId ? { ...c, recovery: 'sync-lost' as const } : c)),
+      );
+    }, []),
   });
 
   const { selectedConversation, isDirect, selectedIsLive, currentNumber, verified, isLive } =
@@ -269,6 +279,10 @@ export default function ChatScreen() {
   // The hooks that consume the real selectedIsLive (receipt-sending, backfill) already guard on
   // messagingDeps, which is null in demo mode, so they remain no-ops.
   const effectiveSelectedIsLive = demoMode ? !!selectedId : selectedIsLive;
+  // Track 4 slice 5c — the selected conversation is sync-lost (its MLS group was dropped by the
+  // self-heal). Show the "needs reconnecting" affordance and suppress the composer: there is no live
+  // group to encrypt into until a member re-adds this device and it re-joins.
+  const selectedIsSyncLost = selectedConversation?.recovery === 'sync-lost';
 
   const handleSend = useMessageSending({
     selectedId,
@@ -721,11 +735,25 @@ export default function ChatScreen() {
                 updateReady={updateReady}
                 onApplyUpdate={applyUpdate}
               />
-              {effectiveSelectedIsLive && (
+              {effectiveSelectedIsLive && !selectedIsSyncLost && (
                 <ReconnectBanner status={connectionStatus} className="mx-4 mt-3" />
               )}
+              {selectedIsSyncLost && (
+                <StateBlock
+                  icon={RefreshCw}
+                  title="Conversation out of sync"
+                  variant="offline"
+                  compact
+                  role="status"
+                  ariaLive="polite"
+                  className="mx-4 mt-3"
+                >
+                  Older messages may be unavailable. This conversation will reconnect automatically
+                  once a device that still holds its keys re-establishes the secure session.
+                </StateBlock>
+              )}
               <MessageList conversation={selectedConversation} onImageClick={setPreviewImage} />
-              {effectiveSelectedIsLive && <ChatInput onSend={handleSend} />}
+              {effectiveSelectedIsLive && !selectedIsSyncLost && <ChatInput onSend={handleSend} />}
             </div>
           ) : (
             <div
