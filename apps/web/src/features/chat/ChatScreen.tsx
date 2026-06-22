@@ -587,9 +587,11 @@ export default function ChatScreen() {
 
   // Compute the selected DIRECT conversation's own safety number (from its own loopback session), once.
   // LIVE conversations are skipped — a started one already holds its REAL number, and none should spin up a
-  // loopback session (which would compute the wrong, local number).
+  // loopback session (which would compute the wrong, local number). A sync-lost conversation is a real live
+  // one that was dropped from liveIds (so selectedIsLive is now false); skip it too so we never spin up a
+  // bogus loopback session against its id (Track 4 slice 5c).
   useEffect(() => {
-    if (!selectedId || !isDirect || selectedIsLive) return;
+    if (!selectedId || !isDirect || selectedIsLive || selectedIsSyncLost) return;
     void getMlsSession(selectedId)
       .then((s) =>
         setNumbersByConv((prev) =>
@@ -597,7 +599,7 @@ export default function ChatScreen() {
         ),
       )
       .catch(() => {});
-  }, [selectedId, isDirect, selectedIsLive]);
+  }, [selectedId, isDirect, selectedIsLive, selectedIsSyncLost]);
 
   useSelectedConversationBackfill({
     selectedId,

@@ -462,7 +462,20 @@ export function useLiveConversations({
     // fresh — is slice 5c-2. Keeping GROUP_STORE means a reload simply re-detects + re-surfaces (no
     // vanished conversation), and there is no delete to race a concurrent ratchet save.
     const signalSyncLost = (conversationId: string): void => {
+      // Drop the doomed group from BOTH the in-memory group map AND the live-id set, so every live-path
+      // consumer treats the conversation as no longer live: the catch-up / commit-drain / live-message
+      // handlers short-circuit on `if (!group) return`, and the liveIds-keyed paths
+      // (useReceiptSending, useChatState → selectedIsLive, useSelectedConversationBackfill) stop acting on
+      // it — no stray delivered/read receipt POSTs or backfills for a conversation that can't advance.
+      // Unlike onRemoved, we do NOT remove it from the conversation LIST: it stays visible with the "out
+      // of sync" banner.
       liveGroups.current.delete(conversationId);
+      setLiveIds((prev) => {
+        if (!prev.has(conversationId)) return prev;
+        const next = new Set(prev);
+        next.delete(conversationId);
+        return next;
+      });
       onSyncLost?.(conversationId);
     };
 
