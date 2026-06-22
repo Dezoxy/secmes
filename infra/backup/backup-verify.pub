@@ -3,16 +3,11 @@
 # the same bucket an attacker could write. The matching PRIVATE key lives ONLY in Key Vault
 # (argus-backup-signing-key) and on the backup host's tmpfs at sign time — never here.
 #
-# PLACEHOLDER — the real key does not exist until the operator generates it. Signature verification at restore
-# (slice 3) FAILS CLOSED against this placeholder, which is correct: an unpopulated verify key must not pass.
-# (Slice 3 must reject this by CONTENT — grep REPLACE_WITH_ and hard-abort with a legible message — not rely
-# only on `openssl pkey -pubin` failing to parse, so the operator sees "verify key not populated", not a
-# generic parse error.)
-# To populate (one-time, after running populate-keyvault.sh which creates argus-backup-signing-key):
+# Populated 2026-06-22 from the Key Vault signing key (one-time, after populate-keyvault.sh), via:
 #   az keyvault secret show --vault-name <vault> --name argus-backup-signing-key --query value -o tsv \
-#     | openssl pkey -pubout
-# Replace the block below with that "-----BEGIN PUBLIC KEY-----" output and commit.
-# See infra/backup/README.md §"Backup signing key" and docs/threat-models/db-backup.md.
+#     | openssl pkey -pubout            # use real OpenSSL 3 (macOS LibreSSL cannot)
+# To rotate, see infra/backup/README.md §"Backup signing key" (coordinated keyring — keep the old block
+# until no live backup is signed by the old key) and docs/threat-models/db-backup.md.
 -----BEGIN PUBLIC KEY-----
-REPLACE_WITH_ARGUS_BACKUP_VERIFY_PUBLIC_KEY
+MCowBQYDK2VwAyEAWtCD5GGXUGIUC96WxYLEqt5oVBI18GK2O94U0v+twgA=
 -----END PUBLIC KEY-----
