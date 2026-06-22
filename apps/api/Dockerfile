@@ -26,7 +26,13 @@ RUN pnpm --filter @argus/api --prod deploy /app
 FROM node:24-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
-RUN apk --no-cache upgrade && apk add --no-cache wget # upgrade OS pkgs (CVE patching) + healthcheck wget
+# Patch OS CVEs, add the healthcheck wget, and DROP npm (+npx) from the runtime. The runtime only runs
+# `node dist/main.js` and never needs a package manager; npm bundles its own (older) undici, which is the
+# sole source of a HIGH CVE in the final image (our app's undici is current). Removing it fixes the CVE
+# and shrinks the runtime / attack surface.
+RUN apk --no-cache upgrade \
+ && apk add --no-cache wget \
+ && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/package.json ./package.json
