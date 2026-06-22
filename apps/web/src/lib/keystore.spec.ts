@@ -403,6 +403,29 @@ describe('DeviceKeystore — sealed at rest under the passkey-PRF unlock key', (
     expect((await ks.loadConversations(device2, key)).size).toBe(0);
   });
 
+  it('markConversationSyncLost flags a conversation and the flag survives a later ratchet save (5c)', async () => {
+    // Track 4 slice 5c — the durable sync-lost marker must outlast an in-flight ratchet save (the same
+    // creatorId-preservation idiom), so the "out of sync" affordance survives a reload.
+    const engine = await MlsEngine.create();
+    const key = await unlockKey();
+    const ks = await DeviceKeystore.open(engine);
+    const device = await ks.getOrCreateDevice('alice', key);
+    const peer = await engine.generateDeviceKeys('peer');
+    const conv = await engine.createConversation('c1', device);
+    const peerConv = await engine.joinConversation(peer, await conv.addMember(peer.publicPackage));
+    await ks.saveConversationState(device, 'c1', conv, key);
+
+    expect((await ks.getSyncLostConversationIds(device)).has('c1')).toBe(false);
+
+    await ks.markConversationSyncLost(device, 'c1');
+    expect((await ks.getSyncLostConversationIds(device)).has('c1')).toBe(true);
+
+    // A ratchet-advancing save that lands after detection (e.g. a queued receive) must NOT drop the flag.
+    await peerConv.decrypt(await conv.encrypt('m'));
+    await ks.saveConversationState(device, 'c1', conv, key);
+    expect((await ks.getSyncLostConversationIds(device)).has('c1')).toBe(true);
+  });
+
   it('message log: append → reload → history round-trips under the same unlock key', async () => {
     const engine = await MlsEngine.create();
     const key = await unlockKey();

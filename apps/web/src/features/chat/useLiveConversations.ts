@@ -476,6 +476,19 @@ export function useLiveConversations({
         next.delete(conversationId);
         return next;
       });
+      // Durably mark sync-lost so the affordance survives a reload: otherwise a refresh would rehydrate
+      // the stale group as live (banner gone, composer back) and a stale-epoch send would be
+      // undecryptable. Best-effort, id-only log; the flag is preserved across any in-flight ratchet save.
+      void deps.keystore
+        .markConversationSyncLost(deps.device, conversationId)
+        .catch((err: unknown) => {
+          // eslint-disable-next-line no-console
+          console.warn(
+            'mark sync-lost failed',
+            conversationId,
+            err instanceof Error ? err.message : err,
+          );
+        });
       onSyncLost?.(conversationId);
     };
 

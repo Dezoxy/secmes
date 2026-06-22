@@ -187,9 +187,11 @@ pruning:
   recreate `GROUP_STORE` and make the eventual Welcome look already-owned). So **5c is the honest standalone
   half: detect → stop → surface.** On `sync-lost`, `signalSyncLost` drops the doomed group from the in-memory
   live set (the live paths stop attempting a ratchet that can't advance) and surfaces a "Conversation out of
-  sync" banner + suppresses the composer, with **no** promise of automatic reconnection. Durable group state is
-  **left intact** — a reload re-detects + re-surfaces (no vanished conversation, no delete to race). Client-only;
-  no server/crypto surface; `maxEpoch` discipline untouched.
+  sync" banner + suppresses the composer, with **no** promise of automatic reconnection. The state is **durably
+  marked** (a `syncLost` flag on the stored group state, mirroring `creatorId` — preserved across ratchet saves,
+  never a destructive delete): a reload re-surfaces the banner and keeps the stale group **out of the live set**,
+  so a refresh can't rehydrate it as live and let a stale-epoch send go out (undecryptable by peers).
+  Client-only; no server/crypto surface; `maxEpoch` discipline untouched.
 - **5c-2 (deferred) — the recovery mechanism:** the whole active recovery — clear the broken durable state and
   re-add the device via the member/Welcome path so it re-joins **fresh** (full out-of-band safety-number
   re-check, fresh one-time KeyPackage, no key reuse) — lands together here. It needs either new server state

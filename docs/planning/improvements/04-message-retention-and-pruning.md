@@ -222,9 +222,11 @@ pruning is implemented.
      v1 would therefore be a premature half-mechanism (it lists nothing, and the delete races a concurrent
      ratchet save). So 5c is scoped to its honest standalone half: **drop the doomed group from the
      in-memory live set** (the live paths stop attempting a ratchet that can't advance) and **surface an
-     "out of sync" banner + suppress the composer**. Durable state is left intact (a reload simply
-     re-detects + re-surfaces — no vanished conversation, no delete to race). Client-only; no server/crypto
-     surface.
+     "out of sync" banner + suppress the composer**, and **durably mark the conversation sync-lost** (a
+     `syncLost` flag on the stored group state, mirroring `creatorId` — preserved across ratchet saves,
+     never a destructive delete) so a reload re-surfaces the banner and keeps the stale group **out of the
+     live set** (otherwise a refresh would rehydrate it as live and a stale-epoch send would be
+     undecryptable). Client-only; no server/crypto surface.
    - **5c-2 (deferred) — the recovery mechanism: re-add via the member/Welcome path.** The whole active
      recovery — clear the broken durable state and re-establish the conversation so the device re-joins
      **fresh** (full out-of-band safety-number re-check, fresh KeyPackage) — lands together here. It needs
@@ -280,9 +282,12 @@ pruning is implemented.
    >   `sync-lost` fire sites through one `signalSyncLost`, which **drops the doomed group from the
    >   in-memory `liveGroups`** (so the catch-up / commit-drain / live-message paths stop attempting a
    >   ratchet that can't advance — idempotent across all three via their `if (!group) return` guard) and
-   >   calls `onSyncLost?.()` (the UI signal). Durable group state is **left intact** — a reload simply
-   >   re-detects and re-surfaces, and there is no delete to race a concurrent ratchet save. The `maxEpoch`
-   >   discipline is untouched.
+   >   calls `onSyncLost?.()` (the UI signal), and **durably marks the conversation sync-lost** via a new
+   >   `keystore.markConversationSyncLost` (a `syncLost` flag on the stored group state, mirroring
+   >   `creatorId` — preserved across ratchet saves, so an in-flight save can't drop it; never a delete, so
+   >   nothing to race). Rehydration reads `getSyncLostConversationIds` and rebuilds such conversations
+   >   into the list **without making them live** + stamps the banner — so a reload keeps the honest state
+   >   and a stale-epoch send can't go out. The `maxEpoch` discipline is untouched.
    > - [`ChatScreen`](../../../apps/web/src/features/chat/ChatScreen.tsx) stamps a `recovery: 'sync-lost'`
    >   flag on the conversation (`Conversation` type, [`seed.ts`](../../../apps/web/src/features/chat/seed.ts))
    >   and renders a "Conversation out of sync" banner ("…fell too far behind to sync. New messages may not

@@ -106,8 +106,10 @@ change; Track 3 is mostly activating things already designed.
   nothing; the delete races a concurrent ratchet save), so 5c is scoped to the honest standalone half: on
   `sync-lost`, `signalSyncLost` **drops the doomed group from the in-memory live set** (live paths stop
   attempting a ratchet that can't advance) and `ChatScreen` shows a "Conversation out of sync" banner +
-  suppresses the composer — with **no** promise of automatic reconnection. Durable state is left intact (a
-  reload re-detects + re-surfaces; no vanished conversation, no delete to race). **The whole recovery mechanism
+  suppresses the composer — with **no** promise of automatic reconnection. A **durable `syncLost` marker** on
+  the stored group state (mirroring `creatorId`, preserved across ratchet saves — never a destructive delete)
+  makes the banner survive a reload and keeps the stale group **out of the live set** (so a refresh can't
+  rehydrate it as live and let a stale-epoch send go out). **The whole recovery mechanism
   — clear broken state + re-add via the member/Welcome path — is deferred to 5c-2** (group-chat GA, same trigger
   as 5d/5e). Client-only; no server, contract, migration, or wire change.
 
