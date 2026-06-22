@@ -83,6 +83,11 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           push: true
+          # Single-manifest push (see cd-aws.yml): buildx's docker-container driver defaults to attaching
+          # provenance + SBOM attestations → an OCI image INDEX, which breaks cosign sign-by-tag / verify-by-
+          # pulled-digest with "no signatures found". Disable both; our syft SBOM rides via `cosign attest`.
+          provenance: false
+          sbom: false
           tags: ${{ env.IMAGE }}
           # The PWA About version follows the release tag (IMAGE_TAG = github.ref_name); the api image ignores it.
           build-args: |

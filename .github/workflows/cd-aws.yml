@@ -85,6 +85,13 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           push: true
+          # Single-manifest push. buildx's docker-container driver (added with setup-buildx) defaults to
+          # attaching provenance + SBOM attestations, which makes the push an OCI image INDEX. `cosign sign`
+          # then signs the index digest, but deploy.sh verifies the PULLED image's digest → "no signatures
+          # found". Disable both so the tag is a plain, directly-signable manifest (we attach our own syft
+          # SBOM separately via `cosign attest`).
+          provenance: false
+          sbom: false
           tags: ${{ env.IMAGE }}
           # The PWA About version follows the release tag (IMAGE_TAG = github.ref_name); the api image ignores it.
           build-args: |
