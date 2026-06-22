@@ -106,30 +106,43 @@ Both expose **metadata/metrics only — never message content** (invariant #6).
 
 | Secret | Purpose | Consumer | Origin | Lifecycle |
 |---|---|---|---|---|
-| `argus-backup-age-key` | the age **private** key (an `AGE-SECRET-KEY` line) — the **only** thing that decrypts nightly DB backups | **Restore time only**, on a trusted host (never the backup box) | Hand-generated once (`age-keygen`), uploaded to KV, local copy shredded. **Not** created by `populate.sh`, **not** seeded by `keyvault.tf` | **SET-ONCE** (operationally — it is the recipient of every backup already written) |
+| `argus-backup-age-key` | the age **private** key (an `AGE-SECRET-KEY` line) — the **only** thing that decrypts nightly DB backups | **Restore only**, fetched from KV by a human operator on a trusted host; never written to the box's disk and never read by a service | Hand-generated once (`age-keygen`), uploaded to KV, local copy shredded. **Not** created by `populate.sh`, **not** seeded by `keyvault.tf` | **SET-ONCE** (operationally — it is the recipient of every backup already written) |
 
-> ⚠️ **If LOST: every backup is permanently unreadable.** This is the single
-> hardest-loss secret in the system. It is **not** delivered to the box (only the
-> age *public* recipient is). Mitigations: an **offline break-glass copy** in a
-> password manager (the operator's responsibility at generation time) + KV
-> soft-delete / purge-protection. Its public half rides as the non-secret
-> `BACKUP_AGE_RECIPIENT` (see [`config-inventory.md`](config-inventory.md)).
-> **If LEAKED:** anyone can decrypt every backup → full metadata/PII exposure.
+> ⚠️ **If LOST: every backup is permanently unreadable** — the single hardest-loss
+> secret in the system. Mitigation: an **offline break-glass copy** in a password
+> manager (the operator's job at generation time) + KV soft-delete / purge-protection.
+> Its public half rides as the non-secret `BACKUP_AGE_RECIPIENT` (see
+> [`config-inventory.md`](config-inventory.md)). **If LEAKED:** anyone can decrypt
+> every backup → full metadata/PII exposure.
+>
+> 🔓 **Access caveat — this is not a hard boundary.** The nightly *write* path needs
+> only the public recipient; the private key is never written to the box's disk and
+> only the *restore* flow reads it. **But** the box's Arc managed identity holds
+> **vault-wide** `Key Vault Secrets User` (`infra/aws/terraform/arc.tf`), so a
+> compromised host can mint the MI token and fetch `argus-backup-age-key` *by name* —
+> "not on the box" means not on disk, **not** beyond the box identity's reach. This
+> weakens backup confidentiality against a **host compromise** (a B2-only compromise
+> is still defended — that attacker has no MI token). Proper posture for real data:
+> keep this key **offline only**, or in a **separate vault / principal the runtime
+> identity cannot read** (or per-secret RBAC). The threat model
+> (`docs/threat-models/db-backup.md`) frames "never on the backup host" as on-disk
+> presence — it does not yet address identity-readability; tracked there.
 
-## 8. Arming secrets — provisioned later (seeded empty, not by `populate.sh`)
+## 8. Arming / optional secrets — seeded EMPTY until provisioned
 
-`fetch-keyvault-secrets.sh` seeds these **empty** until armed; the features no-op
-while unset.
+The `OPTIONAL_SECRETS` set in `fetch-keyvault-secrets.sh`: if absent, a `0444` **empty**
+file is seeded so the compose mount still resolves and the consumer runs **degraded**
+(never fatal). Source of truth — do not invent entries here.
 
-| Secret | Feature it arms |
+| Secret | Behaviour while empty |
 |---|---|
-| `argus-sentry-dsn` | GlitchTip/Sentry error-ingest DSN (also the backup `OnFailure` notifier) |
-| `argus-stripe-secret-key` | Stripe billing |
-| `argus-stripe-webhook-secret` | Stripe webhook signature verification |
-| `argus-operator-api-key` | Operator/ops API |
+| `argus-sentry-dsn` | GlitchTip/Sentry write-only ingest DSN (created in the GlitchTip UI after first deploy). API error-reporting is a no-op until set. |
+| `argus-admin-bootstrap-hash` | Argon2id hash (JSON) for the emergency **breakglass** admin login (`pnpm --filter @argus/api generate-admin-hash`). Absent ⇒ `/auth/breakglass/login` returns 503; the rest of the API is unaffected. See `docs/threat-models/breakglass-admin.md`. |
+| `argus-backup-db-password`, `argus-cleanup-db-password` | **Vestigial** (see §2) — kept in the OPTIONAL set so they can be deleted from KV without bricking boot (the worker roles are password-less). |
 
-(Cloudflare Access uses non-secret env `CF_ACCESS_TEAM_DOMAIN` + `CF_ACCESS_AUD` —
-no secret introduced.)
+(Cloudflare Access uses non-secret env `CF_ACCESS_TEAM_DOMAIN` + `CF_ACCESS_AUD` — no
+secret introduced. Stripe / operator-API integrations, if ever added, are app-level and
+**not** part of this deploy's Key Vault fetch set.)
 
 ## 9. Zitadel (full-stack only — NOT on the lean experiment box)
 
