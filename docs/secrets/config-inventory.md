@@ -157,5 +157,5 @@ The non-secret id lives in GitHub; the secret half lives in Key Vault.
 | `B2_APP_KEY_ID` | `00360fff542dcd80000000007` | `argus-b2-app-key` |
 | `B2_CORS_KEY_ID` | `00360fff542dcd80000000006` | `argus-b2-cors-app-key` |
 | `GHCR_USER` | `Dezoxy` | `argus-ghcr-token` (PAT) |
-| `BACKUP_AGE_RECIPIENT` | `age1u3l07w…` (public key) | the age **private** key (offline, **not** in KV) |
+| `BACKUP_AGE_RECIPIENT` | `age1u3l07w…` (public key) | `argus-backup-age-key` — the age **private** key (Key Vault; read only at restore — see secrets-inventory §7) |
 | `AWS_KEY_VAULT_NAME` | `argus-exp-kv-4ad322` | (the vault's entire contents) |
