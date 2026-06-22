@@ -122,7 +122,7 @@ function SettingsPanelFallback({ onClose }: SettingsPanelFallbackProps) {
     <Modal
       ariaLabel="Settings"
       onClose={onClose}
-      className={`items-center justify-center bg-black/80 p-4 backdrop-blur-sm ${modalBackdropEnterMotion}`}
+      className={`items-center justify-center bg-black/40 p-4 backdrop-blur-md ${modalBackdropEnterMotion}`}
       contentClassName={`relative flex h-[90vh] w-full max-w-6xl items-center justify-center rounded-3xl border border-white/5 bg-[#12121a] text-sm text-white/45 shadow-2xl shadow-black/50 ${modalPanelEnterMotion}`}
     >
       <IconButton
