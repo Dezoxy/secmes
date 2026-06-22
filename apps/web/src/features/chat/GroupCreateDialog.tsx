@@ -11,7 +11,16 @@ import type { MessagingDeps } from '../../lib/messaging';
 import { dicebearAvatar } from '../../lib/dicebear';
 import { contactDisplayName } from './user-label';
 import { VerifySecurity } from './VerifySecurity';
-import { Avatar, Button, ErrorState, IconButton, LoadingState, Modal } from '../ui';
+import {
+  Avatar,
+  Button,
+  ErrorState,
+  IconButton,
+  LoadingState,
+  Modal,
+  modalBackdropEnterMotion,
+  modalPanelEnterMotion,
+} from '../ui';
 import { toSafeUiError, type SafeUiError } from '../../lib/safe-ui-error';
 
 const MAX_GROUP_MEMBERS = 31; // 31 others + self = 32 total
@@ -226,8 +235,8 @@ export function GroupCreateDialog({
       ariaLabel={title}
       onClose={onClose}
       closeOnBackdrop
-      className="items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-      contentClassName="w-full max-w-md rounded-3xl border border-white/5 bg-[#12121a] p-6 shadow-2xl shadow-black/50"
+      className={`items-center justify-center bg-black/40 p-4 backdrop-blur-md ${modalBackdropEnterMotion}`}
+      contentClassName={`w-full max-w-md rounded-3xl border border-white/5 bg-[#12121a] p-6 shadow-2xl shadow-black/50 ${modalPanelEnterMotion}`}
     >
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">

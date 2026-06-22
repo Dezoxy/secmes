@@ -1,5 +1,12 @@
 import { Shield, ShieldCheck, X } from 'lucide-react';
-import { Button, ErrorState, IconButton, Modal } from '../ui';
+import {
+  Button,
+  ErrorState,
+  IconButton,
+  Modal,
+  modalBackdropEnterMotion,
+  modalPanelEnterMotion,
+} from '../ui';
 import type { SafeUiError } from '../../lib/safe-ui-error';
 
 /**
@@ -42,8 +49,8 @@ export function VerifySecurity({
       ariaLabel="Verify security"
       onClose={onClose}
       closeOnBackdrop
-      className="items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-      contentClassName="w-full max-w-md rounded-3xl border border-white/5 bg-[#12121a] p-6 shadow-2xl shadow-black/50"
+      className={`items-center justify-center bg-black/40 p-4 backdrop-blur-md ${modalBackdropEnterMotion}`}
+      contentClassName={`w-full max-w-md rounded-3xl border border-white/5 bg-[#12121a] p-6 shadow-2xl shadow-black/50 ${modalPanelEnterMotion}`}
     >
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
