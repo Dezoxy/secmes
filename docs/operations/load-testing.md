@@ -48,9 +48,10 @@ subscribe path.
 
 ## 3. Seed: a dedicated load-test tenant + N tokens
 
-Run from the repo root. **Local / dedicated-load-test environments only** — the script refuses
-`NODE_ENV=production` and any non-loopback DB host (mirrors [seed.dev.ts](../../apps/api/src/db/seed.dev.ts)).
-Save as `seed-loadtest.ts`:
+**Local / dedicated-load-test environments only** — the script refuses `NODE_ENV=production` and any
+non-loopback DB host (mirrors [seed.dev.ts](../../apps/api/src/db/seed.dev.ts)). Save it **inside the
+`@argus/api` workspace** as **`apps/api/seed-loadtest.ts`** so its `postgres` / `jose` imports resolve, and run
+it with that workspace's `tsx` (below):
 
 ```ts
 // seed-loadtest.ts — provision a DEDICATED load-test tenant: N users, pairwise 1:1 conversations,
@@ -124,21 +125,25 @@ try {
 Run it:
 
 ```bash
-make up && make migrate                                   # stack + schema (idempotent)
-openssl genpkey -algorithm Ed25519 -out loadtest-signing.pem   # shared signing key (PKCS8 PEM); throwaway, regenerate each run
+make up && make migrate                                   # stack + schema (idempotent), from the repo root
+
+# The key + seed live in apps/api so the workspace deps resolve; run them from there:
+cd apps/api
+openssl genpkey -algorithm Ed25519 -out loadtest-signing.pem   # throwaway signing key (PKCS8 PEM); regenerate each run
 
 SESSION_SIGNING_KEY_FILE="$PWD/loadtest-signing.pem" \
 DATABASE_URL="postgres://argus:argus_local_dev@localhost:5432/argus" \
-  npx tsx seed-loadtest.ts 200                            # -> loadtest-tokens.json (200 users, 200 tokens)
+  pnpm exec tsx seed-loadtest.ts 200                      # -> apps/api/loadtest-tokens.json (200 users, 200 tokens)
 
-# Start the API with the SAME key so the minted tokens verify:
-SESSION_SIGNING_KEY_FILE="$PWD/loadtest-signing.pem" make api-dev
+# In a SECOND terminal, from the repo ROOT, start the API with the SAME key so the minted tokens verify:
+#   SESSION_SIGNING_KEY_FILE="$PWD/apps/api/loadtest-signing.pem" make api-dev
 ```
 
 ## 4. The k6 script
 
-Save as `messaging-load.js`. Two scenarios run concurrently: **authed REST reads** and **authed WS
-connect→subscribe** (the concurrency ceiling). Tune `BASE_URL` / `WS_URL` for the target.
+Save as **`apps/api/messaging-load.js`** (next to the seed, so k6 and the tokens file share a directory). Two
+scenarios run concurrently: **authed REST reads** and **authed WS connect→subscribe** (the concurrency
+ceiling). Tune `BASE_URL` / `WS_URL` for the target.
 
 ```js
 import http from 'k6/http';
@@ -147,7 +152,8 @@ import { check, sleep } from 'k6';
 import { Rate } from 'k6/metrics';
 
 const BASE = __ENV.BASE_URL || 'http://localhost:3000';
-const WS_URL = __ENV.WS_URL || 'ws://localhost:3000/ws';
+// Local default is plain ws (TLS terminates at the Cloudflare edge in prod); set WS_SCHEME=wss for a TLS endpoint.
+const WS_URL = __ENV.WS_URL || `${__ENV.WS_SCHEME || 'ws'}://localhost:3000/ws`;
 const TARGET = Number(__ENV.TARGET || 200);
 const tokens = JSON.parse(open('./loadtest-tokens.json'));   // produced by seed-loadtest.ts
 const wsOk = new Rate('ws_connect_ok');
@@ -185,23 +191,29 @@ export function rest() {
 // Connect, authenticate (first frame), subscribe to the member conversation, hold briefly.
 export function realtime() {
   const t = pick();
-  ws.connect(WS_URL, {}, (socket) => {
+  let authed = false;
+  const res = ws.connect(WS_URL, {}, (socket) => {
     socket.on('open', () => socket.send(JSON.stringify({ event: 'auth', data: { token: t.token } })));
     socket.on('message', (raw) => {
       const f = JSON.parse(raw);
       if (f.event === 'ready') {
-        wsOk.add(1);
+        authed = true;
         socket.send(JSON.stringify({ event: 'subscribe', data: { conversationId: t.conversationId } }));
       }
     });
     socket.setTimeout(() => socket.close(), 5000); // hold the connection ~5s, then close
   });
+  // ws.connect blocks until the socket closes. Record success AND failure so the >0.99 threshold is meaningful —
+  // recording only successes would peg the rate at 100% and hide every failed connect/auth.
+  wsOk.add(authed);
+  check(res, { 'ws handshake 101': (r) => r && r.status === 101 });
 }
 ```
 
 Run it via the k6 Docker image (no install):
 
 ```bash
+# Run from apps/api (where the seed wrote loadtest-tokens.json next to messaging-load.js).
 # Linux (host networking reaches localhost):
 docker run --rm --network host -v "$PWD:/work" -w /work \
   -e BASE_URL=http://localhost:3000 -e WS_URL=ws://localhost:3000/ws -e TARGET=200 \
@@ -228,8 +240,9 @@ crypto-blind. This is the natural addition for the at-scale run at arming.
 
 - **Dedicated load-test tenant only** (`…00ff`). Never run the seed or the test against a tenant with real user
   data. The seed's loopback + `NODE_ENV` guards make a stray prod DSN refuse.
-- **Tokens are bearer credentials.** `loadtest-tokens.json` and `loadtest-signing.pem` are short-lived scratch
-  files — keep them out of git (see [§7](#7-gitignore)) and **delete them after the run**. They are never logged.
+- **Tokens are bearer credentials.** `apps/api/loadtest-tokens.json` and `apps/api/loadtest-signing.pem` are
+  short-lived scratch files — keep them out of git (see [§7](#7-gitignore)) and **delete them after the run**
+  (also remove `apps/api/seed-loadtest.ts` and `apps/api/messaging-load.js`). They are never logged.
 - **Re-running is idempotent:** the seed clears the load-test tenant's rows before re-seeding, so synthetic
   data never accumulates. (`make reset` wipes the whole local DB if you want a fully clean slate.) Tokens
   expire in 10 minutes regardless; re-seed for a fresh run.
@@ -243,11 +256,12 @@ crypto-blind. This is the natural addition for the at-scale run at arming.
 
 ## 7. .gitignore
 
-The repo ignores the scratch artifacts these scripts produce (added with this checkpoint):
+The scratch artifacts live under `apps/api/`; the repo ignores them (added with this checkpoint). These bare
+patterns match the files at any depth, and the signing key is already covered by the existing `*.pem` rule:
 
 ```
-loadtest-tokens.json
-loadtest-signing.pem
-seed-loadtest.ts
-messaging-load.js
+loadtest-tokens.json   # bearer tokens (matches apps/api/loadtest-tokens.json)
+seed-loadtest.ts       # the operator's copy of the seed
+messaging-load.js      # the operator's copy of the k6 script
+# loadtest-signing.pem is already covered by *.pem
 ```
