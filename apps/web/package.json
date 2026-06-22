@@ -22,7 +22,7 @@
     "@dicebear/styles": "^10.2.0",
     "@simplewebauthn/browser": "^13.3.0",
     "idb": "^8.0.3",
-    "lucide-react": "^1.20.0",
+    "lucide-react": "^1.21.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.18.0",
