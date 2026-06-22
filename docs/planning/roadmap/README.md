@@ -19,7 +19,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · 🔒 security-gated (ro
 | [Phase 3 — 1:1 encrypted text](04-phase-3-1to1-text.md)        | 9     | 9    | done                                        |
 | [Phase 4 — Encrypted images](05-phase-4-encrypted-images.md)   | 6     | 6    | done                                        |
 | [Phase 5 — Frontend PWA](06-phase-5-frontend-pwa.md)           | 9     | 7    | #39/#41 polish residual                     |
-| [Phase 6 — Hardening & observability](07-phase-6-hardening-observability.md) | 7 | 2 | observability built; deploys at arming      |
+| [Phase 6 — Hardening & observability](07-phase-6-hardening-observability.md) | 7 | 2 | observability + #50 resilience docs built; deploy/at-scale at arming |
 | [Phase 7 — GA / go-to-market](08-phase-7-ga.md)               | 8     | 6    | G4/G5 external paid gates open              |
 | [Backlog — beyond GA](09-backlog.md)                          | 5     | 2    | deferred hard stuff                         |
 | **Total**                                                       | **73**| **48** |                                           |
@@ -32,7 +32,7 @@ Open items, grouped by what unblocks them.
 
 - Phase 0: #1, #2, #3, #4, #5, #6, #7, #7a, #8, #8a
 - Phase 1: #9 (Zitadel)
-- Phase 6: #45, #47, #47b, #49
+- Phase 6: #45, #47, #47b, #49, #50 (at-scale load run + live restore drill — the DR runbook + k6 harness are already built)
 
 **External, paid (schedule early):**
 
@@ -43,7 +43,6 @@ Open items, grouped by what unblocks them.
 
 - Front-load: S1 (RFC 9420 interop vectors, bundle-size, iOS-PWA proof)
 - Phase 5: #39 (iOS installed-PWA proof), #41 (core-UX polish)
-- Phase 6: #50 (resilience — DR runbook + load test)
 
 **Backlog (deferred by design):** B3 (compliance mode), B4 (multi-region), B5 (SOC 2 / ISO 27001 / NIS2).
 
