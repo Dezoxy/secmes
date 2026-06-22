@@ -152,8 +152,9 @@ import { check, sleep } from 'k6';
 import { Rate } from 'k6/metrics';
 
 const BASE = __ENV.BASE_URL || 'http://localhost:3000';
-// Local default is plain ws (TLS terminates at the Cloudflare edge in prod); set WS_SCHEME=wss for a TLS endpoint.
-const WS_URL = __ENV.WS_URL || `${__ENV.WS_SCHEME || 'ws'}://localhost:3000/ws`;
+// Local default is plain ws (TLS terminates at the Cloudflare edge in prod). Override WS_HOST for the target;
+// set WS_SCHEME=wss (or pass a full WS_URL) for a TLS endpoint.
+const WS_URL = __ENV.WS_URL || `${__ENV.WS_SCHEME || 'ws'}://${__ENV.WS_HOST || 'localhost:3000'}/ws`;
 const TARGET = Number(__ENV.TARGET || 200);
 const tokens = JSON.parse(open('./loadtest-tokens.json'));   // produced by seed-loadtest.ts
 const wsOk = new Rate('ws_connect_ok');
@@ -216,12 +217,12 @@ Run it via the k6 Docker image (no install):
 # Run from apps/api (where the seed wrote loadtest-tokens.json next to messaging-load.js).
 # Linux (host networking reaches localhost):
 docker run --rm --network host -v "$PWD:/work" -w /work \
-  -e BASE_URL=http://localhost:3000 -e WS_URL=ws://localhost:3000/ws -e TARGET=200 \
+  -e BASE_URL=http://localhost:3000 -e WS_HOST=localhost:3000 -e TARGET=200 \
   grafana/k6 run messaging-load.js
 
 # macOS / Windows (no host networking — reach the host via host.docker.internal):
 docker run --rm -v "$PWD:/work" -w /work \
-  -e BASE_URL=http://host.docker.internal:3000 -e WS_URL=ws://host.docker.internal:3000/ws -e TARGET=200 \
+  -e BASE_URL=http://host.docker.internal:3000 -e WS_HOST=host.docker.internal:3000 -e TARGET=200 \
   grafana/k6 run messaging-load.js
 ```
 
