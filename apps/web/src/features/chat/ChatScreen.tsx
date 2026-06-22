@@ -730,7 +730,8 @@ export default function ChatScreen() {
                 onAddMember={
                   selectedConversation.type === 'group' &&
                   selectedConversation.creatorId === profile?.userId &&
-                  groupManager !== null
+                  groupManager !== null &&
+                  !selectedIsSyncLost // a sync-lost group has no live group to add into (5c)
                     ? handleOpenAddMember
                     : undefined
                 }
