@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { DISPLAY_NAME_MAX } from '@argus/contracts';
 import { updateProfile } from '../../lib/api';
 import { useAuth } from '../auth/AuthContext';
+import { useToast } from '../ui';
 import { DISPLAY_NAME_HINT, displayNameFieldError } from './display-name';
 
 /**
@@ -12,12 +13,11 @@ import { DISPLAY_NAME_HINT, displayNameFieldError } from './display-name';
  */
 export function DisplayNameEditor() {
   const { profile, refreshProfile } = useAuth();
+  const { toast } = useToast();
 
   const [displayName, setDisplayName] = useState(profile?.displayName ?? '');
   const [touched, setTouched] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [serverError, setServerError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
   const initRef = useRef(false);
 
   // Populate once when the profile first becomes available after session restore.
@@ -41,16 +41,14 @@ export function DisplayNameEditor() {
       setTouched(true);
       return;
     }
-    setServerError(null);
-    setSaved(false);
     setBusy(true);
     try {
       // validationError === null guarantees the value parses; trim/collapse is applied server-side too.
       await updateProfile({ displayName: displayName.trim().replace(/ +/g, ' ') });
       await refreshProfile();
-      setSaved(true);
+      toast('Saved', { variant: 'success' });
     } catch {
-      setServerError('Save failed. Try again.');
+      toast('Couldn’t save — try again', { variant: 'error' });
     } finally {
       setBusy(false);
     }
@@ -78,8 +76,6 @@ export function DisplayNameEditor() {
           onChange={(e) => {
             setDisplayName(e.target.value);
             setTouched(true);
-            setSaved(false);
-            setServerError(null);
           }}
           onBlur={() => setTouched(true)}
           maxLength={DISPLAY_NAME_MAX}
@@ -89,24 +85,19 @@ export function DisplayNameEditor() {
           aria-describedby={describedBy}
           className="w-full rounded-xl border border-white/5 bg-[#1a1a26] px-4 py-2.5 text-sm text-white placeholder-white/30 outline-none transition-colors focus:border-purple-500/50 disabled:opacity-50 aria-[invalid=true]:border-red-400/60"
         />
-        {showValidationError && (
-          <p
-            id="display-name-error"
-            role="alert"
-            aria-live="polite"
-            className="mt-1.5 text-xs text-red-400"
-          >
-            {validationError}
-          </p>
-        )}
+        {/* Reserve the error line's height so toggling it never shifts the hint + Save button. */}
+        <div className="mt-1.5 min-h-[1rem]">
+          {showValidationError && (
+            <p id="display-name-error" role="alert" className="text-xs text-red-400">
+              {validationError}
+            </p>
+          )}
+        </div>
         {/* Always visible — the rule guidance must not disappear while an error is shown. */}
-        <p id="display-name-help" className="mt-1.5 text-xs text-white/40">
+        <p id="display-name-help" className="mt-1 text-xs text-white/40">
           {DISPLAY_NAME_HINT}
         </p>
       </div>
-
-      {serverError && <p className="text-xs text-red-400">{serverError}</p>}
-      {saved && <p className="text-xs text-green-400">Saved.</p>}
 
       <button
         type="submit"
