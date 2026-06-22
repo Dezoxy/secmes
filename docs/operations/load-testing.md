@@ -222,19 +222,24 @@ export function realtime() {
 Run it via the k6 Docker image (no install):
 
 ```bash
-# Run from apps/api (where the seed wrote loadtest-tokens.json next to messaging-load.js).
+# Run from apps/api. Mount ONLY the script + tokens (read-only) — never the whole dir, so the signing key
+# (loadtest-signing.pem, which k6 doesn't need) is not exposed to the container.
 # Linux (host networking reaches localhost):
-docker run --rm --network host -v "$PWD:/work" -w /work \
+docker run --rm --network host -w /work \
+  -v "$PWD/messaging-load.js:/work/messaging-load.js:ro" \
+  -v "$PWD/loadtest-tokens.json:/work/loadtest-tokens.json:ro" \
   -e BASE_URL=http://localhost:3000 -e WS_HOST=localhost:3000 -e TARGET=200 \
   grafana/k6 run messaging-load.js
 
 # macOS / Windows (no host networking — reach the host via host.docker.internal):
-docker run --rm -v "$PWD:/work" -w /work \
+docker run --rm -w /work \
+  -v "$PWD/messaging-load.js:/work/messaging-load.js:ro" \
+  -v "$PWD/loadtest-tokens.json:/work/loadtest-tokens.json:ro" \
   -e BASE_URL=http://host.docker.internal:3000 -e WS_HOST=host.docker.internal:3000 -e TARGET=200 \
   grafana/k6 run messaging-load.js
 ```
 
-k6 prints `http_req_duration` percentiles, `http_req_failed`, and `ws_connect_ok`; a threshold breach exits
+k6 prints `http_req_duration` percentiles, `http_req_failed`, and `ws_session_ok`; a threshold breach exits
 non-zero. Re-run while **raising `TARGET`** until p95 crosses 1 s — that crossing is the box's concurrency knee.
 
 ### Optional extension — message-relay throughput
