@@ -4,7 +4,7 @@ import { createElement, act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ToastProvider } from './ToastProvider';
+import { DEFAULT_DURATION_MS, EXIT_MS, ToastProvider } from './ToastProvider';
 import { useToast } from './ToastContext';
 
 function Trigger() {
@@ -46,7 +46,7 @@ describe('ToastProvider', () => {
 
     // Auto-dismiss: advance past the visible duration + the exit animation.
     await act(async () => {
-      vi.advanceTimersByTime(2500 + 200 + 10);
+      vi.advanceTimersByTime(DEFAULT_DURATION_MS + EXIT_MS + 10);
     });
     expect(container.textContent).not.toContain('Hello toast');
 

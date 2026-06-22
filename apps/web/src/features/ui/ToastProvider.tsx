@@ -9,8 +9,8 @@ interface ActiveToast {
   leaving: boolean;
 }
 
-const DEFAULT_DURATION_MS = 2500;
-const EXIT_MS = 200; // keep in sync with the argus-toast-exit animation duration
+export const DEFAULT_DURATION_MS = 2500;
+export const EXIT_MS = 200; // keep in sync with the argus-toast-exit animation duration
 
 const variantClass: Record<ToastVariant, string> = {
   info: 'border-white/10 bg-[#1a1a26] text-white',
@@ -30,7 +30,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
 
   const dismiss = useCallback((id: number) => {
-    setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
+    // Cancel the pending auto-dismiss (or a stale exit timer) and no-op if the toast is already leaving —
+    // robust once a manual close button can race the auto-dismiss.
+    clearTimeout(timers.current.get(id));
+    setToasts((prev) => prev.map((t) => (t.id === id && !t.leaving ? { ...t, leaving: true } : t)));
     const finish = setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
       timers.current.delete(id);
@@ -69,6 +72,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {toasts.map((t) => (
           <div
             key={t.id}
+            aria-atomic="true"
             className={`pointer-events-auto max-w-[90vw] rounded-xl border px-4 py-2.5 text-sm shadow-lg shadow-black/40 ${
               variantClass[t.variant]
             } ${t.leaving ? 'argus-toast-exit' : 'argus-toast-enter'}`}
