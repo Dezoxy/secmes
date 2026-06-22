@@ -54,16 +54,16 @@ All routes live in a new Nest module `apps/api/src/calls/` (`calls.module.ts`, `
 
 | Method & path | Auth | Request (Zod) | Response | Status contract | Purpose |
 |---|---|---|---|---|---|
-| `POST /calls/turn-credentials` | Guarded | `TurnCredentialsRequest` `{ callId }` | `TurnCredentialsResponse` | `200` ok; `401` no auth; `403` not a participant of an active call; `429` throttled | Mint ephemeral TURN creds + ICE config for a **server-authorized** call (always relay-only in V1) |
+| `POST /calls/turn-credentials` | Guarded | `TurnCredentialsRequest` `{ }` (empty) | `TurnCredentialsResponse` | `200` ok; `401` no auth; `429` throttled | Mint ephemeral relay-only TURN creds for the authenticated user — **not** call-scoped (bounded by short TTL + per-user coturn quota; see §2.2) |
 | `POST /calls/:friendUserId/invite` | Guarded | `CreateCallRequest` | `CreateCallResponse` `{ callId }` | `202` accepted (uniform); `401`; `429` | Mint a transient `callId` + emit ring; uniform 202 = no presence oracle. **No DB write in V1.** |
 | `GET /calls/settings` | Guarded | — | `CallSettingsResponse` `{ relayOnly }` | `200`; `401` | Read relay-only preference |
 | `PUT /calls/settings` | Guarded | `UpdateCallSettingsRequest` `{ relayOnly }` | `CallSettingsResponse` | `200`; `401` | Update relay-only preference |
 
-> **Uniform 202 vs. server-issued `callId` — no oracle.** `invite` **always** returns `202` with a syntactically-valid `callId`, regardless of whether the friendship gate passed or the callee is reachable. Only a **gate-passing** invite registers that `callId` as **active** in the in-memory ring map and emits `CallRingEvent`; a no-op invite returns a fresh **inactive** `callId` (never registered, never rung). The body is thus byte-indistinguishable (no friendship/presence oracle — §7) and the fake id is inert, because the WS handlers (§3.2) reject any `callId` absent from the active ring map. Implementers must mint the active id **only after** the gate, and must never withhold or reshape the field on failure.
+> **Uniform 202 vs. server-issued `callId` — no oracle.** `invite` **always** returns `202` with a syntactically-valid `callId`, regardless of whether the friendship gate passed or the callee is reachable. Only a **gate-passing** invite registers that `callId` as **active** in the in-memory call-authorization map (§3.2a) and emits `CallRingEvent`; a no-op invite returns a fresh **inactive** `callId` (never registered, never rung). The body is thus byte-indistinguishable (no friendship/presence oracle — §7) and the fake id is inert, because the WS handlers (§3.2) **silently drop** any `callId` absent from the live call-authorization map (§3.2a) — and, crucially, `turn-credentials` is **not** call-scoped (§2.2), so it cannot be used to probe whether a `callId` is real either. Implementers must mint the active id **only after** the gate, and must never withhold or reshape the field on failure.
 
 > **Deferred to V1.1:** `POST /calls/:callId/end` (ledger finalize) and `GET /calls/missed` (missed-call list). Both depend on the `call_sessions` table, which is V1.1 (§4). In the V1 audio core, a call **ends** purely over WS (a terminal signal inside `call.signal`, §3.2) with no server-side finalize step, because there is no row to finalize.
 
-> **Why a REST `invite` at all, given WS does signaling?** Two reasons that hold even without a ledger. (1) The invite must be **server-trusted**: the tenant, the two parties, and the **friendship check** (§7) belong on an authenticated REST handler, not in the WS inbound path. (2) It mints a stable `callId` (a server-generated UUID) that the subsequent WS `call.signal` frames reference, so the gateway can correlate signaling frames to one logical call. In V1 the `callId` lives only in the gateway's in-memory ring map; in V1.1 it becomes the `call_sessions` primary key. The SDP itself never touches REST — only the WS relay carries it.
+> **Why a REST `invite` at all, given WS does signaling?** Two reasons that hold even without a ledger. (1) The invite must be **server-trusted**: the tenant, the two parties, and the **friendship check** (§7) belong on an authenticated REST handler, not in the WS inbound path. (2) It mints a stable `callId` (a server-generated UUID) that the subsequent WS `call.signal` frames reference, so the gateway can correlate signaling frames to one logical call. In V1 the `callId` lives only in the gateway's in-memory call-authorization map (§3.2a); in V1.1 it becomes the `call_sessions` primary key. The SDP itself never touches REST — only the WS relay carries it.
 
 ### 2.2 `POST /calls/turn-credentials` — ephemeral TURN creds
 
@@ -73,15 +73,15 @@ The single most important endpoint. It returns **time-limited, HMAC-derived** TU
 - **credential** = `base64( HMAC-SHA1( username, static-auth-secret ) )`.
 - **TTL**: short. **Default 600 s (10 min)** — the confirmed Q6 ruling ([09](./09-decision-log-and-open-questions.md)). Long enough to set up and ride a call, short enough that a leaked credential is near-useless. The client re-fetches per call attempt; it must not cache across calls.
 
-The shared `static-auth-secret` is delivered to **both** the API container and the coturn container as a Key Vault credential **file** (invariant 5) — see [03 §secrets](./03-infrastructure-turn-and-networking.md). The API reads it via `*_FILE` env, exactly like `SESSION_SIGNING_KEY_FILE`. It is **never logged** (invariant 2 — the derived `credential` is a secret-equivalent; logs carry only the `callId`).
+The shared `static-auth-secret` is delivered to **both** the API container and the coturn container as a Key Vault credential **file** (invariant 5) — see [03 §secrets](./03-infrastructure-turn-and-networking.md). The API reads it via `*_FILE` env, exactly like `SESSION_SIGNING_KEY_FILE`. It is **never logged** (invariant 2 — the derived `credential` is a secret-equivalent; logs carry only a request id).
 
-**Issuance is call-scoped, not merely authenticated.** The request carries the `callId` from the `invite` response (caller) or `CallRingEvent` (callee), and the handler mints credentials **only** when the requester is a participant of that active, server-authorized call (the in-memory ring map created by `invite`, which already passed the §7 friendship gate); otherwise `403`. Without this gate, any authenticated account could mint valid coturn credentials within the throttle and abuse argus's relay as an open relay. The credential itself stays a generic time-limited coturn secret — coturn never learns the `callId` — but *issuing* it is bound to an allowed call. In the roadmap the endpoint ships in **P0-A** and this participant gate is wired in **P1-INV**, once the ring map exists (see [08](./08-roadmap-and-delivery-slices.md)).
+**Issuance is per-authenticated-user — deliberately NOT call-scoped.** The endpoint takes no `callId`: any authenticated user receives short-lived relay-only creds. Binding issuance to a `callId` was considered and **rejected** — it would turn this endpoint into the very presence/friendship oracle §2.1 closes, since a caller could post the `callId` from a uniform-202 invite and learn from `200`-vs-`403` whether the call is real (i.e. whether the callee is a reachable friend). Relay abuse is instead bounded the standard WebRTC-TURN way: **short TTL (600 s)** + the **per-user HTTP throttle** + **per-user coturn quotas** (session/bandwidth caps in `turnserver.conf` — see [03](./03-infrastructure-turn-and-networking.md)). The credential is a generic time-limited coturn secret; coturn never learns any `callId`.
 
 **Relay-only enforcement happens here.** In the V1 audio core relay-only is unconditional — the locked IP-privacy default is the *only* mode V1 ships (direct-P2P opt-in is V1.1, before video). The response's `iceServers` and an explicit `iceTransportPolicy` hint reflect that:
 
 ```ts
 // packages/contracts/src/index.ts  (shared) + apps/api server-local mirror
-export const TurnCredentialsRequestSchema = z.object({ callId: CallIdSchema }).strict();
+export const TurnCredentialsRequestSchema = z.object({}).strict();
 
 export const IceServerSchema = z.object({
   urls: z.array(z.string().min(1)).min(1),     // e.g. ["turns:turn.4rgus.com:5349?transport=tcp"]
@@ -131,7 +131,7 @@ Per the DoD, each new/changed controller gets a spec with **both** tiers, using 
 
 - **Tier 1 — contract (`reflectRouteMeta`)**: assert every route is **guarded** (not `@Public`), and pin the status contract: `turn-credentials`→200, `invite`→202, `settings`→200. (V1.1 adds `end`→204, `missed`→200.)
 - **Tier 2 — behaviour (direct instantiation, faked `CallsService`/`FriendsService`)**:
-  - `turn-credentials`: never returns a `stun:` server; `iceTransportPolicy==='relay'`; the `credential` field is present and the handler does **not** pass it to any logger (assert via a spy on the logger); a `callId` the requester is **not** a participant of is rejected with `403` (no open-relay issuance).
+  - `turn-credentials`: takes no `callId` (per-user issuance, not call-scoped — §2.2); never returns a `stun:` server; `iceTransportPolicy==='relay'`; the `credential` field is present and the handler does **not** pass it to any logger (assert via a spy on the logger).
   - `invite`: returns **202 with an identical body** whether the friendship is accepted, absent, or the callee is offline (no oracle); never throws a 403/404 that distinguishes those cases; performs **no DB write** in V1 (assert no repository/insert call on the faked service).
   - `settings`: `PUT` round-trips `relayOnly`; `GET` reflects the stored value.
 
@@ -162,13 +162,24 @@ Today the gateway only accepts inbound `auth` and `subscribe`. Calling needs **c
 Each handler:
 1. Derives identity from the **server-verified** socket binding (`VerifiedAuth.{sub,tenantId}`) — never from the frame.
 2. Validates membership of the referenced `conversationId` via `MessagingService.isMember` (same authz as `onSubscribe`; non-members get the indistinguishable `conversation not found`).
-3. Validates the `callId` against the gateway's **active ring map** — a frame for an unknown call, or one the sender is not a participant of, is dropped. The server-issued `callId` from `invite` is the authorization token; a client cannot fabricate one to relay into a call it was never invited to.
+3. Validates the `callId` against the **live call-authorization map** (§3.2a) and that the sender is a participant — a frame for an unknown/expired call, or from a non-participant, is **silently dropped** (no error response, so it cannot become an oracle). The server-issued `callId` is the authorization token; a client cannot fabricate one to relay into a call it was never part of.
 4. Re-emits the matching bus event. **No DB write** (true in V1; remains true in V1.1 — the ledger is written by REST `invite`/`end`, not by the signaling fast-path).
 5. Is subject to the per-socket inbound rate limit (see §8) — these frames are *not* covered by the HTTP throttler, so reuse/extend the existing `allowSubscribe` token-bucket pattern.
 
-> **How a call ends with no `call.end` frame.** Client termination (hang-up / decline / busy / cancel) is peer-relayed as an encrypted inner type inside `call.signal`; the receiving client tears down. The server never reads it — it releases its in-memory ring entry on **WS disconnect or a ring-timeout**, which is all V1 needs (no ledger to finalize). The only server→client end notifications are the **server-known** events in `CallEndEvent` (§3.1).
+> **How a call ends with no `call.end` frame.** Client termination (hang-up / decline / busy / cancel) is peer-relayed as an encrypted inner type inside `call.signal`; the receiving client tears down. The server never reads it — the call-authorization entry (§3.2a) is released when **both participant sockets disconnect** (or a max-duration cap trips), **not** by reading a terminal signal and **not** by the ring timer once the call is answered. The only server→client end notifications are the **server-known** events in `CallEndEvent` (§3.1).
 
 > **In-call signaling is fragile by design — surface it (S1 / [06 §11](./06-threat-model-and-privacy.md)).** A WS-gateway restart **kills in-call signaling** (mute/hangup/renegotiation can no longer relay) while the **media stream survives** (DTLS-SRTP is peer-to-peer over the TURN relay, independent of the gateway). The in-call UI must therefore show an explicit **"signaling lost"** state rather than pretending the call is healthy. There is no auto-recovery in V1; ICE-restart / reconnection is V1.1.
+
+### 3.2a Call-authorization lifecycle (the `callId` map)
+
+The server keeps a small in-memory map `callId → { tenant, conversationId, callerSub, calleeSub, phase }` — the **authorization state** the relay handler (§3.2 step 3) checks. Its lifecycle is deliberately **not** a single ring timer:
+
+- **Created** by a gate-passing `invite` (phase `ringing`). A no-op invite creates **no** entry (it returned an inert `callId`).
+- **Pre-answer:** a **ring-timeout** (~45 s) releases the entry if the callee never engages.
+- **Active:** the callee's **first relayed `call.signal`** on that `callId` (the encrypted answer/ICE — the server sees only the `callId` + the authenticated sender, never the contents) flips the entry to `active`. Its lifetime is then bound to **participant socket presence** + a **max-call-duration cap**, never the ring timer — so a long, answered call keeps authorizing later ICE / renegotiation / hang-up frames instead of having its authz silently deleted mid-call (the bug this lifecycle exists to prevent).
+- **Released** when **both** participant sockets disconnect, or the max-duration cap trips. An encrypted peer hang-up leads to client teardown → sockets drop → entry released; the server never needs to read accept vs. decline vs. hang-up.
+
+None of this is observable to a prober: invalid-`callId` frames are silently dropped (§3.2 step 3) and TURN creds are per-user, not `callId`-scoped (§2.2).
 
 ### 3.3 Per-device routing — V1 single-device, V1.1 ring-all
 
@@ -405,12 +416,12 @@ Calling adds new personal-data processing (call graph, call timing, relay-relaye
 | **P0-GDPR** | The four-artifact bundle (§9.2): revise data-residency + article-30, extend metadata-exposure, create dpia-voip-calling | TM / GDPR review |
 | **S1** | Threat-model note (`docs/threat-models/voip-call-signaling.md`) | — (docs first) |
 | **S2** | `call_relay_only` boolean on `users` (no new table) + `GET/PUT /calls/settings` | DB review (column-grant scope) |
-| **S3** | `POST /calls/:friendUserId/invite` (friendship gate, authenticated-sender stamp, uniform 202 with an inactive `callId` on no-op, in-memory ring map, no DB write) | boundary review |
-| **S4** | `calls` module: `POST /calls/turn-credentials` — **call-scoped** (validates `callId` against S3's ring map), relay-only shaping, HMAC creds, no-log + secret wiring in fetch script | crypto/boundary review |
+| **S3** | `calls` module: `POST /calls/turn-credentials` (**per-user**, relay-only shaping, HMAC creds, no-log) + secret wiring in fetch script | crypto/boundary review |
+| **S4** | `POST /calls/:friendUserId/invite` (friendship gate, authenticated-sender stamp, uniform 202 with an inactive `callId` on no-op, in-memory **call-authorization map**, no DB write) | boundary review |
 | **S5** | WS gateway: bus events + inbound `call.*` handlers + identity/room routing + per-socket rate limit + "signaling lost" surfacing | boundary review |
 | **S6** | OpenAPI refresh + 42Crunch ≥ 90 + controller specs (both tiers) | DoD gate |
 
-Critical path: **P0-crypto → S3 (invite + in-memory ring) → S4 (turn-credentials, which validates `callId` against that ring map)**. P0-GDPR and S1 are docs-first and can land in parallel. S2 is independent. **S3 (invite/ring) precedes both S4 (call-scoped creds) and S5 (gateway relay), since both validate against the ring map.** S6 finalizes S3–S5. This is the ~9-item audio core that [08](./08-roadmap-and-delivery-slices.md) draws its dependency graph around.
+Critical path: **P0-crypto → S4 (invite + call-authorization map) → S5 (gateway relay, which validates `call.signal` against that map)**. P0-GDPR and S1 are docs-first and can land in parallel. S2 and S3 (per-user TURN creds) are independent and can land early. S6 finalizes S3–S5. This is the ~9-item audio core that [08](./08-roadmap-and-delivery-slices.md) draws its dependency graph around.
 
 ### 10.2 V1.1 (deferred)
 
