@@ -9,7 +9,9 @@
 # ---- build (full workspace) ----
 FROM node:24-alpine AS build
 ENV CI=true
-RUN corepack enable
+# pnpm via npm, pinned to the repo's packageManager. corepack is unbundled in newer Node base images,
+# so don't rely on `corepack enable` (keeps this stable across Node base-image bumps).
+RUN npm install -g pnpm@9.12.0
 WORKDIR /repo
 COPY . .
 # Install the whole workspace (the root `prepare` builds packages/* incl. @argus/crypto), then build the api
