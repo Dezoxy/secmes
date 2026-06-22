@@ -420,7 +420,7 @@ The gateway verifies the sender's `sub`/`tenantId`, but a malicious or buggy pee
 
 **Idempotency** of state transitions: every handler is safe under at-least-once delivery. A second `call.accept` after the call is bound is a no-op; a `call.hangup` for an already-`ended` call is a no-op; re-applying an already-added ICE candidate is a no-op (`addIceCandidate` tolerates it). The state machine never transitions backward.
 
-> **CSPRNG only (invariant: no `Math.random`).** `callId` (UUIDv4) and `nonce` use `crypto.randomUUID()` / `crypto.getRandomValues()`, consistent with the crypto-review criteria and the existing CSPRNG audit (`docs/threat-models/csprng-audit.md`).
+> **CSPRNG only (invariant: no `Math.random`).** The signaling `nonce` uses `crypto.randomUUID()` / `crypto.getRandomValues()`, consistent with the crypto-review criteria and the existing CSPRNG audit (`docs/threat-models/csprng-audit.md`). The `callId` is **server-minted** (§2.1) — the server uses a CSPRNG UUID, the client never generates it.
 
 ---
 
