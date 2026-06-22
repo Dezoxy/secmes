@@ -695,7 +695,6 @@ export default function ChatScreen() {
             onSelect={handleSelect}
             currentUserProfile={currentUserProfile}
             onSettings={openSettings}
-            onNewConversation={manager ? () => setStartOpen(true) : undefined}
             onNewGroup={groupManager ? () => setGroupCreateOpen(true) : undefined}
             updateReady={updateReady}
             onApplyUpdate={applyUpdate}
