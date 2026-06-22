@@ -37,7 +37,8 @@ COPY --from=web-build /repo/apps/web/dist /srv
 # `cap_net_bind_service` file capability from the caddy binary. Without stripping it, a container started with
 # `cap_drop: [ALL]` (as compose.prod.yaml does) cannot even exec caddy — the kernel refuses a binary that
 # carries a file cap not in the bounding set. We bind :8080 (>1024), so the cap is never needed.
-RUN caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile \
+RUN apk --no-cache upgrade \
+ && caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile \
  && apk add --no-cache libcap \
  && setcap -r /usr/bin/caddy \
  && apk del libcap \
