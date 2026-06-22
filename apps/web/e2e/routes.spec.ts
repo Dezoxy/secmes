@@ -15,8 +15,19 @@ for (const route of routeShells) {
     await expect(page.getByRole('heading', { name: route.heading })).toBeVisible();
     await expect(page.getByText(route.marker)).toBeVisible();
     await expect(page.getByRole('link', { name: 'Chat', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Go back' })).toBeVisible();
   });
 }
+
+test('the product route shell back button returns to the previous screen', async ({ page }) => {
+  await page.goto('/chat');
+  await page.goto('/settings');
+  await expect(page.getByRole('heading', { name: 'Account settings' })).toBeVisible();
+
+  // Smart back: with in-app history it steps back to where we came from (chat).
+  await page.getByRole('button', { name: 'Go back' }).click();
+  await expect(page).toHaveURL(/\/chat$/);
+});
 
 test('/transparency renders the public security page without auth', async ({ page }) => {
   await page.goto('/transparency');

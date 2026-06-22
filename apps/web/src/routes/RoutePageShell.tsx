@@ -1,6 +1,7 @@
-import type { ReactNode } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useCallback, type ReactNode } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
+  ArrowLeft,
   Database,
   HardDrive,
   MessageSquare,
@@ -9,6 +10,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { ArgusAppIcon } from '../features/brand/ArgusAppIcon';
+import { surfaceEnterMotion } from '../features/ui';
 import { AuthenticatedRouteBoundary } from './AuthenticatedRouteBoundary';
 
 interface RoutePageShellProps {
@@ -39,16 +41,37 @@ export function RoutePageShell({
   children,
 }: RoutePageShellProps) {
   const location = useLocation();
+  const navigate = useNavigate();
+
+  // Smart back: return to the previous screen if we have in-app history, else fall back to chat
+  // (covers deep links / fresh PWA loads where there is nowhere meaningful to go back to).
+  const handleBack = useCallback(() => {
+    if (window.history.length > 1) {
+      navigate(-1);
+    } else {
+      navigate('/chat');
+    }
+  }, [navigate]);
 
   return (
     <AuthenticatedRouteBoundary>
       <div className="min-h-screen bg-[#0c0c12] text-white">
         <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-5 sm:px-6 lg:px-8">
           <header className="flex flex-col gap-4 border-b border-white/5 pb-5 sm:flex-row sm:items-center sm:justify-between">
-            <Link to="/chat" className="flex items-center gap-3" aria-label="Open chat">
-              <ArgusAppIcon className="h-10 w-10 rounded-xl shadow-lg shadow-purple-500/20" />
-              <span className="text-xl font-bold tracking-[0.08em] text-purple-300">ARGUS</span>
-            </Link>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleBack}
+                aria-label="Go back"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/5 text-white/60 transition-colors hover:bg-white/[0.05] hover:text-white"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+              <Link to="/chat" className="flex items-center gap-3" aria-label="Open chat">
+                <ArgusAppIcon className="h-10 w-10 rounded-xl shadow-lg shadow-purple-500/20" />
+                <span className="text-xl font-bold tracking-[0.08em] text-purple-300">ARGUS</span>
+              </Link>
+            </div>
 
             <nav className="flex gap-1 overflow-x-auto rounded-xl border border-white/5 bg-white/[0.03] p-1">
               {navItems.map(({ to, label, icon: NavIcon }) => {
@@ -73,7 +96,10 @@ export function RoutePageShell({
             </nav>
           </header>
 
-          <main className="flex flex-1 flex-col py-8">
+          <main
+            key={location.pathname}
+            className={`flex flex-1 flex-col py-8 ${surfaceEnterMotion}`}
+          >
             <section className="max-w-3xl">
               <div className="mb-5 flex items-center gap-3">
                 <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-purple-500/15 text-purple-300">
