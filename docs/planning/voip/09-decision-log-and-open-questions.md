@@ -163,6 +163,17 @@ Each Open Question below carries the **chair ruling** as its recommended default
 
 ---
 
+### Q8 — Invite-retry `callId`: reuse the live id, or a fresh id per response?
+
+**The question.** When a caller re-invites the same callee while a ring is already live, should the `202` return the **same** live `callId` (clean idempotency/resume) or a **fresh** id each time (no retry-comparison oracle)?
+
+- **Option A — fresh id per response (chosen).** Every invite — active or no-op, first or repeated — returns a new `callId`; the server **dedups by `(caller, callee)`** so a retry never creates a second ring, and the caller resumes via its original first-response id. No two responses can be compared to detect a live ring.
+- **Option B — reuse the live id on retry.** Cleaner resume semantics, but a caller can send two invites and compare the returned ids: a reused id reveals a live ring / reachable friend — a presence/friendship oracle.
+
+**Ruling — A.** The product's north-star is privacy / no-oracle (it defaults to relay-only precisely to avoid leaks), so where oracle-avoidance and convenience conflict, oracle-avoidance wins — and Option A still satisfies retry correctness via server-side `(caller, callee)` dedup (no orphaned or duplicate rings). **This point is genuinely contested**: an automated reviewer oscillated between A and B across review rounds, which is exactly why it is recorded here as a deliberate decision rather than flipped again. **Decision owner:** `security-boundary-auditor` at slice S4 (P1-INV); revisit only if a concrete resume-UX requirement is shown to outweigh the (small) retry-oracle.
+
+---
+
 ## 4. Prerequisites & assumptions that must hold
 
 These must be true (or made true) for the plan to be valid. If any breaks, the affected decision is revisited.

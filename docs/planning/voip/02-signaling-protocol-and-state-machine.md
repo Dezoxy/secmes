@@ -69,7 +69,15 @@ The union is specified **once, complete**, including the V1.1 variants (`call.re
 ```ts
 import { z } from 'zod';
 
-// A call is identified by a client-minted UUID, unique per call attempt.
+// A call is identified by a UUID **minted server-side** by `POST /calls/:friendUserId/invite`,
+// AFTER the friendship gate (see [04 §2.1](./04-server-api-and-database.md)): the caller receives it
+// in the invite response, the callee in `CallRingEvent`. Clients never invent it — every WS signaling
+// handler silently drops a `callId` not in the live call-authorization map ([04 §3.2a](./04-server-api-and-database.md)),
+// so a caller cannot bypass the trusted invite/friendship gate by fabricating one.
+// To keep the invite response a **uniform 202** (no friendship/presence oracle), a no-op invite
+// (gate fails or callee unreachable) still returns a well-formed but **inactive** callId — never
+// registered in the call-authorization map and never rung — so the body is byte-indistinguishable from success
+// while the id stays inert at the WS layer. The schema only constrains the shape.
 export const CallIdSchema = z.string().uuid();
 
 // Per-call monotonic counter for ordering + replay protection (§8).
@@ -412,7 +420,7 @@ The gateway verifies the sender's `sub`/`tenantId`, but a malicious or buggy pee
 
 **Idempotency** of state transitions: every handler is safe under at-least-once delivery. A second `call.accept` after the call is bound is a no-op; a `call.hangup` for an already-`ended` call is a no-op; re-applying an already-added ICE candidate is a no-op (`addIceCandidate` tolerates it). The state machine never transitions backward.
 
-> **CSPRNG only (invariant: no `Math.random`).** `callId` (UUIDv4) and `nonce` use `crypto.randomUUID()` / `crypto.getRandomValues()`, consistent with the crypto-review criteria and the existing CSPRNG audit (`docs/threat-models/csprng-audit.md`).
+> **CSPRNG only (invariant: no `Math.random`).** The signaling `nonce` uses `crypto.randomUUID()` / `crypto.getRandomValues()`, consistent with the crypto-review criteria and the existing CSPRNG audit (`docs/threat-models/csprng-audit.md`). The `callId` is **server-minted** (§2.1) — the server uses a CSPRNG UUID, the client never generates it.
 
 ---
 
