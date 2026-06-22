@@ -4,8 +4,8 @@ How a change flows through this repo's agent workflow: where **plan mode** gates
 which **subagents** review, which **skills** run, and which **guardrails** (hooks,
 local gates, CI) it has to pass before `main`.
 
-The rules behind every node live in [AGENTS.md](../AGENTS.md) (canonical, tool-neutral)
-and [CLAUDE.md](../CLAUDE.md) (Claude-only wiring). This diagram is the map; those files
+The rules behind every node live in [AGENTS.md](../../AGENTS.md) (canonical, tool-neutral)
+and [CLAUDE.md](../../CLAUDE.md) (Claude-only wiring). This diagram is the map; those files
 are the contract.
 
 ## The flow
@@ -117,4 +117,4 @@ flowchart TD
 Heavy reasoning is reached by **delegating to a subagent**, never by raising the main
 session model. `security-architect` and `crypto-reviewer` run Fable high; the other
 reviewers run Opus high; the main loop stays on `opusplan`. See
-[CLAUDE.md](../CLAUDE.md) → *Model & effort routing*.
+[CLAUDE.md](../../CLAUDE.md) → *Model & effort routing*.

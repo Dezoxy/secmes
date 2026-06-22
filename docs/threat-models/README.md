@@ -4,7 +4,7 @@ Per the Definition of Done in `AGENTS.md`, every **security-relevant feature** g
 
 ## Required before their phase
 
-> **Live implementation status is tracked in [`../roadmap.md`](../roadmap.md).** These notes are the original pre-code design records and keep their draft status; the roadmap reflects what has actually shipped.
+> **Live implementation status is tracked in [`../planning/roadmap/README.md`](../planning/roadmap/README.md).** These notes are the original pre-code design records and keep their draft status; the roadmap reflects what has actually shipped.
 
 | Note | Blocks | Status |
 | --- | --- | --- |
@@ -15,7 +15,7 @@ Per the Definition of Done in `AGENTS.md`, every **security-relevant feature** g
 | `metadata-exposure.md` — what the crypto-blind server can infer (social graph, timing, device topology, presence); the accepted metadata trade vs. content E2EE | GA (external privacy claims) | ✍️ DRAFT — ratify |
 | `contact-list-recovery.md` — roster recovery after PWA reinstall (read-back from `conversation_members`); tap-to-resume (fresh MLS 1:1); identity-change signal + safety-number re-verify; key-substitution + roster-injection threats | Tasks #21–#23 (PRs 2–4) | ✍️ DRAFT — ratify |
 
-> **MLS library choice:** see [`../mls-library-selection.md`](../mls-library-selection.md) — DRAFT recommendation is **`ts-mls`** (MIT, pure TS; CoreCrypto ruled out as GPL-3.0). `key-directory.md` firms up once that's ratified.
+> **MLS library choice:** see [`../architecture/mls-library-selection.md`](../architecture/mls-library-selection.md) — DRAFT recommendation is **`ts-mls`** (MIT, pure TS; CoreCrypto ruled out as GPL-3.0). `key-directory.md` firms up once that's ratified.
 
 Each must explicitly verify against the **six invariants** in `AGENTS.md` and state residual risk.
 

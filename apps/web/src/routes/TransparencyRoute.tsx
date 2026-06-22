@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, ExternalLink, Shield } from 'lucide-react';
 import { ArgusAppIcon } from '../features/brand/ArgusAppIcon';
+import { surfaceEnterMotion } from '../features/ui';
 
 interface BundleManifest {
   algorithm: string;
@@ -55,7 +56,7 @@ export default function TransparencyRoute() {
       aria-label="Security and transparency"
       className="min-h-screen bg-[#1a1a24] px-4 py-10 text-white"
     >
-      <div className="mx-auto max-w-2xl">
+      <div className={`mx-auto max-w-2xl ${surfaceEnterMotion}`}>
         {/* Header */}
         <header className="mb-10">
           <Link

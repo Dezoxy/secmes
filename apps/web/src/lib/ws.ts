@@ -13,6 +13,15 @@ import type { FetchedMessage } from './api';
 export interface IncomingMessage {
   conversationId: string;
   message: FetchedMessage;
+  /**
+   * Transport delivery counter the gateway stamps per (socket, conversation): 1, 2, 3, … for the frames
+   * THIS socket actually receives. Lets the client notice a dropped/reordered frame and self-heal via the
+   * existing backfill. Absent when talking to an older gateway (gap-detection simply unavailable). NOT the
+   * MLS epoch/ratchet generation — metadata only, no cryptographic guarantee; a gap merely triggers a fetch.
+   */
+  deliverySeq?: number;
+  /** The deliverySeq of the immediately-preceding frame on this socket+conversation; null on the first frame. */
+  deliveryPrevSeq?: number | null;
 }
 
 /**
@@ -163,7 +172,20 @@ export function createMessageSocket(opts: MessageSocketOptions): MessageSocket {
       if (!authed) return; // ignore any pre-auth push — don't act on a frame before `ready` (defence in depth)
       const data = frame.data as Partial<IncomingMessage> | null;
       if (data && typeof data.conversationId === 'string' && data.message) {
-        opts.onMessage({ conversationId: data.conversationId, message: data.message });
+        // deliverySeq / deliveryPrevSeq are OPTIONAL transport metadata: a number, or (for prevSeq) null on
+        // the first frame, or absent against an older gateway. Pass through only well-typed values so the
+        // gap detector can't be confused by a malformed frame.
+        const deliverySeq = typeof data.deliverySeq === 'number' ? data.deliverySeq : undefined;
+        const deliveryPrevSeq =
+          typeof data.deliveryPrevSeq === 'number' || data.deliveryPrevSeq === null
+            ? data.deliveryPrevSeq
+            : undefined;
+        opts.onMessage({
+          conversationId: data.conversationId,
+          message: data.message,
+          deliverySeq,
+          deliveryPrevSeq,
+        });
       }
       return;
     }

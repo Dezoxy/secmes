@@ -6,6 +6,7 @@ import { RegisterScreen } from './features/auth/RegisterScreen';
 import { prefersReducedMotion } from './lib/pref';
 import { ArgusAppIcon } from './features/brand/ArgusAppIcon';
 import { usePwaUpdate } from './features/pwa/PwaUpdateContext';
+import { conversationEnterMotion, paneBackEnterMotion } from './features/ui';
 import ChatRoute from './routes/ChatRoute';
 
 const DevicesRoute = lazy(() => import('./routes/DevicesRoute'));
@@ -32,6 +33,9 @@ function LandingRoute() {
   const [mounted, setMounted] = useState(false);
   const [activeSlide, setActiveSlide] = useState(0);
   const [panel, setPanel] = useState<Panel>(null);
+  // Tracks whether we've returned from a sub-panel (e.g. register) so the passkey view slides back in
+  // rather than re-running its first-load fade.
+  const [returnedFromPanel, setReturnedFromPanel] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const currentSlide = slides[activeSlide] ?? slides[0]!;
 
@@ -73,17 +77,24 @@ function LandingRoute() {
         }`}
       >
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-[#0f0f16] p-5 sm:p-6">
-          {panel !== null ? (
-            <div className="flex flex-1 flex-col justify-center">
-              {panel === 'register' && (
-                <RegisterScreen
-                  onRegistered={() => navigate('/chat')}
-                  onBack={() => setPanel(null)}
-                />
-              )}
+          {panel === 'register' ? (
+            <div
+              key="register"
+              className={`flex flex-1 flex-col justify-center ${conversationEnterMotion}`}
+            >
+              <RegisterScreen
+                onRegistered={() => navigate('/chat')}
+                onBack={() => {
+                  setReturnedFromPanel(true);
+                  setPanel(null);
+                }}
+              />
             </div>
           ) : (
-            <>
+            <div
+              key="passkey"
+              className={`flex min-h-0 flex-1 flex-col ${returnedFromPanel ? paneBackEnterMotion : ''}`}
+            >
               <div
                 className={`mb-5 flex items-center justify-center text-center transition-all duration-500 delay-200 ${
                   mounted ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'
@@ -223,7 +234,7 @@ function LandingRoute() {
                   </Link>
                 </div>
               </div>
-            </>
+            </div>
           )}
         </div>
       </section>

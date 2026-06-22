@@ -75,3 +75,9 @@ apps/web/test-results/
 
 # generated api spec (regenerated in CI)
 apps/api/openapi.json
+
+# load-test scratch artifacts (docs/operations/load-testing.md) — operator-run, never committed.
+# loadtest-signing.pem is already covered by *.pem above; these are the rest.
+loadtest-tokens.json
+seed-loadtest.ts
+messaging-load.js

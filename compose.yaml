@@ -86,7 +86,7 @@ services:
       S3_FORCE_PATH_STYLE: 'true' # MinIO needs path-style; B2 uses virtual-host
       # Auth is passkey-only (the API mints its own EdDSA session tokens). WEBAUTHN_RP_ID defaults to
       # 'localhost' and SESSION_SIGNING_KEY_FILE is unset in dev → an ephemeral dev keypair is generated
-      # (see session-key.config.ts). See docs/local-auth.md for the demo-mode / seeded-invite dev flow.
+      # (see session-key.config.ts). See docs/operations/local-auth.md for the demo-mode / seeded-invite dev flow.
     # Optional local overrides (gitignored). Not required — the dev defaults above are sufficient.
     env_file:
       - path: .env.local

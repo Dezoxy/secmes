@@ -20,9 +20,12 @@ export type CreateConversation = z.infer<typeof CreateConversationSchema>;
 
 export const ListMessagesQuerySchema = z
   .object({
-    // Query params arrive as strings → coerce. `after` is an exclusive keyset cursor (a message id).
+    // Query params arrive as strings → coerce. `after` is an exclusive keyset cursor: EITHER a legacy bare
+    // message id (cached PWA bundles) OR the previous page's opaque per-message `cursor` (an encoded
+    // (created_at, id) — prune-safe). Bounded length; the shape is discriminated + validated server-side
+    // (UUID → legacy anchor lookup; otherwise decoded). Mirrors SyncQuerySchema.after.
     limit: z.coerce.number().int().min(1).max(100).default(50),
-    after: z.string().uuid().optional(),
+    after: z.string().min(1).max(256).optional(),
   })
   .strict();
 export type ListMessagesQuery = z.infer<typeof ListMessagesQuerySchema>;

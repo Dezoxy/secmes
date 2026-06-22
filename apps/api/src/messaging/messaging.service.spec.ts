@@ -197,6 +197,38 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     );
   });
 
+  it('listCommits reports oldestRetainedEpoch = min(epoch) over the whole conversation, independent of afterEpoch', async () => {
+    const conv = await newConversation();
+
+    // No commits yet (e.g. a 1:1 that never committed) → null.
+    const empty = await svc.listCommits(aliceAuth, conv, { afterEpoch: 0, limit: 50 });
+    expect(empty.commits).toEqual([]);
+    expect(empty.oldestRetainedEpoch).toBeNull();
+
+    // Seed three commits (epochs 1–3) directly — bypasses postCommit's membership reconciliation.
+    for (const epoch of [1, 2, 3]) {
+      await sql`insert into conversation_commits
+        (tenant_id, conversation_id, sender_user_id, client_commit_id, epoch, commit)
+        values (${tenantA}, ${conv}, ${aliceId}, ${crypto.randomUUID()}, ${epoch}, 'Y29tbWl0')`;
+    }
+    const full = await svc.listCommits(aliceAuth, conv, { afterEpoch: 0, limit: 50 });
+    expect(full.commits.map((c) => c.epoch)).toEqual([1, 2, 3]);
+    expect(full.oldestRetainedEpoch).toBe(1);
+
+    // Prune the oldest commit → oldestRetainedEpoch advances to 2 even though the page (afterEpoch=2)
+    // starts later. This is exactly the signal a sync-lost client needs: its local epoch < oldest retained.
+    await sql`delete from conversation_commits
+      where tenant_id = ${tenantA} and conversation_id = ${conv} and epoch = 1`;
+    const pruned = await svc.listCommits(aliceAuth, conv, { afterEpoch: 2, limit: 50 });
+    expect(pruned.commits.map((c) => c.epoch)).toEqual([3]);
+    expect(pruned.oldestRetainedEpoch).toBe(2);
+
+    // Clear our seeded commit rows so the shared tenant teardown isn't blocked by the NO ACTION
+    // users FK on conversation_commits.sender_user_id (the conversations cascade and the users
+    // cascade race during `delete from tenants`).
+    await sql`delete from conversation_commits where tenant_id = ${tenantA} and conversation_id = ${conv}`;
+  });
+
   // ── fetch / list (checkpoint 27 server half) ─────────────────────────────────────────────────────
   it('a member lists messages in chronological order; ciphertext is returned verbatim', async () => {
     const conv = await newConversation();
@@ -221,6 +253,89 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     const p3 = await svc.listMessages(bobAuth, conv, { limit: 2, after: p2.nextCursor! });
     expect(p3.messages.map((m) => m.id)).toEqual(sent.slice(4));
     expect(p3.nextCursor).toBeNull();
+  });
+
+  // ── prune-safe per-message cursor (Track 4 slice 1) ──────────────────────────────────────────────
+  it('stamps an opaque per-message cursor (base64url, distinct from the id) on every listed message', async () => {
+    const conv = await newConversation();
+    await svc.sendMessage(bobAuth, conv, msg());
+    await svc.sendMessage(bobAuth, conv, msg());
+    const page = await svc.listMessages(bobAuth, conv, { limit: 50 });
+    expect(page.messages).toHaveLength(2);
+    for (const m of page.messages) {
+      expect(m.cursor).toMatch(/^[A-Za-z0-9_-]+$/); // opaque base64url token
+      expect(m.cursor).not.toBe(m.id); // carries (created_at, id), not the bare id
+    }
+  });
+
+  it('paginates via the opaque per-message cursor without overlap', async () => {
+    const conv = await newConversation();
+    const sent: string[] = [];
+    for (let i = 0; i < 5; i++) sent.push((await svc.sendMessage(bobAuth, conv, msg())).messageId);
+
+    const p1 = await svc.listMessages(bobAuth, conv, { limit: 2 });
+    expect(p1.messages.map((m) => m.id)).toEqual(sent.slice(0, 2));
+    // a new client resumes from the LAST message's opaque cursor (what it echoes as `after`)
+    const p2 = await svc.listMessages(bobAuth, conv, {
+      limit: 2,
+      after: p1.messages.at(-1)!.cursor!,
+    });
+    expect(p2.messages.map((m) => m.id)).toEqual(sent.slice(2, 4));
+    const p3 = await svc.listMessages(bobAuth, conv, {
+      limit: 2,
+      after: p2.messages.at(-1)!.cursor!,
+    });
+    expect(p3.messages.map((m) => m.id)).toEqual(sent.slice(4));
+  });
+
+  it('the opaque cursor survives its anchor being pruned; a legacy id cursor does not', async () => {
+    const conv = await newConversation();
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) ids.push((await svc.sendMessage(bobAuth, conv, msg())).messageId);
+
+    // capture the FIRST message's opaque cursor, then delete that message (simulates a TTL prune)
+    const opaqueAfterPruned = (await svc.listMessages(bobAuth, conv, { limit: 1 })).messages[0]!
+      .cursor!;
+    await sql`delete from messages where id = ${ids[0]!}`;
+
+    // position-carrying opaque cursor still resolves "rows newer than here" → messages 2 & 3
+    const recovered = await svc.listMessages(bobAuth, conv, {
+      limit: 50,
+      after: opaqueAfterPruned,
+    });
+    expect(recovered.messages.map((m) => m.id)).toEqual([ids[1], ids[2]]);
+
+    // contrast — the bug this slice fixes: a LEGACY bare-id cursor at the pruned anchor returns an EMPTY
+    // page (old clients fall back to a reload; pruning only arms once new clients are adopted).
+    const legacy = await svc.listMessages(bobAuth, conv, { limit: 50, after: ids[0] });
+    expect(legacy.messages).toEqual([]);
+  });
+
+  it('still accepts a legacy bare-message-id `after` (cached PWA bundles)', async () => {
+    const conv = await newConversation();
+    const sent: string[] = [];
+    for (let i = 0; i < 3; i++) sent.push((await svc.sendMessage(bobAuth, conv, msg())).messageId);
+    const p1 = await svc.listMessages(bobAuth, conv, { limit: 1 });
+    expect(p1.nextCursor).toBe(sent[0]); // legacy page cursor unchanged
+    const p2 = await svc.listMessages(bobAuth, conv, { limit: 50, after: p1.nextCursor! });
+    expect(p2.messages.map((m) => m.id)).toEqual([sent[1], sent[2]]);
+  });
+
+  it('rejects a malformed opaque cursor with 400, before any row lookup (no oracle)', async () => {
+    const conv = await newConversation();
+    await svc.sendMessage(bobAuth, conv, msg());
+    await expect(
+      svc.listMessages(bobAuth, conv, { limit: 50, after: 'not-a-valid-cursor!!' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    // A JS-normalizable-but-impossible calendar date (Feb 30): Date.parse accepts it, but Postgres
+    // ::timestamptz rejects it — must be a clean 400 here, never a 500 mid-query (Codex P2).
+    const impossible = Buffer.from(
+      `2026-02-30T00:00:00.000000Z|${crypto.randomUUID()}`,
+      'utf8',
+    ).toString('base64url');
+    await expect(
+      svc.listMessages(bobAuth, conv, { limit: 50, after: impossible }),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('a non-member (same tenant) cannot list — 404', async () => {

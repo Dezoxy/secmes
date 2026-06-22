@@ -141,6 +141,8 @@ export function useConversationBackfill({
   sessionKey,
   setConversations,
 }: ConversationBackfillOptions): ConversationBackfillResult {
+  // Per-conversation resume cursor (the last message's opaque, prune-safe keyset token) → echoed as `after`
+  // on the next backfill so it survives that message being reaped by retention.
   const fetchCursors = useRef(new Map<string, string>());
   const backfilling = useRef(new Set<string>());
   const backfillPending = useRef(new Set<string>());
@@ -268,14 +270,23 @@ export function useConversationHistoryRehydration({
             // member's. Epoch-only checks are insufficient: if two clients staged at the same epoch
             // and ours lost the race (409), another commit exists at that epoch but our post-commit
             // state would be on a divergent ratchet branch.
-            const commits = await listCommits(conversationId, { afterEpoch: epoch - 1, limit: 1 });
+            const { commits } = await listCommits(conversationId, {
+              afterEpoch: epoch - 1,
+              limit: 1,
+            });
             return commits.some((c) => c.epoch === epoch && c.clientCommitId === clientCommitId);
           },
         );
         const logs = await keystore.loadAllMessageLogs(device, sKey);
         const creatorIds = await keystore.getGroupCreatorIds(device);
+        // Track 4 slice 5c — conversations durably marked sync-lost are rehydrated into the LIST (with
+        // the "out of sync" banner) but NOT made live: a stale group made live would re-enable the
+        // composer and let a stale-epoch send go out (undecryptable by peers). They stay non-live until
+        // 5c-2 re-establishes them.
+        const syncLostIds = await keystore.getSyncLostConversationIds(device);
         for (const [conversationId, conversation] of restored) {
-          addLive(conversationId, conversation);
+          const isSyncLost = syncLostIds.has(conversationId);
+          if (!isSyncLost) addLive(conversationId, conversation);
           const stored = logs.get(conversationId) ?? [];
           const groupName = stored
             .filter((m) => m.kind === 'group-meta')
@@ -289,6 +300,7 @@ export function useConversationHistoryRehydration({
               messages: history,
               ...(groupName ? { name: groupName, type: 'group' as const } : {}),
               ...(creatorId ? { creatorId } : {}),
+              ...(isSyncLost ? { recovery: 'sync-lost' as const } : {}),
             }),
           );
           // Name the peer: try the persisted mapping first (set at creation — survives a no-reply

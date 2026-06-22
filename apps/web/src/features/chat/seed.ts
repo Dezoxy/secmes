@@ -64,6 +64,14 @@ export type Conversation = {
   unreadCount: number;
   /** The userId of the member who created this group (live only; absent for seed/demo conversations). */
   creatorId?: string;
+  /**
+   * Track 4 slice 5c — set to 'sync-lost' when the conversation's MLS epoch can no longer advance (the
+   * commit it needs was pruned, or the device was offline beyond retention). Drives the "out of sync"
+   * affordance and suppresses the composer (there is no live group to send into). v1 only surfaces the
+   * state; re-establishing the conversation (re-add via the member/Welcome path) is slice 5c-2. Absent =
+   * healthy.
+   */
+  recovery?: 'sync-lost';
 };
 
 function hueFromString(s: string): number {
@@ -115,13 +123,18 @@ export function generatedAvatar(name: string): string {
 
 const SAFE_RASTER_AVATAR_DATA_URI =
   /^data:image\/(?:png|jpe?g|webp|gif);base64,[a-z0-9+/]+={0,2}$/i;
+// Prefix of every app-generated avatar (dicebearAvatar + generatedAvatar) — a URL-encoded SVG data-URI.
+// Safe to render: avatars are shown via <img>, and SVG loaded through <img> cannot execute scripts; and
+// these SVGs are always built client-side from a seed/name — the server only ever supplies an opaque
+// avatarSeed string + displayName, never image markup. So no untrusted SVG can reach this gate.
+const APP_SVG_AVATAR_PREFIX = 'data:image/svg+xml,';
 export const MAX_AVATAR_DATA_URI_LENGTH = 120_000;
 
 export function safeAvatarSrc(src: string | undefined, fallbackName: string): string {
   const fallback = generatedAvatar(fallbackName);
   if (!src) return fallback;
-  if (src === fallback) return src;
   if (src.length > MAX_AVATAR_DATA_URI_LENGTH) return fallback;
+  if (src.startsWith(APP_SVG_AVATAR_PREFIX)) return src; // app-generated DiceBear / initials SVG
   return SAFE_RASTER_AVATAR_DATA_URI.test(src) ? src : fallback;
 }
 
@@ -385,6 +398,16 @@ export const conversations: Conversation[] = [
     ],
   },
 ];
+
+/**
+ * The conversation list to seed the UI with. The sample contacts/chats above are demo/E2E fixtures only:
+ * in demo mode they make the UI explorable without a backend, but a real (prod) build must start EMPTY so
+ * a freshly-registered user never sees fabricated conversations. `demo` is the build-time VITE_DEMO_MODE
+ * flag (never set in prod). See ChatScreen's initial state.
+ */
+export function initialConversationsForMode(demo: boolean): Conversation[] {
+  return demo ? conversations : [];
+}
 
 export function getConversationDisplayName(
   conversation: Conversation,

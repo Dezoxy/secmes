@@ -14,6 +14,10 @@ permissions:
 
 jobs:
   analyze:
+    # Code scanning / SARIF upload needs GitHub Advanced Security, which is unavailable on a user-owned
+    # PRIVATE repo (and not included in Pro). Skip on private so it doesn't fail every run; this auto-revives
+    # if the repo is ever made public again. Semgrep/OSV/Trivy/gitleaks still cover SAST/deps/secrets.
+    if: ${{ github.event.repository.visibility == 'public' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6

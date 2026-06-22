@@ -1,6 +1,6 @@
 # Review 01 — Crypto core & key lifecycle
 
-> **Slice 1** of the security review campaign (`docs/security-review-campaign-plan.md`).
+> **Slice 1** of the security review campaign (`docs/planning/security-review-campaign-plan.md`).
 > **Date:** 2026-06-19 · **Reviewed against `main` @ `4282df25`** (post-#250).
 > **Method:** ultracode workflow — 16 `crypto-reviewer` subagents (Opus, max effort): 1 recon + 6 adversarial
 > finders (one per claim, each trying to *break* it) + a skeptic refutation pass on every finding.

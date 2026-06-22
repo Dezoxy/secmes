@@ -147,7 +147,7 @@ only, audited only for the dev-vs-prod delta); `.github/workflows/`; Dockerfiles
 in code/env (vs Key Vault credential files via Managed Identity)? containers non-root + read-only FS + dropped
 caps + limits? data services truly private (no public endpoint)? CI uses OIDC and never interpolates untrusted
 event input into `run:`? backups encrypted, EU-pinned, restorable? Cross-check `docs/threat-models/{vm-secrets,
-cross-cloud-secret-fetch,vm-ingress,vm-cd,db-backup,centralized-logs}.md` and `docs/security_toolchain.md`.
+cross-cloud-secret-fetch,vm-ingress,vm-cd,db-backup,centralized-logs}.md` and `docs/architecture/security_toolchain.md`.
 
 ### Slice 7 — Synthesis, threat-model reconciliation & attestation  *(reviewer: `security-architect`)*
 Pull it together. Scope: reconcile every `docs/threat-models/*` note against what slices 1–6 actually found

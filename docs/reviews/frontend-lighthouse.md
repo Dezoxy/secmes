@@ -1,6 +1,6 @@
 # Frontend Lighthouse Pass
 
-Status: F2 pass complete (point-in-time record). Follow-ups (bundle splitting, source-map policy, iOS install proof) are tracked in [`frontend-plan.md`](frontend-plan.md).
+Status: F2 pass complete (point-in-time record). Follow-ups (bundle splitting, source-map policy, iOS install proof) are tracked in [`frontend-plan.md`](../planning/frontend-plan.md).
 Last run: 2026-06-09
 
 ## Local PWA Result

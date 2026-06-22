@@ -41,6 +41,12 @@ interface ConnState {
   authTimer?: ReturnType<typeof setTimeout>;
   subWindowStart: number; // ms; start of the current subscribe-rate window
   subCount: number; // new-room subscribe frames counted in the current window
+  // Per-(socket, room) TRANSPORT delivery counter: the seq of the last `message` frame fanned out to THIS
+  // socket for that room (1-based; absent room ⇒ 0 ⇒ next frame is seq 1). Lets the client detect a
+  // dropped/reordered frame and self-heal via the existing backfill. EPHEMERAL (lives only for the socket
+  // lifetime, dropped with the state on disconnect); never persisted; NOT the MLS epoch/generation; carries
+  // no cryptographic guarantee. See @argus/contracts MessageEventSchema.
+  outSeq: Map<string, number>;
 }
 
 const roomKey = (tenantId: string, conversationId: string): string =>
@@ -80,6 +86,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       subs: new Set(),
       subWindowStart: Date.now(),
       subCount: 0,
+      outSeq: new Map(),
     };
     // Close sockets that connect but never authenticate (resource exhaustion / probing).
     state.authTimer = setTimeout(() => {
@@ -189,13 +196,27 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   /** Fan a newly-stored message out to the subscribed sockets of its (tenant, conversation). */
   private deliver(event: MessageCreatedEvent): void {
-    const sockets = this.rooms.get(roomKey(event.tenantId, event.conversationId));
+    const room = roomKey(event.tenantId, event.conversationId);
+    const sockets = this.rooms.get(room);
     if (!sockets) return;
     // Include conversationId in the frame: one socket multiplexes many conversations, so the client
-    // needs to know which conversation each delivered message belongs to.
-    const data = { conversationId: event.conversationId, message: event.message };
+    // needs to know which conversation each delivered message belongs to. Each socket also gets its OWN
+    // per-room transport delivery counter (deliverySeq), stamped only on the frames it actually receives,
+    // so it can spot a dropped/reordered frame (deliverySeq != deliveryPrevSeq + 1) and re-fetch. The
+    // counter is metadata only — the message stays the opaque ciphertext envelope (invariant #1).
     for (const client of sockets) {
-      if (client.readyState === WebSocket.OPEN) this.send(client, 'message', data);
+      if (client.readyState !== WebSocket.OPEN) continue;
+      const state = this.conns.get(client);
+      if (!state) continue; // socket disconnected between the room set and here; skip (no counter burn)
+      const prev = state.outSeq.get(room) ?? 0;
+      const seq = prev + 1;
+      state.outSeq.set(room, seq);
+      this.send(client, 'message', {
+        conversationId: event.conversationId,
+        message: event.message,
+        deliverySeq: seq,
+        deliveryPrevSeq: prev === 0 ? null : prev,
+      });
     }
   }
 
@@ -272,6 +293,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
         this.send(client, 'removed', { conversationId: event.conversationId });
       }
       state.subs.delete(room);
+      state.outSeq.delete(room); // reset the transport counter so a later re-subscribe restarts at seq 1
       this.rooms.get(room)?.delete(client);
     }
     const sockets = this.rooms.get(room);

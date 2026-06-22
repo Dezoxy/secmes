@@ -34,6 +34,76 @@ import { foldOwnMessageStatuses, type PeerWatermarks } from './receipts';
 import type { Conversation, User } from './seed';
 import { currentUser, generatedAvatar } from './seed';
 
+// Coalescing window for transport-gap backfills (Track 3 item D). A burst of out-of-order/dropped live
+// frames in one conversation collapses into a single catch-up fetch rather than one per frame — bounds the
+// self-inflicted REST load and avoids a backfill storm on a flaky link.
+const GAP_BACKFILL_DEBOUNCE_MS = 250;
+
+// Track 4 slice 5b — bounded transient-stall budget for the catch-up loop. When a drain can't advance but
+// the needed commit is NOT pruned (classifyCommitDrain → 'transient'), the commit may simply not be
+// GET-visible yet (e.g. replication lag). Retry a few times with a short delay; if it still won't advance,
+// stop and let the next commit event / reconnect re-drive — never spin forever (the bug 5b fixes).
+const CATCHUP_MAX_TRANSIENT_STALLS = 3;
+const CATCHUP_RETRY_DELAY_MS = 500;
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Track 4 slice 5b — classify a STALLED commit drain (one that couldn't reach `targetEpoch`) as a
+ * transient stall (retry) or a genuine, unrecoverable gap (`sync-lost`). Pure, mirroring
+ * `classifyDeliveryFrame`. The deciding fact is the server's oldest still-retained commit epoch:
+ *
+ *  - `in-sync`    — the local epoch already reached the target (a guard; callers only call this on a stall).
+ *  - `sync-lost`  — the commit that would advance the group (the one stamped at `localEpoch`) is GONE: the
+ *                   server's oldest retained commit is already past `localEpoch`, so retrying can never
+ *                   close the gap. Recovery (re-add via Welcome, 5c) is required. This is exactly the state
+ *                   contiguity-preserving prefix pruning (5e) produces, and the "offline beyond retention"
+ *                   case.
+ *  - `transient`  — the needed commit is still retained (or the server reported no oldest epoch): the stall
+ *                   is momentary; retry within a bounded budget.
+ *
+ * `oldestRetainedEpoch` is metadata only (an integer epoch); it never gates decryption or ordering.
+ */
+export type CommitSyncState = 'in-sync' | 'transient' | 'sync-lost';
+
+export function classifyCommitDrain(args: {
+  localEpoch: number;
+  targetEpoch: number;
+  oldestRetainedEpoch: number | null;
+}): CommitSyncState {
+  const { localEpoch, targetEpoch, oldestRetainedEpoch } = args;
+  if (localEpoch >= targetEpoch) return 'in-sync';
+  if (oldestRetainedEpoch !== null && oldestRetainedEpoch > localEpoch) return 'sync-lost';
+  return 'transient';
+}
+
+/**
+ * Decide what a `message` frame's transport delivery counter implies for gap detection (Track 3 item D).
+ * Pure: given the last-seen deliverySeq for a conversation and this frame's deliverySeq/deliveryPrevSeq,
+ * return the new last-seen value and whether a live frame was missed (→ re-fetch over the existing backfill).
+ * The counter is a HINT only — it never gates decryption or ordering (MLS + the (created_at,id) cursor own
+ * those). Rules:
+ *  - absent deliverySeq ⇒ detection unavailable (older gateway): keep state, no gap.
+ *  - deliveryPrevSeq === null ⇒ the gateway's first frame on this socket+room: (re)baseline, no gap.
+ *  - deliverySeq <= last ⇒ duplicate / late-arriving reorder: keep position, no gap (dedup-by-id covers content).
+ *  - otherwise contiguous iff deliveryPrevSeq === last; a numeric prevSeq with no baseline (we never saw the
+ *    leading frame(s)) is therefore a gap. A missing prevSeq falls back to the raw seq step (seq === last+1).
+ */
+export function classifyDeliveryFrame(
+  last: number | undefined,
+  deliverySeq: number | undefined,
+  deliveryPrevSeq: number | null | undefined,
+): { last: number | undefined; gap: boolean } {
+  if (typeof deliverySeq !== 'number') return { last, gap: false };
+  if (deliveryPrevSeq === null) return { last: deliverySeq, gap: false };
+  if (last !== undefined && deliverySeq <= last) return { last, gap: false };
+  const contiguous =
+    typeof deliveryPrevSeq === 'number'
+      ? last !== undefined && deliveryPrevSeq === last
+      : last !== undefined && deliverySeq === last + 1;
+  return { last: deliverySeq, gap: !contiguous };
+}
+
 interface UseLiveConversationsOptions {
   device: DeviceKeys | null;
   pool: DeviceKeys[] | null;
@@ -66,6 +136,17 @@ interface UseLiveConversationsOptions {
    * numbers. Feeds numbersByConv so the Verify button shows the correct number.
    */
   onSafetyNumberResolved?: (conversationId: string, safetyNumber: string) => void;
+  /**
+   * Track 4 slice 5b/5c — called when a conversation is detected as "sync-lost": the commit needed to
+   * advance its MLS epoch has been pruned (or the device was offline beyond retention), so catch-up can
+   * never close the gap by retrying. The argument is the conversation id (metadata only). This is the
+   * UI signal — the consumer (5c) stamps an "out of sync" affordance on the conversation. The hook also
+   * drops the doomed group from `liveGroups` so the live paths stop attempting it (see `signalSyncLost`).
+   * The actual RECOVERY (re-add the device via the member/Welcome path so it re-joins fresh) is slice
+   * 5c-2 — a stranded device can't re-add itself, and nothing produces a fresh Welcome for an
+   * already-rostered device today, so v1 surfaces the state rather than promising auto-recovery.
+   */
+  onSyncLost?: (conversationId: string) => void;
 }
 
 interface UseLiveConversationsResult {
@@ -143,6 +224,7 @@ export function useLiveConversations({
   onPeerKeyChanged,
   onPeerVerified,
   onSafetyNumberResolved,
+  onSyncLost,
 }: UseLiveConversationsOptions): UseLiveConversationsResult {
   const [liveIds, setLiveIds] = useState<Set<string>>(() => new Set());
   const [connectionStatus, setConnectionStatus] = useState<MessageSocketStatus>('offline');
@@ -165,6 +247,16 @@ export function useLiveConversations({
   // The PEER's latest delivered/read watermarks per conversation (checkpoint 31). Seeded from GET /receipts
   // on subscribe and advanced by live `receipt` WS frames; folded onto our own messages to drive ticks.
   const peerWatermarks = useRef(new Map<string, PeerWatermarks>());
+
+  // Transport delivery-gap detection (Track 3 item D). lastDeliverySeq holds the last per-(socket,
+  // conversation) `deliverySeq` we saw; a non-contiguous next frame means a live frame was dropped/reordered.
+  // We STILL decrypt the live frame inline (the WS frame is the reliable copy and is never discarded) and,
+  // on a detected gap, ALSO schedule a debounced backfill to recover the missed EARLIER frame over the
+  // existing catch-up path. gapBackfillTimers coalesces a burst of gaps per conversation into one fetch. The
+  // seq is a HINT only — it never gates decryption or ordering (MLS + the (created_at,id) cursor own those);
+  // it carries no cryptographic guarantee. Both reset on (re)subscribe and on removal.
+  const lastDeliverySeq = useRef(new Map<string, number>());
+  const gapBackfillTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const addLive = useCallback((conversationId: string, conversation: MlsGroup): void => {
     liveGroups.current.set(conversationId, conversation);
@@ -359,6 +451,112 @@ export function useLiveConversations({
     }
     setConnectionStatus('connecting');
     const deps = messagingDeps;
+
+    // Track 4 slice 5c — a conversation is sync-lost (the commit it needs to advance is gone). Drop the
+    // doomed group from liveGroups so the live paths stop attempting a ratchet that can never advance
+    // (the other fire sites then short-circuit on their `if (!group) return` guard — idempotent across
+    // all three), and signal the UI to surface the "out of sync" affordance. We deliberately do NOT
+    // clear durable group state or attempt a re-join here: a stranded device can't re-add itself, and
+    // nothing produces a fresh Welcome for an already-rostered device in v1 (enrollDevice skips a device
+    // already in the roster). That active recovery — re-add via the member/Welcome path so it re-joins
+    // fresh — is slice 5c-2. Keeping GROUP_STORE means a reload simply re-detects + re-surfaces (no
+    // vanished conversation), and there is no delete to race a concurrent ratchet save.
+    const signalSyncLost = (conversationId: string): void => {
+      // Drop the doomed group from BOTH the in-memory group map AND the live-id set, so every live-path
+      // consumer treats the conversation as no longer live: the catch-up / commit-drain / live-message
+      // handlers short-circuit on `if (!group) return`, and the liveIds-keyed paths
+      // (useReceiptSending, useChatState → selectedIsLive, useSelectedConversationBackfill) stop acting on
+      // it — no stray delivered/read receipt POSTs or backfills for a conversation that can't advance.
+      // Unlike onRemoved, we do NOT remove it from the conversation LIST: it stays visible with the "out
+      // of sync" banner.
+      liveGroups.current.delete(conversationId);
+      setLiveIds((prev) => {
+        if (!prev.has(conversationId)) return prev;
+        const next = new Set(prev);
+        next.delete(conversationId);
+        return next;
+      });
+      // Durably mark sync-lost so the affordance survives a reload: otherwise a refresh would rehydrate
+      // the stale group as live (banner gone, composer back) and a stale-epoch send would be
+      // undecryptable. Best-effort, id-only log; the flag is preserved across any in-flight ratchet save.
+      void deps.keystore
+        .markConversationSyncLost(deps.device, conversationId)
+        .catch((err: unknown) => {
+          // eslint-disable-next-line no-console
+          console.warn(
+            'mark sync-lost failed',
+            conversationId,
+            err instanceof Error ? err.message : err,
+          );
+        });
+      onSyncLost?.(conversationId);
+    };
+
+    // Interleaved catch-up for one conversation: backfill at the current epoch, then — if messages at a
+    // future epoch were seen — drain commits to EXACTLY that epoch (not beyond) and backfill again, until
+    // no further epoch gaps. Preserves forward secrecy (epoch-N keys consumed only after all epoch-N
+    // messages decrypt). Shared by the on-subscribe catch-up and the transport-gap backfill.
+    //
+    // Track 4 slice 5b — the drain can fail to advance because the commit that would close the gap was
+    // PRUNED (or we were offline beyond retention). Before 5b that spun forever (backfill keeps returning
+    // the same future-epoch message; the drain keeps no-op'ing). Now a non-advancing drain is classified:
+    // a genuine gap escalates to onSyncLost and stops; a transient stall retries within a bounded budget.
+    const runCatchUp = (conversationId: string): void => {
+      const group = liveGroups.current.get(conversationId);
+      if (!group) return;
+      void (async () => {
+        let transientStalls = 0;
+        for (;;) {
+          const result = await backfillInto(conversationId, group, selfUserId);
+          const nextEpoch = result?.nextEpoch;
+          if (nextEpoch === undefined) break; // no epoch gap — caught up
+          const drain = await processCommitEvent(
+            deps,
+            conversationId,
+            group,
+            { epoch: nextEpoch },
+            nextEpoch,
+          );
+          if (drain.advanced) {
+            transientStalls = 0; // made progress — re-backfill at the new epoch
+            continue;
+          }
+          // The drain couldn't advance the group toward the message's epoch.
+          const state = classifyCommitDrain({
+            localEpoch: group.epoch,
+            targetEpoch: nextEpoch,
+            oldestRetainedEpoch: drain.oldestRetainedEpoch,
+          });
+          if (state === 'sync-lost') {
+            // eslint-disable-next-line no-console
+            console.warn('catch-up: conversation sync-lost (commit pruned)', conversationId);
+            signalSyncLost(conversationId);
+            break;
+          }
+          transientStalls += 1;
+          if (transientStalls >= CATCHUP_MAX_TRANSIENT_STALLS) break; // self-heals via next event/reconnect
+          await sleep(CATCHUP_RETRY_DELAY_MS);
+        }
+      })().catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.warn('catch-up failed', conversationId, err instanceof Error ? err.message : err);
+      });
+    };
+
+    // Debounced backfill on a detected transport gap. Coalesces a burst per conversation
+    // (GAP_BACKFILL_DEBOUNCE_MS) into one catch-up so a flaky link can't trigger a backfill storm. The
+    // catch-up recovers the missed EARLIER frame(s); the live frame that exposed the gap is decrypted inline
+    // (onMessage) and never discarded.
+    const scheduleGapBackfill = (conversationId: string): void => {
+      const timers = gapBackfillTimers.current;
+      if (timers.has(conversationId)) return; // a catch-up is already scheduled — coalesce onto it
+      const timer = setTimeout(() => {
+        timers.delete(conversationId);
+        runCatchUp(conversationId);
+      }, GAP_BACKFILL_DEBOUNCE_MS);
+      timers.set(conversationId, timer);
+    };
+
     const socket = createMessageSocket({
       token: accessToken,
       onStatus: setConnectionStatus,
@@ -402,7 +600,25 @@ export function useLiveConversations({
         // drainWelcomes is idempotent — it skips already-joined conversations.
         drainRef.current();
       },
-      onMessage: ({ conversationId, message }) => {
+      onMessage: ({ conversationId, message, deliverySeq, deliveryPrevSeq }) => {
+        // Transport gap detection (Track 3 item D): a break in the per-(socket, conversation) counter means
+        // a live frame was dropped/reordered, so re-fetch over the existing backfill. classifyDeliveryFrame
+        // owns the decision (pure + unit-tested); the seq is a HINT only, never gating decryption/ordering.
+        const { last: nextLast, gap } = classifyDeliveryFrame(
+          lastDeliverySeq.current.get(conversationId),
+          deliverySeq,
+          deliveryPrevSeq,
+        );
+        if (nextLast !== undefined) lastDeliverySeq.current.set(conversationId, nextLast);
+        // On a detected gap, schedule a backfill to recover the missed EARLIER frame(s). We still decrypt
+        // THIS frame inline below — the live WS frame is the reliable copy and is never discarded (the
+        // backfill's keyset cursor can skip a late-committing earlier-`created_at` row, so dropping the
+        // in-hand frame in favour of a re-fetch could lose it). MLS caches skipped-generation keys, so the
+        // backfill can still decrypt the earlier frame out of order; a same-sender burst exceeding that
+        // bounded cache (`retainKeysForGenerations`) before the backfill runs is an accepted
+        // delivery-completeness residual, backstopped by the reconnect connect-protocol (realtime-delivery.md §6).
+        if (gap) scheduleGapBackfill(conversationId);
+
         const group = liveGroups.current.get(conversationId);
         if (!group) return;
         void (async () => {
@@ -410,13 +626,31 @@ export function useLiveConversations({
           // before decrypting. Passing maxEpoch = message.epoch prevents the drain from overshooting
           // and consuming keys that belong to messages still in-flight at intermediate epochs.
           if (message.epoch > group.epoch) {
-            await processCommitEvent(
+            const drain = await processCommitEvent(
               deps,
               conversationId,
               group,
               { epoch: message.epoch },
               message.epoch,
             );
+            // Track 4 slice 5b — if the drain couldn't reach the live message's epoch because the
+            // commit that would advance the group was pruned, this conversation is sync-lost. Without
+            // this check a freshly-subscribed device with no backlog (so runCatchUp found no gap) would
+            // silently log the message as undecryptable below and only recover on an unrelated
+            // reconnect. A transient stall falls through and self-heals via the catch-up/gap paths.
+            if (group.epoch < message.epoch) {
+              const state = classifyCommitDrain({
+                localEpoch: group.epoch,
+                targetEpoch: message.epoch,
+                oldestRetainedEpoch: drain.oldestRetainedEpoch,
+              });
+              if (state === 'sync-lost') {
+                // eslint-disable-next-line no-console
+                console.warn('ws message: conversation sync-lost (commit pruned)', conversationId);
+                signalSyncLost(conversationId);
+                return; // unreachable epoch — don't attempt an undecryptable read
+              }
+            }
           }
           const decrypted = await receiveLiveMessage(
             deps,
@@ -437,34 +671,16 @@ export function useLiveConversations({
       },
       onReceipt: applyReceipt,
       onSubscribed: (conversationId) => {
-        const group = liveGroups.current.get(conversationId);
-        if (group) {
-          // Interleaved catch-up: backfill at the current epoch, then — if messages at a future
-          // epoch were encountered — drain commits to EXACTLY that epoch (not beyond), then backfill
-          // again. Repeat until the backfill sees no further epoch gaps. This preserves forward
-          // secrecy: keys for epoch N are consumed only after all epoch-N messages are decrypted.
-          void (async () => {
-            for (;;) {
-              const result = await backfillInto(conversationId, group, selfUserId);
-              const nextEpoch = result?.nextEpoch;
-              if (nextEpoch === undefined) break;
-              await processCommitEvent(
-                deps,
-                conversationId,
-                group,
-                { epoch: nextEpoch },
-                nextEpoch,
-              );
-            }
-          })().catch((err: unknown) => {
-            // eslint-disable-next-line no-console
-            console.warn(
-              'subscribe: catch-up failed',
-              conversationId,
-              err instanceof Error ? err.message : err,
-            );
-          });
+        // A fresh room join (re)starts the gateway's per-socket counter, so drop any stale baseline — the
+        // first live frame (deliveryPrevSeq === null) re-establishes it. Also cancel any pending gap timer:
+        // the REST catch-up below already covers anything missed up to now.
+        lastDeliverySeq.current.delete(conversationId);
+        const pendingTimer = gapBackfillTimers.current.get(conversationId);
+        if (pendingTimer) {
+          clearTimeout(pendingTimer);
+          gapBackfillTimers.current.delete(conversationId);
         }
+        runCatchUp(conversationId);
         seedReceipts(conversationId); // seed historical delivered/read ticks once in the room
       },
       // A Welcome is waiting (added to a conversation while connected): drain now — join → subscribe →
@@ -472,6 +688,12 @@ export function useLiveConversations({
       onWelcome: () => drainRef.current(),
       onRemoved: (conversationId) => {
         liveGroups.current.delete(conversationId);
+        lastDeliverySeq.current.delete(conversationId);
+        const pending = gapBackfillTimers.current.get(conversationId);
+        if (pending) {
+          clearTimeout(pending);
+          gapBackfillTimers.current.delete(conversationId);
+        }
         setLiveIds((prev) => {
           if (!prev.has(conversationId)) return prev;
           const next = new Set(prev);
@@ -493,19 +715,33 @@ export function useLiveConversations({
       // A membership commit was posted: drain to exactly this commit (epoch+1 ceiling) so the group
       // advances to epoch+1 but no further. An unbounded drain would consume forward-secret keys for
       // messages still in-flight at epoch+1, making them permanently undecryptable on arrival.
+      //
+      // Track 4 slice 5b — if the drain can't advance and the needed commit was pruned, escalate to
+      // sync-lost (recovery wired in 5c). A transient stall just returns; the next event/reconnect retries.
       onCommit: ({ conversationId, epoch }) => {
         const group = liveGroups.current.get(conversationId);
         if (!group) return;
-        void processCommitEvent(deps, conversationId, group, { epoch }, epoch + 1).catch(
-          (err: unknown) => {
+        void (async () => {
+          const drain = await processCommitEvent(deps, conversationId, group, { epoch }, epoch + 1);
+          if (drain.advanced || drain.stoppedReason === 'stale') return; // progress, or already past
+          const state = classifyCommitDrain({
+            localEpoch: group.epoch,
+            targetEpoch: epoch + 1,
+            oldestRetainedEpoch: drain.oldestRetainedEpoch,
+          });
+          if (state === 'sync-lost') {
             // eslint-disable-next-line no-console
-            console.warn(
-              'commit drain failed',
-              conversationId,
-              err instanceof Error ? err.message : err,
-            );
-          },
-        );
+            console.warn('commit drain: conversation sync-lost (commit pruned)', conversationId);
+            signalSyncLost(conversationId);
+          }
+        })().catch((err: unknown) => {
+          // eslint-disable-next-line no-console
+          console.warn(
+            'commit drain failed',
+            conversationId,
+            err instanceof Error ? err.message : err,
+          );
+        });
       },
     });
     socketRef.current = socket;
@@ -513,6 +749,10 @@ export function useLiveConversations({
     return () => {
       socket.close();
       socketRef.current = null;
+      // Cancel any pending gap backfills; this socket (and its per-socket counters) is gone.
+      for (const timer of gapBackfillTimers.current.values()) clearTimeout(timer);
+      gapBackfillTimers.current.clear();
+      lastDeliverySeq.current.clear();
     };
   }, [
     applyReceipt,
@@ -520,6 +760,7 @@ export function useLiveConversations({
     mergeIncoming,
     messagingDeps,
     onEnrollmentPending,
+    onSyncLost,
     seedReceipts,
     selfUserId,
   ]);

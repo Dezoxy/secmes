@@ -99,7 +99,7 @@ http://glitchtip.4rgus.com:8080 {
 	# FIRST among the `handle` blocks so it wins before handle_path /api/* and the static fallback. The API
 	# additionally verifies the Access JWT signature (defense in depth, env-gated CfAccessGuard). Only these
 	# admin paths are gated — the main app, passkey login, and end-user /api routes are unaffected. See
-	# docs/threat-models/admin-access-gating.md + docs/deploy.md.
+	# docs/threat-models/admin-access-gating.md + docs/architecture/deploy.md.
 	@admin_nojwt {
 		# Match the bare prefixes too (not just /*) so a future index route on the admin/breakglass
 		# controllers can never be reachable un-gated at the bare path.

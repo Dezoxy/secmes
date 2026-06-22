@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { UpdateProfileSchema } from '@argus/contracts';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { reflectRouteMeta } from '../common/testing/route-meta.js';
 import { getDb } from '../db/index.js';
 import { AuditService } from '../audit/audit.service.js';
+import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { MeController } from './me.controller.js';
 import { UserService } from './user.service.js';
 
@@ -30,6 +32,24 @@ describe('MeController route contract', () => {
       httpCode: 204,
       guards: [],
     });
+  });
+});
+
+// Boundary behaviour (DB-free): the PUT /me body runs through ZodValidationPipe(UpdateProfileSchema),
+// so a display name that violates the hardened policy is rejected (400) before the handler executes.
+describe('updateMe body validation (boundary)', () => {
+  const pipe = new ZodValidationPipe(UpdateProfileSchema);
+
+  it('rejects names with disallowed (zero-width / over-length) characters', () => {
+    expect(() => pipe.transform({ displayName: 'Bad\u200bName' })).toThrow();
+    expect(() => pipe.transform({ displayName: 'A'.repeat(33) })).toThrow();
+  });
+
+  it('accepts and normalizes a valid name; an absent name is allowed', () => {
+    expect(pipe.transform({ displayName: '  Brave   Otter  ' })).toEqual({
+      displayName: 'Brave Otter',
+    });
+    expect(pipe.transform({})).toEqual({});
   });
 });
 

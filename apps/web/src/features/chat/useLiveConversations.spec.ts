@@ -3,6 +3,8 @@ import type { Conversation } from './seed';
 import { currentUser } from './seed';
 import {
   addLiveId,
+  classifyCommitDrain,
+  classifyDeliveryFrame,
   liveConversationShell,
   prependConversationIfMissing,
   setsEqual,
@@ -94,5 +96,91 @@ describe('identity-change detection routing', () => {
     expect(setsEqual(['a', 'b'], ['b', 'a'])).toBe(false); // callers pre-sort; out-of-order = mismatch
     expect(setsEqual(['a'], ['a', 'b'])).toBe(false);
     expect(setsEqual([], [])).toBe(true);
+  });
+});
+
+// Track 3 item D — transport delivery-gap detection. classifyDeliveryFrame is the pure decision behind the
+// live `onMessage` handler: given the last-seen counter and an incoming frame's seq/prevSeq, does the client
+// need to backfill? The seq is a HINT only — it never gates decryption or ordering.
+describe('classifyDeliveryFrame (delivery-gap detection)', () => {
+  it('absent counter (older gateway) ⇒ no gap, state unchanged', () => {
+    expect(classifyDeliveryFrame(undefined, undefined, undefined)).toEqual({
+      last: undefined,
+      gap: false,
+    });
+    expect(classifyDeliveryFrame(5, undefined, undefined)).toEqual({ last: 5, gap: false });
+  });
+
+  it('prevSeq === null (gateway’s first frame on this socket) ⇒ (re)baseline, no gap', () => {
+    expect(classifyDeliveryFrame(undefined, 1, null)).toEqual({ last: 1, gap: false });
+    // Even after a previous socket left a stale baseline, a fresh prevSeq=null frame re-baselines (reconnect).
+    expect(classifyDeliveryFrame(9, 1, null)).toEqual({ last: 1, gap: false });
+  });
+
+  it('contiguous frame (prevSeq === last) ⇒ no gap, advances last', () => {
+    expect(classifyDeliveryFrame(1, 2, 1)).toEqual({ last: 2, gap: false });
+    expect(classifyDeliveryFrame(41, 42, 41)).toEqual({ last: 42, gap: false });
+  });
+
+  it('a skipped frame (prevSeq !== last) ⇒ GAP, advances last to the new seq', () => {
+    expect(classifyDeliveryFrame(3, 6, 5)).toEqual({ last: 6, gap: true }); // missed 4 and 5
+  });
+
+  it('a dropped LEADING frame (numeric prevSeq with no baseline) ⇒ GAP', () => {
+    // The genuine first frame (prevSeq=null) was lost; we first see seq 2 (prevSeq 1) → we missed seq 1.
+    expect(classifyDeliveryFrame(undefined, 2, 1)).toEqual({ last: 2, gap: true });
+  });
+
+  it('a duplicate / late-arriving reorder (seq <= last) ⇒ no gap, keeps position', () => {
+    expect(classifyDeliveryFrame(5, 3, 2)).toEqual({ last: 5, gap: false });
+    expect(classifyDeliveryFrame(5, 5, 4)).toEqual({ last: 5, gap: false });
+  });
+
+  it('missing prevSeq falls back to the raw seq step (defensive)', () => {
+    expect(classifyDeliveryFrame(4, 5, undefined)).toEqual({ last: 5, gap: false }); // contiguous step
+    expect(classifyDeliveryFrame(4, 7, undefined)).toEqual({ last: 7, gap: true }); // jumped
+  });
+});
+
+// Track 4 slice 5b — commit-drain classification. classifyCommitDrain is the pure decision behind the
+// catch-up loop / onCommit handler: a drain that COULDN'T advance is either a transient stall (retry) or a
+// genuine, unrecoverable gap (sync-lost → recovery). The oldest retained commit epoch (5a header) decides:
+// if the commit that would advance the group (stamped at the local epoch) is already pruned, retrying is
+// futile. The epoch is metadata only — it never gates decryption or ordering.
+describe('classifyCommitDrain (sync-lost detection)', () => {
+  it('already at/past the target ⇒ in-sync (guard; callers only call this on a stall)', () => {
+    expect(classifyCommitDrain({ localEpoch: 5, targetEpoch: 5, oldestRetainedEpoch: 0 })).toBe(
+      'in-sync',
+    );
+    expect(classifyCommitDrain({ localEpoch: 6, targetEpoch: 5, oldestRetainedEpoch: null })).toBe(
+      'in-sync',
+    );
+  });
+
+  it('behind, and the needed commit is PRUNED (oldest retained > local) ⇒ sync-lost', () => {
+    // local at epoch 2 needs the commit stamped at epoch 2; the server's oldest retained is 5 → it's gone.
+    expect(classifyCommitDrain({ localEpoch: 2, targetEpoch: 6, oldestRetainedEpoch: 5 })).toBe(
+      'sync-lost',
+    );
+    // Boundary: oldest retained is exactly local+1 — the local-epoch commit is already gone.
+    expect(classifyCommitDrain({ localEpoch: 2, targetEpoch: 3, oldestRetainedEpoch: 3 })).toBe(
+      'sync-lost',
+    );
+  });
+
+  it('behind, but the needed commit is still retained (oldest retained ≤ local) ⇒ transient', () => {
+    // oldest retained == local: the commit stamped at the local epoch is still there — just not applied yet.
+    expect(classifyCommitDrain({ localEpoch: 2, targetEpoch: 5, oldestRetainedEpoch: 2 })).toBe(
+      'transient',
+    );
+    expect(classifyCommitDrain({ localEpoch: 4, targetEpoch: 5, oldestRetainedEpoch: 0 })).toBe(
+      'transient',
+    );
+  });
+
+  it('behind, server reported no oldest epoch (null — old server / no rows) ⇒ transient, never a false gap', () => {
+    expect(classifyCommitDrain({ localEpoch: 2, targetEpoch: 5, oldestRetainedEpoch: null })).toBe(
+      'transient',
+    );
   });
 });

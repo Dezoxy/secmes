@@ -9,7 +9,16 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
-import { type Me, type UpdateProfile, MeSchema, UpdateProfileSchema } from '@argus/contracts';
+import {
+  type Me,
+  type UpdateProfile,
+  DISPLAY_NAME_ALLOWED,
+  DISPLAY_NAME_MAX,
+  DISPLAY_NAME_MIN,
+  DISPLAY_NAME_PATTERN,
+  MeSchema,
+  UpdateProfileSchema,
+} from '@argus/contracts';
 
 import { AllowUnbound } from '../auth/allow-unbound.decorator.js';
 import type { MaybeUnboundAuth, VerifiedAuth } from '../auth/auth.service.js';
@@ -23,9 +32,10 @@ import { UserService } from './user.service.js';
 class UpdateProfileBody {
   @ApiProperty({
     required: false,
-    description: 'new display name (1–64 chars, trimmed)',
-    minLength: 1,
-    maxLength: 64,
+    description: `new display name: ${DISPLAY_NAME_MIN}–${DISPLAY_NAME_MAX} chars after trimming; ${DISPLAY_NAME_ALLOWED} only`,
+    minLength: DISPLAY_NAME_MIN,
+    maxLength: DISPLAY_NAME_MAX,
+    pattern: DISPLAY_NAME_PATTERN,
   })
   displayName?: string;
 

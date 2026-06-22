@@ -127,14 +127,49 @@ export const ConversationMemberSchema = z.object({
 });
 export type ConversationMember = z.infer<typeof ConversationMemberSchema>;
 
+/** Names that must never be user-settable (compared case-insensitively). */
+const RESERVED_DISPLAY_NAMES = new Set(['breakglass-admin']);
+
+/**
+ * Display-name constraints, exported so the OpenAPI spec can advertise the EXACT same contract the
+ * server enforces (kept in lockstep with `displayNameSchema`). The pattern is a single character
+ * class with one `+` quantifier — linear, ReDoS-safe, and bounded by `DISPLAY_NAME_MAX`.
+ */
+export const DISPLAY_NAME_PATTERN = "^[A-Za-z0-9 ._'-]+$";
+export const DISPLAY_NAME_MIN = 2;
+export const DISPLAY_NAME_MAX = 32;
+/** Human-readable description of the allow-list — shared by the regex error message and the UI hint. */
+export const DISPLAY_NAME_ALLOWED = "letters, numbers, spaces, and . _ - '";
+
+/**
+ * Hardened display-name policy, shared by the web form and the API (single source of truth).
+ *
+ * After trimming and collapsing internal whitespace runs to a single space, the value must be
+ * 2–32 characters drawn from a strict Latin allow-list: letters `A–Za–z`, digits `0–9`, space,
+ * and `. _ - '`. That allow-list inherently rejects control characters, zero-width characters,
+ * bidirectional overrides (RTL "Trojan" text), Unicode separators, emoji, and combining-mark
+ * (Zalgo) spam — so a name cannot be used to hide content, spoof, or impersonate. Reserved
+ * sentinels (e.g. the breakglass admin) are blocked too.
+ */
+export const displayNameSchema = z
+  .string()
+  .trim()
+  // Collapse runs of plain spaces only — newlines/tabs/other whitespace are left intact so the
+  // allow-list below rejects them rather than silently turning them into a space.
+  .transform((v) => v.replace(/ +/g, ' '))
+  .pipe(
+    z
+      .string()
+      .min(DISPLAY_NAME_MIN, `display name must be at least ${DISPLAY_NAME_MIN} characters`)
+      .max(DISPLAY_NAME_MAX, `display name must be at most ${DISPLAY_NAME_MAX} characters`)
+      .regex(new RegExp(DISPLAY_NAME_PATTERN), `display name may use ${DISPLAY_NAME_ALLOWED} only`)
+      .refine((v) => !RESERVED_DISPLAY_NAMES.has(v.toLowerCase()), {
+        message: 'reserved display name',
+      }),
+  );
+
 export const UpdateProfileSchema = z.object({
-  displayName: z
-    .string()
-    .trim()
-    .min(1)
-    .max(64)
-    .refine((v) => v !== 'breakglass-admin', { message: 'reserved display name' })
-    .optional(),
+  displayName: displayNameSchema.optional(),
   avatarSeed: z.string().min(1).max(64).optional(),
 });
 export type UpdateProfile = z.infer<typeof UpdateProfileSchema>;
@@ -302,6 +337,13 @@ export const FetchedMessageSchema = z.object({
   epoch: z.number().int().nonnegative(),
   attachmentObjectKey: objectKey.nullable(),
   createdAt: z.string().datetime(),
+  /**
+   * Opaque keyset position for THIS message — echo it as `after` to resume strictly after it. Prune-safe:
+   * it carries the `(created_at, id)` directly, so the server can still locate "rows newer than here" even
+   * after this message is deleted (a bare id can no longer be resolved once pruned). Optional: absent on
+   * the live WS push (not paginated) and on responses from servers predating this field; treat as opaque.
+   */
+  cursor: z.string().min(1).max(256).optional(),
 });
 export type FetchedMessage = z.infer<typeof FetchedMessageSchema>;
 
@@ -518,6 +560,16 @@ export type FetchedCommit = z.infer<typeof FetchedCommitSchema>;
 export const CommitPageSchema = z.array(FetchedCommitSchema);
 export type CommitPage = z.infer<typeof CommitPageSchema>;
 
+/**
+ * Response header on GET /conversations/:id/commits carrying the oldest commit epoch the server still
+ * retains for the conversation (metadata only — never the commit blob). A catching-up client compares it
+ * to its local epoch: `oldestRetainedEpoch > localEpoch` means the commit it needs has been pruned/lost
+ * and will never arrive (a genuine sync-lost gap, not a transient stall). Delivered as a header — not a
+ * body field — so stale PWAs that validate the body as `CommitPageSchema` (a bare array) keep working.
+ * Single source of truth shared by the API (sets it) and the web client (reads it).
+ */
+export const OLDEST_RETAINED_EPOCH_HEADER = 'X-Oldest-Retained-Epoch';
+
 // The `commit` WS frame the gateway pushes when a commit wins its epoch slot. Metadata only —
 // the commit ciphertext is NOT included; clients fetch it via GET /commits?afterEpoch=N.
 export const CommitEventSchema = z.object({
@@ -528,6 +580,27 @@ export const CommitEventSchema = z.object({
   createdAt: z.string().datetime(),
 });
 export type CommitEvent = z.infer<typeof CommitEventSchema>;
+
+// The `message` WS frame the gateway pushes when a stored message is fanned out to a subscribed
+// socket. Metadata + the opaque envelope only — the ciphertext rides inside `message` (FetchedMessage),
+// never decrypted by the server.
+//
+// `deliverySeq` / `deliveryPrevSeq` are an EPHEMERAL, per-(socket, conversation) TRANSPORT counter the
+// gateway stamps at fan-out (1, 2, 3, … for the frames it actually sends THAT socket) so the client can
+// notice a dropped or reordered frame and self-heal by re-fetching over the existing message backfill.
+// They are NOT the MLS `epoch` and NOT the MLS ratchet generation, and carry NO cryptographic guarantee:
+// a gap merely TRIGGERS a re-fetch — it never gates decryption, ordering, or dedup (those remain MLS +
+// the durable (created_at, id) cursor + dedup-by-id). Both are optional for backward compatibility — an
+// old server omits them (gap-detection simply unavailable) and an old client ignores them.
+export const MessageEventSchema = z.object({
+  conversationId: z.string().uuid(),
+  message: FetchedMessageSchema,
+  /** This socket+conversation's transport delivery counter; 1-based, +1 per fanned-out frame. Not the MLS epoch/generation. */
+  deliverySeq: z.number().int().positive().optional(),
+  /** The deliverySeq of the immediately-preceding frame on this socket+conversation; null on the first frame. */
+  deliveryPrevSeq: z.number().int().positive().nullable().optional(),
+});
+export type MessageEvent = z.infer<typeof MessageEventSchema>;
 
 // ── Admin-minted invite / registration codes ────────────────────────────────
 

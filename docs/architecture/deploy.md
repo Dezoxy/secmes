@@ -83,7 +83,7 @@ secret set (Managed Identity → `/run/argus/secrets`) → `docker login ghcr.io
 the images → **`cosign verify`s** each (against this repo's `cd.yml` OIDC identity) and rolls out **by
 digest** → brings up Postgres/Redis → runs **DB migrations as the owner** (file-mounted DSN, then `shred`-ed)
 **before** the api serves → brings up `api` + `caddy` + `cloudflared`. Idempotent + fail-closed.
-Threat model: [`docs/threat-models/vm-cd.md`](threat-models/vm-cd.md).
+Threat model: [`docs/threat-models/vm-cd.md`](../threat-models/vm-cd.md).
 
 **Repo vars/secrets** (from the Terraform outputs): secrets `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/
 `AZURE_SUBSCRIPTION_ID`; vars `AZURE_RESOURCE_GROUP`/`AZURE_VM_NAME`/`KEY_VAULT_NAME`; the api's non-secret
@@ -109,7 +109,7 @@ hostnames are configured in the Cloudflare Zero Trust dashboard, not in this rep
 
 The breakglass admin login is **not** on the public landing page. It lives at `https://4rgus.com/admin`, and
 the admin/breakglass API (`/api/auth/breakglass/*`, `/api/admin/*`) is reachable **only** through Cloudflare
-Access. Two layers enforce this (see [`docs/threat-models/admin-access-gating.md`](threat-models/admin-access-gating.md)):
+Access. Two layers enforce this (see [`docs/threat-models/admin-access-gating.md`](../threat-models/admin-access-gating.md)):
 
 1. **Edge (Caddy):** `infra/stack/caddy/Caddyfile` returns **404** for those paths unless the request carries
    the `Cf-Access-Jwt-Assertion` header that cloudflared injects after a request passes Access (and strips if a
@@ -131,7 +131,7 @@ Access. Two layers enforce this (see [`docs/threat-models/admin-access-gating.md
 
 No new tunnel hostname is needed (`4rgus.com → caddy:8080` already exists), and **no secret** is introduced.
 Recovery-of-last-resort if Access is unavailable stays the **direct-DB owner runbook** in
-[`breakglass-admin.md`](threat-models/breakglass-admin.md) — there is deliberately no "skip Access" bypass.
+[`breakglass-admin.md`](../threat-models/breakglass-admin.md) — there is deliberately no "skip Access" bypass.
 
 > **Load-bearing defaults / arming.** Keep the Access app's default behaviour of **stripping client-supplied
 > `Cf-Access-*` headers** — the Caddy 404 gate trusts that cloudflared only ever forwards a header it injected.
@@ -146,7 +146,7 @@ No secret values live in the repo. `argus-secrets.service` fetches them from Azu
 Managed Identity into `/run/argus/secrets/` (tmpfs, `0444` root files inside a `0700` root dir — `0444` so the
 non-root container users can read the bind-mounted Compose secrets, since Docker does not remap the file owner
 on Linux; the `0700` dir is the confinement boundary) at boot — see
-[`infra/stack/secrets/`](../infra/stack/secrets/README.md). The stack consumes them as **mounted credential files**
+[`infra/stack/secrets/`](../../infra/stack/secrets/README.md). The stack consumes them as **mounted credential files**
 (Docker secrets at `/run/secrets/*`), which the app reads via `*_FILE` env vars (invariant #5 — never the
 value in env). Compose's secret sources point at `${ARGUS_SECRETS_DIR}` (`/run/argus/secrets` in prod,
 `./secrets` in local dev):
@@ -175,7 +175,7 @@ injected from the delivered Key Vault files by `deploy.sh` on `up` (`environment
 on-disk env file. Invariant #5 permits a runtime-fetched value alongside a mounted file.
 
 Set the actual values in Key Vault once (the `az keyvault secret set` commands + the full name→file→consumer
-table are in [`infra/stack/secrets/README.md`](../infra/stack/secrets/README.md)). Non-secret config (B2
+table are in [`infra/stack/secrets/README.md`](../../infra/stack/secrets/README.md)). Non-secret config (B2
 endpoint/region/bucket + access-key-**id**, the API's OIDC issuer/audience, the PWA's build-time
 `VITE_OIDC_*`, image tags) is in `.env.prod.example` — copy it into the deploy environment. The `secrets/`
 directory (local dev) is gitignored; nothing is committed or baked into an image.

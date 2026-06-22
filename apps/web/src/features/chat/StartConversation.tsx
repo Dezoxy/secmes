@@ -11,7 +11,16 @@ import {
 import { dicebearAvatar } from '../../lib/dicebear';
 import { contactDisplayName } from './user-label';
 import { VerifySecurity } from './VerifySecurity';
-import { Avatar, EmptyState, ErrorState, IconButton, LoadingState, Modal } from '../ui';
+import {
+  Avatar,
+  EmptyState,
+  ErrorState,
+  IconButton,
+  LoadingState,
+  Modal,
+  modalBackdropEnterMotion,
+  modalPanelEnterMotion,
+} from '../ui';
 import { toSafeUiError, type SafeUiError } from '../../lib/safe-ui-error';
 
 interface StartConversationProps {
@@ -196,8 +205,8 @@ export function StartConversation({
       ariaLabel="New conversation"
       onClose={onClose}
       closeOnBackdrop
-      className="items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
-      contentClassName={CARD}
+      className={`items-center justify-center bg-black/40 p-4 backdrop-blur-md ${modalBackdropEnterMotion}`}
+      contentClassName={`${CARD} ${modalPanelEnterMotion}`}
     >
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">

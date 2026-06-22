@@ -1,6 +1,6 @@
 # Frontend Upgrade Implementation Plan (`apps/web`)
 
-> **Status:** all 14 steps + F1–F6 follow-ups are **complete** and merged (PRs #87–#146). This document stays the **canonical detail + standing rules** for `apps/web`; it is anchored in the roadmap as checkpoint **`#44a`** (`docs/roadmap.md`, Phase 5). Update both together.
+> **Status:** all 14 steps + F1–F6 follow-ups are **complete** and merged (PRs #87–#146). This document stays the **canonical detail + standing rules** for `apps/web`; it is anchored in the roadmap as checkpoint **`#44a`** (`docs/planning/roadmap/README.md`, Phase 5). Update both together.
 
 > **For agentic workers:** Implement this plan task-by-task using the repo's agent instructions and the tools available in your environment. Steps use checkbox (`- [ ]`) syntax for tracking. Keep each task in its own commit unless the user asks to batch changes.
 
@@ -138,7 +138,7 @@ Embedded surface ownership before refactoring:
 
 **Files:**
 
-- Modify: `docs/frontend-plan.md`
+- Modify: `docs/planning/frontend-plan.md`
 - Inspect: `apps/web/src/App.tsx`
 - Inspect: `apps/web/src/features/chat/ChatScreen.tsx`
 - Inspect: `apps/web/src/features/settings/SettingsPanel.tsx`
@@ -151,7 +151,7 @@ Embedded surface ownership before refactoring:
 **Verification:**
 
 ```bash
-git diff -- docs/frontend-plan.md
+git diff -- docs/planning/frontend-plan.md
 ```
 
 Expected: documentation-only diff.
@@ -159,7 +159,7 @@ Expected: documentation-only diff.
 **Commit:**
 
 ```bash
-git add docs/frontend-plan.md
+git add docs/planning/frontend-plan.md
 git commit -m "docs: update frontend upgrade plan"
 ```
 
@@ -172,7 +172,7 @@ git commit -m "docs: update frontend upgrade plan"
 - Modify: `package.json`
 - Create: `scripts/frontend-pr-gate.sh`
 - Create: `scripts/fetch-pr-review-threads.py`
-- Modify: `docs/frontend-plan.md`
+- Modify: `docs/planning/frontend-plan.md`
 
 - [x] Add root script `frontend:verify`.
 - [x] If `apps/web` already has `test:e2e`, include it in `frontend:verify`; otherwise print a clear skip message until Step 3 adds it.
@@ -198,7 +198,7 @@ Expected: `frontend:verify` runs available checks, shell script passes ShellChec
 **Commit:**
 
 ```bash
-git add package.json scripts/frontend-pr-gate.sh scripts/fetch-pr-review-threads.py docs/frontend-plan.md
+git add package.json scripts/frontend-pr-gate.sh scripts/fetch-pr-review-threads.py docs/planning/frontend-plan.md
 git commit -m "chore: automate frontend pr gate"
 ```
 
@@ -537,7 +537,7 @@ Expected: tests cover missing record, invalid JSON, version mismatch, quota fail
 **Commit:**
 
 ```bash
-git add apps/web/src/lib/persistence.ts apps/web/src/lib/persistence.spec.ts apps/web/src/features/settings docs/frontend-plan.md
+git add apps/web/src/lib/persistence.ts apps/web/src/lib/persistence.spec.ts apps/web/src/features/settings docs/planning/frontend-plan.md
 git commit -m "feat(web): add versioned browser persistence"
 ```
 
@@ -662,7 +662,7 @@ Expected: tests, typecheck, and production build pass.
 **Commit:**
 
 ```bash
-git add apps/web/vite.config.ts apps/web/src/lib/pwa-cache-policy.ts apps/web/src/lib/pwa-cache-policy.spec.ts docs/frontend-plan.md
+git add apps/web/vite.config.ts apps/web/src/lib/pwa-cache-policy.ts apps/web/src/lib/pwa-cache-policy.spec.ts docs/planning/frontend-plan.md
 git commit -m "feat(web): restrict pwa caching"
 ```
 
@@ -689,7 +689,7 @@ pnpm --filter @argus/web typecheck
 **Commit:**
 
 ```bash
-git add apps/web/src/lib/telemetry.ts apps/web/src/lib/telemetry.spec.ts docs/frontend-plan.md
+git add apps/web/src/lib/telemetry.ts apps/web/src/lib/telemetry.spec.ts docs/planning/frontend-plan.md
 git commit -m "feat(web): add privacy-safe telemetry boundary"
 ```
 
@@ -717,7 +717,7 @@ pnpm --filter @argus/web build
 **Commit:**
 
 ```bash
-git add apps/web/vite.config.ts docs/threat-models/frontend-observability.md docs/frontend-plan.md
+git add apps/web/vite.config.ts docs/threat-models/frontend-observability.md docs/planning/frontend-plan.md
 git commit -m "docs(web): document frontend hosting safety"
 ```
 

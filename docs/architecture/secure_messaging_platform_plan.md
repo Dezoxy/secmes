@@ -1,6 +1,6 @@
 # Secure Messaging Platform — Architecture Plan v2
 
-> Supersedes [`aws_secure_internal_messaging_architecture_plan.md`](archive/aws_secure_internal_messaging_architecture_plan.md) (kept in `docs/archive/` as history / north-star).
+> Supersedes [`aws_secure_internal_messaging_architecture_plan.md`](../archive/aws_secure_internal_messaging_architecture_plan.md) (kept in `docs/archive/` as history / north-star).
 > This version reflects the decisions made: PWA-only, true E2EE (single device in v1), multi-tenant SaaS sold to other companies, privacy-first, EU-hosted. _(The original **Kubernetes learning goal** was dropped 2026-06 — see the banner.)_
 >
 > **⚠️ Composition update (2026-06 — supersedes the AKS / managed-data sections below):** Kubernetes/AKS was **dropped** as solo-dev overhead, and so were the **Azure managed data services** (managed Postgres / Cache). The deploy target is now a **single Azure VM** running **self-hosted Postgres + Redis + Zitadel** via Docker Compose; attachment blobs live on **Backblaze B2** (S3-compatible, EU `eu-central-003`, private buckets; MinIO locally); DB backups on a separate private EU B2 bucket; secrets in **Azure Key Vault**, fetched by the VM's **Managed Identity** and delivered as credential files (never env at rest). **Azure stays** (the VM + Key Vault + Entra). The detailed AKS / Helm / Argo CD / managed-data sections below are **legacy** — read them as history. Canonical: `AGENTS.md` → _Stack & conventions_.
@@ -362,7 +362,7 @@ Self-hosting the data services on one VM is far cheaper than managed Azure data 
 
 ## 17. Phased Delivery
 
-> This is an earlier, looser cut. `docs/roadmap.md` is **canonical** for phasing — defer to it when they disagree.
+> This is an earlier, looser cut. `docs/planning/roadmap/README.md` is **canonical** for phasing — defer to it when they disagree.
 
 **Phase 0 — VM & pipeline**
 The Azure VM via Terraform (`infra/azure/`), Managed Identity → Key Vault, NSG deny-inbound, Cloudflare Tunnel ingress + Caddy reverse proxy, CD via `az vm run-command`, migrate-on-deploy, a "hello world" `api` live end-to-end. *Prove the pipeline before the bulk of the app logic.*

@@ -3,7 +3,7 @@
 Privacy-first, end-to-end-encrypted messaging platform delivered as an installable PWA.
 The server is **crypto-blind**: it stores ciphertext + metadata only.
 
-Architecture: [`docs/secure_messaging_platform_plan.md`](docs/secure_messaging_platform_plan.md). Phasing & checkpoint status: [`docs/roadmap.md`](docs/roadmap.md).
+Architecture: [`docs/architecture/secure_messaging_platform_plan.md`](docs/architecture/secure_messaging_platform_plan.md). Phasing & checkpoint status: [`docs/planning/roadmap/README.md`](docs/planning/roadmap/README.md).
 
 > **Deployment (2026-06):** the target is a **single Azure VM** (EU, `germanywestcentral`) running the
 > stack via **Docker Compose** — self-hosted **Postgres + Redis** plus API + web + Caddy +
@@ -42,13 +42,13 @@ infra/
   backup/ cleanup/ notify/   # systemd workers — nightly DB backup, attachment expiry, failure alerts
 .github/workflows/     # CI (build/test); security (Semgrep/Checkov/gitleaks/CodeQL/DAST/42Crunch); CD (gated)
 compose.yaml           # dev stack (Postgres, Redis, MinIO, api)
-compose.prod.yaml      # prod stack (+ web, Caddy, cloudflared, observability) — see docs/deploy.md
+compose.prod.yaml      # prod stack (+ web, Caddy, cloudflared, observability) — see docs/architecture/deploy.md
 ```
 
 ## Status: feature-complete, awaiting deploy arming
 
 The application is built end-to-end (Phases 0–7 plus group chat and multi-device sync — see
-[`docs/roadmap.md`](docs/roadmap.md)). What remains is **operational**, not feature work:
+[`docs/planning/roadmap/README.md`](docs/planning/roadmap/README.md)). What remains is **operational**, not feature work:
 
 - the **one-time Azure arming** of the gated deploy pipeline — the Terraform, the prod Compose stack +
   ingress, the Key Vault secret delivery, and the full build/scan/sign → GHCR → `az vm run-command`
@@ -68,7 +68,7 @@ pnpm --filter @argus/web dev     # the PWA on http://localhost:5173
 pnpm test
 ```
 
-Local passkey auth + demo-mode dev flow: [`docs/local-auth.md`](docs/local-auth.md) · [`docs/local-dev.md`](docs/local-dev.md).
+Local passkey auth + demo-mode dev flow: [`docs/operations/local-auth.md`](docs/operations/local-auth.md) · [`docs/operations/local-dev.md`](docs/operations/local-dev.md).
 
 ### Provision (when you have an Azure subscription)
 

@@ -113,7 +113,12 @@ export interface DecryptedMessage {
 /** Decrypted peer messages from a backfill, plus the high-water cursor to resume from next time. */
 export interface BackfillResult {
   messages: DecryptedMessage[];
-  /** The last server message id observed (pass as `after` next time to fetch only newer rows). */
+  /**
+   * Opaque keyset cursor of the last observed message (pass as `after` next time to fetch only newer rows).
+   * Prune-safe: it carries the message's (created_at, id), so it still resolves "newer than here" even if
+   * that message is later reaped by retention. Falls back to the bare id only against a server too old to
+   * stamp per-message cursors.
+   */
   cursor: string | undefined;
   /**
    * Set to the epoch of the first un-decryptable message when the backfill stopped early because a
@@ -159,7 +164,9 @@ export async function backfillConversation(
           nextEpoch = m.epoch;
           break;
         }
-        cursor = m.id; // high-water mark — advance past everything at the current epoch
+        // High-water mark — advance past everything at the current epoch. Prefer the server's prune-safe
+        // per-message cursor; fall back to the bare id only against a server predating that field.
+        cursor = m.cursor ?? m.id;
         if (m.senderUserId === selfUserId) continue; // can't decrypt our own; shown via local echo
         try {
           const plaintext = await conversation.decrypt(fromBase64(m.ciphertext));
@@ -185,8 +192,10 @@ export async function backfillConversation(
           );
         }
       }
-      if (nextEpoch !== undefined || !res.nextCursor || res.messages.length === 0) break;
-      cursor = res.nextCursor;
+      // Stop on an epoch gap (caller must drain commits first) or a non-full page (caught up — a partial
+      // page means no more rows). The per-message assignment above already advanced `cursor` to the last
+      // message's prune-safe token, so there is no separate page cursor to take.
+      if (nextEpoch !== undefined || res.messages.length < FETCH_PAGE) break;
     }
 
     if (advanced) {
@@ -254,6 +263,28 @@ export async function receiveLiveMessage(
 // via `conversation.processCommit`, which advances the ratchet and persists the new state immediately
 // via the keystore persister (built outside the conversation's op queue to avoid re-entering it).
 
+/** Why a commit drain stopped — lets the caller tell a recoverable stall from a genuine epoch gap. */
+export type CommitDrainStopReason =
+  | 'caught-up' // ran out of commits (a non-full page) — the group is current
+  | 'unprocessable' // hit a commit that wouldn't apply (the one before it is gone/missing)
+  | 'capped' // stopped at the maxEpoch ceiling (forward-secrecy guard), more commits remain
+  | 'stale'; // the event epoch was already behind the local epoch — nothing to drain
+
+/** The outcome of a commit drain — fuels the client's transient-stall vs. sync-lost decision (5b). */
+export interface CommitDrainResult {
+  /** True if at least one commit applied (the local epoch advanced) during this drain. */
+  advanced: boolean;
+  /** Why the drain stopped. */
+  stoppedReason: CommitDrainStopReason;
+  /**
+   * The server's oldest still-retained commit epoch for the whole conversation (the 5a
+   * `X-Oldest-Retained-Epoch` header), from the last commit fetch — or `null` when the server reported
+   * none (no commit rows, or a server too old to send it). A drain that can't advance is a genuine gap
+   * (recovery needed) when this is past the local epoch, and a transient stall (retry) otherwise.
+   */
+  oldestRetainedEpoch: number | null;
+}
+
 /**
  * Fetch and apply commits after `afterEpoch` under the conversation lock, in epoch-ascending order.
  * Stops at the first unprocessable commit (subsequent epochs are unreachable without it).
@@ -262,6 +293,10 @@ export async function receiveLiveMessage(
  * to advance the MLS ratchet to exactly the epoch needed to decrypt the next queued message — never
  * beyond it — so intermediate messages remain decryptable (MLS forward secrecy removes those keys
  * once the epoch is surpassed).
+ *
+ * Returns a {@link CommitDrainResult} describing whether the epoch advanced, why it stopped, and the
+ * server's oldest retained commit epoch — so a caller stuck behind a pruned commit can detect the gap
+ * (sync-lost) instead of retrying forever.
  */
 export async function drainCommits(
   deps: MessagingDeps,
@@ -269,7 +304,7 @@ export async function drainCommits(
   conversation: Conversation,
   afterEpoch: number,
   maxEpoch?: number,
-): Promise<void> {
+): Promise<CommitDrainResult> {
   return withLock(conversationLock(conversationId), async () => {
     const persister = deps.keystore.makeConversationPersister(
       deps.device,
@@ -278,16 +313,24 @@ export async function drainCommits(
     );
     const LIMIT = 50;
     let cursor = afterEpoch;
+    let advanced = false;
+    // The whole-conversation min(epoch); stable across pages, so the last fetch's value is authoritative.
+    // No initializer: the `for (;;)` body always runs and assigns it before any read or exit (break).
+    let oldestRetainedEpoch: number | null;
     for (;;) {
-      const commits = await listCommits(conversationId, { afterEpoch: cursor, limit: LIMIT });
-      for (const c of commits) {
+      const page = await listCommits(conversationId, { afterEpoch: cursor, limit: LIMIT });
+      oldestRetainedEpoch = page.oldestRetainedEpoch;
+      for (const c of page.commits) {
         // Stop BEFORE the commit that would advance the group past maxEpoch. A commit stored with
         // epoch N takes the group from N → N+1, so to decrypt a message at epoch maxEpoch the group
         // must be at maxEpoch — meaning only commits with epoch < maxEpoch should be applied.
-        if (maxEpoch !== undefined && c.epoch >= maxEpoch) return;
+        if (maxEpoch !== undefined && c.epoch >= maxEpoch) {
+          return { advanced, stoppedReason: 'capped', oldestRetainedEpoch };
+        }
         try {
           await conversation.processCommit(fromBase64(c.commit), persister);
           cursor = c.epoch; // advance past this commit so the next page starts here
+          advanced = true;
         } catch (err) {
           // Subsequent epochs can't be processed without this one — bail out entirely.
           // eslint-disable-next-line no-console
@@ -298,11 +341,12 @@ export async function drainCommits(
             c.epoch,
             err instanceof Error ? err.message : err,
           );
-          return;
+          return { advanced, stoppedReason: 'unprocessable', oldestRetainedEpoch };
         }
       }
-      if (commits.length < LIMIT) break; // last page — no more commits to fetch
+      if (page.commits.length < LIMIT) break; // last page — no more commits to fetch
     }
+    return { advanced, stoppedReason: 'caught-up', oldestRetainedEpoch };
   });
 }
 
@@ -312,6 +356,9 @@ export async function drainCommits(
  *
  * `maxEpoch` — passed through to `drainCommits`; callers on the message path should set this to
  * the message's epoch so the ratchet stops exactly there, keeping intermediate messages decryptable.
+ *
+ * Returns the underlying {@link CommitDrainResult} (a `stale` result with no advance for an
+ * already-behind event) so callers can detect a sync-lost gap.
  */
 export async function processCommitEvent(
   deps: MessagingDeps,
@@ -319,11 +366,14 @@ export async function processCommitEvent(
   conversation: Conversation,
   event: { epoch: number },
   maxEpoch?: number,
-): Promise<void> {
+): Promise<CommitDrainResult> {
   const convEpoch = conversation.epoch;
-  if (event.epoch < convEpoch) return; // stale — already at a later epoch
+  if (event.epoch < convEpoch) {
+    // stale — already at a later epoch; nothing to drain (and no fresh oldest-epoch read).
+    return { advanced: false, stoppedReason: 'stale', oldestRetainedEpoch: null };
+  }
   // afterEpoch = convEpoch - 1 → returns commits with epoch > (convEpoch-1), i.e. epoch >= convEpoch.
   // No floor at 0: a group at epoch 0 passes -1 so the server returns epoch-0 commits too.
   const afterEpoch = convEpoch - 1;
-  await drainCommits(deps, conversationId, conversation, afterEpoch, maxEpoch);
+  return drainCommits(deps, conversationId, conversation, afterEpoch, maxEpoch);
 }
