@@ -37,6 +37,10 @@ test('the route shell back button falls back to chat on a deep link with no in-a
   await page.goto('/settings');
   await page.getByRole('button', { name: 'Go back' }).click();
   await expect(page).toHaveURL(/\/chat$/);
+
+  // The fallback replaces the deep-link entry, so browser Back must not bounce back into /settings.
+  await page.goBack();
+  await expect(page).not.toHaveURL(/\/settings/);
 });
 
 test('/transparency renders the public security page without auth', async ({ page }) => {

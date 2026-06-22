@@ -51,7 +51,9 @@ export function RoutePageShell({
     if (location.key !== 'default') {
       navigate(-1);
     } else {
-      navigate('/chat');
+      // No in-app history: replace (don't push) this deep-link entry, otherwise the browser/system Back
+      // button from /chat would bounce the user straight back into this guarded route.
+      navigate('/chat', { replace: true });
     }
   }, [location.key, navigate]);
 
