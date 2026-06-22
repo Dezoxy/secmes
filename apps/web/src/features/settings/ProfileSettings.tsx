@@ -104,7 +104,6 @@ export function ProfileSettings({
         </div>
       </div>
 
-      <p className="text-xs text-white/60">Changes save automatically on this device.</p>
       {profileError && (
         <ErrorState
           error={createSafeUiError({ title: 'Profile not saved', message: profileError })}
