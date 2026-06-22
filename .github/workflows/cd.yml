@@ -63,6 +63,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Registry cache export (cache-to type=registry,mode=max below) is only supported on the
+      # docker-container driver, which this sets up. Without it buildx uses the default docker driver and
+      # fails: "Cache export is not supported for the docker driver."
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
       # Generate the About changelog from git tags + commits (ingress bakes the PWA). Runs here in the runner
       # job because the Docker build context excludes .git; the emitted .ts then rides into the build context.
       - name: Generate About release notes
