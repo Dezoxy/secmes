@@ -394,6 +394,16 @@ export const conversations: Conversation[] = [
   },
 ];
 
+/**
+ * The conversation list to seed the UI with. The sample contacts/chats above are demo/E2E fixtures only:
+ * in demo mode they make the UI explorable without a backend, but a real (prod) build must start EMPTY so
+ * a freshly-registered user never sees fabricated conversations. `demo` is the build-time VITE_DEMO_MODE
+ * flag (never set in prod). See ChatScreen's initial state.
+ */
+export function initialConversationsForMode(demo: boolean): Conversation[] {
+  return demo ? conversations : [];
+}
+
 export function getConversationDisplayName(
   conversation: Conversation,
   currentUserId: string,

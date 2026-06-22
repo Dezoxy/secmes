@@ -21,6 +21,7 @@ import type { MessagingDeps } from '../../lib/messaging';
 import { getMlsSession } from '../../lib/mls';
 import { prefersReducedMotion } from '../../lib/pref';
 import { useAuth } from '../auth/AuthContext';
+import { demoMode } from '../../lib/auth';
 import { ArgusAppIcon } from '../brand/ArgusAppIcon';
 import { useDevice } from '../device/DeviceContext';
 import { usePwaUpdate } from '../pwa/PwaUpdateContext';
@@ -60,7 +61,7 @@ import type { Conversation, User } from './seed';
 import { loadPersistedPeerMapping, persistPeerMapping } from './peer-naming';
 import { dicebearAvatar, isCustomPhoto } from '../../lib/dicebear';
 import {
-  conversations as initialConversations,
+  initialConversationsForMode,
   currentUser,
   generatedAvatar,
   MAX_AVATAR_DATA_URI_LENGTH,
@@ -139,8 +140,13 @@ function SettingsPanelFallback({ onClose }: SettingsPanelFallbackProps) {
 
 export default function ChatScreen() {
   const [mounted, setMounted] = useState(false);
-  const [conversations, setConversations] = useState<Conversation[]>(initialConversations);
-  const [selectedId, setSelectedId] = useState<string | null>('conv-1');
+  // Demo seed (sample contacts + chats) is for demo mode / E2E only; real (prod) builds start empty so a
+  // freshly-registered user never sees fabricated conversations (initialConversationsForMode gates on the
+  // build-time VITE_DEMO_MODE flag, never set in prod). selectedId likewise only auto-selects a seed chat.
+  const [conversations, setConversations] = useState<Conversation[]>(() =>
+    initialConversationsForMode(demoMode),
+  );
+  const [selectedId, setSelectedId] = useState<string | null>(demoMode ? 'conv-1' : null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
   const [mobileThreadClosing, setMobileThreadClosing] = useState(false);
@@ -161,7 +167,7 @@ export default function ChatScreen() {
   const [peerKeyChangedConvId, setPeerKeyChangedConvId] = useState<string | null>(null);
 
   const { device, pool, deviceId, keystore, sessionKey } = useDevice();
-  const { profile, subjectId, demoMode } = useAuth();
+  const { profile, subjectId } = useAuth();
   const { updateReady, applyUpdate } = usePwaUpdate();
   const profileSubjectId = subjectId ?? DEMO_PROFILE_SUBJECT;
   const [anonymousProfile, setAnonymousProfile] = useState<AnonymousProfile>(() =>
@@ -237,7 +243,7 @@ export default function ChatScreen() {
     mergeIncoming,
     backfillInto,
     setConversations,
-    onEnrollmentPending: (id) => setPendingEnrollmentId(id),
+    onEnrollmentPending: useCallback((id: string) => setPendingEnrollmentId(id), []),
     onPeerKeyChanged: useCallback(
       (_peerUserId: string, conversationId: string, newNumbers: string[]) => {
         setNumbersByConv((prev) => ({ ...prev, [conversationId]: newNumbers[0] ?? '' }));
