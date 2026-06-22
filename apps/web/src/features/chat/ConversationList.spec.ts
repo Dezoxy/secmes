@@ -15,6 +15,7 @@ function renderConversationList(options?: {
   currentUserProfile?: User;
   updateReady?: boolean;
   friends?: Friend[];
+  onNewGroup?: () => void;
 }): string {
   return renderToStaticMarkup(
     createElement(ConversationList, {
@@ -25,6 +26,7 @@ function renderConversationList(options?: {
       updateReady: options?.updateReady,
       onApplyUpdate: () => undefined,
       friends: options?.friends,
+      onNewGroup: options?.onNewGroup,
     }),
   );
 }
@@ -41,6 +43,14 @@ describe('ConversationList', () => {
 
     expect(html).toContain('Friends');
     expect(html).toContain('accepted');
+  });
+
+  it('shows only the Group button — no separate 1:1 button (1:1 chats start from Friends)', () => {
+    const html = renderConversationList({ onNewGroup: () => undefined });
+
+    expect(html).toContain('Group');
+    expect(html).not.toContain('1:1');
+    expect(html).not.toContain('New Conversation');
   });
 
   it('shows the accepted-friend count from the friends prop', () => {

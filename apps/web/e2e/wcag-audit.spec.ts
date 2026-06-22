@@ -221,7 +221,7 @@ test.describe('@a11y Manual contrast verification (WCAG 1.4.3 — 4.5:1 AA)', ()
     await expect(page.getByRole('main', { name: 'Chat' })).toBeVisible();
 
     const ratio = await page.evaluate(() => {
-      // "New Conversation" button uses the primary Button component (bg-purple-500)
+      // the primary Button component uses bg-purple-500 (whichever primary button is on this view)
       const btn = document.querySelector('button.bg-purple-500') as HTMLElement | null;
       if (!btn) return null;
       const s = window.getComputedStyle(btn);
