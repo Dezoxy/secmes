@@ -25,7 +25,7 @@ The first deploy is a ~2 vCPU / 4 GiB box (`t3.medium` default; `c7i-flex.large`
 
 - `http_req_duration` **p95 < 1 s**
 - `http_req_failed` **< 1 %**
-- WS connect+auth success **> 99 %**
+- WS connect+auth+subscribe success **> 99 %**
 
 **Rate limits to stay under** (so the test measures capacity, not the throttler —
 [rate-limit.constants.ts](../../apps/api/src/rate-limit/rate-limit.constants.ts)): global **120 req/min per
@@ -71,10 +71,16 @@ const url = process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL; // o
 const keyFile = process.env.SESSION_SIGNING_KEY_FILE; // the SAME key the API loads — so tokens verify
 if (!url) { console.error('set DATABASE_URL (owner connection)'); process.exit(1); }
 if (!keyFile) { console.error('set SESSION_SIGNING_KEY_FILE (same key the API loads)'); process.exit(1); }
+// Loopback-only by DEFAULT. The at-scale run targets the ARMED load-test/staging DB (non-loopback), so allow an
+// explicit opt-in — LOADTEST_ALLOW_REMOTE=1 — but NEVER production (refused above) and never without the flag.
+const ALLOW_REMOTE = process.env.LOADTEST_ALLOW_REMOTE === '1';
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 let host: string;
 try { host = new URL(url).hostname; } catch { console.error('DATABASE_URL not a URL'); process.exit(1); }
-if (!LOOPBACK.has(host)) { console.error(`refusing non-local DB host: ${host}`); process.exit(1); }
+if (!LOOPBACK.has(host) && !ALLOW_REMOTE) {
+  console.error(`refusing non-local DB host: ${host} — set LOADTEST_ALLOW_REMOTE=1 for a dedicated load-test/staging DB (NEVER production)`);
+  process.exit(1);
+}
 
 // Load the same Ed25519 key the API loads (mirrors loadSessionKeys() in auth/session-key.config.ts).
 const signingKey = await importPKCS8((await readFile(keyFile, 'utf8')).trim(), 'EdDSA');
@@ -152,12 +158,15 @@ import { check, sleep } from 'k6';
 import { Rate } from 'k6/metrics';
 
 const BASE = __ENV.BASE_URL || 'http://localhost:3000';
+// The API serves routes at root (no app-level global prefix); only the public Cloudflare edge adds /api. Target
+// the API directly (default ''); set API_PREFIX=/api only if you point BASE_URL at the public edge.
+const API_PREFIX = __ENV.API_PREFIX || '';
 // Local default is plain ws (TLS terminates at the Cloudflare edge in prod). Override WS_HOST for the target;
 // set WS_SCHEME=wss (or pass a full WS_URL) for a TLS endpoint.
 const WS_URL = __ENV.WS_URL || `${__ENV.WS_SCHEME || 'ws'}://${__ENV.WS_HOST || 'localhost:3000'}/ws`;
 const TARGET = Number(__ENV.TARGET || 200);
 const tokens = JSON.parse(open('./loadtest-tokens.json'));   // produced by seed-loadtest.ts
-const wsOk = new Rate('ws_connect_ok');
+const wsOk = new Rate('ws_session_ok');
 
 export const options = {
   scenarios: {
@@ -173,7 +182,7 @@ export const options = {
   thresholds: {
     http_req_duration: ['p(95)<1000'], // SLO: p95 < 1s
     http_req_failed: ['rate<0.01'],    // SLO: errors < 1%
-    ws_connect_ok: ['rate>0.99'],      // SLO: connect+auth success > 99%
+    ws_session_ok: ['rate>0.99'],      // SLO: connect+auth+subscribe success > 99%
   },
 };
 
@@ -182,7 +191,7 @@ function pick() { return tokens[(__VU * 7 + __ITER) % tokens.length]; }
 // Authed, member-gated read: exercises the JWT guard + RLS-scoped DB query.
 export function rest() {
   const t = pick();
-  const r = http.get(`${BASE}/conversations/${t.conversationId}/messages?limit=50`, {
+  const r = http.get(`${BASE}${API_PREFIX}/conversations/${t.conversationId}/messages?limit=50`, {
     headers: { Authorization: `Bearer ${t.token}` },
   });
   check(r, { 'messages 200': (x) => x.status === 200 });
@@ -192,21 +201,20 @@ export function rest() {
 // Connect, authenticate (first frame), subscribe to the member conversation, hold briefly.
 export function realtime() {
   const t = pick();
-  let authed = false;
+  let subscribed = false;
   const res = ws.connect(WS_URL, {}, (socket) => {
     socket.on('open', () => socket.send(JSON.stringify({ event: 'auth', data: { token: t.token } })));
     socket.on('message', (raw) => {
       const f = JSON.parse(raw);
-      if (f.event === 'ready') {
-        authed = true;
-        socket.send(JSON.stringify({ event: 'subscribe', data: { conversationId: t.conversationId } }));
-      }
+      // `ready` (authed) -> send subscribe; `subscribed` -> the full session succeeded.
+      if (f.event === 'ready') socket.send(JSON.stringify({ event: 'subscribe', data: { conversationId: t.conversationId } }));
+      if (f.event === 'subscribed') subscribed = true;
     });
     socket.setTimeout(() => socket.close(), 5000); // hold the connection ~5s, then close
   });
-  // ws.connect blocks until the socket closes. Record success AND failure so the >0.99 threshold is meaningful —
-  // recording only successes would peg the rate at 100% and hide every failed connect/auth.
-  wsOk.add(authed);
+  // ws.connect blocks until the socket closes. Full session = connect + auth + subscribe (subscribe is sent only
+  // after `ready`). Record the whole chain — false on ANY failure (handshake, auth, or subscribe) — so >0.99 bites.
+  wsOk.add(subscribed);
   check(res, { 'ws handshake 101': (r) => r && r.status === 101 });
 }
 ```
@@ -240,7 +248,8 @@ crypto-blind. This is the natural addition for the at-scale run at arming.
 ## 5. Safety
 
 - **Dedicated load-test tenant only** (`…00ff`). Never run the seed or the test against a tenant with real user
-  data. The seed's loopback + `NODE_ENV` guards make a stray prod DSN refuse.
+  data. The seed refuses `NODE_ENV=production` outright; it is loopback-only unless you set
+  `LOADTEST_ALLOW_REMOTE=1`, which is **only** for a dedicated load-test/staging DB at arming — never production.
 - **Tokens are bearer credentials.** `apps/api/loadtest-tokens.json` and `apps/api/loadtest-signing.pem` are
   short-lived scratch files — keep them out of git (see [§7](#7-gitignore)) and **delete them after the run**
   (also remove `apps/api/seed-loadtest.ts` and `apps/api/messaging-load.js`). They are never logged.
