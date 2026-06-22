@@ -489,17 +489,33 @@ export class DeviceKeystore {
 
   /**
    * Track 4 slice 5c — durably mark `conversationId` as "sync-lost" (its MLS epoch can no longer
-   * advance). Mirrors `saveGroupCreatorId`: a read-modify-write of the existing GROUP_STORE record,
-   * idempotent and monotonic. No-op if the record is absent or bound to a different device. The flag is
-   * preserved across subsequent ratchet saves (see the persister) so an in-flight save can't drop it.
+   * advance). Idempotent, monotonic, device-scoped. No-op if the record is absent or bound to a
+   * different device.
+   *
+   * The read-modify-write runs INSIDE a single `readwrite` transaction (NOT the separate get/put of
+   * `saveGroupCreatorId`): unlike creatorId — set once at creation when nothing else writes — this is
+   * called at sync-lost DETECTION time, which races in-flight / cross-tab ratchet saves. A separate
+   * get-then-put could read the row, have a `saveConversationState` commit a newer `sealed`/`version`
+   * in between, then write the STALE record back just to add the flag — a ratchet rollback. IndexedDB
+   * serializes transactions on a store, so reading + writing within one tx flips the flag on the LATEST
+   * row, preserving its sealed state and version (which the persister then carries forward).
    */
   async markConversationSyncLost(device: DeviceKeys, conversationId: string): Promise<void> {
     const identity = deviceIdentity(device);
     const signaturePublicKey = deviceSignaturePublicKeyB64(device);
-    const rec = (await this.db.get(GROUP_STORE, conversationId)) as StoredGroupState | undefined;
-    if (!rec || rec.identity !== identity || rec.signaturePublicKey !== signaturePublicKey) return;
-    if (rec.syncLost) return; // already marked — avoid a redundant write
-    await this.db.put(GROUP_STORE, { ...rec, syncLost: true }, conversationId);
+    const tx = this.db.transaction(GROUP_STORE, 'readwrite');
+    const rec = (await tx.store.get(conversationId)) as StoredGroupState | undefined;
+    if (
+      rec &&
+      rec.identity === identity &&
+      rec.signaturePublicKey === signaturePublicKey &&
+      !rec.syncLost // already marked — skip the redundant write
+    ) {
+      // Keep the freshly-read sealed state + version; only add the flag. Same version, so the
+      // persister's in-memory CAS base stays valid (no false GroupStateConflict on the next save).
+      await tx.store.put({ ...rec, syncLost: true }, conversationId);
+    }
+    await tx.done;
   }
 
   /**

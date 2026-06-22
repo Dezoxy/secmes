@@ -403,9 +403,10 @@ describe('DeviceKeystore — sealed at rest under the passkey-PRF unlock key', (
     expect((await ks.loadConversations(device2, key)).size).toBe(0);
   });
 
-  it('markConversationSyncLost flags a conversation and the flag survives a later ratchet save (5c)', async () => {
-    // Track 4 slice 5c — the durable sync-lost marker must outlast an in-flight ratchet save (the same
-    // creatorId-preservation idiom), so the "out of sync" affordance survives a reload.
+  it('markConversationSyncLost flags a conversation, preserves the ratchet, and survives a later save (5c)', async () => {
+    // Track 4 slice 5c — the durable sync-lost marker must (a) outlast a later ratchet save (preserved
+    // like creatorId) AND (b) NOT roll back the ratchet itself: marking reads + writes the LATEST row in
+    // one transaction, so it never clobbers a newer sealed state with a stale read.
     const engine = await MlsEngine.create();
     const key = await unlockKey();
     const ks = await DeviceKeystore.open(engine);
@@ -417,13 +418,27 @@ describe('DeviceKeystore — sealed at rest under the passkey-PRF unlock key', (
 
     expect((await ks.getSyncLostConversationIds(device)).has('c1')).toBe(false);
 
+    // Advance the ratchet and persist the NEWER state, then mark sync-lost.
+    await peerConv.decrypt(await conv.encrypt('m1'));
+    await ks.saveConversationState(device, 'c1', conv, key);
     await ks.markConversationSyncLost(device, 'c1');
     expect((await ks.getSyncLostConversationIds(device)).has('c1')).toBe(true);
 
-    // A ratchet-advancing save that lands after detection (e.g. a queued receive) must NOT drop the flag.
-    await peerConv.decrypt(await conv.encrypt('m'));
-    await ks.saveConversationState(device, 'c1', conv, key);
-    expect((await ks.getSyncLostConversationIds(device)).has('c1')).toBe(true);
+    // No rollback: a fresh reload restores the ADVANCED ratchet — its next send is a generation the peer
+    // has not consumed, so the peer can still decrypt it. (A stale whole-record put would fail this.)
+    const reopened = await DeviceKeystore.open(engine);
+    const dev2 = await reopened.loadDevice('alice', key);
+    if (!dev2) throw new Error('expected a persisted device');
+    const restored = (await reopened.loadConversations(dev2, key)).get('c1');
+    if (!restored) throw new Error('expected a restored conversation');
+    expect(await peerConv.decrypt(await restored.encrypt('after'))).toBe('after');
+    // The flag also survives the rehydration round-trip.
+    expect((await reopened.getSyncLostConversationIds(dev2)).has('c1')).toBe(true);
+
+    // A ratchet-advancing save that lands after detection must also preserve the flag (persister carry).
+    await peerConv.decrypt(await restored.encrypt('m2'));
+    await reopened.saveConversationState(dev2, 'c1', restored, key);
+    expect((await reopened.getSyncLostConversationIds(dev2)).has('c1')).toBe(true);
   });
 
   it('message log: append → reload → history round-trips under the same unlock key', async () => {
