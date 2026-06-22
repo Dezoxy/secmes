@@ -123,13 +123,18 @@ export function generatedAvatar(name: string): string {
 
 const SAFE_RASTER_AVATAR_DATA_URI =
   /^data:image\/(?:png|jpe?g|webp|gif);base64,[a-z0-9+/]+={0,2}$/i;
+// Prefix of every app-generated avatar (dicebearAvatar + generatedAvatar) — a URL-encoded SVG data-URI.
+// Safe to render: avatars are shown via <img>, and SVG loaded through <img> cannot execute scripts; and
+// these SVGs are always built client-side from a seed/name — the server only ever supplies an opaque
+// avatarSeed string + displayName, never image markup. So no untrusted SVG can reach this gate.
+const APP_SVG_AVATAR_PREFIX = 'data:image/svg+xml,';
 export const MAX_AVATAR_DATA_URI_LENGTH = 120_000;
 
 export function safeAvatarSrc(src: string | undefined, fallbackName: string): string {
   const fallback = generatedAvatar(fallbackName);
   if (!src) return fallback;
-  if (src === fallback) return src;
   if (src.length > MAX_AVATAR_DATA_URI_LENGTH) return fallback;
+  if (src.startsWith(APP_SVG_AVATAR_PREFIX)) return src; // app-generated DiceBear / initials SVG
   return SAFE_RASTER_AVATAR_DATA_URI.test(src) ? src : fallback;
 }
 
