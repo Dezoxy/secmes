@@ -121,6 +121,13 @@ infra/retention/prune-…sh  →  NO DB password on the host. Assumes a least-pr
   UPDATE); retention deletes **whole rows** as the window-scoped prune role — neither grant widens the other.
 - **Metadata residual unchanged** — `metadata-exposure.md`'s row-count/volume leak is *reduced* by bounding
   growth, not eliminated.
+- **Sync-lost recovery is deferred to 5c-2; v1 only surfaces the state (slice 5c)** — a device stranded past
+  commit retention is detected, stops attempting the doomed ratchet, and shows an honest "out of sync" banner,
+  but v1 does **not** recover it: nothing produces a fresh Welcome for an already-rostered device without new
+  server state or the unbuilt MLS remove+add/PCS path (5c-2). So a sync-lost conversation stays surfaced but
+  stuck until it is re-established. This is the same accepted "offline > TTL / both sides offline" trade as the
+  first bullet, extended to the own-multi-device case. Aggressive commit pruning (5d/5e) would raise the rate of
+  this state — a further reason it stays deferred until 5c-2 lands.
 
 ## 7. Binding conditions for the code slices (from the sign-off)
 
@@ -170,10 +177,34 @@ pruning:
   gap now escalates to an `onSyncLost` callback and stops, instead of looping. **No content/keys involved** —
   `oldestRetainedEpoch` is metadata that never gates decryption or ordering. Client-only; no server/contract
   change. (Recovery action + UI are 5c.)
-- **5c:** on `sync-lost`, drive the re-add recovery via the existing member/Welcome path + a UI affordance.
+- **5c (UI affordance — implemented 2026-06-21):** a `security-architect` pass plus the Codex review found the
+  planned *recovery action* **unimplementable** in v1 without new server state or the unbuilt MLS remove+add
+  (PCS) path: `onSyncLost` fires only on the *stranded* device, no cross-device "stranded" signal exists (adding
+  one is the published-GroupInfo surface ruled out above), `conversation_members` is per-*user* so a live
+  sibling can't see a stale leaf, and **nothing produces a fresh Welcome for an already-rostered device**
+  (`enrollDevice` skips current members). Clearing durable state + re-driving the Welcome drain in v1 would be a
+  premature half-mechanism — it lists nothing, and the delete races a concurrent ratchet save (which would
+  recreate `GROUP_STORE` and make the eventual Welcome look already-owned). So **5c is the honest standalone
+  half: detect → stop → surface.** On `sync-lost`, `signalSyncLost` drops the doomed group from the in-memory
+  live set (the live paths stop attempting a ratchet that can't advance) and surfaces a "Conversation out of
+  sync" banner + suppresses the composer, with **no** promise of automatic reconnection. The state is **durably
+  marked** (a `syncLost` flag on the stored group state, mirroring `creatorId` — preserved across ratchet saves,
+  never a destructive delete): a reload re-surfaces the banner and keeps the stale group **out of the live set**,
+  so a refresh can't rehydrate it as live and let a stale-epoch send go out (undecryptable by peers).
+  Client-only; no server/crypto surface; `maxEpoch` discipline untouched.
+- **5c-2 (deferred) — the recovery mechanism:** the whole active recovery — clear the broken durable state and
+  re-add the device via the member/Welcome path so it re-joins **fresh** (full out-of-band safety-number
+  re-check, fresh one-time KeyPackage, no key reuse) — lands together here. It needs either new server state
+  (the cross-device "stranded" signal / published GroupInfo) or the MLS remove+add (PCS) path; un-defer with
+  group-chat GA (same trigger as the commit-prune slices). A removed device gains nothing even then — re-add is
+  a member-authorized add commit the server gates with `requireMembership`.
 
 **Deferred:** the actual commit pruning (the cond-3/4 boundary migration + worker) waits behind 5a–5c **and**
-group-chat GA — 1:1 conversations write zero commit rows, so pruning is premature at current scale.
+group-chat GA — 1:1 conversations write zero commit rows, so pruning is premature at current scale. Cond-5 is
+**met for the detection + surfacing gate** (5a–5c deliver the sync-lost signal, the spin-forever fix, and an
+honest UI), but the *recovery action* it ultimately gates is **deferred to 5c-2**: in v1 a sync-lost
+conversation stays surfaced-but-stuck until re-established. So aggressive commit pruning would park more
+conversations in that state until 5c-2 lands — another reason 5d/5e stay deferred.
 
 **Sign-off:** `security-architect` — **PASS_WITH_CONDITIONS** (conditions 1–3 above). `crypto-reviewer` —
 **PASS_WITH_CONDITIONS** (crypto-blind metadata-only prune path, DB-enforced never-current-epoch, welcomes

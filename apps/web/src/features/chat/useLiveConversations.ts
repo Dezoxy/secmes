@@ -137,10 +137,14 @@ interface UseLiveConversationsOptions {
    */
   onSafetyNumberResolved?: (conversationId: string, safetyNumber: string) => void;
   /**
-   * Track 4 slice 5b — called when a conversation is detected as "sync-lost": the commit needed to
+   * Track 4 slice 5b/5c — called when a conversation is detected as "sync-lost": the commit needed to
    * advance its MLS epoch has been pruned (or the device was offline beyond retention), so catch-up can
-   * never close the gap by retrying. The argument is the conversation id (metadata only). 5b only
-   * DETECTS and reports; recovery (re-add via Welcome) + the UI affordance land in 5c, which wires this.
+   * never close the gap by retrying. The argument is the conversation id (metadata only). This is the
+   * UI signal — the consumer (5c) stamps an "out of sync" affordance on the conversation. The hook also
+   * drops the doomed group from `liveGroups` so the live paths stop attempting it (see `signalSyncLost`).
+   * The actual RECOVERY (re-add the device via the member/Welcome path so it re-joins fresh) is slice
+   * 5c-2 — a stranded device can't re-add itself, and nothing produces a fresh Welcome for an
+   * already-rostered device today, so v1 surfaces the state rather than promising auto-recovery.
    */
   onSyncLost?: (conversationId: string) => void;
 }
@@ -448,6 +452,46 @@ export function useLiveConversations({
     setConnectionStatus('connecting');
     const deps = messagingDeps;
 
+    // Track 4 slice 5c — a conversation is sync-lost (the commit it needs to advance is gone). Drop the
+    // doomed group from liveGroups so the live paths stop attempting a ratchet that can never advance
+    // (the other fire sites then short-circuit on their `if (!group) return` guard — idempotent across
+    // all three), and signal the UI to surface the "out of sync" affordance. We deliberately do NOT
+    // clear durable group state or attempt a re-join here: a stranded device can't re-add itself, and
+    // nothing produces a fresh Welcome for an already-rostered device in v1 (enrollDevice skips a device
+    // already in the roster). That active recovery — re-add via the member/Welcome path so it re-joins
+    // fresh — is slice 5c-2. Keeping GROUP_STORE means a reload simply re-detects + re-surfaces (no
+    // vanished conversation), and there is no delete to race a concurrent ratchet save.
+    const signalSyncLost = (conversationId: string): void => {
+      // Drop the doomed group from BOTH the in-memory group map AND the live-id set, so every live-path
+      // consumer treats the conversation as no longer live: the catch-up / commit-drain / live-message
+      // handlers short-circuit on `if (!group) return`, and the liveIds-keyed paths
+      // (useReceiptSending, useChatState → selectedIsLive, useSelectedConversationBackfill) stop acting on
+      // it — no stray delivered/read receipt POSTs or backfills for a conversation that can't advance.
+      // Unlike onRemoved, we do NOT remove it from the conversation LIST: it stays visible with the "out
+      // of sync" banner.
+      liveGroups.current.delete(conversationId);
+      setLiveIds((prev) => {
+        if (!prev.has(conversationId)) return prev;
+        const next = new Set(prev);
+        next.delete(conversationId);
+        return next;
+      });
+      // Durably mark sync-lost so the affordance survives a reload: otherwise a refresh would rehydrate
+      // the stale group as live (banner gone, composer back) and a stale-epoch send would be
+      // undecryptable. Best-effort, id-only log; the flag is preserved across any in-flight ratchet save.
+      void deps.keystore
+        .markConversationSyncLost(deps.device, conversationId)
+        .catch((err: unknown) => {
+          // eslint-disable-next-line no-console
+          console.warn(
+            'mark sync-lost failed',
+            conversationId,
+            err instanceof Error ? err.message : err,
+          );
+        });
+      onSyncLost?.(conversationId);
+    };
+
     // Interleaved catch-up for one conversation: backfill at the current epoch, then — if messages at a
     // future epoch were seen — drain commits to EXACTLY that epoch (not beyond) and backfill again, until
     // no further epoch gaps. Preserves forward secrecy (epoch-N keys consumed only after all epoch-N
@@ -486,7 +530,7 @@ export function useLiveConversations({
           if (state === 'sync-lost') {
             // eslint-disable-next-line no-console
             console.warn('catch-up: conversation sync-lost (commit pruned)', conversationId);
-            onSyncLost?.(conversationId);
+            signalSyncLost(conversationId);
             break;
           }
           transientStalls += 1;
@@ -603,7 +647,7 @@ export function useLiveConversations({
               if (state === 'sync-lost') {
                 // eslint-disable-next-line no-console
                 console.warn('ws message: conversation sync-lost (commit pruned)', conversationId);
-                onSyncLost?.(conversationId);
+                signalSyncLost(conversationId);
                 return; // unreachable epoch — don't attempt an undecryptable read
               }
             }
@@ -688,7 +732,7 @@ export function useLiveConversations({
           if (state === 'sync-lost') {
             // eslint-disable-next-line no-console
             console.warn('commit drain: conversation sync-lost (commit pruned)', conversationId);
-            onSyncLost?.(conversationId);
+            signalSyncLost(conversationId);
           }
         })().catch((err: unknown) => {
           // eslint-disable-next-line no-console

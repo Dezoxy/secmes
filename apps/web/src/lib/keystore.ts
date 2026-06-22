@@ -111,6 +111,11 @@ interface StoredGroupState {
   /** The userId of the member who created this group — persisted by the creator only. Used to gate
    * "Add member" so the button survives page reload (in-memory creatorId is lost on unmount). */
   creatorId?: string;
+  /** Track 4 slice 5c — set once the conversation is detected "sync-lost" (its MLS epoch can no longer
+   * advance; the commit it needs was pruned). Durable so the "out of sync" affordance survives a reload
+   * and the stale group is not silently rehydrated as live (a stale-epoch send would be undecryptable).
+   * Monotonic in v1 (only set, never cleared) — clearing on a successful re-join is slice 5c-2. */
+  syncLost?: boolean;
 }
 
 /** One decrypted message in the local history log — PLAINTEXT, only ever stored SEALED (see StoredMessageLog). */
@@ -424,6 +429,9 @@ export class DeviceKeystore {
             version,
             // Preserve creatorId across ratchet saves (set once by confirmCreate; never cleared here).
             ...(current?.creatorId !== undefined ? { creatorId: current.creatorId } : {}),
+            // Preserve the sync-lost marker across any in-flight ratchet save (5c) — same idiom as
+            // creatorId, so a save that races detection can never silently drop the durable flag.
+            ...(current?.syncLost ? { syncLost: true } : {}),
           } satisfies StoredGroupState,
           conversationId,
         );
@@ -475,6 +483,54 @@ export class DeviceKeystore {
     for (const rec of recs) {
       if (rec.identity !== identity || rec.signaturePublicKey !== signaturePublicKey) continue;
       if (rec.creatorId) out.set(rec.conversationId, rec.creatorId);
+    }
+    return out;
+  }
+
+  /**
+   * Track 4 slice 5c — durably mark `conversationId` as "sync-lost" (its MLS epoch can no longer
+   * advance). Idempotent, monotonic, device-scoped. No-op if the record is absent or bound to a
+   * different device.
+   *
+   * The read-modify-write runs INSIDE a single `readwrite` transaction (NOT the separate get/put of
+   * `saveGroupCreatorId`): unlike creatorId — set once at creation when nothing else writes — this is
+   * called at sync-lost DETECTION time, which races in-flight / cross-tab ratchet saves. A separate
+   * get-then-put could read the row, have a `saveConversationState` commit a newer `sealed`/`version`
+   * in between, then write the STALE record back just to add the flag — a ratchet rollback. IndexedDB
+   * serializes transactions on a store, so reading + writing within one tx flips the flag on the LATEST
+   * row, preserving its sealed state and version (which the persister then carries forward).
+   */
+  async markConversationSyncLost(device: DeviceKeys, conversationId: string): Promise<void> {
+    const identity = deviceIdentity(device);
+    const signaturePublicKey = deviceSignaturePublicKeyB64(device);
+    const tx = this.db.transaction(GROUP_STORE, 'readwrite');
+    const rec = (await tx.store.get(conversationId)) as StoredGroupState | undefined;
+    if (
+      rec &&
+      rec.identity === identity &&
+      rec.signaturePublicKey === signaturePublicKey &&
+      !rec.syncLost // already marked — skip the redundant write
+    ) {
+      // Keep the freshly-read sealed state + version; only add the flag. Same version, so the
+      // persister's in-memory CAS base stays valid (no false GroupStateConflict on the next save).
+      await tx.store.put({ ...rec, syncLost: true }, conversationId);
+    }
+    await tx.done;
+  }
+
+  /**
+   * Track 4 slice 5c — the set of THIS device's conversations durably marked sync-lost. Read at
+   * rehydration so the "out of sync" affordance survives a reload and the stale group is not rehydrated
+   * as live (mirrors `getGroupCreatorIds`).
+   */
+  async getSyncLostConversationIds(device: DeviceKeys): Promise<Set<string>> {
+    const identity = deviceIdentity(device);
+    const signaturePublicKey = deviceSignaturePublicKeyB64(device);
+    const recs = (await this.db.getAll(GROUP_STORE)) as StoredGroupState[];
+    const out = new Set<string>();
+    for (const rec of recs) {
+      if (rec.identity !== identity || rec.signaturePublicKey !== signaturePublicKey) continue;
+      if (rec.syncLost) out.add(rec.conversationId);
     }
     return out;
   }

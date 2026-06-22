@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MessageCircle, X } from 'lucide-react';
+import { MessageCircle, Unplug, X } from 'lucide-react';
 import { safetyNumberFromMember } from '@argus/crypto';
 import type { UserLookupResult, Friend, FriendRequest } from '../../lib/api';
 import {
@@ -49,6 +49,7 @@ import {
   IconButton,
   Modal,
   ReconnectBanner,
+  StateBlock,
   conversationEnterMotion,
   modalBackdropEnterMotion,
   modalPanelEnterMotion,
@@ -255,6 +256,15 @@ export default function ChatScreen() {
     onSafetyNumberResolved: useCallback((conversationId: string, safetyNumber: string) => {
       setNumbersByConv((prev) => ({ ...prev, [conversationId]: safetyNumber }));
     }, []),
+    // Track 4 slice 5c — a conversation can no longer advance its MLS epoch (the commit it needs was
+    // pruned / offline beyond retention). Stamp an "out of sync" affordance; the hook has already dropped
+    // the doomed group from liveGroups so the live paths stop attempting it. Re-establishing the
+    // conversation (re-add via the member/Welcome path) is slice 5c-2 — v1 surfaces the state.
+    onSyncLost: useCallback((conversationId: string) => {
+      setConversations((prev) =>
+        prev.map((c) => (c.id === conversationId ? { ...c, recovery: 'sync-lost' as const } : c)),
+      );
+    }, []),
   });
 
   const { selectedConversation, isDirect, selectedIsLive, currentNumber, verified, isLive } =
@@ -269,6 +279,10 @@ export default function ChatScreen() {
   // The hooks that consume the real selectedIsLive (receipt-sending, backfill) already guard on
   // messagingDeps, which is null in demo mode, so they remain no-ops.
   const effectiveSelectedIsLive = demoMode ? !!selectedId : selectedIsLive;
+  // Track 4 slice 5c — the selected conversation is sync-lost (its doomed MLS group was dropped from
+  // liveGroups). Show the "out of sync" affordance and suppress the composer: there is no live group to
+  // encrypt into, and v1 does not auto-recover (re-establishment is slice 5c-2).
+  const selectedIsSyncLost = selectedConversation?.recovery === 'sync-lost';
 
   const handleSend = useMessageSending({
     selectedId,
@@ -573,9 +587,11 @@ export default function ChatScreen() {
 
   // Compute the selected DIRECT conversation's own safety number (from its own loopback session), once.
   // LIVE conversations are skipped — a started one already holds its REAL number, and none should spin up a
-  // loopback session (which would compute the wrong, local number).
+  // loopback session (which would compute the wrong, local number). A sync-lost conversation is a real live
+  // one that was dropped from liveIds (so selectedIsLive is now false); skip it too so we never spin up a
+  // bogus loopback session against its id (Track 4 slice 5c).
   useEffect(() => {
-    if (!selectedId || !isDirect || selectedIsLive) return;
+    if (!selectedId || !isDirect || selectedIsLive || selectedIsSyncLost) return;
     void getMlsSession(selectedId)
       .then((s) =>
         setNumbersByConv((prev) =>
@@ -583,7 +599,7 @@ export default function ChatScreen() {
         ),
       )
       .catch(() => {});
-  }, [selectedId, isDirect, selectedIsLive]);
+  }, [selectedId, isDirect, selectedIsLive, selectedIsSyncLost]);
 
   useSelectedConversationBackfill({
     selectedId,
@@ -714,18 +730,33 @@ export default function ChatScreen() {
                 onAddMember={
                   selectedConversation.type === 'group' &&
                   selectedConversation.creatorId === profile?.userId &&
-                  groupManager !== null
+                  groupManager !== null &&
+                  !selectedIsSyncLost // a sync-lost group has no live group to add into (5c)
                     ? handleOpenAddMember
                     : undefined
                 }
                 updateReady={updateReady}
                 onApplyUpdate={applyUpdate}
               />
-              {effectiveSelectedIsLive && (
+              {effectiveSelectedIsLive && !selectedIsSyncLost && (
                 <ReconnectBanner status={connectionStatus} className="mx-4 mt-3" />
               )}
+              {selectedIsSyncLost && (
+                <StateBlock
+                  icon={Unplug}
+                  title="Conversation out of sync"
+                  variant="offline"
+                  compact
+                  role="status"
+                  ariaLive="polite"
+                  className="mx-4 mt-3"
+                >
+                  This conversation fell too far behind to sync. New messages may not appear and
+                  older ones may be unavailable.
+                </StateBlock>
+              )}
               <MessageList conversation={selectedConversation} onImageClick={setPreviewImage} />
-              {effectiveSelectedIsLive && <ChatInput onSend={handleSend} />}
+              {effectiveSelectedIsLive && !selectedIsSyncLost && <ChatInput onSend={handleSend} />}
             </div>
           ) : (
             <div

@@ -64,6 +64,14 @@ export type Conversation = {
   unreadCount: number;
   /** The userId of the member who created this group (live only; absent for seed/demo conversations). */
   creatorId?: string;
+  /**
+   * Track 4 slice 5c — set to 'sync-lost' when the conversation's MLS epoch can no longer advance (the
+   * commit it needs was pruned, or the device was offline beyond retention). Drives the "out of sync"
+   * affordance and suppresses the composer (there is no live group to send into). v1 only surfaces the
+   * state; re-establishing the conversation (re-add via the member/Welcome path) is slice 5c-2. Absent =
+   * healthy.
+   */
+  recovery?: 'sync-lost';
 };
 
 function hueFromString(s: string): number {
