@@ -148,7 +148,12 @@ sed -i "s/REPLACE_WITH_KEY_VAULT_NAME/${ARGUS_KEY_VAULT}/" /etc/systemd/system/a
 # experiment, write a drop-in so argus-secrets.service fetches via HIMDS; clean it up if we ever revert to imds.
 if [ "$TOKEN_SOURCE" != imds ]; then
   install -d -m 0755 /etc/systemd/system/argus-secrets.service.d
-  printf '[Service]\nEnvironment=ARGUS_TOKEN_SOURCE=%s\n' "$TOKEN_SOURCE" \
+  # Arc HIMDS mints the token by reading a 0440 root:himds challenge file. The unit runs as root but with an
+  # EMPTY CapabilityBoundingSet (no CAP_DAC_*), so root can't DAC-override — it must be IN the himds group to
+  # read that file. SupplementaryGroups=himds grants exactly that group-read, keeping the zero-cap hardening.
+  # Arc-only: the himds group exists only where the Connected Machine Agent is installed (never the Azure VM,
+  # where this drop-in is removed below), so it can't fail the unit on the imds path.
+  printf '[Service]\nEnvironment=ARGUS_TOKEN_SOURCE=%s\nSupplementaryGroups=himds\n' "$TOKEN_SOURCE" \
     >/etc/systemd/system/argus-secrets.service.d/10-token-source.conf
 else
   rm -f /etc/systemd/system/argus-secrets.service.d/10-token-source.conf 2>/dev/null || true
