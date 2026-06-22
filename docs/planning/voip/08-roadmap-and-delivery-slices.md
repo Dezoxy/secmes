@@ -168,14 +168,14 @@ Phase 1 makes audio calls work end-to-end between two **foreground** browsers, r
 | **Reviewers** | `security-boundary-auditor` (authz on the genuinely-new client→server→peer path, no IDOR, no plaintext, tenant isolation via room key) |
 | **Size** | **L** |
 
-### Slice P1-INV — REST invite/end + friendship gate + relay-only settings
+### Slice P1-INV — REST invite + friendship gate + relay-only settings + WS call.release
 
 | | |
 |---|---|
 | **Scope** | `POST /calls/:friendUserId/invite` (**accepted-friendship gate** via `FriendsService.canonicalPair` + accepted lookup; conversation-membership check; emit `CallRingEvent`; **uniform 202** regardless of online/friend/busy — no oracle). **In V1 the invite writes no `call_sessions` row** (ephemeral) — it is a pure routed ring. **V1 termination is the WS `call.release` flow** ([04 §3.2](./04-server-api-and-database.md)) — there is **no** REST `POST /calls/:callId/end` in V1 (it lands in **V1.1** with the ledger; [04 §2.1](./04-server-api-and-database.md)). `GET/PUT /calls/settings` (the `call_relay_only` toggle). **No `GET /calls/missed` in V1** — the missed-call list needs the ledger and lands in V1.1 (P3-PUSH). This is the **first feature to gate contact on friendship** — new logic, documented as such. It also stands up the **in-memory call-authorization map** (the `callId` lifecycle in [04 §3.2a](./04-server-api-and-database.md)) that the gateway relay (P1-GW) validates `call.signal` frames against. Detail in [04 §2.3–2.5, §6, §7](./04-server-api-and-database.md). |
 | **Files/areas** | `apps/api/src/calls/calls.controller.ts` + `calls.service.ts` (extend), `apps/api/openapi.json`, controller spec |
 | **Depends on** | P0-A (calls module exists), P0-SET (settings column), P1-GW (`CallRingEvent` on the bus) |
-| **DoD gates** | **`/api-spec`** + **42Crunch ≥ 90**; controller spec both tiers (guard posture; uniform-202 no-oracle; 404-no-IDOR on `end`); no persistence asserted (V1 ephemeral); no banned log patterns |
+| **DoD gates** | **`/api-spec`** + **42Crunch ≥ 90**; controller spec both tiers (guard posture; uniform-202 no-oracle on `invite`; settings round-trip) + a gateway-spec assertion that `call.release` drops the authz entry with no fan-out; no persistence asserted (V1 ephemeral); no banned log patterns. (The REST `POST /calls/:callId/end` 404-no-IDOR check belongs to **V1.1** — V1.1-b.) |
 | **Reviewers** | `security-boundary-auditor` (friendship gate, presence-oracle mitigations, IDOR, uniform responses) |
 | **Size** | **M** |
 

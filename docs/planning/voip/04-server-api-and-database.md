@@ -160,12 +160,14 @@ Today the gateway only accepts inbound `auth` and `subscribe`. Calling needs **c
 - A **single** opaque relay frame **`call.signal`** for all peer-to-peer signaling — it carries the encrypted `envelope`; **every** signal type (offer, answer, ICE, **and termination — decline/busy/cancel/hangup**) is an encrypted inner discriminant, so the gateway/Redis cannot tell setup from ICE from hang-up, and there is deliberately **no** per-phase relay frame ([02 §2](./02-signaling-protocol-and-state-machine.md)).
 - The **only** other inbound frame is a minimal **`call.release{callId}`** server-state control (no reason, no SDP) that lets the server promptly release the call-authorization entry (§3.2a). It is **not** a relay and reveals only end-of-call lifecycle the server already tracks from `invite` — so it adds no phase/timing the server couldn't already infer.
 
-Each handler:
+The **`call.signal`** relay handler:
 1. Derives identity from the **server-verified** socket binding (`VerifiedAuth.{sub,tenantId}`) — never from the frame.
 2. Validates membership of the referenced `conversationId` via `MessagingService.isMember` (same authz as `onSubscribe`; non-members get the indistinguishable `conversation not found`).
 3. Validates the `callId` against the **live call-authorization map** (§3.2a) and that the sender is a participant — a frame for an unknown/expired call, or from a non-participant, is **silently dropped** (no error response, so it cannot become an oracle). The server-issued `callId` is the authorization token; a client cannot fabricate one to relay into a call it was never part of.
 4. Re-emits the matching bus event. **No DB write** (true in V1; remains true in V1.1 — the ledger is written by REST `invite`/`end`, not by the signaling fast-path).
 5. Is subject to the per-socket inbound rate limit (see §8) — these frames are *not* covered by the HTTP throttler, so reuse/extend the existing `allowSubscribe` token-bucket pattern.
+
+**`call.release` is a separate, non-relay path** — it carries only `{callId}` (no `conversationId`), so it does **not** run the steps above. The handler looks up the call-authorization entry by `callId`, verifies the socket's authenticated `sub` is one of the entry's **stored participants**, **drops the entry** (§3.2a), and **publishes nothing** — no bus event, no fan-out. It is bound by the same per-socket rate limit.
 
 > **How a call ends.** The peer-to-peer hang-up / decline / busy / cancel is an encrypted inner type inside `call.signal`; the receiving client tears down. Separately, the client sends a minimal cleartext **`call.release{callId}`** so the server promptly drops the call-authorization entry (§3.2a) — the server never reads the encrypted reason, and release is **not** tied to the long-lived chat socket. The only server→client end notifications are the **server-known** events in `CallEndEvent` (§3.1).
 
