@@ -10,11 +10,10 @@ All personal data processed by this service is stored and processed exclusively 
 
 | Component | Provider | Region | Data stored |
 |---|---|---|---|
-| Application VM (API, gateway, Zitadel, GlitchTip, Redis) | Microsoft Azure | Germany West Central (`germanywestcentral`) | DB volumes, Redis state, application logs |
+| Application VM (API, gateway, GlitchTip, Redis) | Microsoft Azure | Germany West Central (`germanywestcentral`) | DB volumes, Redis state, application logs |
 | PostgreSQL (self-hosted on VM) | Microsoft Azure | Germany West Central | All relational data |
 | Attachment blob storage | Backblaze B2 | EU Central (`eu-central-003`) | Encrypted attachment ciphertext |
 | DB backups | Backblaze B2 | EU Central (`eu-central-003`) | Encrypted database snapshots |
-| Identity provider (Zitadel) | Self-hosted on same VM | Germany West Central | User identities, authentication events |
 | Error tracking (GlitchTip) | Self-hosted on same VM | Germany West Central | Error events (no personal content) |
 | Ingress / TLS termination | Cloudflare Tunnel | EU edge PoPs | No data stored; traffic only |
 

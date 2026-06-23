@@ -46,7 +46,7 @@ After apply, wire the outputs into GitHub Actions secrets/vars for the CD slice:
 ## Secrets that go in Key Vault (later slices consume them)
 
 DB passwords (owner, `argus_app`, `argus_cleanup`, `argus_backup`), B2 keys (attachment + backup buckets),
-Redis password, Zitadel masterkey/admin, and the **cloudflared tunnel token**. The age backup **private**
+Redis password, and the **cloudflared tunnel token**. The age backup **private**
 key is intentionally NOT here — keep it offline/separate (restore-time only).
 
 ## Security model & must-before-prod

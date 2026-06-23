@@ -51,7 +51,7 @@ write_files:
       mkdir -p "$MNT"
       grep -q "LABEL=argus-data" /etc/fstab || echo "LABEL=argus-data $MNT ext4 defaults,nofail 0 2" >>/etc/fstab
       mount -a
-      install -d -o argus -g argus -m 0750 "$MNT/postgres" "$MNT/zitadel-postgres" "$MNT/redis"
+      install -d -o argus -g argus -m 0750 "$MNT/postgres" "$MNT/redis"
 
   # Run the mount as a boot-time systemd unit, NOT a one-shot cloud-init runcmd: it re-runs on EVERY boot, so
   # a reboot recovers if the disk ever attaches after the script's wait window; and it's ordered BEFORE
@@ -61,7 +61,7 @@ write_files:
     owner: root:root
     content: |
       [Unit]
-      Description=argus — format + mount the data disk (LUN 0) for Postgres/Redis/Zitadel
+      Description=argus — format + mount the data disk (LUN 0) for Postgres/Redis
       After=local-fs.target
       Before=docker.service
       [Service]
