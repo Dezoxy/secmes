@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Bell, BellOff } from 'lucide-react';
-import { Button, SettingsRow, StateBlock } from '../ui';
+import { Bell } from 'lucide-react';
+import { SettingsRow, StateBlock } from '../ui';
 import { subscribeToPush, unsubscribeFromPush } from '../../lib/push';
 
 interface NotificationSettingsProps {
@@ -20,11 +20,28 @@ export function NotificationSettings({ deviceId }: NotificationSettingsProps) {
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(
     currentPermission,
   );
+  // Tracks actual PushManager subscription, not just browser permission.
+  // Permission stays 'granted' after unsubscribe (browsers don't allow JS to revoke it),
+  // so we check the real subscription on mount and update it on enable/disable.
+  const [subscribed, setSubscribed] = useState<boolean>(
+    // Best-guess initial: assume subscribed if permission is already granted.
+    // The effect below corrects this to the real subscription state.
+    () => currentPermission() === 'granted',
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setPermission(currentPermission());
+    const perm = currentPermission();
+    setPermission(perm);
+    if (perm !== 'granted') {
+      setSubscribed(false);
+      return;
+    }
+    navigator.serviceWorker.ready
+      .then((reg) => reg.pushManager.getSubscription())
+      .then((sub) => setSubscribed(sub !== null))
+      .catch(() => setSubscribed(false));
   }, []);
 
   const handleEnable = useCallback(async () => {
@@ -34,6 +51,7 @@ export function NotificationSettings({ deviceId }: NotificationSettingsProps) {
     try {
       await subscribeToPush(deviceId, VAPID_KEY);
       setPermission(currentPermission());
+      setSubscribed(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not enable notifications.');
     } finally {
@@ -47,7 +65,7 @@ export function NotificationSettings({ deviceId }: NotificationSettingsProps) {
     setError(null);
     try {
       await unsubscribeFromPush(deviceId);
-      setPermission(currentPermission());
+      setSubscribed(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not disable notifications.');
     } finally {
@@ -76,37 +94,28 @@ export function NotificationSettings({ deviceId }: NotificationSettingsProps) {
 
       {permission !== 'unsupported' && (
         <div className="space-y-2">
-          {permission !== 'granted' ? (
-            <div className="flex items-center gap-3">
-              <Button
-                size="sm"
-                onClick={handleEnable}
-                disabled={busy || !deviceId || !VAPID_KEY}
-                aria-busy={busy}
-              >
-                <Bell className="h-4 w-4 mr-1.5" />
-                {busy ? 'Enabling…' : 'Enable notifications'}
-              </Button>
-              {!VAPID_KEY && (
-                <span className="text-xs text-white/60">
-                  Push is not configured on this server.
-                </span>
-              )}
-            </div>
+          {subscribed ? (
+            <SettingsRow
+              title="Notifications"
+              value={busy ? 'Disabling…' : 'Enabled'}
+              enabled={true}
+              disabled={busy}
+              onClick={handleDisable}
+            />
           ) : (
-            <div className="flex items-center gap-3">
-              <SettingsRow title="Notifications" value="Enabled" badge="On" />
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={handleDisable}
-                disabled={busy}
-                aria-busy={busy}
-              >
-                <BellOff className="h-4 w-4 mr-1.5" />
-                {busy ? 'Disabling…' : 'Disable'}
-              </Button>
-            </div>
+            <SettingsRow
+              title="Notifications"
+              value={
+                busy
+                  ? 'Enabling…'
+                  : !VAPID_KEY
+                    ? 'Push is not configured on this server'
+                    : 'Tap to enable'
+              }
+              enabled={false}
+              disabled={busy || !deviceId || !VAPID_KEY}
+              onClick={handleEnable}
+            />
           )}
           {error && <p className="text-xs text-red-400">{error}</p>}
         </div>

@@ -386,69 +386,75 @@ export function SettingsPanel({
         aria-label={`${activeSection.label} settings`}
         tabIndex={-1}
         className={`${
-          mobileSectionOpen || mobileBackAnimating ? 'block' : 'hidden'
-        } flex-1 px-3 pt-[calc(env(safe-area-inset-top)_+_0.75rem)] pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)] focus:outline-none sm:block sm:px-6 sm:pt-6 sm:pb-6 ${
-          active === 'about' ? 'overflow-hidden' : 'overflow-y-auto'
-        } ${mobileBackAnimating ? paneBackExitMotion : ''}`}
+          mobileSectionOpen || mobileBackAnimating ? 'flex' : 'hidden'
+        } flex-1 flex-col overflow-hidden focus:outline-none sm:flex ${
+          mobileBackAnimating ? paneBackExitMotion : ''
+        }`}
       >
+        <div className="shrink-0 flex items-center gap-3 px-3 pt-[calc(env(safe-area-inset-top)_+_0.75rem)] pb-4 sm:px-6 sm:pt-6 sm:pb-4">
+          <IconButton
+            onClick={returnToSettingsMenu}
+            className="sm:hidden"
+            aria-label="Back to settings menu"
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </IconButton>
+          <div
+            className="flex h-10 w-10 items-center justify-center rounded-xl"
+            style={{ backgroundColor: accent.soft }}
+          >
+            <ActiveIcon className="h-5 w-5" style={{ color: accent.hex }} />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-xl font-semibold text-white">{activeSection.label}</h3>
+          </div>
+          <IconButton
+            onClick={closeSettings}
+            className="ml-auto sm:hidden"
+            aria-label="Close settings"
+          >
+            <X className="h-5 w-5" />
+          </IconButton>
+        </div>
+
         <div
           key={active}
-          className={`${mobileBackAnimating ? '' : surfaceEnterMotion} ${
-            active === 'about' ? 'flex h-full min-h-0 flex-col' : ''
+          className={`flex-1 px-3 pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)] sm:px-6 sm:pb-6 ${
+            active === 'about' ? 'overflow-hidden' : 'overflow-y-auto'
           }`}
         >
-          <div className="mb-4 flex items-center gap-3 sm:mb-6">
-            <IconButton
-              onClick={returnToSettingsMenu}
-              className="sm:hidden"
-              aria-label="Back to settings menu"
-            >
-              <ChevronLeft className="h-5 w-5" />
-            </IconButton>
-            <div
-              className="flex h-10 w-10 items-center justify-center rounded-xl"
-              style={{ backgroundColor: accent.soft }}
-            >
-              <ActiveIcon className="h-5 w-5" style={{ color: accent.hex }} />
-            </div>
-            <div className="min-w-0">
-              <h3 className="text-xl font-semibold text-white">{activeSection.label}</h3>
-            </div>
-            <IconButton
-              onClick={closeSettings}
-              className="ml-auto sm:hidden"
-              aria-label="Close settings"
-            >
-              <X className="h-5 w-5" />
-            </IconButton>
+          <div
+            className={`${mobileBackAnimating ? '' : surfaceEnterMotion} ${
+              active === 'about' ? 'flex h-full min-h-0 flex-col' : ''
+            }`}
+          >
+            {active === 'security' && <SecuritySettings />}
+
+            {active === 'privacy' && (
+              <PrivacySettings settings={privacySettings} onSettingsChange={setPrivacySettings} />
+            )}
+
+            {active === 'notifications' && <NotificationSettings deviceId={deviceId} />}
+
+            {active === 'appearance' && (
+              <AppearanceSettings
+                accentId={accentId}
+                fontSizeLevel={fontSizeLevel}
+                onAccentIdChange={setAccentId}
+                onFontSizeLevelChange={setFontSizeLevel}
+              />
+            )}
+
+            {active === 'storage' && <DataStorageSettings />}
+
+            {active === 'about' && <AboutSettings />}
+
+            {active === 'team' && serverProfile?.role === 'admin' && (
+              <TeamSettings currentUserId={serverProfile.userId} />
+            )}
+
+            {active === 'admin' && serverProfile?.role === 'admin' && <AdminPanel />}
           </div>
-
-          {active === 'security' && <SecuritySettings />}
-
-          {active === 'privacy' && (
-            <PrivacySettings settings={privacySettings} onSettingsChange={setPrivacySettings} />
-          )}
-
-          {active === 'notifications' && <NotificationSettings deviceId={deviceId} />}
-
-          {active === 'appearance' && (
-            <AppearanceSettings
-              accentId={accentId}
-              fontSizeLevel={fontSizeLevel}
-              onAccentIdChange={setAccentId}
-              onFontSizeLevelChange={setFontSizeLevel}
-            />
-          )}
-
-          {active === 'storage' && <DataStorageSettings />}
-
-          {active === 'about' && <AboutSettings />}
-
-          {active === 'team' && serverProfile?.role === 'admin' && (
-            <TeamSettings currentUserId={serverProfile.userId} />
-          )}
-
-          {active === 'admin' && serverProfile?.role === 'admin' && <AdminPanel />}
         </div>
       </section>
     </Modal>
