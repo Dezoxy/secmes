@@ -683,7 +683,10 @@ fi
 B2_CORS_KEY_ID="${B2_CORS_KEY_ID:-}"
 # ATTACHMENT_BUCKET is defined and bound to $S3_BUCKET pre-rollout near the top of this script (CSP-1) — by the
 # time the CORS-key restriction check below runs, it equals the bucket the API actually presigns against.
-B2_AUTH_URL="https://api.backblazeb2.com/b2api/v3/b2_authorize_account"
+# API v4: Backblaze deprecated b2_authorize_account on v1/v2/v3 (they 400 with "not currently supported on
+# API version number N"); v4 is the supported version. v4 also restructured the key's allowed-bucket info
+# (see the bucket_id/bucket_name extraction below).
+B2_AUTH_URL="https://api.backblazeb2.com/b2api/v4/b2_authorize_account"
 # B2 canonicalizes CORS header NAMES to lowercase on storage (e.g. "ETag" -> "etag"). Lowercase the header
 # arrays on BOTH sides before comparing so a casing-only difference isn't mistaken for drift — otherwise the
 # post-write re-verify (live "etag" vs source "ETag") would FATAL on every deploy. sort_by(.corsRuleName) makes
@@ -747,8 +750,12 @@ converge_attachment_cors() {
   api_url="$(printf '%s' "$auth" | jq -r '.apiInfo.storageApi.apiUrl // .apiUrl // empty')"
   authtok="$(printf '%s' "$auth" | jq -r '.authorizationToken // empty')"
   account_id="$(printf '%s' "$auth" | jq -r '.accountId // empty')"
-  bucket_id="$(printf '%s' "$auth" | jq -r '.apiInfo.storageApi.bucketId // .allowed.bucketId // empty')"
-  bucket_name="$(printf '%s' "$auth" | jq -r '.apiInfo.storageApi.bucketName // .allowed.bucketName // empty')"
+  # v4 nests the key's allowed buckets as an ARRAY under apiInfo.storageApi.allowed.buckets ([{id,name},…]) —
+  # not v3's scalar bucketId/bucketName. Select the entry whose name matches the attachment bucket, so a
+  # multi-bucket key resolves the right id and a key NOT scoped to it resolves empty (→ the restriction check
+  # below fails closed).
+  bucket_id="$(printf '%s' "$auth" | jq -r --arg b "$ATTACHMENT_BUCKET" '(.apiInfo.storageApi.allowed.buckets // []) | map(select(.name == $b)) | .[0].id // empty')"
+  bucket_name="$(printf '%s' "$auth" | jq -r --arg b "$ATTACHMENT_BUCKET" '(.apiInfo.storageApi.allowed.buckets // []) | map(select(.name == $b)) | .[0].name // empty')"
   auth=""
   { [ -n "$api_url" ] && [ -n "$authtok" ] && [ -n "$account_id" ]; } || {
     authtok=""
@@ -767,7 +774,7 @@ converge_attachment_cors() {
   # Read current CORS (a bucket-restricted list returns just this bucket); compare normalized.
   local cur_resp current ids_body
   ids_body="$(jq -nc --arg a "$account_id" --arg b "$bucket_id" '{accountId:$a,bucketId:$b}')"
-  cur_resp="$(b2_api "${api_url}/b2api/v3/b2_list_buckets" "$authtok" "$ids_body")" || {
+  cur_resp="$(b2_api "${api_url}/b2api/v4/b2_list_buckets" "$authtok" "$ids_body")" || {
     authtok=""
     log "FATAL: B2 list_buckets failed"
     return 1
@@ -785,7 +792,7 @@ converge_attachment_cors() {
   local upd_body upd_resp updated
   upd_body="$(jq -nc --arg a "$account_id" --arg b "$bucket_id" --slurpfile r "$cors_file" \
     '{accountId:$a,bucketId:$b,corsRules:$r[0]}')"
-  upd_resp="$(b2_api "${api_url}/b2api/v3/b2_update_bucket" "$authtok" "$upd_body")" || {
+  upd_resp="$(b2_api "${api_url}/b2api/v4/b2_update_bucket" "$authtok" "$upd_body")" || {
     authtok=""
     log "FATAL: B2 update_bucket failed"
     return 1
