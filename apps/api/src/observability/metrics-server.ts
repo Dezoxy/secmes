@@ -1,6 +1,6 @@
 import { createServer, type Server } from 'node:http';
 import pino from 'pino';
-import type { Registry } from 'prom-client';
+import type { OpenMetricsContentType, Registry } from 'prom-client';
 import { pinoConfig } from './logger.js';
 import { registry as defaultRegistry } from './metrics.js';
 
@@ -14,7 +14,7 @@ const log = pino({ ...pinoConfig, name: 'Metrics' });
 // 404s. Bind 0.0.0.0 so an in-network scraper reaches it; exposure is bounded by the lack of a published port.
 export function startMetricsServer(
   port = Number(process.env.METRICS_PORT ?? 9090),
-  register: Registry = defaultRegistry,
+  register: Registry<OpenMetricsContentType> = defaultRegistry,
 ): Server {
   const server = createServer((req, res) => {
     // Match the pathname only (ignore any query string), so a scraper appending `?…` still resolves /metrics.

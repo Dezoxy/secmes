@@ -1,5 +1,13 @@
 import type { IncomingMessage } from 'node:http';
-import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom-client';
+import {
+  Counter,
+  Gauge,
+  Histogram,
+  Registry,
+  collectDefaultMetrics,
+  openMetricsContentType,
+  type OpenMetricsContentType,
+} from 'prom-client';
 
 // Prometheus instrumentation for the API (checkpoint 47, Slice A). Threat model: docs/threat-models/
 // observability.md. CRITICAL: metrics describe traffic SHAPE only — counts, latencies, process stats. They
@@ -9,7 +17,10 @@ import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from 'prom
 // port (see metrics-server.ts), never via Caddy / the public /api surface.
 
 // A dedicated registry (not the global default) so metrics state is explicit + test-isolatable.
-export const registry = new Registry();
+// OpenMetrics content type is required for exemplar support; prom-client enforces this at Histogram
+// construction time. The generic ensures setContentType's narrow parameter accepts the OpenMetrics literal.
+export const registry = new Registry<OpenMetricsContentType>();
+registry.setContentType(openMetricsContentType);
 
 // Process metrics (CPU, RSS, event-loop lag, GC, handles) — node internals only, no app data.
 collectDefaultMetrics({ register: registry, prefix: 'argus_api_' });
