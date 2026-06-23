@@ -120,6 +120,8 @@ interface UseLiveConversationsOptions {
   setConversations: Dispatch<SetStateAction<Conversation[]>>;
   /** Called when another device of this user registers a pending enrollment request (D1 side). */
   onEnrollmentPending?: (enrollmentId: string) => void;
+  /** Called when a new incoming friend request arrived — caller should refresh incoming requests. */
+  onFriendRequest?: () => void;
   /**
    * Called when a joined conversation's peer safety numbers differ from the stored verified set —
    * the peer has a new cryptographic identity (reinstall or device replacement). The UI should
@@ -221,6 +223,7 @@ export function useLiveConversations({
   backfillInto,
   setConversations,
   onEnrollmentPending,
+  onFriendRequest,
   onPeerKeyChanged,
   onPeerVerified,
   onSafetyNumberResolved,
@@ -712,6 +715,9 @@ export function useLiveConversations({
       onEnrollmentApproved: () => {
         drainRef.current();
       },
+      onFriendRequest: () => {
+        onFriendRequest?.();
+      },
       // A membership commit was posted: drain to exactly this commit (epoch+1 ceiling) so the group
       // advances to epoch+1 but no further. An unbounded drain would consume forward-secret keys for
       // messages still in-flight at epoch+1, making them permanently undecryptable on arrival.
@@ -760,6 +766,7 @@ export function useLiveConversations({
     mergeIncoming,
     messagingDeps,
     onEnrollmentPending,
+    onFriendRequest,
     onSyncLost,
     seedReceipts,
     selfUserId,

@@ -19,6 +19,7 @@ import {
   type CommitCreatedEvent,
   type DeviceEnrollmentApprovedEvent,
   type DeviceEnrollmentPendingEvent,
+  type FriendRequestCreatedEvent,
   type MemberRemovedEvent,
   type MessageCreatedEvent,
   type ReceiptAdvancedEvent,
@@ -83,6 +84,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.bus.onMemberRemoved((event) => this.notifyRemoved(event));
     this.bus.onDeviceEnrollmentPending((event) => this.notifyEnrollmentPending(event));
     this.bus.onDeviceEnrollmentApproved((event) => this.notifyEnrollmentApproved(event));
+    this.bus.onFriendRequestCreated((event) => this.notifyFriendRequest(event));
   }
 
   handleConnection(client: WebSocket): void {
@@ -334,6 +336,16 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       if (state.auth.tenantId !== event.tenantId || state.auth.sub !== event.userSub) continue;
       if (client.readyState === WebSocket.OPEN) {
         this.send(client, 'enrollment_approved', { enrollmentId: event.enrollmentId });
+      }
+    }
+  }
+
+  private notifyFriendRequest(event: FriendRequestCreatedEvent): void {
+    for (const [client, state] of this.conns) {
+      if (!state.authed || !state.auth) continue;
+      if (state.auth.tenantId !== event.tenantId || state.auth.sub !== event.recipientSub) continue;
+      if (client.readyState === WebSocket.OPEN) {
+        this.send(client, 'friend_request', {});
       }
     }
   }

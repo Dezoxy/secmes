@@ -97,6 +97,8 @@ export interface MessageSocketOptions {
    * to join the conversations D1 added it to.
    */
   onEnrollmentApproved?: (enrollmentId: string) => void;
+  /** A new incoming friend request arrived — refresh the pending-requests list. */
+  onFriendRequest?: () => void;
   /** Injectable WebSocket constructor (tests). Defaults to the global. */
   WebSocketImpl?: typeof WebSocket;
   /** Reconnect backoff knobs (tests tune these down). */
@@ -255,6 +257,11 @@ export function createMessageSocket(opts: MessageSocketOptions): MessageSocket {
       if (!authed) return;
       const id = (frame.data as { enrollmentId?: unknown } | null)?.enrollmentId;
       if (typeof id === 'string') opts.onEnrollmentApproved?.(id);
+      return;
+    }
+    if (frame.event === 'friend_request') {
+      if (!authed) return;
+      opts.onFriendRequest?.();
       return;
     }
     // 'error' frames need no client action (membership/authz is server-enforced; the keys gate content).

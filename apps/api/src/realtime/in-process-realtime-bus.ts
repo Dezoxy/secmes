@@ -5,6 +5,7 @@ import {
   type CommitCreatedEvent,
   type DeviceEnrollmentApprovedEvent,
   type DeviceEnrollmentPendingEvent,
+  type FriendRequestCreatedEvent,
   type MemberRemovedEvent,
   type MessageCreatedEvent,
   type ReceiptAdvancedEvent,
@@ -72,5 +73,13 @@ export class InProcessRealtimeBus extends RealtimeBus {
 
   onDeviceEnrollmentApproved(listener: (event: DeviceEnrollmentApprovedEvent) => void): void {
     this.emitter.on('device.enrollment.approved', listener);
+  }
+
+  emitFriendRequestCreated(event: FriendRequestCreatedEvent): void {
+    this.emitter.emit('friend.request.created', event);
+  }
+
+  onFriendRequestCreated(listener: (event: FriendRequestCreatedEvent) => void): void {
+    this.emitter.on('friend.request.created', listener);
   }
 }

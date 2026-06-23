@@ -42,7 +42,9 @@ describe.skipIf(!DB_URL)('FriendsService (Slice D — friends API)', () => {
       values (${tenant}, 'fr-ext-b', ${argusB}, 'fr-b@b.test') returning id`;
     [{ id: userC }] = await sql`insert into users (tenant_id, external_identity_id, argus_id, email)
       values (${tenant}, 'fr-ext-c', ${argusC}, 'fr-c@c.test') returning id`;
-    service = new FriendsService(new UserService());
+    const mockBus = { emitFriendRequestCreated: () => {} } as never;
+    const mockPush = { notifyUser: () => Promise.resolve() } as never;
+    service = new FriendsService(new UserService(), mockBus, mockPush);
   });
 
   beforeEach(async () => {

@@ -157,6 +157,22 @@ export const DeviceEnrollmentApprovedEventSchema = z.object({
 });
 
 /**
+ * A friend request was created and stored — nudges the recipient's connected sockets to refresh
+ * their incoming-requests list NOW instead of waiting for a manual open/reload. METADATA ONLY:
+ * the recipient's verified subject only — no sender info, no argus-ids, no content (invariant #2).
+ */
+export interface FriendRequestCreatedEvent {
+  tenantId: string;
+  /** The recipient's external subject (`users.external_identity_id`) — what an authed socket knows. */
+  recipientSub: string;
+}
+
+export const FriendRequestCreatedEventSchema = z.object({
+  tenantId: z.string().min(1),
+  recipientSub: z.string().min(1),
+});
+
+/**
  * Realtime fan-out bus — decouples the HTTP send path (publisher) from the WebSocket gateway
  * (subscriber). Abstract so it can be in-process (single-pod / dev / tests) or Redis-backed for
  * cross-pod delivery (checkpoint 29). Only the opaque ciphertext envelope ever crosses it.
@@ -178,4 +194,6 @@ export abstract class RealtimeBus {
   abstract onDeviceEnrollmentApproved(
     listener: (event: DeviceEnrollmentApprovedEvent) => void,
   ): void;
+  abstract emitFriendRequestCreated(event: FriendRequestCreatedEvent): void;
+  abstract onFriendRequestCreated(listener: (event: FriendRequestCreatedEvent) => void): void;
 }

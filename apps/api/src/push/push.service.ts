@@ -194,30 +194,7 @@ export class PushService {
             ),
           );
 
-        const payload = JSON.stringify({ type: 'new_message' });
-
-        // Collect stale subscription ids during the concurrent sends, then delete in one query
-        // to avoid issuing concurrent writes on the same transaction object.
-        const staleIds: string[] = [];
-
-        await Promise.allSettled(
-          subs.map(async (sub) => {
-            try {
-              await webpush.sendNotification(
-                { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-                payload,
-                { urgency: 'low', TTL: 3600 },
-              );
-            } catch (err: unknown) {
-              const status = (err as { statusCode?: number }).statusCode;
-              if (status === 410 || status === 404) staleIds.push(sub.id);
-              // Log only the row id — never the endpoint, p256dh, or auth (invariant #2).
-              this.logger.warn(
-                `push: send failed for subscription ${sub.id}, status ${status ?? 'unknown'}`,
-              );
-            }
-          }),
-        );
+        const staleIds = await this.sendPayload(subs, JSON.stringify({ type: 'new_message' }));
 
         if (staleIds.length > 0) {
           await tx
@@ -231,6 +208,72 @@ export class PushService {
         `push: fan-out error for conversation ${conversationId}: ${(err as Error).name}`,
       );
     }
+  }
+
+  /**
+   * Fan a content-free typed ping to every push subscription belonging to a single user.
+   * Best-effort: all errors swallowed, stale 410/404 subscriptions self-healed. No-op when
+   * VAPID is not configured.
+   */
+  async notifyUser(tenantId: string, recipientUserId: string, type: string): Promise<void> {
+    if (!this.configured) return;
+    try {
+      await withTenant(tenantId, async (tx) => {
+        const subs = await tx
+          .select({
+            id: schema.pushSubscriptions.id,
+            endpoint: schema.pushSubscriptions.endpoint,
+            p256dh: schema.pushSubscriptions.p256dh,
+            auth: schema.pushSubscriptions.auth,
+          })
+          .from(schema.pushSubscriptions)
+          .where(
+            and(
+              eq(schema.pushSubscriptions.tenantId, tenantId),
+              eq(schema.pushSubscriptions.userId, recipientUserId),
+            ),
+          );
+
+        const staleIds = await this.sendPayload(subs, JSON.stringify({ type }));
+
+        if (staleIds.length > 0) {
+          await tx
+            .delete(schema.pushSubscriptions)
+            .where(inArray(schema.pushSubscriptions.id, staleIds));
+        }
+      });
+    } catch (err: unknown) {
+      this.logger.warn(
+        `push: notify-user error for user ${recipientUserId}: ${(err as Error).name}`,
+      );
+    }
+  }
+
+  /** Send a payload to a batch of subscriptions; return ids of stale (410/404) entries. */
+  private async sendPayload(
+    subs: Array<{ id: string; endpoint: string; p256dh: string; auth: string }>,
+    payload: string,
+  ): Promise<string[]> {
+    const staleIds: string[] = [];
+    await Promise.allSettled(
+      subs.map(async (sub) => {
+        try {
+          await webpush.sendNotification(
+            { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+            payload,
+            { urgency: 'low', TTL: 3600 },
+          );
+        } catch (err: unknown) {
+          const status = (err as { statusCode?: number }).statusCode;
+          if (status === 410 || status === 404) staleIds.push(sub.id);
+          // Log only the row id — never endpoint, p256dh, or auth (invariant #2).
+          this.logger.warn(
+            `push: send failed for subscription ${sub.id}, status ${status ?? 'unknown'}`,
+          );
+        }
+      }),
+    );
+    return staleIds;
   }
 }
 

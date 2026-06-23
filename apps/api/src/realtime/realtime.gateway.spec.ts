@@ -397,6 +397,45 @@ describe('RealtimeGateway', () => {
     expect(seqChain(s)).toEqual([[1, null]]);
   });
 
+  it('notifyFriendRequest sends an empty friend_request frame to the matching (tenant, sub) socket', async () => {
+    const recipient = mkSocket();
+    const other = mkSocket();
+    await authed(recipient, 'bob', 'T1');
+    await authed(other, 'alice', 'T1'); // different sub, same tenant
+    recipient.send.mockClear();
+    other.send.mockClear();
+
+    bus.emitFriendRequestCreated({ tenantId: 'T1', recipientSub: 'bob' });
+
+    const frame = lastSend(recipient);
+    expect(frame?.event).toBe('friend_request');
+    expect(frame?.data).toEqual({}); // metadata-free: no sender, no id
+    expect(lastSend(other)).toBeUndefined(); // non-recipient skipped
+  });
+
+  it('notifyFriendRequest does not cross tenants', async () => {
+    const t1sock = mkSocket();
+    const t2sock = mkSocket();
+    await authed(t1sock, 'bob', 'T1');
+    await authed(t2sock, 'bob', 'T2'); // same sub, different tenant
+    t1sock.send.mockClear();
+    t2sock.send.mockClear();
+
+    bus.emitFriendRequestCreated({ tenantId: 'T1', recipientSub: 'bob' });
+
+    expect(lastSend(t1sock)?.event).toBe('friend_request');
+    expect(lastSend(t2sock)).toBeUndefined(); // tenant isolation
+  });
+
+  it('notifyFriendRequest skips unauthenticated sockets', async () => {
+    const unauthed = mkSocket();
+    gw.handleConnection(sock(unauthed)); // connected but never auth'd
+
+    bus.emitFriendRequestCreated({ tenantId: 'T1', recipientSub: 'bob' });
+
+    expect(lastSend(unauthed)).toBeUndefined();
+  });
+
   it('increments per MESSAGE within one epoch (the counter is not the MLS epoch)', async () => {
     const s = mkSocket();
     await authed(s);

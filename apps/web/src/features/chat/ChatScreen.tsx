@@ -233,6 +233,24 @@ export default function ChatScreen() {
     setConversations,
   });
 
+  const refreshFriends = useCallback(async () => {
+    try {
+      const [fl, inc, out] = await Promise.all([
+        listFriends(),
+        listFriendRequests('incoming'),
+        listFriendRequests('outgoing'),
+      ]);
+      setFriends(fl);
+      setIncomingRequests(inc);
+      setOutgoingRequests(out);
+      setFriendsError(false);
+    } catch {
+      // Only surface the stale-data banner when authenticated; in demo/E2E mode failures are expected
+      // and silent (no manager → no session token → every call 401s/502s).
+      if (manager) setFriendsError(true);
+    }
+  }, [manager]);
+
   const { liveIds, liveGroups, addLive, connectionStatus } = useLiveConversations({
     device,
     pool,
@@ -271,6 +289,9 @@ export default function ChatScreen() {
         prev.map((c) => (c.id === conversationId ? { ...c, recovery: 'sync-lost' as const } : c)),
       );
     }, []),
+    onFriendRequest: useCallback(() => {
+      void refreshFriends();
+    }, [refreshFriends]),
   });
 
   const { selectedConversation, isDirect, selectedIsLive, currentNumber, verified, isLive } =
@@ -349,27 +370,21 @@ export default function ChatScreen() {
   // A 1:1 is unique per peer: find an existing direct conversation with this user (the picker opens it
   // ── Friends (Slice E) ────────────────────────────────────────────────────────
 
-  const refreshFriends = useCallback(async () => {
-    try {
-      const [fl, inc, out] = await Promise.all([
-        listFriends(),
-        listFriendRequests('incoming'),
-        listFriendRequests('outgoing'),
-      ]);
-      setFriends(fl);
-      setIncomingRequests(inc);
-      setOutgoingRequests(out);
-      setFriendsError(false);
-    } catch {
-      // Only surface the stale-data banner when authenticated; in demo/E2E mode failures are expected
-      // and silent (no manager → no session token → every call 401s/502s).
-      if (manager) setFriendsError(true);
-    }
-  }, [manager]);
-
   useEffect(() => {
     if (manager) void refreshFriends();
   }, [refreshFriends, manager]);
+
+  useEffect(() => {
+    if ('setAppBadge' in navigator) {
+      if (incomingRequests.length > 0) {
+        void (navigator as Navigator & { setAppBadge(count?: number): Promise<void> }).setAppBadge(
+          incomingRequests.length,
+        );
+      } else {
+        void (navigator as Navigator & { clearAppBadge(): Promise<void> }).clearAppBadge();
+      }
+    }
+  }, [incomingRequests.length]);
 
   const handleTapFriend = useCallback(
     (friend: Friend) => {
