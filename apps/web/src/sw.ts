@@ -67,6 +67,7 @@ registerRoute(
 // Prompt-mode updates: the update dialog calls wb.messageSkipWaiting() which posts this message.
 // injectManifest strategy requires adding this handler manually (generateSW would inject it automatically).
 self.addEventListener('message', (event: ExtendableMessageEvent) => {
+  if (event.origin !== self.location.origin) return;
   if (event.data?.type === 'SKIP_WAITING') void self.skipWaiting();
 });
 
