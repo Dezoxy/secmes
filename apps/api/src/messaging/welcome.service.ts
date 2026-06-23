@@ -4,7 +4,7 @@ import { and, asc, eq } from 'drizzle-orm';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant, type Tx } from '../db/index.js';
-import { requireMembership, requireUser } from './membership.js';
+import { requireDirectFriendshipForAdd, requireMembership, requireUser } from './membership.js';
 import type { RealtimeBus } from '../realtime/realtime-bus.js';
 import type { DeliverWelcome } from './messaging.schemas.js';
 import type { PendingWelcome, WelcomeMaterial } from './messaging.types.js';
@@ -32,6 +32,11 @@ export class WelcomeService {
     const { welcomeId, recipientSubs } = await withTenant(auth.tenantId, async (tx) => {
       const sender = await requireUser(tx, auth);
       await requireMembership(tx, conversationId, sender);
+
+      // Friendship gate at the DM peer-ADD point: for a direct (1:1) conversation the recipient being added
+      // must be an accepted friend of the caller. No-op for groups/legacy and for self-adds. Runs BEFORE the
+      // member insert so a rejected add writes no row. Groups are ungated (friendship is a 1:1 concept).
+      await requireDirectFriendshipForAdd(tx, conversationId, sender, [body.recipientUserId]);
 
       // Add the recipient as a member (idempotent — re-delivering to an existing member is a no-op add).
       // The composite FK (tenant_id, user_id) → users(tenant_id, id) rejects an unknown / cross-tenant

@@ -4527,7 +4527,7 @@
             }
           },
           "403": {
-            "description": "direct conversation requires an accepted friendship",
+            "description": "Authenticated, but not permitted to perform this action.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5751,7 +5751,7 @@
             }
           },
           "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
+            "description": "direct conversation requires an accepted friendship with the added recipient",
             "content": {
               "application/json": {
                 "schema": {

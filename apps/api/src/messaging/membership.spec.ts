@@ -2,7 +2,12 @@ import { ForbiddenException, InternalServerErrorException } from '@nestjs/common
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Tx } from '../db/index.js';
-import { canonicalPair, requireDirectFriendship, requireFriendship } from './membership.js';
+import {
+  canonicalPair,
+  requireDirectFriendship,
+  requireDirectFriendshipForAdd,
+  requireFriendship,
+} from './membership.js';
 
 // Builds a minimal Drizzle-tx mock whose .select chain returns the provided rows.
 function mockTx(rows: Array<{ id: string }>): Tx {
@@ -105,6 +110,94 @@ describe('requireDirectFriendship', () => {
   it('fails CLOSED (500) when the conversation row is missing (membership precondition violated)', async () => {
     const tx = mockTxSeq([[]]);
     await expect(requireDirectFriendship(tx, CONV, USER_A)).rejects.toThrow(
+      InternalServerErrorException,
+    );
+  });
+});
+
+describe('requireDirectFriendshipForAdd', () => {
+  // Sequential selects: [0] conversations.isDirect, [1] existing members (cardinality), [2+] friendships.
+  // The added ids are a BATCH (deliverWelcome passes one, postCommit passes addedUserIds).
+  it('is a no-op for a group add (isDirect=false) even between non-friends', async () => {
+    const tx = mockTxSeq([[{ isDirect: false }]]);
+    await expect(
+      requireDirectFriendshipForAdd(tx, CONV, USER_A, [USER_B]),
+    ).resolves.toBeUndefined();
+    expect((tx.select as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1); // isDirect read only
+  });
+
+  it('is a no-op for a legacy conversation (isDirect=null)', async () => {
+    const tx = mockTxSeq([[{ isDirect: null }]]);
+    await expect(
+      requireDirectFriendshipForAdd(tx, CONV, USER_A, [USER_B]),
+    ).resolves.toBeUndefined();
+  });
+
+  it('is a no-op when the only added id is the caller (self-add — own other devices)', async () => {
+    const tx = mockTxSeq([[{ isDirect: true }]]);
+    await expect(
+      requireDirectFriendshipForAdd(tx, CONV, USER_A, [USER_A]),
+    ).resolves.toBeUndefined();
+    expect((tx.select as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1); // no cardinality/friendship read
+  });
+
+  it('resolves at DM bootstrap (only the creator is a member) when the added peer is a friend', async () => {
+    const tx = mockTxSeq([[{ isDirect: true }], [{ userId: USER_A }], [{ id: 'f1' }]]);
+    await expect(
+      requireDirectFriendshipForAdd(tx, CONV, USER_A, [USER_B]),
+    ).resolves.toBeUndefined();
+  });
+
+  it('gates only the non-self ids in a mixed [self, peer] batch (multi-device bootstrap)', async () => {
+    const tx = mockTxSeq([[{ isDirect: true }], [{ userId: USER_A }], [{ id: 'f1' }]]);
+    await expect(
+      requireDirectFriendshipForAdd(tx, CONV, USER_A, [USER_A, USER_B]),
+    ).resolves.toBeUndefined();
+  });
+
+  it('throws Forbidden at DM bootstrap when the added peer is not a friend', async () => {
+    const tx = mockTxSeq([[{ isDirect: true }], [{ userId: USER_A }], []]);
+    await expect(requireDirectFriendshipForAdd(tx, CONV, USER_A, [USER_B])).rejects.toThrow(
+      ForbiddenException,
+    );
+  });
+
+  it('resolves on a re-add of the existing peer while still friends (idempotent member add)', async () => {
+    const tx = mockTxSeq([
+      [{ isDirect: true }],
+      [{ userId: USER_A }, { userId: USER_B }],
+      [{ id: 'f1' }],
+    ]);
+    await expect(
+      requireDirectFriendshipForAdd(tx, CONV, USER_A, [USER_B]),
+    ).resolves.toBeUndefined();
+  });
+
+  it('throws Forbidden on a re-add after the peer was unfriended (no idempotent bypass at add sites)', async () => {
+    const tx = mockTxSeq([[{ isDirect: true }], [{ userId: USER_A }, { userId: USER_B }], []]);
+    await expect(requireDirectFriendshipForAdd(tx, CONV, USER_A, [USER_B])).rejects.toThrow(
+      ForbiddenException,
+    );
+  });
+
+  it('fails CLOSED (500) when a single add would make a 2-member DM a 3-member one', async () => {
+    const tx = mockTxSeq([[{ isDirect: true }], [{ userId: USER_A }, { userId: USER_B }]]);
+    await expect(requireDirectFriendshipForAdd(tx, CONV, USER_A, [USER_C])).rejects.toThrow(
+      InternalServerErrorException,
+    );
+  });
+
+  it('fails CLOSED (500) when ONE commit adds two new peers to a solo DM (batch cardinality)', async () => {
+    // The key multi-add case: each peer alone would see only the creator; the batch check catches it.
+    const tx = mockTxSeq([[{ isDirect: true }], [{ userId: USER_A }]]);
+    await expect(requireDirectFriendshipForAdd(tx, CONV, USER_A, [USER_B, USER_C])).rejects.toThrow(
+      InternalServerErrorException,
+    );
+  });
+
+  it('fails CLOSED (500) when the conversation row is missing', async () => {
+    const tx = mockTxSeq([[]]);
+    await expect(requireDirectFriendshipForAdd(tx, CONV, USER_A, [USER_B])).rejects.toThrow(
       InternalServerErrorException,
     );
   });

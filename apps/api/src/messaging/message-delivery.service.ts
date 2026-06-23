@@ -3,7 +3,12 @@ import { and, asc, eq, gt, inArray, max, min, sql } from 'drizzle-orm';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
-import { requireDirectFriendship, requireMembership, requireUser } from './membership.js';
+import {
+  requireDirectFriendship,
+  requireDirectFriendshipForAdd,
+  requireMembership,
+  requireUser,
+} from './membership.js';
 import type { PushService } from '../push/push.service.js';
 import type {
   CommitCreatedEvent,
@@ -203,11 +208,13 @@ export class MessageDeliveryService {
       const sender = await requireUser(tx, auth);
       await requireMembership(tx, conversationId, sender);
 
-      // Friendship gate: DMs (isDirect=true) require an accepted friendship even for commits.
-      // Architecturally DMs never use commits (their MLS epoch advances via addMember), but failing
-      // closed here prevents a removed friend from committing membership changes to a DM conversation
-      // if that invariant is ever violated by a client bug.
-      await requireDirectFriendship(tx, conversationId, sender);
+      // Friendship gate at the DM peer-ADD point: a commit that adds members to a direct (1:1)
+      // conversation must add accepted friends only. This is the multi-device DM bootstrap path — the peer
+      // is added here via addedUserIds while only the creator is a member yet, so we check the declared
+      // added ids (not a member-derived peer). The whole set is checked at once so the DM two-member cap
+      // can't be slipped by adding two new friends in one commit. No-op for groups and for self-adds. Runs
+      // before the commit/member insert so a rejected commit writes nothing.
+      await requireDirectFriendshipForAdd(tx, conversationId, sender, body.addedUserIds);
 
       // Contiguity guard: reject commits that skip epochs. A gap commit would poison MAX(epoch) for
       // the sendMessage stale-epoch gate, cause peer drain loops to halt at a missing slot, and let

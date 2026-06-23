@@ -1,3 +1,4 @@
+import { ForbiddenException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
@@ -58,6 +59,19 @@ describe('WelcomesController delegation', () => {
     };
     await controller.deliver(auth, CONV, body);
     expect(messaging.deliverWelcome).toHaveBeenCalledWith(auth, CONV, body);
+  });
+
+  it('deliver propagates 403 from the service when adding a non-friend to a DM', async () => {
+    const { controller, messaging } = makeController();
+    messaging.deliverWelcome.mockRejectedValueOnce(new ForbiddenException('friendship required'));
+    await expect(
+      controller.deliver(auth, CONV, {
+        recipientUserId: 'u2',
+        recipientDeviceId: DEVICE,
+        welcome: 'b64',
+        ratchetTree: 'b64',
+      }),
+    ).rejects.toThrow(ForbiddenException);
   });
 
   it('list forwards the calling device id + limit', async () => {

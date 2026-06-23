@@ -14,6 +14,7 @@ import {
   ApiBearerAuth,
   ApiBody,
   ApiCreatedResponse,
+  ApiForbiddenResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -128,6 +129,9 @@ export class WelcomesController {
   @ApiCreatedResponse({ type: DeliveredWelcomeDto })
   @ApiBadRequestResponse({ description: 'invalid body, or recipient is not a user in this tenant' })
   @ApiNotFoundResponse({ description: 'conversation not found or caller is not a member' })
+  @ApiForbiddenResponse({
+    description: 'direct conversation requires an accepted friendship with the added recipient',
+  })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async deliver(
     @CurrentAuth() auth: VerifiedAuth,

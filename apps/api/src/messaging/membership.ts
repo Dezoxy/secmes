@@ -135,3 +135,51 @@ export async function requireDirectFriendship(
   }
   await requireFriendship(tx, callerUserId, peers[0]!.userId);
 }
+
+/**
+ * Friendship gate for the moment peers are ADDED to a conversation (deliverWelcome adds one,
+ * postCommit may add several via `addedUserIds`) — checked against the EXPLICIT ids being added, not
+ * members derived from the table (a peer isn't a member yet at bootstrap). No-op for groups/legacy and
+ * for self-adds (a creator pulling in their own other devices reuses the caller id). For a DM every added
+ * peer must be an accepted friend of the caller.
+ *
+ * The whole add set is evaluated AT ONCE: a DM holds exactly two members, so existing members + the
+ * distinct NEW peers must not exceed two — otherwise 500 (an invariant breach, never a 403 oracle).
+ * Checking per-entry would be unsafe: a single commit adding two new friends would slip past, because each
+ * entry on its own sees only the solo creator. Must run inside the SAME `withTenant` transaction as the
+ * member-add and BEFORE it, so a rejected add writes no member row.
+ */
+export async function requireDirectFriendshipForAdd(
+  tx: Tx,
+  conversationId: string,
+  callerUserId: string,
+  addedUserIds: readonly string[],
+): Promise<void> {
+  const [conv] = await tx
+    .select({ isDirect: schema.conversations.isDirect })
+    .from(schema.conversations)
+    .where(eq(schema.conversations.id, conversationId))
+    .limit(1);
+  if (!conv) throw new InternalServerErrorException('conversation not found for friendship gate');
+  if (conv.isDirect !== true) return; // groups + legacy rows are ungated
+
+  // Distinct peers being added — drop self-adds (own other devices reuse the caller id) and duplicates.
+  const peers = [...new Set(addedUserIds)].filter((id) => id !== callerUserId);
+  if (peers.length === 0) return; // nothing peer-facing to gate (self-only / empty add)
+
+  // DM cardinality across the whole batch: existing members + distinct new peers must not exceed two.
+  const existing = await tx
+    .select({ userId: schema.conversationMembers.userId })
+    .from(schema.conversationMembers)
+    .where(eq(schema.conversationMembers.conversationId, conversationId))
+    .limit(3);
+  const existingIds = new Set(existing.map((m) => m.userId));
+  const newPeerCount = peers.filter((id) => !existingIds.has(id)).length;
+  if (existingIds.size + newPeerCount > 2) {
+    throw new InternalServerErrorException('DM cannot exceed two members');
+  }
+
+  for (const peer of peers) {
+    await requireFriendship(tx, callerUserId, peer);
+  }
+}

@@ -68,16 +68,6 @@ describe('MessagingController delegation', () => {
     expect(messaging.sendMessage).toHaveBeenCalledWith(auth, CONV, body);
   });
 
-  it('createConversation propagates 403 from service when parties are not friends', async () => {
-    const { controller, messaging } = makeController();
-    messaging.createConversation.mockRejectedValueOnce(
-      new ForbiddenException('friendship required'),
-    );
-    await expect(
-      controller.createConversation(auth, { memberUserIds: ['u2'], isDirect: true }),
-    ).rejects.toThrow(ForbiddenException);
-  });
-
   it('sendMessage propagates 403 from service when parties are not friends', async () => {
     const { controller, messaging } = makeController();
     messaging.sendMessage.mockRejectedValueOnce(new ForbiddenException('friendship required'));

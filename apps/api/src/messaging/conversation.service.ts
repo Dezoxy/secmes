@@ -3,7 +3,7 @@ import { and, eq } from 'drizzle-orm';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
-import { requireFriendship, requireMembership, requireUser } from './membership.js';
+import { requireMembership, requireUser } from './membership.js';
 import type { CreatedConversation } from './messaging.types.js';
 
 // Conversation lifecycle + membership reads. One of four internal collaborators the MessagingService
@@ -40,12 +40,12 @@ export class ConversationService {
     if (isDirect && memberUserIds.length !== 1) {
       throw new BadRequestException('direct conversation requires exactly one peer');
     }
+    // No friendship gate here: the real client creates a DM as a SOLO conversation (memberUserIds is the
+    // creator's own id) and adds the peer later via deliverWelcome / postCommit. The friendship check
+    // therefore lives at those peer-ADD sites (requireDirectFriendshipForAdd), where the actual peer id is
+    // known, plus on sendMessage. Gating here would only ever see the creator's own id → a self-pair 403.
     return withTenant(auth.tenantId, async (tx) => {
       const creator = await requireUser(tx, auth);
-
-      if (isDirect) {
-        await requireFriendship(tx, creator, memberUserIds[0]!);
-      }
 
       const [conv] = await tx
         .insert(schema.conversations)
