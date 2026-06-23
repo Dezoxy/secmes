@@ -15,12 +15,10 @@ deployed.** The infrastructure exists as code across slices; CD (`vars.ENABLE_DE
 
 ```
 users ─HTTPS─▶ Cloudflare edge (TLS · WAF · rate-limit) ─tunnel─▶ cloudflared ─▶ caddy:8080
-               caddy host-splits by domain:
+               caddy serves:
                  4rgus.com      → PWA + reverse-proxies /api,/ws → api:3000
-                 auth.4rgus.com → zitadel:8080 (OIDC/console, h2c) ; /ui/v2/login → zitadel-login:3000
                api ─▶ postgres / redis (internal Docker network, NO published ports)
                api ─▶ Backblaze B2 (egress, presigned)
-               zitadel ─▶ zitadel-db (own Postgres, internal network, NO published port)
 ```
 
 The VM opens **no inbound port** (NSG denies all inbound; `infra/azure/terraform/`). The only way in is the
@@ -31,18 +29,13 @@ on a non-privileged port over the internal Docker network only. Threat model:
 ## The stack (`compose.prod.yaml`)
 
 Standalone prod stack — **not** layered over `compose.yaml` (that file is local-dev only). Services:
-`postgres`, `redis`, `api`, `caddy` (PWA + router), `cloudflared`, the self-hosted identity provider
-`zitadel` + `zitadel-db` + `zitadel-login` (roadmap #9), and the observability stack `prometheus` + `grafana`
-+ `alertmanager` (roadmap #47). No `minio` (prod uses Backblaze B2). No service publishes a host port. Every
-service runs hardened (non-root where the image allows, `no-new-privileges`, `cap_drop: [ALL]`, resource
-limits).
+`postgres`, `redis`, `api`, `caddy` (PWA + router), `cloudflared`, and the observability stack `prometheus`
++ `grafana` + `alertmanager` (roadmap #47). No `minio` (prod uses Backblaze B2). No service publishes a host
+port. Every service runs hardened (non-root where the image allows, `no-new-privileges`, `cap_drop: [ALL]`,
+resource limits).
 
-> **Zitadel** (roadmap #9) is the OIDC issuer at `https://auth.4rgus.com` — a **public** login surface (end
-> users authenticate against it; it is NOT behind Cloudflare Access, which would be circular for end-user
-> login). Its admin console is protected by Zitadel's own authentication. TLS terminates at Cloudflare;
-> Zitadel runs `--tlsMode external` + `ExternalSecure=true` behind it. See the **Zitadel bootstrap** section
-> below + `docs/threat-models/vm-zitadel.md`. Provisioning (project / SPA app / tenant-claim Action) + the
-> multi-tenant org→`tenant_id` mapping are the deferred **G1** follow-on.
+Auth is **passkey-only** — the API mints and verifies its own EdDSA session tokens. Zitadel/OIDC was
+decommissioned in Phase 6 (`docs/threat-models/phase-6-decommission.md`); there is no external IdP.
 
 ### Images
 
@@ -99,29 +92,37 @@ cloudflared uses a **token** tunnel (the token stored in Key Vault as `argus-tun
 hostnames are configured in the Cloudflare Zero Trust dashboard, not in this repo:
 
 - `4rgus.com` → `http://caddy:8080`  (the app — PWA + `/api` + `/ws`, all same-origin)
-- `auth.4rgus.com` → `http://caddy:8080`  (self-hosted Zitadel — Caddy host-splits this domain to
-  `zitadel`/`zitadel-login`; **public**, NOT behind Access — it's the end-user login surface)
 - `grafana.4rgus.com` → `http://caddy:8080`  (observability dashboards — Caddy host-splits to `grafana:3000`,
   **gated by Cloudflare Access** + Grafana's own login; Prometheus + Alertmanager stay internal-only)
 - other admin subdomains (e.g. ops) → their service, **gated by Cloudflare Access** (identity at the edge)
 
-### Admin (breakglass) access — Cloudflare Access on `/admin` + the admin API
+### Admin (breakglass) access — Cloudflare Access on `/admin` + the breakglass API
 
 The breakglass admin login is **not** on the public landing page. It lives at `https://4rgus.com/admin`, and
-the admin/breakglass API (`/api/auth/breakglass/*`, `/api/admin/*`) is reachable **only** through Cloudflare
+the breakglass surface (`/admin/*`, `/api/auth/breakglass/*`) is reachable **only** through Cloudflare
 Access. Two layers enforce this (see [`docs/threat-models/admin-access-gating.md`](../threat-models/admin-access-gating.md)):
 
-1. **Edge (Caddy):** `infra/stack/caddy/Caddyfile` returns **404** for those paths unless the request carries
-   the `Cf-Access-Jwt-Assertion` header that cloudflared injects after a request passes Access (and strips if a
-   client supplies it). No Terraform/code change beyond the Caddyfile.
-2. **App (defense in depth):** the API verifies that JWT's signature (`CfAccessGuard`) **when** the two
-   non-secret env vars below are set; unset = no-op (dev / before the Access app exists).
+1. **Edge (Caddy):** `infra/stack/caddy/Caddyfile` returns **404** for `/admin` and `/api/auth/breakglass/*`
+   unless the request carries the `Cf-Access-Jwt-Assertion` header that cloudflared injects after a request
+   passes Access (and strips if a client supplies it). No Terraform/code change beyond the Caddyfile.
+   **`/api/admin/*` is NOT in this gate** — see design note below.
+2. **App (defense in depth):** the API verifies that JWT's signature (`CfAccessGuard`) on the
+   `BreakglassController` **when** the two non-secret env vars below are set; unset = no-op (dev / before
+   the Access app exists). `AdminController` uses `AdminGuard` only (not CF Access) — see design note.
+
+> **Design note:** the in-app Admin panel (Settings → Admin) is accessible to any tenant user with
+> `role='admin'`. Requiring CF Access would block regular admins who authenticated via passkey but have
+> never gone through the breakglass CF Access flow. `AdminGuard` is sufficient: it verifies the Argus
+> EdDSA JWT, checks session revocation, and asserts `role='admin'` + `status='active'` in the DB under
+> tenant RLS. See [`docs/threat-models/admin-access-gating.md`](../threat-models/admin-access-gating.md).
 
 **Create the Access application (Zero Trust dashboard — same place as grafana/glitchtip):**
 
 1. Access → Applications → **Add an application** → **Self-hosted**.
-2. **Application domain:** add `4rgus.com` with **path** `/admin`, and add the same app's additional paths
-   `/api/auth/breakglass` and `/api/admin` (the page **and** the XHRs it makes must both be behind Access).
+2. **Application domain:** add `4rgus.com` with **path** `/admin`, and add the same app's additional path
+   `/api/auth/breakglass` (the breakglass login UI **and** its API must both be behind Access).
+   **Do NOT add `/api/admin`** — that surface uses `AdminGuard` and must remain accessible to regular
+   app-authenticated admins without CF Access.
 3. **Session duration:** short (e.g. **1 hour**) — breakglass is rare.
 4. **Policy:** Action **Allow** → Include → **Emails** → the operator's email only (everyone else is implicitly
    denied); optionally require the IdP's MFA.
@@ -164,84 +165,15 @@ value in env). Compose's secret sources point at `${ARGUS_SECRETS_DIR}` (`/run/a
   (`redis://:<pw>@redis:6379`) which the api reads via `REDIS_URL_FILE`. The redis healthcheck reads this
   `redis_password` file directly for `REDISCLI_AUTH`. No Redis credential ever rides env / `docker inspect`.
   URL-safe (`openssl rand -hex 32`).
-- `secrets/zitadel_masterkey` → `zitadel` reads it via `--masterkeyFile` (32-byte instance masterkey).
-- `secrets/zitadel_db_password` → `zitadel-db` reads it via `POSTGRES_PASSWORD_FILE`; `zitadel` reads the
-  **same value** as the runtime `${ZITADEL_DB_PASSWORD}` (Zitadel has no `_FILE` env form for it).
-
 The cloudflared tunnel token is also a mounted credential **file** (`tunnel_token`); cloudflared reads it via
-`TUNNEL_TOKEN_FILE` (>=2025.4.0), so no token enters the `compose up` env or container config. The remaining
-runtime-value secrets — Zitadel's `ZITADEL_DB_PASSWORD` + the first-init-only `ZITADEL_ADMIN_PASSWORD` — are
-injected from the delivered Key Vault files by `deploy.sh` on `up` (`environment:` interpolation), never an
-on-disk env file. Invariant #5 permits a runtime-fetched value alongside a mounted file.
+`TUNNEL_TOKEN_FILE` (>=2025.4.0), so no token enters the `compose up` env or container config. Invariant #5
+permits a runtime-fetched value alongside a mounted file.
 
 Set the actual values in Key Vault once (the `az keyvault secret set` commands + the full name→file→consumer
 table are in [`infra/stack/secrets/README.md`](../../infra/stack/secrets/README.md)). Non-secret config (B2
 endpoint/region/bucket + access-key-**id**, the API's OIDC issuer/audience, the PWA's build-time
 `VITE_OIDC_*`, image tags) is in `.env.prod.example` — copy it into the deploy environment. The `secrets/`
 directory (local dev) is gitignored; nothing is committed or baked into an image.
-
-## Zitadel bootstrap (self-hosted IdP — roadmap #9)
-
-The `zitadel` + `zitadel-db` + `zitadel-login` services are in `compose.prod.yaml`, hardened, no published
-ports, reachable at `https://auth.4rgus.com`. **Built as code; not armed** — these one-time steps run when you
-arm the deploy. Threat model: `docs/threat-models/vm-zitadel.md`.
-
-**1 — Generate the masterkey ONCE.** It is exactly **32 bytes** and encrypts the keys Zitadel stores in its
-DB; **never rotate it casually** (loss makes the instance's encrypted data unrecoverable — rely on Key Vault
-soft-delete + purge-protection, and back it up with the rest of the vault material):
-
-```bash
-az keyvault secret set --vault-name "$KV" --name argus-zitadel-masterkey      --value "$(openssl rand -base64 32 | head -c 32)"
-az keyvault secret set --vault-name "$KV" --name argus-zitadel-db-password    --value '<zitadel-db-owner-pw>'
-az keyvault secret set --vault-name "$KV" --name argus-zitadel-admin-password --value '<bootstrap-admin-pw>'   # change on first login
-```
-
-**2 — First init.** On the first `deploy.sh` run, `start-from-init` creates the instance: the org, the Login
-V2 service-user machine account, a bootstrap human admin (`admin`, password = `argus-zitadel-admin-password`,
-**change-required**), and — via the `ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_*` + `ZITADEL_OIDC_DEFAULTLOGINURLV2`
-env (init-only) — **Login V2 is wired at first boot** (the instance's login URLs point at `/ui/v2/login`). The
-DB password + admin password are runtime values `deploy.sh` reads from the delivered Key Vault files. On every
-later boot the instance already exists, so FirstInstance is skipped (the admin password is ignored).
-
-**3 — Cloudflare ingress.** Add `auth.4rgus.com` → `http://caddy:8080` in the Zero Trust dashboard (a
-**public** hostname, NOT behind Access — it's the end-user login surface). Caddy host-splits it to
-`zitadel`/`zitadel-login`.
-
-**4 — Seed the Login V2 PAT into Key Vault.** The login container authenticates to the Zitadel API with a
-service-user PAT that — per invariant #2 — is **not** persisted to a Docker volume; it's a Key-Vault-delivered
-credential file, empty until you provision it (so the login UI is degraded until this step). FirstInstance
-writes its first PAT to the zitadel container's tmpfs; grab it and store it in Key Vault, then re-deliver:
-
-```bash
-COMPOSE=/opt/argus/compose.prod.yaml
-# Copy the PAT out host-side with `docker cp` (daemon-side — needs no shell/cat in the minimal zitadel image,
-# which has neither; `tar -xO` streams the one file to stdout so the token never lands on host disk).
-zid="$(docker compose -f "$COMPOSE" ps -q zitadel)"
-PAT="$(docker cp "$zid:/tmp/login-client.pat" - | tar -xO)"
-az keyvault secret set --vault-name "$KV" --name argus-zitadel-login-pat --value "$PAT"
-sudo systemctl restart argus-secrets.service                 # re-fetch → /run/argus/secrets/zitadel_login_pat
-# --force-recreate: a plain `up -d` won't recreate an unchanged service, so it would keep the OLD (empty)
-# secret file mounted; force a recreate so the now-populated PAT is re-mounted. ARGUS_SECRETS_DIR points
-# compose's secret source at the tmpfs the fetch wrote to (matches what deploy.sh exports).
-ARGUS_SECRETS_DIR=/run/argus/secrets \
-  docker compose -f "$COMPOSE" up -d --force-recreate --no-deps zitadel-login
-```
-
-From here on `argus-secrets.service` re-delivers it on every boot (reboot-safe). If `/tmp/login-client.pat` is
-already gone (container restarted), mint a fresh PAT for the `login-client` machine user in the console
-instead.
-
-**5 — Harden + provision (manual, post-arm).** Log in to the console at `https://auth.4rgus.com`, **change the
-admin password + enable MFA** immediately, then create the project / SPA OIDC app / tenant-claim Action. The
-local provisioner (`infra/local/zitadel/provision.sh`) is the reference for those API calls; the **multi-tenant
-org→`tenant_id` mapping** (the local Action hardcodes a single dev UUID) is the deferred **G1** work. Set the
-**project id** as `OIDC_AUDIENCE` (the API's token audience — what Zitadel puts in the access-token `aud`, per
-the local provisioner's `OIDC_AUDIENCE=$PROJECT_ID`) and the **SPA client id** as `VITE_OIDC_CLIENT_ID`, then
-re-cut the release so the PWA build embeds them.
-
-> **Footprint.** Zitadel adds ~1.8 GB of memory limits (`zitadel` 768m + `zitadel-db` 768m + `zitadel-login`
-> 256m) on top of the app stack (~4 GB); the observability stack (below) adds ~1.4 GB (`prometheus` 768m +
-> `grafana` 512m + `alertmanager` 128m) — size the VM for **~8 GB+** before arming.
 
 ## Observability (Prometheus + Grafana + Alertmanager — roadmap #47)
 

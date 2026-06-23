@@ -220,8 +220,8 @@ export class GdprController {
    * Requires the `X-Confirm-Delete: my-account` header to prevent accidental deletion via API
    * browsing tools. Rate-limited to 3 per day per user.
    *
-   * NOTE: the Zitadel identity (external IdP account) is NOT deleted. A tenant operator must
-   * revoke it in the Zitadel admin console — see docs/threat-models/gdpr.md §6.
+   * Auth is passkey-only (Zitadel/OIDC decommissioned in Phase 6) — no external IdP step needed.
+   * See docs/threat-models/gdpr.md §6 for the full deletion runbook.
    */
   @Delete('me')
   @HttpCode(HttpStatus.NO_CONTENT)

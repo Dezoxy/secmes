@@ -152,7 +152,7 @@ resource "azurerm_virtual_machine_data_disk_attachment" "data" {
   managed_disk_id    = azurerm_managed_disk.data.id
   virtual_machine_id = azurerm_linux_virtual_machine.this.id
   lun                = 0
-  # None (not ReadWrite): this disk holds the Postgres/Redis/Zitadel data dirs. ReadWrite host caching can
+  # None (not ReadWrite): this disk holds the Postgres/Redis data dirs. ReadWrite host caching can
   # lose host-acknowledged-but-unpersisted writes on a crash; Azure recommends None for write-heavy DB disks.
   caching = "None"
 }

@@ -10,7 +10,7 @@ Run the whole stack on your machine with Docker Compose — the **same** Compose
 ## Start / stop
 
 ```bash
-make up                    # build + start postgres, redis, minio, zitadel (+ provision OIDC)
+make up                    # build + start postgres, redis, minio
 make migrate && make seed  # apply the schema + seed the dev tenant
 make api-dev               # run the API on the host (:3000)
 make ps                    # status
@@ -19,7 +19,7 @@ make down                  # stop (keeps data)
 make reset                 # stop + wipe data volumes
 ```
 
-The API runs on the host via `make api-dev` — the Compose `api` service is `app`-profile-gated, so `make up` does **not** start it. One-time: add `127.0.0.1 zitadel` to `/etc/hosts` (see [`local-auth.md`](local-auth.md)).
+The API runs on the host via `make api-dev` — the Compose `api` service is `app`-profile-gated, so `make up` does **not** start it. See [`local-auth.md`](local-auth.md) for the passkey login flow.
 
 ## What you get
 
@@ -55,5 +55,5 @@ pnpm --filter @argus/web dev   # Vite dev server on http://localhost:5173
 ## Notes
 
 - All credentials here are **local-only throwaway values**, never real secrets.
-- **Zitadel (identity)** runs as part of `make up` (its own DB + Login V2, provisioned by `make auth-provision`), so local login uses the real OIDC flow — see [`local-auth.md`](local-auth.md). Demo mode (auth stubbed) only applies when OIDC is left unconfigured.
+- Auth is **passkey-only** — Zitadel/OIDC was decommissioned in Phase 6. See [`local-auth.md`](local-auth.md) for how to log in locally.
 - Data persists in named volumes (`pgdata`, `miniodata`) across `make down`; use `make reset` to start clean.

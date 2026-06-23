@@ -1,4 +1,4 @@
-# Key Vault holds every runtime secret (DB passwords, B2 keys, Redis password, Zitadel masterkey, the
+# Key Vault holds every runtime secret (DB passwords, B2 keys, Redis password, the
 # cloudflared tunnel token, …). The VM's Managed Identity reads them at deploy time — no secret is ever in
 # the repo, env, or Terraform inputs. (The age backup PRIVATE key deliberately does NOT live here on the VM
 # path — it's restore-only; keep it in a separate vault/offline.)

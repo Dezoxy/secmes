@@ -12,7 +12,7 @@ import postgres from 'postgres';
 // staging/prod (e.g. with `NODE_ENV` unset) can never receive the tenant. Run by hand (`make seed`).
 
 // A deliberately synthetic, all-but-zero UUID so it's unmistakable in data/logs as the dev tenant.
-// Keep in lockstep with the Zitadel bootstrap (the Action emits this exact value).
+// Hardcoded dev-tenant UUID — must match the value seeded by `make seed`.
 export const DEV_TENANT_ID = '00000000-0000-4000-a000-000000000001';
 const DEV_TENANT_NAME = 'Local Dev Tenant';
 

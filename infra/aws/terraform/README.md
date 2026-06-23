@@ -55,8 +55,7 @@ Every step has a `make -C infra/aws <target>` (run `make -C infra/aws help` to l
 6. **Wire GitHub:** `infra/aws/scripts/setup-github-cicd.sh`. It pulls the AWS values from `terraform output`
    and **prompts for the non-secret config** (S3 bucket + key id, the OIDC / VITE_OIDC values) plus the optional
    42Crunch token (hidden), then sets the cd-aws.yml vars + creates the gated Environment (leaves
-   `ENABLE_DEPLOY_AWS=false`). Pre-set any value as an env var to skip its prompt. The Zitadel SPA
-   `VITE_OIDC_CLIENT_ID` only exists once Zitadel is up — set a placeholder, configure Zitadel, then re-run.
+   `ENABLE_DEPLOY_AWS=false`). Pre-set any value as an env var to skip its prompt.
 
    > **Shortcut for steps 5–6:** `make -C infra/aws secrets` runs both helpers in order (Key Vault → GitHub)
    > and stops if the first fails. Individual targets: `make -C infra/aws populate-kv` / `wire-github`.
@@ -64,7 +63,7 @@ Every step has a `make -C infra/aws <target>` (run `make -C infra/aws help` to l
 7. **Deploy:** `gh variable set ENABLE_DEPLOY_AWS --body true`, then `git tag aws-v0.1.0 && git push origin aws-v0.1.0`
    → approve in the `aws-experiment` Environment → SSM rolls out `deploy.sh` (migrate → provision runtime role
    logins → bring the stack up).
-8. **Arm** the optional secrets after first boot (Stripe, operator key, Sentry DSN, Zitadel mgmt/login PATs)
+8. **Arm** the optional secrets after first boot (Stripe, operator key, Sentry DSN)
    via `az keyvault secret set …` — see `infra/stack/secrets/README.md`.
 
 > The `argus_app`/`argus_cleanup`/`argus_backup` DB roles get their LOGIN passwords set **automatically** by
