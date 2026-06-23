@@ -55,6 +55,7 @@ function MemberRow({
             void handleRoleChange(e.target.value as 'admin' | 'member');
           }}
           disabled={busy || isSelf}
+          aria-label={`Role for ${member.displayName ?? 'member'}`}
           className="rounded-lg border border-white/10 bg-[#1a1a26] px-2.5 py-0.5 text-xs text-white/80 transition-colors focus:border-purple-400/40 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
         >
           <option value="member">Member</option>
