@@ -109,7 +109,11 @@ export default function TransparencyRoute() {
               title: 'End-to-end encrypted',
               body: 'MLS RFC 9420 with forward secrecy',
             },
-            { icon: Server, title: 'EU data residency', body: 'All data stored in Germany West Central' },
+            {
+              icon: Server,
+              title: 'EU data residency',
+              body: 'All data stored in Germany West Central',
+            },
             {
               icon: CheckCircle,
               title: 'Verifiable builds',
@@ -161,8 +165,8 @@ export default function TransparencyRoute() {
                     Messaging Layer Security standard
                     <ExternalLink className="h-3 w-3" />
                   </a>{' '}
-                  via{' '}
-                  <code className="rounded bg-white/10 px-1 py-0.5 text-xs">ts-mls</code>. Ciphersuite:{' '}
+                  via <code className="rounded bg-white/10 px-1 py-0.5 text-xs">ts-mls</code>.
+                  Ciphersuite:{' '}
                   <code className="rounded bg-white/10 px-1 py-0.5 text-xs">
                     MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519
                   </code>
@@ -178,7 +182,9 @@ export default function TransparencyRoute() {
                 </p>
               </div>
               <div className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-6">
-                <p className="mb-2 text-sm font-semibold text-amber-300">PWA code-delivery caveat</p>
+                <p className="mb-2 text-sm font-semibold text-amber-300">
+                  PWA code-delivery caveat
+                </p>
                 <p className="text-sm leading-relaxed text-white/55">
                   Argus is a web app — encryption code is delivered by the server on each load. A
                   fully compromised server could ship malicious JavaScript. Mitigations include a
@@ -202,7 +208,9 @@ export default function TransparencyRoute() {
             <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-6">
               <p className="mb-5 text-sm leading-relaxed text-white/60">
                 Every build publishes a{' '}
-                <code className="rounded bg-white/10 px-1 py-0.5 text-xs">/bundle-manifest.json</code>{' '}
+                <code className="rounded bg-white/10 px-1 py-0.5 text-xs">
+                  /bundle-manifest.json
+                </code>{' '}
                 file containing SHA-384 hashes of every JavaScript and CSS asset, plus a single
                 deterministic <span className="font-medium text-white">bundle digest</span> over all
                 of them. The value below is served fresh with each page load.
@@ -244,13 +252,15 @@ export default function TransparencyRoute() {
                 <p className="font-medium text-white/70">How to verify independently</p>
                 <p className="mt-1.5">
                   Download{' '}
-                  <code className="rounded bg-white/10 px-1 py-0.5 text-xs">/bundle-manifest.json</code>
+                  <code className="rounded bg-white/10 px-1 py-0.5 text-xs">
+                    /bundle-manifest.json
+                  </code>
                   , fetch each listed asset, compute its{' '}
                   <code className="rounded bg-white/10 px-1 py-0.5 text-xs">sha384sum</code>, and
                   compare against the manifest. The{' '}
-                  <code className="rounded bg-white/10 px-1 py-0.5 text-xs">bundleDigest</code> is the
-                  SHA-384 over the sorted &ldquo;file sha384&rdquo; lines — a single fingerprint for
-                  the entire build.
+                  <code className="rounded bg-white/10 px-1 py-0.5 text-xs">bundleDigest</code> is
+                  the SHA-384 over the sorted &ldquo;file sha384&rdquo; lines — a single fingerprint
+                  for the entire build.
                 </p>
               </div>
             </div>
