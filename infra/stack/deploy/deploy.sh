@@ -618,6 +618,19 @@ wait_running grafana
 # Centralized logs (checkpoint 47b): same posture — Loki + Alloy have no shell for a CMD healthcheck, so gate
 # on running + not-crash-looping (catches a bad config mount / missing log dir / image pull).
 wait_running loki
+# Alloy WAL-lock recovery: the alloy-data volume retains a stale WAL lock when the previous deploy
+# exited abruptly (e.g. failed after the health-check window but before a clean shutdown). Docker
+# Compose's `up -d` sees an already-running container and leaves it in place — but if that container
+# is crash-looping (Alloy tried to open the locked WAL and exited), wait_running would FATAL.
+# Guard: stop + rm the alloy container and wipe the data volume before each deploy so Alloy always
+# gets a clean WAL start. Safe because Alloy's data volume only holds tail-position offsets and WAL
+# staging buffers — the actual log content lives in Docker's json-file driver. Any re-scanned log
+# lines are deduplicated by Loki's reject_old_samples (7-day window). The stop/rm is a no-op when
+# Alloy is not running (e.g. first deploy).
+docker compose -f "$COMPOSE" stop alloy 2>/dev/null || true
+docker compose -f "$COMPOSE" rm -f alloy 2>/dev/null || true
+docker volume rm "argus-prod_alloy-data" 2>/dev/null || true
+docker compose -f "$COMPOSE" up -d --no-deps alloy
 wait_running alloy
 # Error tracking (checkpoint 48): glitchtip has a healthcheck (wget /api/0/version/) that
 # only passes after migrations complete + gunicorn is serving — gate on HEALTHY to catch a
