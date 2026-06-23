@@ -3,12 +3,11 @@ import {
   Controller,
   HttpCode,
   HttpStatus,
-  Ip,
-  Logger,
   Post,
   Req,
   Res,
 } from '@nestjs/common';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { AuditService } from '../audit/audit.service.js';
 import {
   ApiBearerAuth,
@@ -46,9 +45,8 @@ class RefreshResponseDto {
 @ApiTags('auth')
 @Controller('auth/session')
 export class SessionTokenController {
-  private readonly logger = new Logger(SessionTokenController.name);
-
   constructor(
+    @InjectPinoLogger(SessionTokenController.name) private readonly logger: PinoLogger,
     private readonly sessions: SessionTokenService,
     private readonly audit: AuditService,
   ) {}
@@ -88,7 +86,6 @@ export class SessionTokenController {
   async refresh(
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
-    @Ip() ip: string,
   ): Promise<RefreshResponseDto> {
     if (!req.headers[CSRF_HEADER]) {
       throw new BadRequestException(`${CSRF_HEADER} header is required`);
@@ -113,7 +110,7 @@ export class SessionTokenController {
       maxAge: Math.max(0, expiresAt.getTime() - Date.now()), // remaining TTL in ms — cookie tracks DB expiry
     });
 
-    this.logger.debug(`session refreshed from ${ip}`);
+    this.logger.debug('session refreshed');
     return { accessToken };
   }
 

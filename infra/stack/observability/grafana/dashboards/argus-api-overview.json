@@ -4,7 +4,7 @@
   "tags": ["argus"],
   "timezone": "utc",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": false,
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
@@ -61,7 +61,8 @@
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
           "expr": "histogram_quantile(0.95, sum(rate(argus_api_http_request_duration_seconds_bucket[5m])) by (le))",
-          "legendFormat": "p95"
+          "legendFormat": "p95",
+          "exemplar": true
         },
         {
           "refId": "C",
@@ -90,6 +91,65 @@
           "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
           "expr": "rate(argus_api_process_cpu_seconds_total[5m])",
           "legendFormat": "CPU (cores)"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "logs",
+      "title": "Recent error logs",
+      "datasource": { "type": "loki", "uid": "argus-loki" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": false
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "argus-loki" },
+          "expr": "{job=\"docker\", level=\"error\"} | json | line_format \"[{{.context}}] {{.msg}}\""
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "logs",
+      "title": "Recent warn logs",
+      "datasource": { "type": "loki", "uid": "argus-loki" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": false
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "argus-loki" },
+          "expr": "{job=\"docker\", level=\"warn\"} | json | line_format \"[{{.context}}] {{.msg}}\""
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Active WebSocket connections",
+      "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "area" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "argus_ws_connections_active",
+          "legendFormat": "active WS connections"
         }
       ]
     }

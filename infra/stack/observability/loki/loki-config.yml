@@ -49,6 +49,19 @@ compactor:
   retention_enabled: true
   delete_request_store: filesystem
 
+ruler:
+  storage:
+    type: local
+    local:
+      directory: /etc/loki/rules
+  rule_path: /tmp/loki-ruler
+  alertmanager_url: http://alertmanager:9093
+  ring:
+    kvstore:
+      store: inmemory
+  enable_api: true
+  enable_alertmanager_v2: true
+
 # No phone-home / usage reporting (privacy-first; matches Grafana/Prometheus analytics-off in #47).
 analytics:
   reporting_enabled: false

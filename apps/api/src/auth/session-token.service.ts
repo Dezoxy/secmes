@@ -1,12 +1,14 @@
 // Session-signing is server-auth infrastructure — see docs/threat-models/session-tokens.md §invariant-4.
 import { randomBytes, createHash } from 'node:crypto';
 
-import { Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { SignJWT } from 'jose';
 
 import { schema, withRouting, withTenant } from '../db/index.js';
 import { SESSION_SIGNING_KEY } from './session-key.config.js';
+import { authAttempts } from '../observability/metrics.js';
 
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const COOKIE_NAME = 'argus_refresh';
@@ -26,9 +28,10 @@ function sha256hex(input: string): string {
 
 @Injectable()
 export class SessionTokenService {
-  private readonly logger = new Logger(SessionTokenService.name);
-
-  constructor(@Inject(SESSION_SIGNING_KEY) private readonly signingKey: CryptoKey) {}
+  constructor(
+    @InjectPinoLogger(SessionTokenService.name) private readonly logger: PinoLogger,
+    @Inject(SESSION_SIGNING_KEY) private readonly signingKey: CryptoKey,
+  ) {}
 
   /**
    * Create a new session: insert an auth_sessions row, mint a 10-min access JWT and a 30-day refresh token.
@@ -92,6 +95,15 @@ export class SessionTokenService {
    * See docs/threat-models/session-tokens.md §refresh-reuse-detection.
    */
   async rotateRefresh(refreshToken: string): Promise<MintedSession> {
+    try {
+      return await this._rotateRefresh(refreshToken);
+    } catch (err: unknown) {
+      authAttempts.inc({ result: 'failure', method: 'session' });
+      throw err;
+    }
+  }
+
+  private async _rotateRefresh(refreshToken: string): Promise<MintedSession> {
     const tokenHash = sha256hex(refreshToken);
     const INVALID = 'invalid or expired session';
 
@@ -119,7 +131,8 @@ export class SessionTokenService {
     if (row.revokedAt !== null) {
       // Reuse of a rotated/revoked token is a theft signal. Revoke the entire session family.
       this.logger.warn(
-        `session.refresh_reuse: revoking all active sessions for user ${row.userId}`,
+        { userId: row.userId },
+        'session.refresh_reuse: revoking all active sessions',
       );
       await withTenant(row.tenantId, (tx) =>
         tx
@@ -178,7 +191,8 @@ export class SessionTokenService {
         // SELECT and this UPDATE. Treat as a theft signal (same semantics as reuse detection) and
         // revoke the entire session family so the winner of the race also loses their session.
         this.logger.warn(
-          `session.rotation_race: revoking all active sessions for user ${row.userId}`,
+          { userId: row.userId },
+          'session.rotation_race: revoking all active sessions',
         );
         await tx
           .update(schema.authSessions)
@@ -204,6 +218,7 @@ export class SessionTokenService {
     if (!newSession) throw new UnauthorizedException(INVALID);
 
     const accessToken = await this.mintAccessToken(row.sub, newSession.id, row.userId);
+    authAttempts.inc({ result: 'success', method: 'session' });
     return {
       accessToken,
       refreshToken: newRefreshToken,

@@ -9,11 +9,11 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
-  Logger,
   OnModuleInit,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { argon2idAsync } from '@noble/hashes/argon2.js';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 
@@ -21,6 +21,7 @@ import { schema, withTenant } from '../db/index.js';
 import { generateArgusId, isArgusIdCollision } from '../users/argus-id.js';
 import { AuditService } from '../audit/audit.service.js';
 import { type MintedSession, SessionTokenService } from './session-token.service.js';
+import { authAttempts } from '../observability/metrics.js';
 
 // Fixed single-tenant UUID — matches DEFAULT_TENANT_ID in webauthn.service.ts. Must be a valid
 // RFC-4122 UUID (version + variant nibbles) so it passes the contracts' strict z.string().uuid().
@@ -101,7 +102,6 @@ function parseBootstrapFile(content: string): BootstrapHash {
 
 @Injectable()
 export class BreakglassService implements OnModuleInit {
-  private readonly logger = new Logger(BreakglassService.name);
   private provisioned = false;
   // Dummy constants for timing parity on username-miss (see breakglass-admin.md §timing-oracle).
   // Set once in onModuleInit; never change after that.
@@ -109,6 +109,7 @@ export class BreakglassService implements OnModuleInit {
   private dummySalt!: Buffer;
 
   constructor(
+    @InjectPinoLogger(BreakglassService.name) private readonly logger: PinoLogger,
     private readonly sessions: SessionTokenService,
     private readonly audit: AuditService,
   ) {}
@@ -163,7 +164,7 @@ export class BreakglassService implements OnModuleInit {
         .then((r) => r[0] ?? null);
     });
     if (existing) {
-      this.logger.log('breakglass: admin credentials already bootstrapped (idempotent)');
+      this.logger.info('breakglass: admin credentials already bootstrapped (idempotent)');
       return;
     }
 
@@ -173,7 +174,7 @@ export class BreakglassService implements OnModuleInit {
       const argusId = generateArgusId();
       try {
         await this.insertAdminAccount(argusId, hash);
-        this.logger.log(`breakglass: admin account bootstrapped (argus_id=${argusId})`);
+        this.logger.info({ argusId }, 'breakglass: admin account bootstrapped');
         return;
       } catch (err) {
         if (isArgusIdCollision(err)) continue;
@@ -187,7 +188,7 @@ export class BreakglassService implements OnModuleInit {
           (constraint.includes('admin_credentials') ||
             constraint === 'users_tenant_display_name_idx')
         ) {
-          this.logger.log('breakglass: admin credentials already bootstrapped (idempotent)');
+          this.logger.info('breakglass: admin credentials already bootstrapped (idempotent)');
           return;
         }
         throw err;
@@ -363,6 +364,7 @@ export class BreakglassService implements OnModuleInit {
         ip: requestContext.ip || null,
         userAgent: requestContext.userAgent || null,
       });
+      authAttempts.inc({ result: 'failure', method: 'breakglass' });
       throw new UnauthorizedException('invalid credentials');
     }
 
@@ -373,6 +375,7 @@ export class BreakglassService implements OnModuleInit {
         ip: requestContext.ip || null,
         userAgent: requestContext.userAgent || null,
       });
+      authAttempts.inc({ result: 'failure', method: 'breakglass' });
       throw new HttpException('Account locked', HttpStatus.TOO_MANY_REQUESTS);
     }
 
@@ -383,10 +386,12 @@ export class BreakglassService implements OnModuleInit {
         ip: requestContext.ip || null,
         userAgent: requestContext.userAgent || null,
       });
+      authAttempts.inc({ result: 'failure', method: 'breakglass' });
       throw new UnauthorizedException('invalid credentials');
     }
 
     // outcome === 'ok'
+    authAttempts.inc({ result: 'success', method: 'breakglass' });
     await this.audit.record(DEFAULT_TENANT_ID, {
       eventType: 'breakglass.login_succeeded',
       actorSub: result.sub,

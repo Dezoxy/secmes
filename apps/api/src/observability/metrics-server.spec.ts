@@ -27,7 +27,7 @@ describe('metrics-server (separate internal port)', () => {
     const port = await start();
     const res = await fetch(`http://127.0.0.1:${port}/metrics`);
     expect(res.status).toBe(200);
-    expect(res.headers.get('content-type')).toContain('text/plain');
+    expect(res.headers.get('content-type')).toContain('application/openmetrics-text');
     expect(await res.text()).toContain('argus_api_');
   });
 

@@ -4,8 +4,9 @@
 // for E2EE message keys; session signing is transport-auth that the server is intended to own.
 import { readFile } from 'node:fs/promises';
 
+import pino from 'pino';
 import { exportJWK, generateKeyPair, importJWK, importPKCS8, type JWK } from 'jose';
-import { Logger } from '@nestjs/common';
+import { pinoConfig } from '../observability/logger.js';
 
 export const SESSION_KEY_PAIR = Symbol('SESSION_KEY_PAIR');
 export const SESSION_SIGNING_KEY = Symbol('SESSION_SIGNING_KEY');
@@ -16,7 +17,7 @@ export interface SessionKeyPair {
   publicKey: CryptoKey;
 }
 
-const logger = new Logger('SessionKeyConfig');
+const logger = pino({ ...pinoConfig, name: 'SessionKeyConfig' });
 
 /** Load Ed25519 key pair from a file-mounted secret, or generate an ephemeral pair for dev. */
 export async function loadSessionKeys(): Promise<SessionKeyPair> {
@@ -41,7 +42,7 @@ export async function loadSessionKeys(): Promise<SessionKeyPair> {
       { kty: jwk.kty, crv: jwk.crv, x: jwk.x } as JWK,
       'EdDSA',
     )) as CryptoKey;
-    logger.log('session signing key loaded from file');
+    logger.info('session signing key loaded from file');
     return { privateKey, publicKey };
   }
 

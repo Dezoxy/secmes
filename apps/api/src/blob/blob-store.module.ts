@@ -1,5 +1,7 @@
-import { Logger, Module } from '@nestjs/common';
+import pino from 'pino';
+import { Module } from '@nestjs/common';
 
+import { pinoConfig } from '../observability/logger.js';
 import { loadBlobConfig } from './blob-config.js';
 import { BlobStore } from './blob-store.js';
 import { S3BlobStore, UnconfiguredBlobStore } from './s3-blob-store.js';
@@ -14,13 +16,13 @@ import { S3BlobStore, UnconfiguredBlobStore } from './s3-blob-store.js';
     {
       provide: BlobStore,
       useFactory: (): BlobStore => {
-        const log = new Logger('BlobStore');
+        const log = pino({ ...pinoConfig, name: 'BlobStore' });
         const cfg = loadBlobConfig();
         if (!cfg.configured) {
           log.warn('blob store not configured — attachment endpoints will fail closed');
           return new UnconfiguredBlobStore();
         }
-        log.log(
+        log.info(
           `using S3-compatible blob store (bucket ${cfg.bucket}, endpoint ${cfg.endpoint}, ` +
             `path-style ${cfg.forcePathStyle})`,
         );

@@ -1,0 +1,105 @@
+{
+  "uid": "argus-traces",
+  "title": "argus Traces",
+  "tags": ["argus", "traces"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "p95 latency by route",
+      "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(argus_api_http_request_duration_seconds_bucket[5m])) by (le, route))",
+          "legendFormat": "p95 {{route}}",
+          "exemplar": true
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "heatmap",
+      "title": "Latency heatmap (all routes)",
+      "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "options": {
+        "calculate": false,
+        "yAxis": { "unit": "s" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "sum(rate(argus_api_http_request_duration_seconds_bucket[5m])) by (le)",
+          "legendFormat": "{{le}}",
+          "format": "heatmap"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Top slow operations (Tempo TraceQL)",
+      "datasource": { "type": "tempo", "uid": "argus-tempo" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": { "frameIndex": 0, "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "tempo", "uid": "argus-tempo" },
+          "queryType": "traceql",
+          "query": "{ span.http.route != \"\" } | select(span.http.route, duration) | sort(duration desc) | limit 10",
+          "tableType": "spans"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Error traces (Tempo TraceQL)",
+      "datasource": { "type": "tempo", "uid": "argus-tempo" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": { "frameIndex": 0, "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "tempo", "uid": "argus-tempo" },
+          "queryType": "traceql",
+          "query": "{ status = error } | limit 20",
+          "tableType": "traces"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "flamegraph",
+      "title": "CPU flame graph (same time window)",
+      "description": "Pyroscope continuous CPU profile. Drag the time range to correlate with a latency spike visible in the panels above.",
+      "datasource": { "type": "grafana-pyroscope-datasource", "uid": "argus-pyroscope" },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 24 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-pyroscope-datasource", "uid": "argus-pyroscope" },
+          "profileTypeId": "process_cpu:cpu:nanoseconds:cpu:nanoseconds",
+          "labelSelector": "{service_name=\"argus.api\"}"
+        }
+      ]
+    }
+  ]
+}

@@ -27,7 +27,15 @@ describe.skipIf(!DB_URL)('PushService', () => {
   let deviceId: string;
   let aliceAuth: VerifiedAuth;
 
-  const svc = new PushService(configuredVapid);
+  const pinoMock = {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    trace: vi.fn(),
+    fatal: vi.fn(),
+  } as never;
+  const svc = new PushService(pinoMock, configuredVapid);
 
   const fakeSub = (tag = 'a') => ({
     endpoint: `https://push.example.com/sub-${tag}`,
@@ -223,7 +231,7 @@ describe.skipIf(!DB_URL)('PushService', () => {
 
   it('notifyConversationMembers: 410 removes the stale subscription row', async () => {
     // Use a service instance with configured=true so the fan-out path runs
-    const configuredSvc = new PushService({ ...configuredVapid, configured: true });
+    const configuredSvc = new PushService(pinoMock, { ...configuredVapid, configured: true });
 
     // Set up VAPID details with fake keys (sendNotification will be mocked)
     const webpush = await import('web-push');

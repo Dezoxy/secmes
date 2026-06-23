@@ -1,0 +1,36 @@
+groups:
+  - name: security
+    rules:
+      # Normal WS auth failures come from expired tokens (a few per 5 min is fine).
+      # > 20 in 5 min suggests a credential-stuffing or token-replay attack.
+      - alert: WSAuthFailureSpike
+        expr: |
+          count_over_time(
+            {job="docker"} | json | msg="ws:auth_failed" [5m]
+          ) > 20
+        labels: { severity: warning }
+        annotations:
+          summary: "High WebSocket auth failure rate"
+          description: "More than 20 WS auth failures in 5 minutes — possible credential-stuffing or token-replay attack."
+
+      # A spike in rate-limit hits suggests a client misbehaving or an attack.
+      - alert: RateLimitHitSpike
+        expr: |
+          count_over_time(
+            {job="docker"} | json | msg="ws:subscribe_rate_limited" [5m]
+          ) > 50
+        labels: { severity: warning }
+        annotations:
+          summary: "High WS subscribe rate-limit hit count"
+          description: "More than 50 rate-limited subscribe attempts in 5 minutes — possible abusive client."
+
+      # Repeated session refresh failures can indicate token-replay or confused clients.
+      - alert: SessionRefreshFailureSpike
+        expr: |
+          count_over_time(
+            {job="docker", level="warn"} | json | context="SessionTokenController" [5m]
+          ) > 30
+        labels: { severity: warning }
+        annotations:
+          summary: "Repeated session refresh failures"
+          description: "More than 30 session refresh failures in 5 minutes — possible token-replay attempt."

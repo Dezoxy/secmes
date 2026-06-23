@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { trace } from '@opentelemetry/api';
 import { httpRequestDuration, httpRequestsTotal, routeLabel } from './metrics.js';
 
 // `express` isn't a direct dependency, so we type the request/response structurally on node:http (Express's
@@ -26,7 +27,15 @@ export function metricsMiddleware(
       status: String(res.statusCode),
     };
     httpRequestsTotal.inc(labels);
-    httpRequestDuration.observe(labels, durationSeconds);
+    // Attach the active trace ID as an exemplar so Grafana can render clickable dots on the p95
+    // panel that jump directly to the Tempo trace for that request. The zero trace ID (all-zeros)
+    // indicates no active span, so we skip it. traceId is an opaque 32-char hex — no PII.
+    const traceId = trace.getActiveSpan()?.spanContext().traceId;
+    const exemplarLabels =
+      traceId && traceId !== '00000000000000000000000000000000' ? { traceId } : undefined;
+    // prom-client: when enableExemplars=true, observe() switches to the object-form signature.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    httpRequestDuration.observe({ labels, value: durationSeconds, exemplarLabels } as any);
   });
   next();
 }

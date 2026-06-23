@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { LoggerModule } from 'nestjs-pino';
 import { AppController } from './app.controller.js';
 import { AdminModule } from './admin/admin.module.js';
 import { AuditModule } from './audit/audit.module.js';
@@ -11,9 +12,13 @@ import { PushModule } from './push/push.module.js';
 import { RealtimeModule } from './realtime/realtime.module.js';
 import { TenantsModule } from './tenants/tenants.module.js';
 import { UsersModule } from './users/users.module.js';
+import { pinoHttpConfig } from './observability/logger.js';
 
 @Module({
   imports: [
+    LoggerModule.forRootAsync({
+      useFactory: () => ({ pinoHttp: pinoHttpConfig }),
+    }),
     AdminModule,
     AuthModule,
     DevicesModule,

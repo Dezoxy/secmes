@@ -13,7 +13,20 @@ import { PushService } from '../push/push.service.js';
 import { MessagingService } from './messaging.service.js';
 import type { SendMessage } from './messaging.schemas.js';
 
-const noopPush = new PushService({ publicKey: '', privateKey: '', subject: '', configured: false });
+const pinoMock = {
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+  trace: vi.fn(),
+  fatal: vi.fn(),
+} as never;
+const noopPush = new PushService(pinoMock, {
+  publicKey: '',
+  privateKey: '',
+  subject: '',
+  configured: false,
+});
 
 // Integration (roadmap 26) — needs a live Postgres with migrations applied. Auto-skips without DATABASE_URL.
 const DB_URL = process.env.DATABASE_URL;

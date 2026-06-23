@@ -1,6 +1,11 @@
+// tracing.ts MUST be the first import so the OTel SDK patches Node built-ins before any other module
+// loads. See docs/threat-models/structured-logging-and-tracing.md and apps/api/Dockerfile CMD.
+import './observability/tracing.js';
+
 import 'reflect-metadata';
+import pino from 'pino';
 import { NestFactory } from '@nestjs/core';
-import { Logger } from '@nestjs/common';
+import { Logger } from 'nestjs-pino';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { WsAdapter } from '@nestjs/platform-ws';
 import { SwaggerModule } from '@nestjs/swagger';
@@ -12,17 +17,25 @@ import { initErrorTracking } from './observability/error-tracking.js';
 import { ErrorTrackingInterceptor } from './observability/error-tracking.interceptor.js';
 import { metricsMiddleware } from './observability/metrics.middleware.js';
 import { startMetricsServer } from './observability/metrics-server.js';
+import { pinoConfig } from './observability/logger.js';
+
+// Bootstrap-phase logger for messages emitted before/after the DI container is up.
+const bootLog = pino({ ...pinoConfig, name: 'Bootstrap' });
 
 async function bootstrap(): Promise<void> {
   // Error tracking (checkpoint 48) — init as early as possible so captures cover the whole app. DSN-GATED:
   // a complete no-op when SENTRY_DSN is unset (the default until arming). Events are default-deny scrubbed
   // (no content/keys/tokens/headers/presigned URLs ever leave — see observability/error-tracking.ts).
-  initErrorTracking((msg) => Logger.log(msg, 'ErrorTracking'));
+  initErrorTracking((msg) => bootLog.info({ context: 'ErrorTracking' }, msg));
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
-    bufferLogs: false,
+    bufferLogs: true,
     rawBody: true,
   });
+
+  // Switch NestJS's internal logger to the Pino logger provisioned by LoggerModule, flushing any
+  // buffered boot-phase logs through Pino.
+  app.useLogger(app.get(Logger));
 
   // Report unhandled/5xx errors to Sentry/GlitchTip without altering the response (observe + rethrow). No-op
   // when error tracking is disabled. Captures method + route-template + opaque ids only.
@@ -72,7 +85,7 @@ async function bootstrap(): Promise<void> {
 
   const port = Number(process.env.PORT ?? 3000);
   await app.listen(port, '0.0.0.0');
-  Logger.log(`api listening on :${port}`, 'Bootstrap');
+  bootLog.info({ port }, 'api listening');
 
   // Prometheus metrics on a SEPARATE internal port (default 9090) — never routed by Caddy / the public /api
   // surface, no published host port, so only an in-network scraper reaches it (see observability.md). Closed

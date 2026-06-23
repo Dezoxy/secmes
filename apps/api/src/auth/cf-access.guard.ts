@@ -2,9 +2,9 @@ import {
   type CanActivate,
   type ExecutionContext,
   Injectable,
-  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import type { Request } from 'express';
 
@@ -21,13 +21,12 @@ import type { Request } from 'express';
 // deploy — no Access in front) it is a pass-through no-op so dev + tests run with zero Access infrastructure.
 @Injectable()
 export class CfAccessGuard implements CanActivate {
-  private readonly logger = new Logger(CfAccessGuard.name);
   private readonly enabled: boolean;
   private readonly issuer: string | undefined;
   private readonly audience: string | undefined;
   private readonly jwks: ReturnType<typeof createRemoteJWKSet> | undefined;
 
-  constructor() {
+  constructor(@InjectPinoLogger(CfAccessGuard.name) private readonly logger: PinoLogger) {
     const team = process.env['CF_ACCESS_TEAM_DOMAIN']?.trim();
     const aud = process.env['CF_ACCESS_AUD']?.trim();
     if (team && aud) {
@@ -48,7 +47,7 @@ export class CfAccessGuard implements CanActivate {
       this.audience = aud;
       this.jwks = createRemoteJWKSet(new URL(`${base}/cdn-cgi/access/certs`));
       this.enabled = true;
-      this.logger.log(`Cloudflare Access verification ENABLED (issuer ${base})`);
+      this.logger.info({ issuer: base }, 'Cloudflare Access verification ENABLED');
     } else {
       this.enabled = false;
       // Observability for the silent-no-op risk: in production this WARN flags that the admin/breakglass

@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { Injectable, type OnModuleInit } from '@nestjs/common';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import {
   ConnectedSocket,
   MessageBody,
@@ -10,6 +12,7 @@ import {
 import { WebSocket } from 'ws';
 
 import { AuthService, type MaybeUnboundAuth, type VerifiedAuth } from '../auth/auth.service.js';
+import { wsConnectionsActive } from '../observability/metrics.js';
 import { MessagingService } from '../messaging/messaging.service.js';
 import {
   RealtimeBus,
@@ -35,6 +38,7 @@ const SUBSCRIBE_MAX_PER_WINDOW = 120;
 
 /** Per-socket state. A socket does nothing until it has authenticated. */
 interface ConnState {
+  connId: string; // per-connection random UUID for structured log correlation
   authed: boolean;
   auth?: VerifiedAuth;
   subs: Set<string>; // room keys this socket joined
@@ -65,6 +69,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   private readonly rooms = new Map<string, Set<WebSocket>>(); // roomKey → subscribed sockets
 
   constructor(
+    @InjectPinoLogger(RealtimeGateway.name) private readonly logger: PinoLogger,
     private readonly auth: AuthService,
     private readonly messaging: MessagingService,
     private readonly bus: RealtimeBus,
@@ -82,6 +87,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   handleConnection(client: WebSocket): void {
     const state: ConnState = {
+      connId: randomUUID(),
       authed: false,
       subs: new Set(),
       subWindowStart: Date.now(),
@@ -90,7 +96,10 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     };
     // Close sockets that connect but never authenticate (resource exhaustion / probing).
     state.authTimer = setTimeout(() => {
-      if (!state.authed) client.close(4408, 'auth timeout');
+      if (!state.authed) {
+        this.logger.warn({ connId: state.connId }, 'ws:auth_timeout');
+        client.close(4408, 'auth timeout');
+      }
     }, AUTH_DEADLINE_MS);
     this.conns.set(client, state);
   }
@@ -99,6 +108,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     const state = this.conns.get(client);
     if (!state) return;
     if (state.authTimer) clearTimeout(state.authTimer);
+    if (state.authed) wsConnectionsActive.dec();
     for (const room of state.subs) {
       const sockets = this.rooms.get(room);
       sockets?.delete(client);
@@ -121,6 +131,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     try {
       auth = await this.auth.verify(token); // throws on any failure; never logged
     } catch {
+      this.logger.warn({ connId: state.connId, reason: 'invalid_token' }, 'ws:auth_failed');
       client.close(4401, 'unauthorized');
       return;
     }
@@ -132,6 +143,8 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     state.authed = true;
     state.auth = auth as VerifiedAuth;
     if (state.authTimer) clearTimeout(state.authTimer);
+    wsConnectionsActive.inc();
+    this.logger.info({ connId: state.connId, sub: auth.sub, tenantId: auth.tenantId }, 'ws:auth');
     this.send(client, 'ready', { sub: auth.sub });
   }
 
@@ -160,6 +173,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
     // Bound the NEW-room subscribe rate per socket — each one costs a DB lookup (see SUBSCRIBE_MAX_PER_WINDOW).
     if (!this.allowSubscribe(state)) {
+      this.logger.warn({ connId: state.connId, sub: state.auth.sub }, 'ws:subscribe_rate_limited');
       this.send(client, 'error', { message: 'rate limited' });
       return;
     }
@@ -180,6 +194,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       this.rooms.set(room, sockets);
     }
     sockets.add(client);
+    this.logger.info({ connId: state.connId, conversationId }, 'ws:subscribe');
     this.send(client, 'subscribed', { conversationId });
   }
 

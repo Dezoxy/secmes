@@ -399,6 +399,10 @@ case "$_app_pw" in
   exit 1
   ;;
 esac
+# Write the extracted password to a separate file for postgres-exporter (DATA_SOURCE_PASS_FILE) so the
+# exporter never needs the full DSN in process env — satisfies invariant #5 without the entrypoint wrapper.
+printf '%s' "$_app_pw" >"$SECRETS_DIR/argus_app_password"
+chmod 0444 "$SECRETS_DIR/argus_app_password"
 # Feed the SQL on STDIN (never argv/-v) so no password reaches /proc/<pid>/cmdline; psql echoes nothing of the
 # value. The owner connects over the postgres container's local socket (official-image trust) — no connection
 # secret is passed; if local trust is ever disabled, psql fails and `set -e` aborts (fail-closed).
@@ -764,6 +768,30 @@ if [ -n "$B2_CORS_KEY_ID" ]; then
   converge_attachment_cors || exit 1
 else
   log "B2_CORS_KEY_ID not set — skipping attachment-bucket CORS convergence (provision the key to enable)"
+fi
+
+# --- 6e. Post a deployment annotation to Grafana (non-fatal).
+#         Every time-series panel in every dashboard shows a vertical line at the deploy moment —
+#         instant correlation between a metric shift and the code change that caused it.
+#         Access Grafana via its container IP on the Docker network (no published port); auth header
+#         is passed via curl --config stdin so the value never appears in a process list. ---
+_gf_cid="$(docker compose -f "$COMPOSE" ps -q grafana 2>/dev/null || true)"
+if [ -n "$_gf_cid" ] && [ -s "$SECRETS_DIR/grafana_admin_password" ]; then
+  log "posting deploy annotation to Grafana"
+  _gf_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$_gf_cid" | tail -1)"
+  if [ -n "$_gf_ip" ]; then
+    _gf_auth="$(printf 'admin:%s' "$(cat "$SECRETS_DIR/grafana_admin_password")" | base64 | tr -d '\n')"
+    printf 'header = "Authorization: Basic %s"\n' "$_gf_auth" | \
+      curl -fsS -X POST "http://${_gf_ip}:3000/api/annotations" \
+        -H 'Content-Type: application/json' \
+        --config - \
+        -d "{\"text\":\"Deployed ${IMAGE_TAG}\",\"tags\":[\"deploy\"],\"time\":$(date +%s%3N)}" \
+      && log "Grafana annotation posted (${IMAGE_TAG})" \
+      || log "warning: could not post Grafana deploy annotation (non-fatal)"
+    _gf_auth=""
+  fi
+  _gf_cid=""
+  _gf_ip=""
 fi
 
 # --- 7. Tidy up: drop dangling images (the GHCR login is cleared by the EXIT trap). ---

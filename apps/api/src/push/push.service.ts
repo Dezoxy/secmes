@@ -1,4 +1,5 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import webpush from 'web-push';
 
@@ -37,9 +38,11 @@ function assertSafeEndpoint(endpoint: string): void {
 @Injectable()
 export class PushService {
   private readonly configured: boolean;
-  private readonly logger = new Logger(PushService.name);
 
-  constructor(@Inject(VAPID_CONFIG) private readonly vapid: VapidConfig) {
+  constructor(
+    @InjectPinoLogger(PushService.name) private readonly logger: PinoLogger,
+    @Inject(VAPID_CONFIG) private readonly vapid: VapidConfig,
+  ) {
     this.configured = vapid.configured;
     if (vapid.configured) {
       webpush.setVapidDetails(vapid.subject, vapid.publicKey, vapid.privateKey);

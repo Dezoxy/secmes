@@ -35,7 +35,16 @@ describe('RealtimeGateway', () => {
     bus = new InProcessRealtimeBus();
     auth = { verify: vi.fn() };
     messaging = { isMember: vi.fn() };
+    const pinoMock = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+      trace: vi.fn(),
+      fatal: vi.fn(),
+    } as never;
     gw = new RealtimeGateway(
+      pinoMock,
       auth as unknown as AuthService,
       messaging as unknown as MessagingService,
       bus,

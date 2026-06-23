@@ -1,4 +1,5 @@
-import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import { and, count, eq, max, min, or, sql } from 'drizzle-orm';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
@@ -8,9 +9,10 @@ import type { MeExport } from '@argus/contracts';
 
 @Injectable()
 export class GdprService {
-  private readonly logger = new Logger(GdprService.name);
-
-  constructor(private readonly blobStore: BlobStore) {}
+  constructor(
+    @InjectPinoLogger(GdprService.name) private readonly logger: PinoLogger,
+    private readonly blobStore: BlobStore,
+  ) {}
 
   /**
    * GDPR Art. 20 — data portability. Returns all METADATA the server holds about the caller.

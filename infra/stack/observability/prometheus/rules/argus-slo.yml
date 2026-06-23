@@ -1,0 +1,62 @@
+groups:
+  - name: argus-slo-recording
+    interval: 30s
+    rules:
+      # ── Availability SLO (target: 99.5% non-5xx) ──────────────────────────────
+      - record: argus:http_error_ratio:rate5m
+        expr: |
+          sum(rate(argus_api_http_requests_total{status=~"5.."}[5m]))
+          / sum(rate(argus_api_http_requests_total[5m]))
+
+      - record: argus:http_error_ratio:rate1h
+        expr: |
+          sum(rate(argus_api_http_requests_total{status=~"5.."}[1h]))
+          / sum(rate(argus_api_http_requests_total[1h]))
+
+      - record: argus:http_error_ratio:rate6h
+        expr: |
+          sum(rate(argus_api_http_requests_total{status=~"5.."}[6h]))
+          / sum(rate(argus_api_http_requests_total[6h]))
+
+      # ── Latency SLO (target: 95% of requests < 500ms) ─────────────────────────
+      - record: argus:http_latency_compliance:rate5m
+        expr: |
+          sum(rate(argus_api_http_request_duration_seconds_bucket{le="0.5"}[5m]))
+          / sum(rate(argus_api_http_request_duration_seconds_count[5m]))
+
+      - record: argus:http_latency_compliance:rate1h
+        expr: |
+          sum(rate(argus_api_http_request_duration_seconds_bucket{le="0.5"}[1h]))
+          / sum(rate(argus_api_http_request_duration_seconds_count[1h]))
+
+  - name: argus-slo-alerts
+    rules:
+      # Fast-burn page: consuming 14× the allowed error rate — 2% of the monthly budget gone in 1 hour.
+      # Both a short (5m) and long (1h) window must be elevated to avoid false positives from brief spikes.
+      - alert: AvailabilitySLOFastBurn
+        expr: |
+          argus:http_error_ratio:rate1h > (14 * 0.005)
+          and argus:http_error_ratio:rate5m > (14 * 0.005)
+        labels: { severity: critical, slo: availability }
+        annotations:
+          summary: "Fast error-budget burn — availability SLO at risk"
+          description: "5xx error rate is {{ $value | humanizePercentage }} — at 14× the allowed budget burn rate. Act immediately."
+
+      # Slow-burn warn: consuming 6× over 6 hours — draining the budget without triggering fast-burn.
+      - alert: AvailabilitySLOSlowBurn
+        expr: |
+          argus:http_error_ratio:rate6h > (6 * 0.005)
+          and argus:http_error_ratio:rate1h > (6 * 0.005)
+        labels: { severity: warning, slo: availability }
+        annotations:
+          summary: "Slow error-budget burn — review error rate trend"
+          description: "5xx error rate has been elevated for 6+ hours at 6× the allowed burn rate."
+
+      # Latency SLO breach: fewer than 95% of requests completing under 500ms for a sustained period.
+      - alert: LatencySLOBreach
+        expr: argus:http_latency_compliance:rate1h < 0.95
+        for: 10m
+        labels: { severity: warning, slo: latency }
+        annotations:
+          summary: "Less than 95% of requests completing under 500ms"
+          description: "Latency SLO compliance is {{ $value | humanizePercentage }} over the last hour."

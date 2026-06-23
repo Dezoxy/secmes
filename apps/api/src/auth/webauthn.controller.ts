@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, HttpStatus, Ip, Logger, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Ip, Post, Req, Res } from '@nestjs/common';
 import {
   ApiBody,
   ApiCreatedResponse,
@@ -174,8 +174,6 @@ class AccessTokenResponseDto {
 @ApiTags('auth')
 @Controller('auth')
 export class WebAuthnController {
-  private readonly logger = new Logger(WebAuthnController.name);
-
   constructor(private readonly webauthn: WebAuthnService) {}
 
   /**

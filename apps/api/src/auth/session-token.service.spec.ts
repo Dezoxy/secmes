@@ -56,7 +56,15 @@ describe('SessionTokenService (unit)', () => {
   });
 
   beforeEach(() => {
-    svc = new SessionTokenService(signingKey);
+    const pinoMock = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+      trace: vi.fn(),
+      fatal: vi.fn(),
+    } as never;
+    svc = new SessionTokenService(pinoMock, signingKey);
     vi.mocked(withTenant).mockReset();
     vi.mocked(withRouting).mockReset();
     vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
