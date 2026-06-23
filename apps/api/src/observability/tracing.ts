@@ -1,6 +1,11 @@
 // OpenTelemetry SDK bootstrap. Loaded via `node --import` (see Dockerfile CMD) so it runs before
 // any application module is imported — the SDK must patch Node built-ins before their first require.
 //
+// ESM loader hook: register() is called before sdk.start() so OTel instrumentations can wrap
+// ESM-loaded module exports (http, express, etc.). Without it, --import alone initialises the SDK
+// but cannot intercept ESM modules — spans, trace_id log fields, and exemplars are silently absent.
+// Uses module.register() (Node 20+ stable API, no deprecation warning) instead of --loader.
+//
 // Security constraints (invariant #2):
 //  - HTTP spans: url.full / http.url are redacted on ALL spans (incoming and outgoing).
 //    Incoming routes are still captured via http.route (set by the NestJS middleware, safe).
@@ -12,11 +17,14 @@
 //  - Sampling: 10% in production via OTEL_TRACES_SAMPLER / OTEL_TRACES_SAMPLER_ARG env overrides.
 //    The NodeSDK picks these up automatically; no code change needed to adjust sampling.
 //  - The OTLP exporter reads OTEL_EXPORTER_OTLP_ENDPOINT from env (set to http://tempo:4318 in prod).
+import { register } from 'module';
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
+
+register('@opentelemetry/instrumentation/hook.mjs', import.meta.url);
 
 const sdk = new NodeSDK({
   resource: resourceFromAttributes({
