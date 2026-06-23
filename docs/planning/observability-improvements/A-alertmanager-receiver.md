@@ -1,6 +1,6 @@
 # Idea A — Alertmanager receiver + infrastructure alerts
 
-**Effort:** S  **Impact:** Critical  **Status:** [ ] Not implemented
+**Effort:** S  **Impact:** Critical  **Status:** [x] Implemented
 
 ---
 

@@ -298,6 +298,8 @@ services:
     volumes:
       - ./infra/stack/observability/alertmanager:/etc/alertmanager:ro
       - alertmanager-data:/alertmanager
+    secrets:
+      - alertmanager_webhook_url
     read_only: true
     tmpfs:
       - /tmp
@@ -669,6 +671,12 @@ secrets:
     # Django SECRET_KEY (cryptographic). Generate: python -c "import secrets; print(secrets.token_urlsafe(50))"
     # Stored in Key Vault as argus-glitchtip-secret-key. Set before first deploy.
     file: ${ARGUS_SECRETS_DIR:-./secrets}/glitchtip_secret_key
+  alertmanager_webhook_url:
+    # Slack (or any HTTP) incoming webhook URL for Alertmanager notifications.
+    # OPTIONAL: fetched from Key Vault (argus-alertmanager-webhook-url); seeded EMPTY on first boot.
+    # Empty = notifications silently fail but alerts are still visible in the Alertmanager UI and Grafana.
+    # Arm by provisioning argus-alertmanager-webhook-url in Key Vault; hot-reload via SIGHUP.
+    file: ${ARGUS_SECRETS_DIR:-./secrets}/alertmanager_webhook_url
   sentry_dsn:
     # GlitchTip project DSN — a write-only ingest key for the api's @sentry/node SDK (roadmap #48).
     # OPTIONAL: fetched from Key Vault (argus-sentry-dsn); seeded EMPTY on first boot so the mount

@@ -75,6 +75,10 @@ SECRETS=(
 # runs degraded until the value is provisioned (e.g. the GlitchTip DSN, only created after the GlitchTip UI is
 # up; the breakglass admin hash, provisioned during arming).
 OPTIONAL_SECRETS=(
+  # Alertmanager webhook URL (Slack incoming webhook or equivalent). Seeded EMPTY until the operator
+  # provisions it in Key Vault after the first deploy. Empty = alerts visible in the Alertmanager UI
+  # but no external notifications. Hot-reload via: docker compose kill -s HUP alertmanager.
+  "argus-alertmanager-webhook-url=alertmanager_webhook_url"
   # GlitchTip project DSN — a write-only ingest key the operator creates in the GlitchTip UI after
   # the first deploy (arming). Seeded EMPTY until provisioned; the api is a complete no-op without it.
   "argus-sentry-dsn=sentry_dsn"
