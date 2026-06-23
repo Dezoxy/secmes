@@ -626,6 +626,11 @@ export function ConversationList({
               {effectiveFriends.length} accepted
             </span>
           </span>
+          {effectiveIncoming.length > 0 && (
+            <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-purple-500 px-1.5 text-xs font-semibold text-white">
+              {effectiveIncoming.length}
+            </span>
+          )}
         </button>
       </div>
 

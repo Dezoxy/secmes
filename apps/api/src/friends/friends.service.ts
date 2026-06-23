@@ -5,6 +5,8 @@ import { and, eq, gt, lt, ne, or, sql } from 'drizzle-orm';
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
 import { requireUser } from '../messaging/membership.js';
+import { PushService } from '../push/push.service.js';
+import { RealtimeBus } from '../realtime/realtime-bus.js';
 import { UserService } from '../users/user.service.js';
 
 /** Pending friend requests live this long before the argus_cleanup sweep reaps them (R-friends-2). */
@@ -34,7 +36,11 @@ function otherParty(me: string) {
 
 @Injectable()
 export class FriendsService {
-  constructor(private readonly users: UserService) {}
+  constructor(
+    private readonly users: UserService,
+    private readonly bus: RealtimeBus,
+    private readonly push: PushService,
+  ) {}
 
   /**
    * Create a friend request addressed by exact argus-id. Returns whether the target was found (for the
@@ -58,35 +64,76 @@ export class FriendsService {
 
     const { low, high } = canonicalPair(me, target.userId);
     const expiresAt = new Date(Date.now() + FRIEND_REQUEST_TTL_DAYS * 24 * 60 * 60 * 1000);
-    await withTenant(auth.tenantId, async (tx) => {
-      await tx
-        .insert(schema.friendships)
-        .values({
-          tenantId: auth.tenantId,
-          userLowId: low,
-          userHighId: high,
-          status: 'pending',
-          requestedBy: me,
-          expiresAt,
-        })
-        // One row per canonical pair. On conflict, REVIVE the row only if the existing one is an
-        // EXPIRED pending request (resetting requester + expiry from this caller). A live pending row
-        // or an accepted friendship is left untouched (setWhere matches nothing → no-op). Without this,
-        // an expired-but-unswept row would deadlock the pair: every re-request would silently no-op
-        // against it while the API treats it as inert, until the cleanup sweep finally deletes it.
-        .onConflictDoUpdate({
-          target: [
-            schema.friendships.tenantId,
-            schema.friendships.userLowId,
-            schema.friendships.userHighId,
-          ],
-          set: { status: 'pending', requestedBy: me, expiresAt, resolvedAt: null },
-          setWhere: and(
-            eq(schema.friendships.status, 'pending'),
-            lt(schema.friendships.expiresAt, new Date()),
-          ),
-        });
-    });
+    const { rowWritten, recipientSubs, recipientUserId } = await withTenant(
+      auth.tenantId,
+      async (tx) => {
+        const [row] = await tx
+          .insert(schema.friendships)
+          .values({
+            tenantId: auth.tenantId,
+            userLowId: low,
+            userHighId: high,
+            status: 'pending',
+            requestedBy: me,
+            expiresAt,
+          })
+          // One row per canonical pair. On conflict, REVIVE the row only if the existing one is an
+          // EXPIRED pending request (resetting requester + expiry from this caller). A live pending row
+          // or an accepted friendship is left untouched (setWhere matches nothing → no-op). Without this,
+          // an expired-but-unswept row would deadlock the pair: every re-request would silently no-op
+          // against it while the API treats it as inert, until the cleanup sweep finally deletes it.
+          .onConflictDoUpdate({
+            target: [
+              schema.friendships.tenantId,
+              schema.friendships.userLowId,
+              schema.friendships.userHighId,
+            ],
+            set: { status: 'pending', requestedBy: me, expiresAt, resolvedAt: null },
+            setWhere: and(
+              eq(schema.friendships.status, 'pending'),
+              lt(schema.friendships.expiresAt, new Date()),
+            ),
+          })
+          .returning({ id: schema.friendships.id });
+
+        // No row returned ⇒ conflict with a live-pending or accepted row — notify would be spurious.
+        if (!row)
+          return { rowWritten: false, recipientSubs: [] as string[], recipientUserId: null };
+
+        // Resolve the recipient's subs in the same tx while RLS context is active.
+        const [recipient] = await tx
+          .select({
+            id: schema.users.id,
+            externalSub: schema.users.externalIdentityId,
+            argusId: schema.users.argusId,
+          })
+          .from(schema.users)
+          .where(and(eq(schema.users.tenantId, auth.tenantId), eq(schema.users.id, target.userId)))
+          .limit(1);
+
+        return {
+          rowWritten: true,
+          // Both sub families so sockets authenticated under either token family receive the nudge.
+          // Dedup in case externalSub already carries the argusid: prefix (defensive).
+          recipientSubs: recipient
+            ? [...new Set([recipient.externalSub, `argusid:${recipient.argusId}`])]
+            : ([] as string[]),
+          recipientUserId: recipient?.id ?? null,
+        };
+      },
+    );
+
+    // Best-effort notify — fired after the tx commits so the DB row is durable first.
+    // Neither failure changes the uniform 202 (R-friends-3).
+    if (rowWritten) {
+      for (const recipientSub of recipientSubs) {
+        this.bus.emitFriendRequestCreated({ tenantId: auth.tenantId, recipientSub });
+      }
+      if (recipientUserId) {
+        void this.push.notifyUser(auth.tenantId, recipientUserId, 'friend_request').catch(() => {});
+      }
+    }
+
     return { targetFound: true };
   }
 

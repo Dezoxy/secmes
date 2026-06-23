@@ -64,16 +64,34 @@ registerRoute(
   }),
 );
 
-// Push: content-free wake. The payload is {"type":"new_message"} — zero plaintext, no sender, no
-// conversation id. On push: show a generic notification. The app reconnects via WebSocket and
-// fetches ciphertext normally. Tag collapses multiple pushes into one notification entry.
+// Push: content-free wake. The payload is {"type":"new_message"|"friend_request"} — zero plaintext,
+// no sender, no conversation id. On push: show a generic notification. The app reconnects via
+// WebSocket and fetches ciphertext normally. Tag collapses multiple pushes into one notification entry.
 self.addEventListener('push', (event: PushEvent) => {
+  let type = 'new_message';
+  try {
+    const data = event.data?.json() as { type?: unknown } | null;
+    if (typeof data?.type === 'string') type = data.type;
+  } catch {
+    // malformed payload — default to new_message
+  }
+
+  let body: string;
+  let tag: string;
+  if (type === 'friend_request') {
+    body = 'New friend request';
+    tag = 'argus-friend-request';
+  } else {
+    body = 'New message';
+    tag = 'argus-new-message';
+  }
+
   event.waitUntil(
     self.registration.showNotification('argus', {
-      body: 'New message',
+      body,
       icon: '/icon-192.png',
       badge: '/icon-192.png',
-      tag: 'argus-new-message',
+      tag,
       renotify: true,
     }),
   );

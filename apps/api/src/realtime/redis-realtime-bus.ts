@@ -5,6 +5,7 @@ import {
   CommitCreatedEventSchema,
   DeviceEnrollmentApprovedEventSchema,
   DeviceEnrollmentPendingEventSchema,
+  FriendRequestCreatedEventSchema,
   MemberRemovedEventSchema,
   MessageCreatedEventSchema,
   ReceiptAdvancedEventSchema,
@@ -13,6 +14,7 @@ import {
   type CommitCreatedEvent,
   type DeviceEnrollmentApprovedEvent,
   type DeviceEnrollmentPendingEvent,
+  type FriendRequestCreatedEvent,
   type MemberRemovedEvent,
   type MessageCreatedEvent,
   type ReceiptAdvancedEvent,
@@ -26,6 +28,7 @@ export const COMMIT_CHANNEL = 'argus:realtime:commit-created';
 export const MEMBER_REMOVED_CHANNEL = 'argus:realtime:member-removed';
 export const ENROLLMENT_PENDING_CHANNEL = 'argus:realtime:device-enrollment-pending';
 export const ENROLLMENT_APPROVED_CHANNEL = 'argus:realtime:device-enrollment-approved';
+export const FRIEND_REQUEST_CHANNEL = 'argus:realtime:friend-request-created';
 
 /**
  * Cross-pod bus (checkpoint 29): each send PUBLISHES the event to a Redis channel, and every gateway
@@ -49,6 +52,7 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
   private readonly enrollmentApprovedListeners: Array<
     (event: DeviceEnrollmentApprovedEvent) => void
   > = [];
+  private readonly friendRequestListeners: Array<(event: FriendRequestCreatedEvent) => void> = [];
   /** Resolves once the subscriptions are active — await before relying on receipt (readiness/tests). */
   readonly ready: Promise<void>;
 
@@ -75,6 +79,7 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
         MEMBER_REMOVED_CHANNEL,
         ENROLLMENT_PENDING_CHANNEL,
         ENROLLMENT_APPROVED_CHANNEL,
+        FRIEND_REQUEST_CHANNEL,
       )
       .then(() => undefined);
   }
@@ -127,6 +132,12 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
       const parsed = DeviceEnrollmentApprovedEventSchema.safeParse(raw);
       if (!parsed.success) return;
       for (const listener of this.enrollmentApprovedListeners) listener(parsed.data);
+      return;
+    }
+    if (channel === FRIEND_REQUEST_CHANNEL) {
+      const parsed = FriendRequestCreatedEventSchema.safeParse(raw);
+      if (!parsed.success) return;
+      for (const listener of this.friendRequestListeners) listener(parsed.data);
     }
   }
 
@@ -189,6 +200,14 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
 
   onDeviceEnrollmentApproved(listener: (event: DeviceEnrollmentApprovedEvent) => void): void {
     this.enrollmentApprovedListeners.push(listener);
+  }
+
+  emitFriendRequestCreated(event: FriendRequestCreatedEvent): void {
+    this.pub.publish(FRIEND_REQUEST_CHANNEL, JSON.stringify(event)).catch(() => {});
+  }
+
+  onFriendRequestCreated(listener: (event: FriendRequestCreatedEvent) => void): void {
+    this.friendRequestListeners.push(listener);
   }
 
   async onModuleDestroy(): Promise<void> {
