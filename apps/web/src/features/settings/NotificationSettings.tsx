@@ -20,11 +20,28 @@ export function NotificationSettings({ deviceId }: NotificationSettingsProps) {
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(
     currentPermission,
   );
+  // Tracks actual PushManager subscription, not just browser permission.
+  // Permission stays 'granted' after unsubscribe (browsers don't allow JS to revoke it),
+  // so we check the real subscription on mount and update it on enable/disable.
+  const [subscribed, setSubscribed] = useState<boolean>(
+    // Best-guess initial: assume subscribed if permission is already granted.
+    // The effect below corrects this to the real subscription state.
+    () => currentPermission() === 'granted',
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setPermission(currentPermission());
+    const perm = currentPermission();
+    setPermission(perm);
+    if (perm !== 'granted') {
+      setSubscribed(false);
+      return;
+    }
+    navigator.serviceWorker.ready
+      .then((reg) => reg.pushManager.getSubscription())
+      .then((sub) => setSubscribed(sub !== null))
+      .catch(() => setSubscribed(false));
   }, []);
 
   const handleEnable = useCallback(async () => {
@@ -34,6 +51,7 @@ export function NotificationSettings({ deviceId }: NotificationSettingsProps) {
     try {
       await subscribeToPush(deviceId, VAPID_KEY);
       setPermission(currentPermission());
+      setSubscribed(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not enable notifications.');
     } finally {
@@ -47,7 +65,7 @@ export function NotificationSettings({ deviceId }: NotificationSettingsProps) {
     setError(null);
     try {
       await unsubscribeFromPush(deviceId);
-      setPermission(currentPermission());
+      setSubscribed(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not disable notifications.');
     } finally {
@@ -76,7 +94,15 @@ export function NotificationSettings({ deviceId }: NotificationSettingsProps) {
 
       {permission !== 'unsupported' && (
         <div className="space-y-2">
-          {permission !== 'granted' ? (
+          {subscribed ? (
+            <SettingsRow
+              title="Notifications"
+              value={busy ? 'Disabling…' : 'Enabled'}
+              enabled={true}
+              disabled={busy}
+              onClick={handleDisable}
+            />
+          ) : (
             <SettingsRow
               title="Notifications"
               value={
@@ -89,14 +115,6 @@ export function NotificationSettings({ deviceId }: NotificationSettingsProps) {
               enabled={false}
               disabled={busy || !deviceId || !VAPID_KEY}
               onClick={handleEnable}
-            />
-          ) : (
-            <SettingsRow
-              title="Notifications"
-              value={busy ? 'Disabling…' : 'Enabled'}
-              enabled={true}
-              disabled={busy}
-              onClick={handleDisable}
             />
           )}
           {error && <p className="text-xs text-red-400">{error}</p>}
