@@ -2,14 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { AdminGuard } from '../auth/admin.guard.js';
-import { CfAccessGuard } from '../auth/cf-access.guard.js';
 import { reflectRouteMeta } from '../common/testing/route-meta.js';
 import { AdminController } from './admin.controller.js';
 import type { AdminService } from './admin.service.js';
 
-// Admin surface — the contract tier is what carries this one: every route must sit behind BOTH the
-// edge CfAccessGuard and the role-checking AdminGuard. The behaviour tier is thin delegation (the
-// metadata-only shaping lives in AdminService), so we assert it forwards auth + params faithfully.
+// Admin surface — the contract tier pins that every route sits behind AdminGuard (Argus JWT +
+// session revocation + role='admin'). CF Access is NOT on the admin API — it would block regular
+// admin users accessing the in-app settings panel without having gone through the breakglass flow.
+// The behaviour tier is thin delegation (metadata-only shaping lives in AdminService).
 
 const auth: VerifiedAuth = {
   sub: 'argusid:admin',
@@ -48,9 +48,9 @@ describe('AdminController route contract', () => {
   });
 
   it.each(['listDevices', 'revokeDevice', 'listAudit'])(
-    '%s is wrapped by CfAccessGuard AND AdminGuard',
+    '%s is wrapped by AdminGuard only (no CfAccessGuard — admin API is not behind CF Access)',
     (method) => {
-      expect(guardNames(method)).toEqual([AdminGuard.name, CfAccessGuard.name].sort());
+      expect(guardNames(method)).toEqual([AdminGuard.name]);
     },
   );
 });

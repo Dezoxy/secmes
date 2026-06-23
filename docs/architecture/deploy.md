@@ -105,23 +105,33 @@ hostnames are configured in the Cloudflare Zero Trust dashboard, not in this rep
   **gated by Cloudflare Access** + Grafana's own login; Prometheus + Alertmanager stay internal-only)
 - other admin subdomains (e.g. ops) → their service, **gated by Cloudflare Access** (identity at the edge)
 
-### Admin (breakglass) access — Cloudflare Access on `/admin` + the admin API
+### Admin (breakglass) access — Cloudflare Access on `/admin` + the breakglass API
 
 The breakglass admin login is **not** on the public landing page. It lives at `https://4rgus.com/admin`, and
-the admin/breakglass API (`/api/auth/breakglass/*`, `/api/admin/*`) is reachable **only** through Cloudflare
+the breakglass surface (`/admin/*`, `/api/auth/breakglass/*`) is reachable **only** through Cloudflare
 Access. Two layers enforce this (see [`docs/threat-models/admin-access-gating.md`](../threat-models/admin-access-gating.md)):
 
-1. **Edge (Caddy):** `infra/stack/caddy/Caddyfile` returns **404** for those paths unless the request carries
-   the `Cf-Access-Jwt-Assertion` header that cloudflared injects after a request passes Access (and strips if a
-   client supplies it). No Terraform/code change beyond the Caddyfile.
-2. **App (defense in depth):** the API verifies that JWT's signature (`CfAccessGuard`) **when** the two
-   non-secret env vars below are set; unset = no-op (dev / before the Access app exists).
+1. **Edge (Caddy):** `infra/stack/caddy/Caddyfile` returns **404** for `/admin` and `/api/auth/breakglass/*`
+   unless the request carries the `Cf-Access-Jwt-Assertion` header that cloudflared injects after a request
+   passes Access (and strips if a client supplies it). No Terraform/code change beyond the Caddyfile.
+   **`/api/admin/*` is NOT in this gate** — see design note below.
+2. **App (defense in depth):** the API verifies that JWT's signature (`CfAccessGuard`) on the
+   `BreakglassController` **when** the two non-secret env vars below are set; unset = no-op (dev / before
+   the Access app exists). `AdminController` uses `AdminGuard` only (not CF Access) — see design note.
+
+> **Design note:** the in-app Admin panel (Settings → Admin) is accessible to any tenant user with
+> `role='admin'`. Requiring CF Access would block regular admins who authenticated via passkey but have
+> never gone through the breakglass CF Access flow. `AdminGuard` is sufficient: it verifies the Argus
+> EdDSA JWT, checks session revocation, and asserts `role='admin'` + `status='active'` in the DB under
+> tenant RLS. See [`docs/threat-models/admin-access-gating.md`](../threat-models/admin-access-gating.md).
 
 **Create the Access application (Zero Trust dashboard — same place as grafana/glitchtip):**
 
 1. Access → Applications → **Add an application** → **Self-hosted**.
-2. **Application domain:** add `4rgus.com` with **path** `/admin`, and add the same app's additional paths
-   `/api/auth/breakglass` and `/api/admin` (the page **and** the XHRs it makes must both be behind Access).
+2. **Application domain:** add `4rgus.com` with **path** `/admin`, and add the same app's additional path
+   `/api/auth/breakglass` (the breakglass login UI **and** its API must both be behind Access).
+   **Do NOT add `/api/admin`** — that surface uses `AdminGuard` and must remain accessible to regular
+   app-authenticated admins without CF Access.
 3. **Session duration:** short (e.g. **1 hour**) — breakglass is rare.
 4. **Policy:** Action **Allow** → Include → **Emails** → the operator's email only (everyone else is implicitly
    denied); optionally require the IdP's MFA.

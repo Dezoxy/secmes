@@ -90,23 +90,26 @@ http://glitchtip.4rgus.com:8080 {
 	@revalidate not path /assets/* /workbox-*.js /api/* /ws /ws/*
 	header @revalidate Cache-Control "no-cache"
 
-	# --- Admin surfaces gated by Cloudflare Access ------------------------------------------------------
-	# The breakglass admin login page (/admin) and the admin/breakglass API are reachable ONLY through
-	# Cloudflare Access. cloudflared injects `Cf-Access-Jwt-Assertion` on requests that passed the Access
-	# policy and STRIPS any client-supplied copy, so the header's ABSENCE means the request did not pass
-	# Access → return 404 (not 403: don't confirm the route exists to an unauthenticated scanner). Requests
-	# that passed Access carry the header and fall through to the normal SPA/API handling below. This block is
-	# FIRST among the `handle` blocks so it wins before handle_path /api/* and the static fallback. The API
-	# additionally verifies the Access JWT signature (defense in depth, env-gated CfAccessGuard). Only these
-	# admin paths are gated — the main app, passkey login, and end-user /api routes are unaffected. See
-	# docs/threat-models/admin-access-gating.md + docs/architecture/deploy.md.
-	@admin_nojwt {
-		# Match the bare prefixes too (not just /*) so a future index route on the admin/breakglass
-		# controllers can never be reachable un-gated at the bare path.
-		path /admin /admin/* /api/auth/breakglass /api/auth/breakglass/* /api/admin /api/admin/*
+	# --- Breakglass surface gated by Cloudflare Access -------------------------------------------------
+	# The breakglass admin login page (/admin) and its API (/api/auth/breakglass/*) are reachable ONLY
+	# through Cloudflare Access. cloudflared injects `Cf-Access-Jwt-Assertion` on requests that passed
+	# the Access policy and STRIPS any client-supplied copy, so the header's ABSENCE means the request
+	# did not pass Access → return 404 (not 403: don't confirm the route exists to a scanner). Requests
+	# that passed Access carry the header and fall through to the normal SPA/API handling below. This
+	# block is FIRST among the `handle` blocks so it wins before handle_path /api/* and the SPA fallback.
+	#
+	# NOTE: /api/admin/* is NOT in this gate. The admin panel API is accessible to any app-authenticated
+	# user with role='admin' (enforced by AdminGuard: Argus JWT + session revocation check + DB role
+	# check). CF Access was removed from /api/admin/* to allow regular admin users to use the in-app
+	# admin panel (Settings → Admin) without having gone through the breakglass CF Access flow.
+	# See docs/threat-models/admin-access-gating.md.
+	@breakglass_nojwt {
+		# Match the bare prefixes too (not just /*) so a future index route on the breakglass
+		# controller can never be reachable un-gated at the bare path.
+		path /admin /admin/* /api/auth/breakglass /api/auth/breakglass/*
 		not header Cf-Access-Jwt-Assertion *
 	}
-	handle @admin_nojwt {
+	handle @breakglass_nojwt {
 		respond 404
 	}
 
