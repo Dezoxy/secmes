@@ -14,12 +14,16 @@ The fix adds a server-side friendship guard at two points:
 
 ```
 POST /conversations  (isDirect=true)
-  requireUser  →  requireFriendship(caller, peer)  →  INSERT conversation + members
+  requireUser  →  requireFriendship(tx, caller, peer)  →  INSERT conversation + members
 
 POST /conversations/:id/messages
-  requireUser  →  requireMembership  →  requireDmFriendship(conversationId, sender)
-  →  INSERT message (ciphertext only)
+  requireUser  →  requireMembership
+    → resolveDmPeer(tx, conversationId, sender)   -- looks up isDirect + peer from conversation_members
+    → requireFriendship(tx, sender, peer)          -- shared guard: checks friendships table
+    → INSERT message (ciphertext only)
 ```
+
+`requireFriendship(tx, userA, userB)` is the single shared guard in `messaging/membership.ts`. `resolveDmPeer` is an inline step inside `sendMessage()` (not a separate export) that returns `null` for non-DM conversations, short-circuiting the check.
 
 **Sensitive data on this path.** None new: the check reads `friendships.status` (metadata) and `conversation_members.user_id` (metadata). No plaintext, no keys. The server remains crypto-blind; it only decides *whether* to store the ciphertext, never *what* is in it.
 
@@ -58,6 +62,9 @@ POST /conversations/:id/messages
 - **Mitigation**: The existing `requireMembership()` returns 404 for non-members (no conversation oracle). The friendship gate is reached *only after* membership is confirmed, so a 403 reveals: (a) the conversation exists, and (b) the caller is a member. The caller already knows both. No new enumeration surface.
 - **Threat**: Error message reveals the peer's user id.
 - **Mitigation**: The 403 body contains only the string `"friendship required"`. No user ids, no conversation structure.
+
+### Repudiation
+- **Scope**: The server cannot cryptographically bind a message to its author — doing so would require inspecting or signing content, violating the crypto-blind invariant. Repudiation of message authorship is a client-layer concern handled by MLS sender keys (each message is signed by the sender's MLS leaf key, verifiable by conversation members). This server-side guard decides only *whether* to store the ciphertext blob; it makes no authorship claim. Out of scope for this feature.
 
 ### Elevation of Privilege
 - **Threat**: A revoked/soft-deleted user still holding an unexpired token sends a message.
