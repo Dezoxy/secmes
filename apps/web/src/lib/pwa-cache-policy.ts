@@ -15,6 +15,8 @@ export const pwaNavigateFallbackDenylist = [
   /^\/auth\/callback(?:[/?#]|$)/,
   /^\/api(?:[/?#]|$)/,
   /^\/ws(?:[/?#]|$)/,
+  // /admin must reach the network so Cloudflare Access can gate it; serving the cached shell bypasses CF Access
+  /^\/admin(?:[/?#]|$)/,
 ] as const;
 
 const presignedUrlParams = new Set([
