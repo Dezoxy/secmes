@@ -93,7 +93,7 @@ import {
   type FriendRequest,
   type FriendRequestBox,
 } from '@argus/contracts';
-import { requestJson, requestStatus, unwrapApiResult } from './api-client';
+import { type ApiResult, requestJson, requestStatus, unwrapApiResult } from './api-client';
 
 export { apiFetch } from './api-client';
 
@@ -200,20 +200,19 @@ export async function logoutSession(): Promise<void> {
   unwrapApiResult(await requestStatus({ path: '/auth/session/logout', method: 'POST' }));
 }
 
-/** Authenticate as the breakglass admin (POST /auth/breakglass/login). */
+/** Authenticate as the breakglass admin (POST /auth/breakglass/login).
+ * Returns the raw ApiResult so callers can distinguish 401 / 429 / 503 / network errors. */
 export async function breakglassLogin(
   username: string,
   password: string,
-): Promise<AccessTokenResponse> {
-  return unwrapApiResult(
-    await requestJson({
-      path: '/auth/breakglass/login',
-      method: 'POST',
-      body: { username, password },
-      requestSchema: BreakglassLoginRequestSchema,
-      responseSchema: AccessTokenResponseSchema,
-    }),
-  );
+): Promise<ApiResult<AccessTokenResponse>> {
+  return requestJson({
+    path: '/auth/breakglass/login',
+    method: 'POST',
+    body: { username, password },
+    requestSchema: BreakglassLoginRequestSchema,
+    responseSchema: AccessTokenResponseSchema,
+  });
 }
 
 // ── User discovery (Phase 4 + 5) ─────────────────────────────────────────────

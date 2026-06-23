@@ -282,7 +282,7 @@ export class BreakglassService implements OnModuleInit {
       if (!row) return { outcome: 'not_found' as const };
 
       // Lockout check BEFORE KDF — prevents a locked account from being a free Argon2id-DoS
-      // amplifier (breakglass-admin.md §lockout-policy). Returns 423 so the operator knows
+      // amplifier (breakglass-admin.md §lockout-policy). Returns 429 so the operator knows
       // the account is locked (not that their credentials are wrong).
       if (row.lockedUntil && row.lockedUntil > new Date()) {
         return { outcome: 'locked' as const };

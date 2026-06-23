@@ -22,7 +22,22 @@ export function BreakglassLogin({ onLoggedIn, onBack }: BreakglassLoginProps) {
     setError(null);
     setBusy(true);
     try {
-      const { accessToken: token } = await breakglassLogin(username.trim(), password);
+      const result = await breakglassLogin(username.trim(), password);
+      if (!result.ok) {
+        if (result.status === 429) {
+          setError('Account locked. Try again in 15 minutes.');
+        } else if (result.status === 503) {
+          setError('Admin login is not configured on this server.');
+        } else if (result.error.kind === 'invalid-json' || result.error.kind === 'network') {
+          setError(
+            'Cannot reach the server. Your Cloudflare Access session may have expired — re-authenticate and try again.',
+          );
+        } else {
+          setError('Invalid credentials.');
+        }
+        return;
+      }
+      const { accessToken: token } = result.data;
       setToken(token); // must be set before fetchMe so the bearer header is present
       const me = await fetchMe();
       if (!me.bound) throw new Error('Login succeeded but profile is not bound.');
