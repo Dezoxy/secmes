@@ -21,7 +21,7 @@ test('admin and team sections are absent in demo mode (no server profile)', asyn
 
   // Admin and Team sections are admin-gated; not shown without a server profile.
   await expect(dialog.getByRole('button', { name: 'Admin' })).toHaveCount(0);
-  await expect(dialog.getByRole('button', { name: 'Team' })).toHaveCount(0);
+  await expect(dialog.getByRole('button', { name: 'Members' })).toHaveCount(0);
 });
 
 test('GET /admin/devices returns device list (mock)', async ({ page }) => {

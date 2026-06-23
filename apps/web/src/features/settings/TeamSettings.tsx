@@ -19,21 +19,22 @@ interface TeamSettingsProps {
 function MemberRow({
   member,
   currentUserId,
-  onRoleToggle,
+  onRoleChange,
   onRevoke,
 }: {
   member: MemberSummary;
   currentUserId: string;
-  onRoleToggle: (userId: string, newRole: 'admin' | 'member') => Promise<void>;
+  onRoleChange: (userId: string, newRole: 'admin' | 'member') => Promise<void>;
   onRevoke: (userId: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const isSelf = member.userId === currentUserId;
 
-  const handleRoleToggle = async () => {
+  const handleRoleChange = async (newRole: 'admin' | 'member') => {
+    if (newRole === member.role) return;
     setBusy(true);
     try {
-      await onRoleToggle(member.userId, member.role === 'admin' ? 'member' : 'admin');
+      await onRoleChange(member.userId, newRole);
     } finally {
       setBusy(false);
     }
@@ -48,19 +49,17 @@ function MemberRow({
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <button
-          type="button"
-          onClick={() => void handleRoleToggle()}
+        <select
+          value={member.role}
+          onChange={(e) => {
+            void handleRoleChange(e.target.value as 'admin' | 'member');
+          }}
           disabled={busy || isSelf}
-          title={member.role === 'admin' ? 'Demote to member' : 'Promote to admin'}
-          className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-            member.role === 'admin'
-              ? 'border-purple-400/30 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20'
-              : 'border-white/10 bg-white/[0.04] text-white/60 hover:border-purple-400/30 hover:text-purple-300'
-          }`}
+          className="rounded-lg border border-white/10 bg-[#1a1a26] px-2.5 py-0.5 text-xs text-white/80 transition-colors focus:border-purple-400/40 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {member.role}
-        </button>
+          <option value="member">Member</option>
+          <option value="admin">Admin</option>
+        </select>
         {!isSelf && (
           <button
             type="button"
@@ -187,7 +186,7 @@ export function TeamSettings({ currentUserId }: TeamSettingsProps) {
       setMembers(m);
       setInvites(i);
     } catch {
-      setError('Could not load team data.');
+      setError('Could not load member data.');
     }
   }, []);
 
@@ -279,7 +278,7 @@ export function TeamSettings({ currentUserId }: TeamSettingsProps) {
               key={member.userId}
               member={member}
               currentUserId={currentUserId}
-              onRoleToggle={handleRoleToggle}
+              onRoleChange={handleRoleToggle}
               onRevoke={(id) => setConfirmRevokeUserId(id)}
             />
           ),
