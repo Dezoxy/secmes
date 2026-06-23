@@ -17,3 +17,15 @@
 # REMOVE this entry once caddy publishes an image built on Go >= 1.26.4 — a fresh re-tag will then
 # pass the Trivy gate cleanly. Tracked as a follow-up task.
 CVE-2026-42504
+
+# ---------------------------------------------------------------------------------------------------
+# CVE-2026-27145 — Go stdlib (x509.Certificate.VerifyHostname), HIGH, fixed in Go 1.25.11 / 1.26.4.
+#
+# Same root cause as CVE-2026-42504: baked into caddy's compiled binary in caddy:2-alpine (built
+# with Go 1.26.3). apk upgrade does not touch it. No caddy image rebuilt on Go >= 1.26.4 yet.
+#
+# Risk accepted on the same basis: caddy is reachable only via Cloudflare Tunnel (no public ports);
+# the flaw is in x509 hostname verification (affects Caddy's TLS to upstreams), not RCE.
+#
+# REMOVE once caddy publishes an image built on Go >= 1.26.4. Same release gate as CVE-2026-42504.
+CVE-2026-27145
