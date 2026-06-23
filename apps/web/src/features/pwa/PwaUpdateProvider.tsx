@@ -139,7 +139,9 @@ export function PwaUpdateProvider({ children }: PwaUpdateProviderProps) {
           setNewVersion((data as { version: string }).version);
         }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        newVersionFetched.current = false;
+      });
   }, [status]);
 
   const value = useMemo<PwaUpdateContextValue>(() => {

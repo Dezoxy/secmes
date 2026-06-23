@@ -7,7 +7,7 @@ import { prefersReducedMotion } from './lib/pref';
 import { ArgusAppIcon } from './features/brand/ArgusAppIcon';
 import { usePwaUpdate } from './features/pwa/PwaUpdateContext';
 import { APP_VERSION_TAG } from './lib/app-version';
-import { conversationEnterMotion, paneBackEnterMotion } from './features/ui';
+import { conversationEnterMotion, modalPanelExitMotion, paneBackEnterMotion } from './features/ui';
 import ChatRoute from './routes/ChatRoute';
 
 const DevicesRoute = lazy(() => import('./routes/DevicesRoute'));
@@ -248,9 +248,19 @@ function RouteUpdateAction() {
   const { updateReady, applyUpdate, newVersion, dialogOpen, openUpdateDialog, closeUpdateDialog } =
     usePwaUpdate();
   const [applying, setApplying] = useState(false);
+  const [closing, setClosing] = useState(false);
 
   // Chat has its own sidebar update buttons — skip the global pill to avoid duplicates.
   if (!updateReady || pathname === '/chat') return null;
+
+  const handleClose = () => {
+    if (closing) return;
+    setClosing(true);
+    setTimeout(() => {
+      setClosing(false);
+      closeUpdateDialog();
+    }, 220);
+  };
 
   if (!dialogOpen) {
     return (
@@ -270,7 +280,11 @@ function RouteUpdateAction() {
 
   const handleUpdate = async () => {
     setApplying(true);
-    await applyUpdate();
+    try {
+      await applyUpdate();
+    } catch {
+      setApplying(false);
+    }
   };
 
   return (
@@ -278,13 +292,13 @@ function RouteUpdateAction() {
       <div
         role="dialog"
         aria-label="Update available"
-        className="argus-surface-enter w-72 rounded-2xl border border-purple-400/40 bg-[#2b123d]/95 p-4 shadow-2xl shadow-black/35 backdrop-blur sm:w-80"
+        className={`w-72 rounded-2xl border border-purple-400/40 bg-[#2b123d]/95 p-4 shadow-2xl shadow-black/35 backdrop-blur sm:w-80 ${closing ? modalPanelExitMotion : 'argus-surface-enter'}`}
       >
         <div className="mb-3 flex items-center justify-between">
           <span className="text-sm font-semibold text-white">Update available</span>
           <button
             type="button"
-            onClick={closeUpdateDialog}
+            onClick={handleClose}
             aria-label="Close"
             className="rounded-md p-1 text-white/50 transition-colors hover:text-white"
           >

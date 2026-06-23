@@ -17,6 +17,7 @@ export interface PwaUpdateContextValue {
   dialogOpen: boolean;
   checkForUpdate: () => Promise<void>;
   applyUpdate: () => Promise<void>;
+  /** Session-level dismiss: hides the pill without applying. Reserved for "remind me later" UI; not yet wired. */
   dismissUpdate: () => void;
   openUpdateDialog: () => void;
   closeUpdateDialog: () => void;
