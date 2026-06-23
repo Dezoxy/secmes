@@ -1,5 +1,5 @@
 import { Suspense, lazy, useState, useEffect, useCallback } from 'react';
-import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Fingerprint, RefreshCw, X } from 'lucide-react';
 import { useAuth } from './features/auth/AuthContext';
 import { RegisterScreen } from './features/auth/RegisterScreen';
@@ -244,11 +244,13 @@ function LandingRoute() {
 }
 
 function RouteUpdateAction() {
+  const { pathname } = useLocation();
   const { updateReady, applyUpdate, newVersion, dialogOpen, openUpdateDialog, closeUpdateDialog } =
     usePwaUpdate();
   const [applying, setApplying] = useState(false);
 
-  if (!updateReady) return null;
+  // Chat has its own sidebar update buttons — skip the global pill to avoid duplicates.
+  if (!updateReady || pathname === '/chat') return null;
 
   if (!dialogOpen) {
     return (

@@ -158,9 +158,13 @@ test('non-chat routes keep a reachable PWA update action', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/settings?previewPwaUpdate=1');
 
+  // Pill button (aria-label="Update Argus") opens the update dialog.
   const updateButton = page.getByRole('button', { name: 'Update Argus' });
   await expect(updateButton).toBeVisible();
+  await updateButton.click();
 
+  // Dialog replaces the pill; dialog's "Update Argus" button applies the update.
+  await expect(updateButton).toBeVisible();
   await updateButton.click();
 
   await expect(updateButton).toHaveCount(0);
