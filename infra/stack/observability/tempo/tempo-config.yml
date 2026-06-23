@@ -37,6 +37,3 @@ compactor:
 query_frontend:
   search:
     default_result_limit: 20
-
-usage_report:
-  reporting_enabled: false
