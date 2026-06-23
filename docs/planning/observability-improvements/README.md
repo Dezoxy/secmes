@@ -11,7 +11,7 @@ Check the box when an idea is fully implemented and merged.
 | # | Idea | Effort | Impact | Status |
 |---|------|--------|--------|--------|
 | A | [Alertmanager receiver + infra alerts](./A-alertmanager-receiver.md) | S | Critical | [x] |
-| B | [Exemplars — click metric spike → open trace](./B-exemplars.md) | S | High | [ ] |
+| B | [Exemplars — click metric spike → open trace](./B-exemplars.md) | S | High | [x] |
 | C | [Business/domain metrics](./C-business-metrics.md) | M | High | [ ] |
 | D | [Continuous profiling — Grafana Pyroscope](./D-pyroscope-profiling.md) | M | Medium | [ ] |
 | E | [SLO dashboard + multi-burn-rate alerts](./E-slo-dashboard.md) | M | Medium | [ ] |

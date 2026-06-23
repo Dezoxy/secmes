@@ -23,7 +23,8 @@
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
           "expr": "histogram_quantile(0.95, sum(rate(argus_api_http_request_duration_seconds_bucket[5m])) by (le, route))",
-          "legendFormat": "p95 {{route}}"
+          "legendFormat": "p95 {{route}}",
+          "exemplar": true
         }
       ]
     },

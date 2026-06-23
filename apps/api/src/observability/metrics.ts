@@ -28,6 +28,8 @@ export const httpRequestDuration = new Histogram({
   // API-latency-shaped buckets (5ms … 10s).
   buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
   registers: [registry],
+  // Exemplars let Grafana render clickable dots on the p95 panel that open the Tempo trace for that request.
+  enableExemplars: true,
 });
 
 // The label for a request's route. We use the Express-matched ROUTE TEMPLATE (set on req.route by the router

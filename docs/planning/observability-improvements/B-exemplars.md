@@ -1,6 +1,6 @@
 # Idea B — Exemplars: click a metric spike → open the trace
 
-**Effort:** S  **Impact:** High  **Status:** [ ] Not implemented
+**Effort:** S  **Impact:** High  **Status:** [x] Implemented
 
 ---
 
