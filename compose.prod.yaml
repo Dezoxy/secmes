@@ -435,16 +435,16 @@ services:
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.17.0
     restart: unless-stopped
-    # postgres-exporter v0.17 does not support DATA_SOURCE_NAME_FILE; read the secret into
-    # DATA_SOURCE_NAME via the entrypoint — the secret is only ever in this container's environment.
-    entrypoint:
-      - sh
-      - -c
-      - 'export DATA_SOURCE_NAME=$$(cat /run/secrets/database_url) && exec /bin/postgres_exporter'
+    # Use DATA_SOURCE_PASS_FILE + DATA_SOURCE_USER + DATA_SOURCE_URI instead of DATA_SOURCE_NAME so the
+    # credential never enters the process environment (invariant #5). deploy.sh extracts the argus_app
+    # password from the database_url DSN and writes it to a dedicated argus_app_password secret file.
     environment:
+      DATA_SOURCE_URI: 'postgresql://postgres:5432/argus?sslmode=disable'
+      DATA_SOURCE_USER: argus_app
+      DATA_SOURCE_PASS_FILE: /run/secrets/argus_app_password
       PG_EXPORTER_DISABLE_SETTINGS_METRICS: 'true'
     secrets:
-      - database_url
+      - argus_app_password
     depends_on:
       postgres:
         condition: service_healthy
@@ -629,6 +629,10 @@ secrets:
   # non-root), so a root-owned 0400 file would be unreadable and the stack would fail to start on the real VM. 0444 lets the
   # container user read it; confinement is the 0700 root tmpfs SECRETS_DIR (host non-root users can't traverse
   # it; the root daemon mounts the file in), NOT the file mode. Set by fetch-keyvault-secrets.sh / deploy.sh.
+  argus_app_password:
+    # Password-only file for postgres-exporter — extracted from database_url by deploy.sh so the exporter
+    # can use DATA_SOURCE_PASS_FILE instead of a full DSN in process env (invariant #5).
+    file: ${ARGUS_SECRETS_DIR:-./secrets}/argus_app_password
   postgres_password:
     file: ${ARGUS_SECRETS_DIR:-./secrets}/postgres_password
   database_url:

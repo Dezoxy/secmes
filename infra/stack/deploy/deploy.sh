@@ -399,6 +399,10 @@ case "$_app_pw" in
   exit 1
   ;;
 esac
+# Write the extracted password to a separate file for postgres-exporter (DATA_SOURCE_PASS_FILE) so the
+# exporter never needs the full DSN in process env — satisfies invariant #5 without the entrypoint wrapper.
+printf '%s' "$_app_pw" >"$SECRETS_DIR/argus_app_password"
+chmod 0444 "$SECRETS_DIR/argus_app_password"
 # Feed the SQL on STDIN (never argv/-v) so no password reaches /proc/<pid>/cmdline; psql echoes nothing of the
 # value. The owner connects over the postgres container's local socket (official-image trust) — no connection
 # secret is passed; if local trust is ever disabled, psql fails and `set -e` aborts (fail-closed).

@@ -32,13 +32,16 @@ const sdk = new NodeSDK({
         // http.route (set by the NestJS framework) is untouched and remains useful for dashboards.
         // requestHook covers incoming server spans; applyCustomAttributesOnSpan covers outgoing client
         // spans (belt-and-suspenders: OTel library versions differ on which hook fires for which span kind).
+        // http.target (path+query under old semconv) is also redacted — push endpoints encode tokens there.
         requestHook: (span) => {
           span.setAttribute('url.full', '[redacted]');
           span.setAttribute('http.url', '[redacted]');
+          span.setAttribute('http.target', '[redacted]');
         },
         applyCustomAttributesOnSpan: (span) => {
           span.setAttribute('url.full', '[redacted]');
           span.setAttribute('http.url', '[redacted]');
+          span.setAttribute('http.target', '[redacted]');
         },
       },
       '@opentelemetry/instrumentation-pg': { enabled: false },
