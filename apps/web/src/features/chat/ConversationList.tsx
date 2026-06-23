@@ -10,7 +10,12 @@ import {
   Check,
   X,
 } from 'lucide-react';
-import type { Friend, FriendRequest } from '../../lib/api';
+import {
+  lookupUserByArgusId,
+  type Friend,
+  type FriendRequest,
+  type UserLookupResult,
+} from '../../lib/api';
 import type { Conversation, User } from './seed';
 import {
   currentUser,
@@ -21,6 +26,8 @@ import {
 } from './seed';
 import { Avatar, Button, EmptyState, conversationEnterMotion, paneBackEnterMotion } from '../ui';
 import { dicebearAvatar } from '../../lib/dicebear';
+
+const ARGUS_ID_RE = /^argus-[abcdefghjkmnpqrstuvwxyz23456789]{16}-[a-z]+$/;
 
 type SidebarMode = 'conversations' | 'friends';
 type SidebarTransition = 'forward' | 'back' | null;
@@ -110,12 +117,18 @@ export function ConversationList({
   const [sendingRequest, setSendingRequest] = useState(false);
   const [sentArgusId, setSentArgusId] = useState<string | null>(null);
   const [sendRequestError, setSendRequestError] = useState<string | null>(null);
+  const [lookingUp, setLookingUp] = useState(false);
+  const [lookupResult, setLookupResult] = useState<UserLookupResult | null>(null);
+  const [sentDisplayName, setSentDisplayName] = useState<string | null>(null);
   const [confirmingUnfriendId, setConfirmingUnfriendId] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const touchStartY = useRef<number | null>(null);
   const searchTouchStartY = useRef<number | null>(null);
   const sidebarTouchStartY = useRef<number | null>(null);
+  // Tracks the query string that triggered the most recent in-flight lookup. Cleared to null on every
+  // input change so that a stale response arriving after the user edited the field is discarded.
+  const infightLookupQuery = useRef<string | null>(null);
 
   const effectiveFriends = friends ?? [];
   const filteredFriends = useMemo(
@@ -229,6 +242,8 @@ export function ConversationList({
     setFriendQuery('');
     setSentArgusId(null);
     setSendRequestError(null);
+    setLookupResult(null);
+    setSentDisplayName(null);
     setConfirmingUnfriendId(null);
     setSidebarTransition('back');
     setSidebarMode('conversations');
@@ -239,13 +254,43 @@ export function ConversationList({
   };
 
   const handleSendRequest = async () => {
-    if (!onSendFriendRequest || !trimmedFriendQuery || sendingRequest) return;
-    setSendingRequest(true);
-    setSentArgusId(null);
+    if (!onSendFriendRequest || !trimmedFriendQuery || lookingUp || sendingRequest) return;
     setSendRequestError(null);
+    if (!ARGUS_ID_RE.test(trimmedFriendQuery)) {
+      setSendRequestError('Invalid argus ID — paste the exact ID from their profile.');
+      return;
+    }
+    const querySnapshot = trimmedFriendQuery;
+    infightLookupQuery.current = querySnapshot;
+    setLookingUp(true);
     try {
-      await onSendFriendRequest(trimmedFriendQuery);
-      setSentArgusId(trimmedFriendQuery);
+      const result = await lookupUserByArgusId(querySnapshot);
+      if (infightLookupQuery.current !== querySnapshot) return;
+      if (!result) {
+        setSendRequestError('No user found with that argus-id.');
+      } else {
+        setLookupResult(result);
+      }
+    } catch {
+      if (infightLookupQuery.current === querySnapshot) {
+        setSendRequestError('Lookup failed. Check the id and try again.');
+      }
+    } finally {
+      setLookingUp(false);
+    }
+  };
+
+  const handleConfirmSend = async () => {
+    if (!onSendFriendRequest || !lookupResult || sendingRequest) return;
+    setSendingRequest(true);
+    setSendRequestError(null);
+    const { argusId: canonicalId, displayName: resolvedName } = lookupResult;
+    const displayName = resolvedName ?? canonicalId;
+    try {
+      await onSendFriendRequest(canonicalId);
+      setSentArgusId(canonicalId);
+      setSentDisplayName(displayName);
+      setLookupResult(null);
     } catch {
       setSendRequestError('Could not send request. Try again in a moment.');
     } finally {
@@ -292,6 +337,8 @@ export function ConversationList({
               onChange={(event) => {
                 setFriendQuery(event.target.value);
                 setSendRequestError(null);
+                setLookupResult(null);
+                infightLookupQuery.current = null;
               }}
               aria-label="Search friends or enter Argus ID"
               placeholder="Search friends or enter Argus ID..."
@@ -381,32 +428,82 @@ export function ConversationList({
 
           {showFriendRequestAction && (
             <div className="mx-2 rounded-xl border border-white/5 bg-white/[0.03] p-3">
-              <p className="text-sm font-medium text-white/85">
-                No accepted friend found for that Argus ID.
-              </p>
-              <p className="mt-1 truncate font-mono text-xs text-white/45">{trimmedFriendQuery}</p>
-              {onSendFriendRequest &&
-                (pendingForQuery ? (
-                  <p className="mt-3 rounded-lg border border-emerald-400/20 bg-emerald-500/[0.08] px-3 py-2 text-sm font-medium text-emerald-200">
-                    Request sent
-                  </p>
-                ) : (
-                  <>
+              {pendingForQuery ? (
+                <p className="rounded-lg border border-emerald-400/20 bg-emerald-500/[0.08] px-3 py-2 text-sm font-medium text-emerald-200">
+                  Request sent{sentDisplayName ? ` to ${sentDisplayName}` : ''}
+                </p>
+              ) : lookupResult ? (
+                <>
+                  <p className="text-sm font-medium text-white/85">Send a friend request to:</p>
+                  <div className="mt-2 flex items-center gap-3">
+                    <Avatar
+                      src={dicebearAvatar(lookupResult.userId)}
+                      name={lookupResult.displayName ?? lookupResult.argusId}
+                      size="md"
+                      shape="circle"
+                      className="shrink-0 ring-2 ring-white/5"
+                    />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-white/90">
+                        {lookupResult.displayName ?? lookupResult.argusId}
+                      </p>
+                      <p className="truncate font-mono text-xs text-white/45">
+                        {lookupResult.argusId}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex gap-2">
                     <Button
-                      onClick={() => void handleSendRequest()}
+                      onClick={() => void handleConfirmSend()}
                       disabled={sendingRequest}
                       variant="subtle"
                       size="md"
-                      className="mt-3 w-full"
+                      className="flex-1"
                     >
                       <UserPlus className="h-4 w-4" />
-                      {sendingRequest ? 'Sending…' : 'Send friend request'}
+                      {sendingRequest ? 'Sending…' : 'Send request'}
                     </Button>
-                    {sendRequestError && (
-                      <p className="mt-2 text-xs text-red-400">{sendRequestError}</p>
-                    )}
-                  </>
-                ))}
+                    <button
+                      type="button"
+                      onClick={() => setLookupResult(null)}
+                      disabled={sendingRequest}
+                      aria-label="Cancel"
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/5 bg-white/[0.04] text-white/50 transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                  {sendRequestError && (
+                    <p className="mt-2 text-xs text-red-400">{sendRequestError}</p>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-medium text-white/85">
+                    No accepted friend found for that Argus ID.
+                  </p>
+                  <p className="mt-1 truncate font-mono text-xs text-white/45">
+                    {trimmedFriendQuery}
+                  </p>
+                  {onSendFriendRequest && (
+                    <>
+                      <Button
+                        onClick={() => void handleSendRequest()}
+                        disabled={lookingUp || sendingRequest}
+                        variant="subtle"
+                        size="md"
+                        className="mt-3 w-full"
+                      >
+                        <UserPlus className="h-4 w-4" />
+                        {lookingUp ? 'Looking up…' : 'Send friend request'}
+                      </Button>
+                      {sendRequestError && (
+                        <p className="mt-2 text-xs text-red-400">{sendRequestError}</p>
+                      )}
+                    </>
+                  )}
+                </>
+              )}
             </div>
           )}
 
