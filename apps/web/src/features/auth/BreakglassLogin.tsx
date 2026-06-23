@@ -24,7 +24,7 @@ export function BreakglassLogin({ onLoggedIn, onBack }: BreakglassLoginProps) {
     try {
       const result = await breakglassLogin(username.trim(), password);
       if (!result.ok) {
-        if (result.status === 423) {
+        if (result.status === 429) {
           setError('Account locked. Try again in 15 minutes.');
         } else if (result.status === 503) {
           setError('Admin login is not configured on this server.');
