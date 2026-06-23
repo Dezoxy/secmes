@@ -35,6 +35,13 @@ describe('PWA cache policy', () => {
     expect(isPwaNavigationFallbackAllowed('/ws')).toBe(false);
   });
 
+  it('does not serve navigation fallback for /admin (must reach network for Cloudflare Access)', () => {
+    expect(isPwaNavigationFallbackAllowed('/admin')).toBe(false);
+    expect(isPwaNavigationFallbackAllowed('/admin/')).toBe(false);
+    expect(isPwaNavigationFallbackAllowed('/admin/users')).toBe(false);
+    expect(isPwaNavigationFallbackAllowed('/admin?tab=audit')).toBe(false);
+  });
+
   it('recognizes S3-compatible presigned URLs', () => {
     expect(
       isPresignedAttachmentUrl(
