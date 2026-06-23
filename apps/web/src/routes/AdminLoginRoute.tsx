@@ -19,10 +19,10 @@ export default function AdminLoginRoute() {
   return (
     <main
       aria-label="Admin access"
-      className="flex h-[100dvh] items-center justify-center overflow-y-auto bg-[#1a1a24] p-4"
+      className="flex h-[100dvh] flex-col overflow-y-auto bg-[#1a1a24] p-4"
     >
       <section
-        className={`w-full max-w-[430px] rounded-3xl bg-[#12121a] p-6 shadow-2xl shadow-black/50 ${surfaceEnterMotion}`}
+        className={`m-auto w-full max-w-[430px] rounded-3xl bg-[#12121a] p-6 shadow-2xl shadow-black/50 ${surfaceEnterMotion}`}
       >
         <BreakglassLogin onLoggedIn={() => navigate('/chat')} onBack={() => navigate('/')} />
       </section>
