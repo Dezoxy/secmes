@@ -147,8 +147,31 @@ test('accepted friend can be removed via the unfriend button', async ({ page }) 
   }
 });
 
-test('send-friend-request flow calls the API and shows "Request sent"', async ({ page }) => {
+// Valid argus-id used across send-request tests. Must pass ARGUS_ID_RE:
+// /^argus-[abcdefghjkmnpqrstuvwxyz23456789]{16}-[a-z]+$/
+const VALID_SEND_ID = 'argus-abcdefghjkmnpqrs-test';
+const LOOKUP_STUB = {
+  userId: 'd4d4d4d4-0000-4000-8000-000000000004',
+  argusId: VALID_SEND_ID,
+  displayName: 'Dave',
+  avatarSeed: null,
+};
+
+test('send-friend-request flow: lookup-then-confirm (authenticated) / "no match" hint (demo)', async ({
+  page,
+}) => {
   await stubFriendsApi(page);
+
+  // Stub GET /users/lookup — required by phase-1 of the two-phase send flow.
+  let lookedUpId: string | null = null;
+  await page.route('**/api/users/lookup**', (route) => {
+    lookedUpId = new URL(route.request().url()).searchParams.get('argusId');
+    void route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(LOOKUP_STUB),
+    });
+  });
 
   let requestBody: string | null = null;
   await page.route('**/api/friends/requests', (route) => {
@@ -164,27 +187,35 @@ test('send-friend-request flow calls the API and shows "Request sent"', async ({
     });
   });
 
-  // Reload routes after stubs — navigate now
   await page.goto('/chat');
-
-  // Simulate an authenticated session by injecting a dummy access token so apiFetch will not
-  // short-circuit. (Without a token the request is never sent; the button is still wired though.)
-  // In practice this requires a real auth flow; the test verifies UI wiring at mock level.
-
-  // Skip the API-call assertion in demo mode since manager is null; just check the input and button.
   await page.getByRole('button', { name: 'Friends' }).click();
   const search = page.getByRole('textbox', { name: 'Search friends or enter Argus ID' });
-  await search.fill('argus-testtest-tttttt-t99');
+  await search.fill(VALID_SEND_ID);
 
-  // In demo mode the "Send friend request" button is hidden (onSendFriendRequest is undefined).
-  // If it IS visible (authenticated mode), clicking it should call the API.
+  // In demo mode onSendFriendRequest is undefined — the button is hidden and the card shows
+  // only the "No accepted friend found" hint. The authenticated branch tests the full two-phase
+  // flow: format-validation → lookup → confirmation card → confirm → "Request sent to [name]".
   const sendBtn = page.getByRole('button', { name: 'Send friend request' });
   if (await sendBtn.isVisible()) {
+    // Phase 1a: format validation error (bad input → no lookup call).
+    await search.fill('hello');
     await sendBtn.click();
-    await expect(page.getByText('Request sent').first()).toBeVisible();
-    expect(requestBody).toContain('argus-testtest-tttttt-t99');
+    await expect(page.getByText('Invalid argus ID')).toBeVisible();
+    expect(lookedUpId).toBeNull();
+
+    // Phase 1b: valid ID → lookup → confirmation card shows user details.
+    await search.fill(VALID_SEND_ID);
+    await sendBtn.click();
+    await expect(page.getByText('Send a friend request to:')).toBeVisible();
+    await expect(page.getByText('Dave')).toBeVisible();
+    expect(lookedUpId).toBe(VALID_SEND_ID);
+
+    // Phase 2: confirm → sends the request, green pill with name.
+    await page.getByRole('button', { name: 'Send request' }).click();
+    await expect(page.getByText('Request sent to Dave')).toBeVisible();
+    expect(requestBody).toContain(VALID_SEND_ID);
   } else {
-    // Demo mode — just confirm the input value is visible in the CTA area.
+    // Demo mode (always runs in CI) — card shows "No accepted friend found" hint.
     await expect(page.getByText('No accepted friend found for that Argus ID.')).toBeVisible();
   }
 });
