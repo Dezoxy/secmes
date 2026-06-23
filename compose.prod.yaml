@@ -670,10 +670,6 @@ secrets:
   database_url:
     # Full password-bearing connection URL (argus_app role); the api reads it via DATABASE_URL_FILE.
     file: ${ARGUS_SECRETS_DIR:-./secrets}/database_url
-  argus_app_password:
-    # argus_app role password DERIVED by deploy.sh step 5b from database_url — postgres-exporter reads it via
-    # DATA_SOURCE_PASS_FILE so the credential never enters a process environment variable (invariant #5).
-    file: ${ARGUS_SECRETS_DIR:-./secrets}/argus_app_password
   s3_secret_access_key:
     # B2 application-key secret; the api reads it via S3_SECRET_ACCESS_KEY_FILE.
     file: ${ARGUS_SECRETS_DIR:-./secrets}/s3_secret_access_key
