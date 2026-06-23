@@ -333,6 +333,8 @@ services:
     depends_on:
       prometheus:
         condition: service_started
+      tempo:
+        condition: service_started
     read_only: true
     tmpfs:
       - /tmp
@@ -414,9 +416,6 @@ services:
     volumes:
       - ./infra/stack/observability/tempo:/etc/tempo:ro
       - tempo-data:/var/tempo
-    depends_on:
-      grafana:
-        condition: service_started
     read_only: true
     tmpfs:
       - /tmp

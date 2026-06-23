@@ -30,7 +30,13 @@ const sdk = new NodeSDK({
         ignoreIncomingRequestHook: (req) => req.url === '/healthz',
         // Redact full URLs from every span — outgoing push capability URLs must not persist in traces.
         // http.route (set by the NestJS framework) is untouched and remains useful for dashboards.
+        // requestHook covers incoming server spans; applyCustomAttributesOnSpan covers outgoing client
+        // spans (belt-and-suspenders: OTel library versions differ on which hook fires for which span kind).
         requestHook: (span) => {
+          span.setAttribute('url.full', '[redacted]');
+          span.setAttribute('http.url', '[redacted]');
+        },
+        applyCustomAttributesOnSpan: (span) => {
           span.setAttribute('url.full', '[redacted]');
           span.setAttribute('http.url', '[redacted]');
         },
