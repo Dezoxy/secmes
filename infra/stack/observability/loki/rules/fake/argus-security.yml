@@ -1,18 +1,6 @@
 groups:
   - name: security
     rules:
-      # Any breakglass use is suspicious by design. More than 3 in one hour
-      # means either legitimate emergency (operator should know) or a breach.
-      - alert: BreakglassEventSpike
-        expr: |
-          count_over_time(
-            {job="docker"} | json | context="BreakglassService" [1h]
-          ) > 3
-        labels: { severity: critical }
-        annotations:
-          summary: "More than 3 breakglass events in the last hour"
-          description: "Check the security dashboard immediately. This may indicate emergency access abuse or a compromise."
-
       # Normal WS auth failures come from expired tokens (a few per 5 min is fine).
       # > 20 in 5 min suggests a credential-stuffing or token-replay attack.
       - alert: WSAuthFailureSpike

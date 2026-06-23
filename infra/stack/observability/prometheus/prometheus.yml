@@ -7,10 +7,13 @@ global:
   evaluation_interval: 15s
   external_labels:
     cluster: argus-prod
-  # Store exemplars (trace IDs attached to histogram observations). Grafana renders them as clickable
-  # dots on the p95 latency panel; clicking opens the Tempo trace for that exact request.
-  exemplar_storage:
-    enable_exemplars: true
+
+# Store exemplars (trace IDs attached to histogram observations). Grafana renders them as clickable
+# dots on the p95 latency panel; clicking opens the Tempo trace for that exact request.
+# Top-level stanza (not under global: — Prometheus rejects unknown keys there).
+storage:
+  exemplars:
+    max_exemplars: 100000
 
 alerting:
   alertmanagers:

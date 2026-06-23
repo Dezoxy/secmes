@@ -59,6 +59,19 @@ groups:
           summary: 'argus API p95 latency > 1s (10m)'
           description: 'p95 request latency has breached the 1s SLO for 10m.'
 
+  - name: argus-security
+    rules:
+      # Any successful breakglass login is suspicious by design — fire on every occurrence.
+      # Uses the existing argus_auth_attempts_total counter (breakglass.service.ts:394);
+      # the Loki rule was removed because BreakglassService emits no Pino logs on login.
+      - alert: BreakglassLoginOccurred
+        expr: increase(argus_auth_attempts_total{method="breakglass",result="success"}[1h]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Breakglass admin login occurred'
+          description: '{{ $value }} successful breakglass login(s) in the last hour. Verify this is authorized emergency access.'
+
   - name: argus-infra
     rules:
       - alert: RedisDown
