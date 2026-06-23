@@ -14,17 +14,17 @@
     {
       "id": 1,
       "type": "timeseries",
-      "title": "Auth events by type (1m rate)",
-      "description": "IDs and event types only — no content. A sudden spike in ws:auth_failed or breakglass events is a security signal.",
-      "datasource": { "type": "loki", "uid": "argus-loki" },
+      "title": "Auth attempt rate by result & method (1m)",
+      "description": "Real-time authentication attempt rate from Prometheus. A spike in failure/webauthn or failure/breakglass is an active attack signal.",
+      "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
-      "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "fieldConfig": { "defaults": { "unit": "reqps", "min": 0 }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "loki", "uid": "argus-loki" },
-          "expr": "sum by (msg) (count_over_time({job=\"docker\"} | json | context=~\"WebAuthnService|SessionTokenService|BreakglassService|RealtimeGateway\" [$__interval]))",
-          "legendFormat": "{{msg}}"
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "sum by (result, method) (rate(argus_auth_attempts_total[1m]))",
+          "legendFormat": "{{result}}/{{method}}"
         }
       ]
     },

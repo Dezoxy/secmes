@@ -138,17 +138,18 @@
     },
     {
       "id": 7,
-      "type": "timeseries",
-      "title": "WebSocket connections (approx active)",
-      "datasource": { "type": "loki", "uid": "argus-loki" },
+      "type": "stat",
+      "title": "Active WebSocket connections",
+      "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "area" },
       "targets": [
         {
           "refId": "A",
-          "datasource": { "type": "loki", "uid": "argus-loki" },
-          "expr": "sum(count_over_time({job=\"docker\"} | json | msg=\"ws:auth\" [5m])) - sum(count_over_time({job=\"docker\"} | json | msg=\"ws:disconnect\" [5m]))",
-          "legendFormat": "approx active WS"
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "argus_ws_connections_active",
+          "legendFormat": "active WS connections"
         }
       ]
     }

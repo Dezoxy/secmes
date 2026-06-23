@@ -8,6 +8,7 @@ import { SignJWT } from 'jose';
 
 import { schema, withRouting, withTenant } from '../db/index.js';
 import { SESSION_SIGNING_KEY } from './session-key.config.js';
+import { authAttempts } from '../observability/metrics.js';
 
 const REFRESH_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 const COOKIE_NAME = 'argus_refresh';
@@ -94,6 +95,15 @@ export class SessionTokenService {
    * See docs/threat-models/session-tokens.md §refresh-reuse-detection.
    */
   async rotateRefresh(refreshToken: string): Promise<MintedSession> {
+    try {
+      return await this._rotateRefresh(refreshToken);
+    } catch (err: unknown) {
+      authAttempts.inc({ result: 'failure', method: 'session' });
+      throw err;
+    }
+  }
+
+  private async _rotateRefresh(refreshToken: string): Promise<MintedSession> {
     const tokenHash = sha256hex(refreshToken);
     const INVALID = 'invalid or expired session';
 
@@ -208,6 +218,7 @@ export class SessionTokenService {
     if (!newSession) throw new UnauthorizedException(INVALID);
 
     const accessToken = await this.mintAccessToken(row.sub, newSession.id, row.userId);
+    authAttempts.inc({ result: 'success', method: 'session' });
     return {
       accessToken,
       refreshToken: newRefreshToken,

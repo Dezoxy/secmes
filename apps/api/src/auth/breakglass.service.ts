@@ -21,6 +21,7 @@ import { schema, withTenant } from '../db/index.js';
 import { generateArgusId, isArgusIdCollision } from '../users/argus-id.js';
 import { AuditService } from '../audit/audit.service.js';
 import { type MintedSession, SessionTokenService } from './session-token.service.js';
+import { authAttempts } from '../observability/metrics.js';
 
 // Fixed single-tenant UUID — matches DEFAULT_TENANT_ID in webauthn.service.ts. Must be a valid
 // RFC-4122 UUID (version + variant nibbles) so it passes the contracts' strict z.string().uuid().
@@ -363,6 +364,7 @@ export class BreakglassService implements OnModuleInit {
         ip: requestContext.ip || null,
         userAgent: requestContext.userAgent || null,
       });
+      authAttempts.inc({ result: 'failure', method: 'breakglass' });
       throw new UnauthorizedException('invalid credentials');
     }
 
@@ -373,6 +375,7 @@ export class BreakglassService implements OnModuleInit {
         ip: requestContext.ip || null,
         userAgent: requestContext.userAgent || null,
       });
+      authAttempts.inc({ result: 'failure', method: 'breakglass' });
       throw new HttpException('Account locked', HttpStatus.TOO_MANY_REQUESTS);
     }
 
@@ -383,10 +386,12 @@ export class BreakglassService implements OnModuleInit {
         ip: requestContext.ip || null,
         userAgent: requestContext.userAgent || null,
       });
+      authAttempts.inc({ result: 'failure', method: 'breakglass' });
       throw new UnauthorizedException('invalid credentials');
     }
 
     // outcome === 'ok'
+    authAttempts.inc({ result: 'success', method: 'breakglass' });
     await this.audit.record(DEFAULT_TENANT_ID, {
       eventType: 'breakglass.login_succeeded',
       actorSub: result.sub,

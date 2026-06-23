@@ -2,6 +2,8 @@
 // docs/threat-models/registration-and-tenancy.md.
 import { randomBytes, createHash } from 'node:crypto';
 
+import { authAttempts } from '../observability/metrics.js';
+
 import {
   ConflictException,
   HttpException,
@@ -474,6 +476,7 @@ export class WebAuthnService {
         }
 
         this.logger.info({ argusId: cred.argusId }, 'passkey authenticated');
+        authAttempts.inc({ result: 'success', method: 'webauthn' });
         return {
           tenantId: DEFAULT_TENANT_ID,
           userId: cred.userId,
@@ -483,6 +486,7 @@ export class WebAuthnService {
 
       return this.sessions.mintSession(result);
     } catch (err) {
+      authAttempts.inc({ result: 'failure', method: 'webauthn' });
       if (regressionArgusId !== null) {
         this.logger.warn({ argusId: regressionArgusId }, 'passkey.counter_regression');
         await this.audit

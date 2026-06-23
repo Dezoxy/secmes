@@ -12,6 +12,7 @@ import {
 import { WebSocket } from 'ws';
 
 import { AuthService, type MaybeUnboundAuth, type VerifiedAuth } from '../auth/auth.service.js';
+import { wsConnectionsActive } from '../observability/metrics.js';
 import { MessagingService } from '../messaging/messaging.service.js';
 import {
   RealtimeBus,
@@ -107,6 +108,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     const state = this.conns.get(client);
     if (!state) return;
     if (state.authTimer) clearTimeout(state.authTimer);
+    if (state.authed) wsConnectionsActive.dec();
     for (const room of state.subs) {
       const sockets = this.rooms.get(room);
       sockets?.delete(client);
@@ -141,6 +143,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     state.authed = true;
     state.auth = auth as VerifiedAuth;
     if (state.authTimer) clearTimeout(state.authTimer);
+    wsConnectionsActive.inc();
     this.logger.info({ connId: state.connId, sub: auth.sub, tenantId: auth.tenantId }, 'ws:auth');
     this.send(client, 'ready', { sub: auth.sub });
   }

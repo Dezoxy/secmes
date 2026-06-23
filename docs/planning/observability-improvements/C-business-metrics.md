@@ -1,6 +1,6 @@
 # Idea C — Business/domain metrics
 
-**Effort:** M  **Impact:** High  **Status:** [ ] Not implemented
+**Effort:** M  **Impact:** High  **Status:** [x] Implemented
 
 ---
 

@@ -13,6 +13,7 @@ import type {
 } from '../realtime/realtime-bus.js';
 import type { CommitBody, ListCommitsQuery, SendMessage } from './messaging.schemas.js';
 import type { CommitResult, FetchedCommit, SentMessage } from './messaging.types.js';
+import { messagesSent } from '../observability/metrics.js';
 
 // Message send + MLS commit chain (post/list). One of four internal collaborators the MessagingService
 // façade composes (see messaging.service.ts); constructed by the façade, not a DI provider.
@@ -164,6 +165,7 @@ export class MessageDeliveryService {
 
     // Post-commit: the row is durable + visible to a subsequent fetch before any client is notified.
     if (event) {
+      messagesSent.inc();
       this.bus.emitMessageCreated(event);
       // Fire-and-forget content-free push ping. Errors are caught inside notifyConversationMembers;
       // a push failure must never surface to the caller or delay the response.
