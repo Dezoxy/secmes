@@ -471,7 +471,7 @@ services:
     # credential never enters the process environment (invariant #5). deploy.sh extracts the argus_app
     # password from the database_url DSN and writes it to a dedicated argus_app_password secret file.
     environment:
-      DATA_SOURCE_URI: 'postgresql://postgres:5432/argus?sslmode=disable'
+      DATA_SOURCE_URI: 'postgres:5432/argus?sslmode=disable'
       DATA_SOURCE_USER: argus_app
       DATA_SOURCE_PASS_FILE: /run/secrets/argus_app_password
       PG_EXPORTER_DISABLE_SETTINGS_METRICS: 'true'
