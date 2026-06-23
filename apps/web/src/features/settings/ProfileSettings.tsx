@@ -47,7 +47,7 @@ export function ProfileSettings({
 
   const copyId = async () => {
     try {
-      await navigator.clipboard.writeText(serverProfile?.argusId ?? '');
+      await navigator.clipboard.writeText(profile.id);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1400);
     } catch {
@@ -89,7 +89,7 @@ export function ProfileSettings({
         <span className="mb-2 block text-sm font-medium text-white/70">Argus ID</span>
         <div className="flex gap-2">
           <input
-            value={serverProfile?.argusId ?? ''}
+            value={profile.id}
             readOnly
             aria-label="Argus ID"
             className={`${INPUT} font-mono text-xs`}
