@@ -397,13 +397,19 @@ services:
     restart: unless-stopped
     command:
       - 'run'
-      - '--storage.path=/var/lib/alloy/data'
+      # Storage MUST live outside the image's /var/lib/alloy tree. That dir ships as 0770 473:473, and we run
+      # as uid 0 with cap_drop:[ALL] (no CAP_DAC_OVERRIDE), so root is treated as "other" and can't even
+      # traverse /var/lib/alloy to reach a child data dir → "mkdir /var/lib/alloy/data: permission denied"
+      # crash loop. /var/lib is 0755 (traversable) and /var/lib/alloy-data isn't pre-owned in the image, so a
+      # fresh volume there comes up root:root and uid 0 can write it. (Surfaced when deploy.sh's WAL-recovery
+      # wiped + re-seeded the volume from the image, flipping it back to 473:473.)
+      - '--storage.path=/var/lib/alloy-data'
       - '/etc/alloy/config.alloy'
     user: '0:0' # required to read root-owned /var/lib/docker/containers/*-json.log (read-only mount; no socket)
     volumes:
       - ./infra/stack/observability/alloy:/etc/alloy:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro # host container logs, READ-ONLY; never the socket
-      - alloy-data:/var/lib/alloy/data # read offsets/WAL — avoids re-ingesting on restart
+      - alloy-data:/var/lib/alloy-data # read offsets/WAL — avoids re-ingesting on restart
     depends_on:
       loki:
         condition: service_started
