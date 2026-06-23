@@ -239,10 +239,20 @@
 html,
 body {
   height: 100%;
+  /* Hard-lock the document itself so it can never scroll/rubber-band — this is the
+     mobile bug where dragging anywhere moved the whole page and toggled the browser
+     chrome. The app's real pages are exactly 100dvh with their own inner scrollers,
+     so the page never needs to scroll. */
+  overflow: hidden;
 }
 
 #root {
   height: 100dvh;
+  /* Fallback scroller: real pages fit 100dvh exactly (no scroll appears), but any
+     routed surface that still relies on document scrolling (e.g. the /v2 design
+     sketches) stays reachable here instead of being clipped. */
+  overflow: auto;
+  overscroll-behavior: none;
 }
 
 body {

@@ -75,19 +75,18 @@ test('mobile settings sections expose current state and focus section content', 
   const dialog = page.getByRole('dialog', { name: 'Settings' });
   await expect(dialog.getByRole('navigation', { name: 'Settings sections' })).toBeVisible();
   const settingsPanel = dialog.locator(':scope > div');
+  // On mobile the settings modal is a full-screen sheet (flush to all four edges, filling the
+  // 390×844 viewport) — not the inset, centered card used at the sm breakpoint and above.
   await expect
     .poll(async () => (await settingsPanel.boundingBox())?.x ?? 999)
-    .toBeLessThanOrEqual(17);
+    .toBeLessThanOrEqual(1);
 
   const panelBox = await settingsPanel.boundingBox();
   expect(panelBox).not.toBeNull();
-  expect(panelBox!.x).toBeGreaterThanOrEqual(15);
-  expect(panelBox!.x).toBeLessThanOrEqual(17);
-  expect(panelBox!.y).toBeGreaterThanOrEqual(40);
-  expect(panelBox!.y).toBeLessThanOrEqual(45);
-  expect(panelBox!.width).toBeLessThanOrEqual(358);
-  expect(panelBox!.height).toBeGreaterThanOrEqual(757);
-  expect(panelBox!.height).toBeLessThanOrEqual(763);
+  expect(panelBox!.x).toBeLessThanOrEqual(1);
+  expect(panelBox!.y).toBeLessThanOrEqual(1);
+  expect(panelBox!.width).toBeGreaterThanOrEqual(388);
+  expect(panelBox!.height).toBeGreaterThanOrEqual(840);
 
   const securitySection = dialog.getByRole('button', { name: 'Security', exact: true });
 
