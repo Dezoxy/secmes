@@ -770,6 +770,30 @@ else
   log "B2_CORS_KEY_ID not set — skipping attachment-bucket CORS convergence (provision the key to enable)"
 fi
 
+# --- 6e. Post a deployment annotation to Grafana (non-fatal).
+#         Every time-series panel in every dashboard shows a vertical line at the deploy moment —
+#         instant correlation between a metric shift and the code change that caused it.
+#         Access Grafana via its container IP on the Docker network (no published port); auth header
+#         is passed via curl --config stdin so the value never appears in a process list. ---
+_gf_cid="$(docker compose -f "$COMPOSE" ps -q grafana 2>/dev/null || true)"
+if [ -n "$_gf_cid" ] && [ -s "$SECRETS_DIR/grafana_admin_password" ]; then
+  log "posting deploy annotation to Grafana"
+  _gf_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$_gf_cid" | tail -1)"
+  if [ -n "$_gf_ip" ]; then
+    _gf_auth="$(printf 'admin:%s' "$(cat "$SECRETS_DIR/grafana_admin_password")" | base64 | tr -d '\n')"
+    printf 'header = "Authorization: Basic %s"\n' "$_gf_auth" | \
+      curl -fsS -X POST "http://${_gf_ip}:3000/api/annotations" \
+        -H 'Content-Type: application/json' \
+        --config - \
+        -d "{\"text\":\"Deployed ${IMAGE_TAG}\",\"tags\":[\"deploy\"],\"time\":$(date +%s%3N)}" \
+      && log "Grafana annotation posted (${IMAGE_TAG})" \
+      || log "warning: could not post Grafana deploy annotation (non-fatal)"
+    _gf_auth=""
+  fi
+  _gf_cid=""
+  _gf_ip=""
+fi
+
 # --- 7. Tidy up: drop dangling images (the GHCR login is cleared by the EXIT trap). ---
 docker image prune -f >/dev/null 2>&1 || true
 log "deploy complete + healthy (${IMAGE_TAG})"

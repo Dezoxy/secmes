@@ -1,6 +1,6 @@
 # Idea G — GlitchTip arming runbook + deployment annotations
 
-**Effort:** S  **Impact:** Low-Medium  **Status:** [ ] Not implemented
+**Effort:** S  **Impact:** Low-Medium  **Status:** [x] Implemented
 
 ---
 

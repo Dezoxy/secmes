@@ -16,7 +16,7 @@ Check the box when an idea is fully implemented and merged.
 | D | [Continuous profiling — Grafana Pyroscope](./D-pyroscope-profiling.md) | M | Medium | [x] |
 | E | [SLO dashboard + multi-burn-rate alerts](./E-slo-dashboard.md) | M | Medium | [x] |
 | F | [Loki alerting rules for security events](./F-loki-security-alerts.md) | S | Medium | [x] |
-| G | [GlitchTip arming runbook + deployment annotations](./G-glitchtip-annotations.md) | S | Low-Med | [ ] |
+| G | [GlitchTip arming runbook + deployment annotations](./G-glitchtip-annotations.md) | S | Low-Med | [x] |
 
 ---
 
