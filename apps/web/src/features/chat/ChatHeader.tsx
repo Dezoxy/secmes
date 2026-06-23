@@ -195,7 +195,7 @@ export function ChatHeader({
               : 'Security details';
 
   return (
-    <div className="flex items-center justify-between border-b border-white/5 bg-[#0f0f16] px-4 py-3">
+    <div className="flex items-center justify-between border-b border-white/5 bg-[#0f0f16] px-4 py-3 pt-[calc(env(safe-area-inset-top)_+_0.75rem)] pl-[calc(env(safe-area-inset-left)_+_1rem)] pr-[calc(env(safe-area-inset-right)_+_1rem)]">
       <div className="flex items-center gap-3">
         {onBack && (
           <IconButton
@@ -381,7 +381,7 @@ export function ChatHeader({
           ariaLabel={panelTitle}
           onClose={closePanel}
           className={`items-end justify-center bg-black/75 p-0 backdrop-blur-sm sm:items-center sm:p-4 ${modalBackdropEnterMotion}`}
-          contentClassName={`max-h-[86vh] w-full overflow-hidden rounded-t-2xl border border-white/5 bg-[#12121a] shadow-2xl shadow-black/50 sm:max-w-lg sm:rounded-2xl ${modalPanelEnterMotion}`}
+          contentClassName={`max-h-[86dvh] w-full overflow-hidden rounded-t-2xl border border-white/5 bg-[#12121a] shadow-2xl shadow-black/50 sm:max-w-lg sm:rounded-2xl ${modalPanelEnterMotion}`}
         >
           <div className="flex items-center justify-between border-b border-white/5 px-5 py-4">
             <div>
@@ -393,7 +393,7 @@ export function ChatHeader({
             </IconButton>
           </div>
 
-          <div className="max-h-[70vh] overflow-y-auto p-5">
+          <div className="max-h-[70dvh] overflow-y-auto p-5 pb-[calc(env(safe-area-inset-bottom)_+_1.25rem)]">
             {activePanel === 'info' && (
               <div className="space-y-3">
                 <PanelRow title="Type" value={conversation.type === 'group' ? 'Group' : 'Direct'} />

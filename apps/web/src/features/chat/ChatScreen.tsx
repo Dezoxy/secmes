@@ -123,7 +123,7 @@ function SettingsPanelFallback({ onClose }: SettingsPanelFallbackProps) {
       ariaLabel="Settings"
       onClose={onClose}
       className={`items-center justify-center bg-black/40 p-4 backdrop-blur-md ${modalBackdropEnterMotion}`}
-      contentClassName={`relative flex h-[90vh] w-full max-w-6xl items-center justify-center rounded-3xl border border-white/5 bg-[#12121a] text-sm text-white/45 shadow-2xl shadow-black/50 ${modalPanelEnterMotion}`}
+      contentClassName={`relative flex h-[90dvh] w-full max-w-6xl items-center justify-center rounded-3xl border border-white/5 bg-[#12121a] text-sm text-white/45 shadow-2xl shadow-black/50 ${modalPanelEnterMotion}`}
     >
       <IconButton
         onClick={onClose}
@@ -663,9 +663,9 @@ export default function ChatScreen() {
   };
 
   return (
-    <div className="min-h-screen bg-[#1a1a24] flex items-center justify-center p-4">
+    <div className="h-[100dvh] bg-[#1a1a24] flex sm:items-center sm:justify-center sm:p-4">
       <div
-        className={`w-full max-w-6xl h-[90vh] bg-[#12121a] rounded-3xl overflow-hidden flex shadow-2xl shadow-black/50 transition-all duration-700 ease-out ${
+        className={`w-full max-w-6xl h-full sm:h-[90dvh] bg-[#12121a] sm:rounded-3xl overflow-hidden flex shadow-2xl shadow-black/50 transition-all duration-700 ease-out ${
           mounted ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
         }`}
       >
@@ -678,7 +678,7 @@ export default function ChatScreen() {
             mounted ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-8'
           } ${mobileSidebarReturning ? paneBackEnterMotion : ''}`}
         >
-          <div className="border-b border-white/5 p-4">
+          <div className="border-b border-white/5 p-4 pt-[calc(env(safe-area-inset-top)_+_1rem)]">
             <div className="flex items-center justify-center gap-2">
               <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />
               <span className="text-xl font-bold tracking-wider">
