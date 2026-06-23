@@ -201,7 +201,7 @@ export async function logoutSession(): Promise<void> {
 }
 
 /** Authenticate as the breakglass admin (POST /auth/breakglass/login).
- * Returns the raw ApiResult so callers can distinguish 401 / 423 / 503 / network errors. */
+ * Returns the raw ApiResult so callers can distinguish 401 / 429 / 503 / network errors. */
 export async function breakglassLogin(
   username: string,
   password: string,
