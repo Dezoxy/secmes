@@ -126,6 +126,9 @@ export function ConversationList({
   const touchStartY = useRef<number | null>(null);
   const searchTouchStartY = useRef<number | null>(null);
   const sidebarTouchStartY = useRef<number | null>(null);
+  // Tracks the query string that triggered the most recent in-flight lookup. Cleared to null on every
+  // input change so that a stale response arriving after the user edited the field is discarded.
+  const infightLookupQuery = useRef<string | null>(null);
 
   const effectiveFriends = friends ?? [];
   const filteredFriends = useMemo(
@@ -257,16 +260,21 @@ export function ConversationList({
       setSendRequestError('Invalid argus ID — paste the exact ID from their profile.');
       return;
     }
+    const querySnapshot = trimmedFriendQuery;
+    infightLookupQuery.current = querySnapshot;
     setLookingUp(true);
     try {
-      const result = await lookupUserByArgusId(trimmedFriendQuery);
+      const result = await lookupUserByArgusId(querySnapshot);
+      if (infightLookupQuery.current !== querySnapshot) return;
       if (!result) {
         setSendRequestError('No user found with that argus-id.');
       } else {
         setLookupResult(result);
       }
     } catch {
-      setSendRequestError('Lookup failed. Check the id and try again.');
+      if (infightLookupQuery.current === querySnapshot) {
+        setSendRequestError('Lookup failed. Check the id and try again.');
+      }
     } finally {
       setLookingUp(false);
     }
@@ -330,6 +338,7 @@ export function ConversationList({
                 setFriendQuery(event.target.value);
                 setSendRequestError(null);
                 setLookupResult(null);
+                infightLookupQuery.current = null;
               }}
               aria-label="Search friends or enter Argus ID"
               placeholder="Search friends or enter Argus ID..."
