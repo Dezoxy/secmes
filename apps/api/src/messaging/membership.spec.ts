@@ -2,7 +2,7 @@ import { ForbiddenException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Tx } from '../db/index.js';
-import { requireFriendship } from './membership.js';
+import { canonicalPair, requireFriendship } from './membership.js';
 
 // Builds a minimal Drizzle-tx mock whose .select chain returns the provided rows.
 function mockTx(rows: Array<{ id: string }>): Tx {
@@ -41,5 +41,20 @@ describe('requireFriendship', () => {
     await requireFriendship(tx, USER_B, USER_A); // B > A alphabetically — should still resolve
     // The where clause is built by drizzle internals; we just confirm the chain was called
     expect((tx.select as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+  });
+});
+
+describe('canonicalPair', () => {
+  it('returns the lower id as low and higher as high', () => {
+    expect(canonicalPair(USER_A, USER_B)).toEqual({ low: USER_A, high: USER_B });
+  });
+
+  it('is symmetric — argument order does not change the pair', () => {
+    expect(canonicalPair(USER_B, USER_A)).toEqual(canonicalPair(USER_A, USER_B));
+  });
+
+  it('lower-cases uppercase UUID input so it matches the stored canonical row', () => {
+    const upper = USER_A.toUpperCase();
+    expect(canonicalPair(upper, USER_B)).toEqual(canonicalPair(USER_A, USER_B));
   });
 });

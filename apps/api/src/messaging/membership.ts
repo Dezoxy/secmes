@@ -8,6 +8,16 @@ import { schema, type Tx } from '../db/index.js';
 // `Tx` so the check runs in the SAME RLS-scoped transaction as the write it guards.
 
 /**
+ * Canonical pair ordering for the friendships table (user_low_id < user_high_id). Lower-casing first
+ * ensures uppercase UUID input (valid per ParseUUIDPipe) sorts the same way as the stored lower-case rows.
+ */
+export function canonicalPair(a: string, b: string): { low: string; high: string } {
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  return x < y ? { low: x, high: y } : { low: y, high: x };
+}
+
+/**
  * Resolve the VERIFIED caller to an ACTIVE tenant user id. Never trusts a client-supplied id, and
  * only resolves an active user — a soft-deleted/suspended member with a still-valid bearer token can't act.
  *
@@ -60,9 +70,7 @@ export async function requireMembership(
  * `withTenant` transaction so the RLS tenant context is already set on the connection.
  */
 export async function requireFriendship(tx: Tx, userA: string, userB: string): Promise<void> {
-  const a = userA.toLowerCase();
-  const b = userB.toLowerCase();
-  const [low, high] = a < b ? [a, b] : [b, a];
+  const { low, high } = canonicalPair(userA, userB);
   const [row] = await tx
     .select({ id: schema.friendships.id })
     .from(schema.friendships)

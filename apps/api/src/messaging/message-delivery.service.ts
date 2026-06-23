@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { and, asc, eq, gt, inArray, max, min, ne, sql } from 'drizzle-orm';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
@@ -41,34 +41,9 @@ export class MessageDeliveryService {
       const sender = await requireUser(tx, auth);
       await requireMembership(tx, conversationId, sender);
 
-      // Friendship gate for direct (1:1) conversations: if the conversation is a DM, the sender
-      // must still be an accepted friend of the peer. Groups are ungated — friendship is a 1:1
-      // social-graph concept. Legacy rows where isDirect IS NULL are treated as non-DM (no gate).
-      const [convRow] = await tx
-        .select({ isDirect: schema.conversations.isDirect })
-        .from(schema.conversations)
-        .where(eq(schema.conversations.id, conversationId))
-        .limit(1);
-      if (convRow?.isDirect) {
-        const [peerRow] = await tx
-          .select({ userId: schema.conversationMembers.userId })
-          .from(schema.conversationMembers)
-          .where(
-            and(
-              eq(schema.conversationMembers.conversationId, conversationId),
-              ne(schema.conversationMembers.userId, sender),
-            ),
-          )
-          .limit(1);
-        if (peerRow) {
-          await requireFriendship(tx, sender, peerRow.userId);
-        }
-      }
-
-      // Idempotent-retry fast path: if this (conversation, sender, clientMessageId) was already
-      // stored, return it immediately BEFORE the stale-epoch check. This prevents a retry from
-      // being rejected with 409 simply because a commit advanced the epoch after the first send
-      // succeeded but before the client received the acknowledgement.
+      // Idempotent-retry fast path: check BEFORE the friendship gate so a retry of an already-stored
+      // message succeeds even if the sender has since been unfriended. The message is already durable;
+      // refusing the retry would leave the client stuck with no ACK for a message the server has stored.
       const [alreadyStored] = await tx
         .select({ id: schema.messages.id, createdAt: schema.messages.createdAt })
         .from(schema.messages)
@@ -89,6 +64,31 @@ export class MessageDeliveryService {
           },
           event: null,
         };
+      }
+
+      // Friendship gate for direct (1:1) conversations: if the conversation is a DM, the sender
+      // must still be an accepted friend of the peer. Groups are ungated — friendship is a 1:1
+      // social-graph concept. Legacy rows where isDirect IS NULL are treated as non-DM (no gate).
+      // convRow is guaranteed non-null: requireMembership above confirms the conversation exists in
+      // this tenant under the active RLS context.
+      const [convRow] = await tx
+        .select({ isDirect: schema.conversations.isDirect })
+        .from(schema.conversations)
+        .where(eq(schema.conversations.id, conversationId))
+        .limit(1);
+      if (convRow!.isDirect) {
+        const [peerRow] = await tx
+          .select({ userId: schema.conversationMembers.userId })
+          .from(schema.conversationMembers)
+          .where(
+            and(
+              eq(schema.conversationMembers.conversationId, conversationId),
+              ne(schema.conversationMembers.userId, sender),
+            ),
+          )
+          .limit(1);
+        if (!peerRow) throw new InternalServerErrorException('DM conversation has no peer member');
+        await requireFriendship(tx, sender, peerRow.userId);
       }
 
       // Epoch gate: reject messages at any epoch other than the current group epoch. A message
@@ -222,6 +222,31 @@ export class MessageDeliveryService {
     const { result, event, removedSubs } = await withTenant(auth.tenantId, async (tx) => {
       const sender = await requireUser(tx, auth);
       await requireMembership(tx, conversationId, sender);
+
+      // Friendship gate: DMs (isDirect=true) require an accepted friendship even for commits.
+      // Architecturally DMs never use commits (their MLS epoch advances via addMember), but failing
+      // closed here prevents a removed friend from committing membership changes to a DM conversation
+      // if that invariant is ever violated by a client bug. convRow is guaranteed non-null: the
+      // conversation exists in this tenant (requireMembership confirmed it above).
+      const [convDmRow] = await tx
+        .select({ isDirect: schema.conversations.isDirect })
+        .from(schema.conversations)
+        .where(eq(schema.conversations.id, conversationId))
+        .limit(1);
+      if (convDmRow!.isDirect) {
+        const [peerRow] = await tx
+          .select({ userId: schema.conversationMembers.userId })
+          .from(schema.conversationMembers)
+          .where(
+            and(
+              eq(schema.conversationMembers.conversationId, conversationId),
+              ne(schema.conversationMembers.userId, sender),
+            ),
+          )
+          .limit(1);
+        if (!peerRow) throw new InternalServerErrorException('DM conversation has no peer member');
+        await requireFriendship(tx, sender, peerRow.userId);
+      }
 
       // Contiguity guard: reject commits that skip epochs. A gap commit would poison MAX(epoch) for
       // the sendMessage stale-epoch gate, cause peer drain loops to halt at a missing slot, and let
