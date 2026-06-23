@@ -1,0 +1,242 @@
+{
+  "uid": "argus-slo",
+  "title": "argus SLO",
+  "tags": ["argus", "slo"],
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": { "list": [] },
+  "annotations": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Error budget remaining (30d)",
+      "description": "Availability SLO: 99.5% non-5xx. Budget = 0.5% of requests. Drops below 100% as errors accumulate over 30 days.",
+      "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.25 },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "green", "value": 0.75 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "1 - clamp_min(sum(increase(argus_api_http_requests_total{status=~\"5..\"}[30d])) / sum(increase(argus_api_http_requests_total[30d])) / 0.005, 0)",
+          "legendFormat": "budget remaining"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Latency SLO compliance (1h)",
+      "description": "Latency SLO: 95% of requests < 500ms. Computed over the last hour.",
+      "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.9 },
+              { "color": "yellow", "value": 0.93 },
+              { "color": "green", "value": 0.95 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "argus:http_latency_compliance:rate1h",
+          "legendFormat": "< 500ms compliance"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Current burn rate (1h)",
+      "description": "Multiples of the allowed 0.5% error rate. 1× = on budget. >14× = fast-burn alert.",
+      "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 2 },
+              { "color": "orange", "value": 6 },
+              { "color": "red", "value": 14 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "argus:http_error_ratio:rate1h / 0.005",
+          "legendFormat": "burn rate (×)"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Availability error-budget burn rate — multi-window",
+      "description": "Error rate as a multiple of the 0.5% SLO budget. Fast-burn alert fires at 14× on both 5m + 1h windows. Slow-burn fires at 6× on 1h + 6h windows.",
+      "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "fieldConfig": {
+        "defaults": { "unit": "short", "min": 0 },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "argus:http_error_ratio:rate5m / 0.005",
+          "legendFormat": "burn rate 5m"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "argus:http_error_ratio:rate1h / 0.005",
+          "legendFormat": "burn rate 1h"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "argus:http_error_ratio:rate6h / 0.005",
+          "legendFormat": "burn rate 6h"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Latency SLO compliance over time",
+      "description": "Fraction of requests completing in < 500ms. SLO target: 95%.",
+      "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "min": 0, "max": 1 },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "argus:http_latency_compliance:rate5m",
+          "legendFormat": "compliance 5m"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "argus:http_latency_compliance:rate1h",
+          "legendFormat": "compliance 1h"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "table",
+      "title": "5xx ratio by route (last 1h)",
+      "description": "Routes sorted by error ratio descending — identify which endpoints are burning the availability budget.",
+      "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit" },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "route" },
+            "properties": [{ "id": "custom.width", "value": 280 }]
+          }
+        ]
+      },
+      "options": { "frameIndex": 0, "showHeader": true, "sortBy": [{ "displayName": "Value", "desc": true }] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "sum by (route) (rate(argus_api_http_requests_total{status=~\"5..\"}[1h])) / sum by (route) (rate(argus_api_http_requests_total[1h]))",
+          "legendFormat": "{{route}}",
+          "instant": true,
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "p95 latency by route (last 1h)",
+      "description": "Routes sorted by p95 latency descending — identify which endpoints violate the 500ms latency SLO.",
+      "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "fieldConfig": {
+        "defaults": { "unit": "s" },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "route" },
+            "properties": [{ "id": "custom.width", "value": 280 }]
+          }
+        ]
+      },
+      "options": { "frameIndex": 0, "showHeader": true, "sortBy": [{ "displayName": "Value", "desc": true }] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(argus_api_http_request_duration_seconds_bucket[1h])) by (le, route))",
+          "legendFormat": "{{route}}",
+          "instant": true,
+          "format": "table"
+        }
+      ]
+    }
+  ]
+}

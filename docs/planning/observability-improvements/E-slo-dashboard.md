@@ -1,6 +1,6 @@
 # Idea E — SLO dashboard + multi-burn-rate alerts
 
-**Effort:** M  **Impact:** Medium  **Status:** [ ] Not implemented
+**Effort:** M  **Impact:** Medium  **Status:** [x] Implemented
 
 ---
 
