@@ -35,7 +35,7 @@ export function UnlockGate({ children }: { children: ReactNode }): ReactNode {
   if (status === 'ready') return <>{children}</>;
 
   const shell = (icon: ReactNode, title: string, subtitle: string, body: ReactNode): ReactNode => (
-    <div className="flex min-h-screen items-center justify-center bg-[#1a1a24] p-4">
+    <div className="flex h-[100dvh] items-center justify-center overflow-y-auto bg-[#1a1a24] p-4">
       <div className={CARD}>
         <div className="mb-6 flex flex-col items-center text-center">
           <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-500/20">

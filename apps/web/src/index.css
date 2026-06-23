@@ -239,10 +239,15 @@
 html,
 body {
   height: 100%;
+  /* Lock the document to the viewport: only designated inner regions (chat list,
+     route content, settings panes) scroll. Without this, any descendant taller than
+     the viewport scrolls the whole page/body — the mobile rubber-band bug. */
+  overflow: hidden;
 }
 
 #root {
   height: 100dvh;
+  overflow: hidden;
 }
 
 body {

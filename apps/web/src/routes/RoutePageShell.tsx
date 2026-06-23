@@ -59,8 +59,8 @@ export function RoutePageShell({
 
   return (
     <AuthenticatedRouteBoundary>
-      <div className="min-h-screen bg-[#0c0c12] text-white">
-        <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-5 sm:px-6 lg:px-8">
+      <div className="flex h-[100dvh] flex-col bg-[#0c0c12] text-white">
+        <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col px-4 pt-[calc(env(safe-area-inset-top)_+_1.25rem)] sm:px-6 lg:px-8">
           <header className="flex flex-col gap-4 border-b border-white/5 pb-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-3">
               <button
@@ -102,7 +102,7 @@ export function RoutePageShell({
 
           <main
             key={location.pathname}
-            className={`flex flex-1 flex-col py-8 ${surfaceEnterMotion}`}
+            className={`flex min-h-0 flex-1 flex-col overflow-y-auto py-8 pb-[calc(env(safe-area-inset-bottom)_+_2rem)] ${surfaceEnterMotion}`}
           >
             <section className="max-w-3xl">
               <div className="mb-5 flex items-center gap-3">
