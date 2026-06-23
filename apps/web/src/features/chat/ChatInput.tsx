@@ -105,7 +105,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
 
   if (disabled) {
     return (
-      <div className="border-t border-white/5 bg-[#0f0f16] p-4">
+      <div className="border-t border-white/5 bg-[#0f0f16] p-4 pb-[calc(env(safe-area-inset-bottom)_+_1rem)] pl-[calc(env(safe-area-inset-left)_+_1rem)] pr-[calc(env(safe-area-inset-right)_+_1rem)]">
         <EmptyState title="Messaging unavailable" compact>
           {disabledNotice ?? 'Messaging is not available here yet.'}
         </EmptyState>

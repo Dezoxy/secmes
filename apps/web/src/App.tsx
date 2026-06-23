@@ -265,7 +265,7 @@ function RouteUpdateAction() {
 
 function RouteLoadingFallback() {
   return (
-    <div className="flex h-[100dvh] items-center justify-center bg-[#1a1a24] p-4 text-sm text-white/50">
+    <div className="flex h-[100dvh] items-center justify-center bg-[#1a1a24] p-4 pt-[calc(env(safe-area-inset-top)_+_1rem)] text-sm text-white/50">
       Loading...
     </div>
   );
