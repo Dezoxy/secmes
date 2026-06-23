@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Bell, BellOff } from 'lucide-react';
-import { Button, SettingsRow, StateBlock } from '../ui';
+import { Bell } from 'lucide-react';
+import { SettingsRow, StateBlock } from '../ui';
 import { subscribeToPush, unsubscribeFromPush } from '../../lib/push';
 
 interface NotificationSettingsProps {
@@ -77,36 +77,27 @@ export function NotificationSettings({ deviceId }: NotificationSettingsProps) {
       {permission !== 'unsupported' && (
         <div className="space-y-2">
           {permission !== 'granted' ? (
-            <div className="flex items-center gap-3">
-              <Button
-                size="sm"
-                onClick={handleEnable}
-                disabled={busy || !deviceId || !VAPID_KEY}
-                aria-busy={busy}
-              >
-                <Bell className="h-4 w-4 mr-1.5" />
-                {busy ? 'Enabling…' : 'Enable notifications'}
-              </Button>
-              {!VAPID_KEY && (
-                <span className="text-xs text-white/60">
-                  Push is not configured on this server.
-                </span>
-              )}
-            </div>
+            <SettingsRow
+              title="Notifications"
+              value={
+                busy
+                  ? 'Enabling…'
+                  : !VAPID_KEY
+                    ? 'Push is not configured on this server'
+                    : 'Tap to enable'
+              }
+              enabled={false}
+              disabled={busy || !deviceId || !VAPID_KEY}
+              onClick={handleEnable}
+            />
           ) : (
-            <div className="flex items-center gap-3">
-              <SettingsRow title="Notifications" value="Enabled" badge="On" />
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={handleDisable}
-                disabled={busy}
-                aria-busy={busy}
-              >
-                <BellOff className="h-4 w-4 mr-1.5" />
-                {busy ? 'Disabling…' : 'Disable'}
-              </Button>
-            </div>
+            <SettingsRow
+              title="Notifications"
+              value={busy ? 'Disabling…' : 'Enabled'}
+              enabled={true}
+              disabled={busy}
+              onClick={handleDisable}
+            />
           )}
           {error && <p className="text-xs text-red-400">{error}</p>}
         </div>

@@ -5,6 +5,7 @@ interface SettingsRowProps {
   value: string;
   badge?: string;
   enabled?: boolean;
+  disabled?: boolean;
   onClick?: () => void;
   trailing?: ReactNode;
 }
@@ -61,8 +62,12 @@ export function SettingsRow(props: SettingsRowProps) {
         type="button"
         role={isSwitch ? 'switch' : undefined}
         aria-checked={isSwitch ? props.enabled : undefined}
+        disabled={props.disabled}
         onClick={props.onClick}
-        className={joinClasses(rowClass, interactiveClass)}
+        className={joinClasses(
+          rowClass,
+          props.disabled ? 'opacity-60 cursor-not-allowed' : interactiveClass,
+        )}
       >
         {content}
       </button>
