@@ -2,8 +2,10 @@
 // any application module is imported — the SDK must patch Node built-ins before their first require.
 //
 // Security constraints (invariant #2):
-//  - HTTP auto-instrumentation captures method, route template, status code and duration only.
-//    It does NOT capture request/response bodies or auth headers by default — do not add requestHook.
+//  - HTTP spans: url.full / http.url are redacted on ALL spans (incoming and outgoing).
+//    Incoming routes are still captured via http.route (set by the NestJS middleware, safe).
+//    Outgoing requests — particularly web-push sendNotification() calls — carry capability URLs
+//    (push endpoint credentials) that must never be persisted in traces.
 //  - pg instrumentation is disabled: the project uses postgres.js (not pg), and even if it fires it
 //    would capture SQL text. Disabling removes any risk of query text reaching Tempo.
 //  - fs and dns instrumentation are disabled: too noisy for this service.
@@ -13,11 +15,11 @@
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { Resource } from '@opentelemetry/resources';
+import { resourceFromAttributes } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 
 const sdk = new NodeSDK({
-  resource: new Resource({
+  resource: resourceFromAttributes({
     [ATTR_SERVICE_NAME]: 'argus-api',
     [ATTR_SERVICE_VERSION]: process.env['IMAGE_TAG'] ?? 'dev',
   }),
@@ -26,6 +28,12 @@ const sdk = new NodeSDK({
     getNodeAutoInstrumentations({
       '@opentelemetry/instrumentation-http': {
         ignoreIncomingRequestHook: (req) => req.url === '/healthz',
+        // Redact full URLs from every span — outgoing push capability URLs must not persist in traces.
+        // http.route (set by the NestJS framework) is untouched and remains useful for dashboards.
+        requestHook: (span) => {
+          span.setAttribute('url.full', '[redacted]');
+          span.setAttribute('http.url', '[redacted]');
+        },
       },
       '@opentelemetry/instrumentation-pg': { enabled: false },
       '@opentelemetry/instrumentation-fs': { enabled: false },

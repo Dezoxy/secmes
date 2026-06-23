@@ -436,8 +436,13 @@ services:
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.17.0
     restart: unless-stopped
+    # postgres-exporter v0.17 does not support DATA_SOURCE_NAME_FILE; read the secret into
+    # DATA_SOURCE_NAME via the entrypoint — the secret is only ever in this container's environment.
+    entrypoint:
+      - sh
+      - -c
+      - 'export DATA_SOURCE_NAME=$$(cat /run/secrets/database_url) && exec /bin/postgres_exporter'
     environment:
-      DATA_SOURCE_NAME_FILE: /run/secrets/database_url
       PG_EXPORTER_DISABLE_SETTINGS_METRICS: 'true'
     secrets:
       - database_url

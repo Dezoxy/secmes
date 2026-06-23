@@ -77,7 +77,7 @@ describe('SessionTokenController.refresh — CSRF + cookie gates', () => {
   it('rejects a request missing the X-Argus-Refresh header', async () => {
     const { controller, sessions } = makeController();
     const req = fakeReq({}, { [COOKIE_NAME]: 'old.refresh' });
-    await expect(controller.refresh(req, fakeRes() as never, '203.0.113.1')).rejects.toBeInstanceOf(
+    await expect(controller.refresh(req, fakeRes() as never)).rejects.toBeInstanceOf(
       BadRequestException,
     );
     expect(sessions.rotateRefresh).not.toHaveBeenCalled();
@@ -86,7 +86,7 @@ describe('SessionTokenController.refresh — CSRF + cookie gates', () => {
   it('rejects a request missing the refresh cookie', async () => {
     const { controller, sessions } = makeController();
     const req = fakeReq({ 'x-argus-refresh': '1' }, {});
-    await expect(controller.refresh(req, fakeRes() as never, '203.0.113.1')).rejects.toBeInstanceOf(
+    await expect(controller.refresh(req, fakeRes() as never)).rejects.toBeInstanceOf(
       BadRequestException,
     );
     expect(sessions.rotateRefresh).not.toHaveBeenCalled();
@@ -96,7 +96,7 @@ describe('SessionTokenController.refresh — CSRF + cookie gates', () => {
     const { controller, sessions } = makeController();
     const req = fakeReq({ 'x-argus-refresh': '1' }, { [COOKIE_NAME]: 'old.refresh' });
     const res = fakeRes();
-    await expect(controller.refresh(req, res as never, '203.0.113.1')).resolves.toEqual({
+    await expect(controller.refresh(req, res as never)).resolves.toEqual({
       accessToken: 'new.access',
     });
     expect(sessions.rotateRefresh).toHaveBeenCalledWith('old.refresh');
