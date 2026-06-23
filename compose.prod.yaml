@@ -431,7 +431,7 @@ services:
   # http://tempo:4318 (OTEL_EXPORTER_OTLP_ENDPOINT above). 72-h block retention — traces are more
   # ephemeral than logs. Threat model: docs/threat-models/structured-logging-and-tracing.md.
   tempo:
-    image: grafana/tempo:2.8.0
+    image: grafana/tempo:2.9.0
     restart: unless-stopped
     command: ['-config.file=/etc/tempo/tempo-config.yml']
     volumes:
@@ -455,7 +455,11 @@ services:
   pyroscope:
     image: grafana/pyroscope:1.13.0
     restart: unless-stopped
-    command: ['-config.file=/etc/pyroscope/pyroscope-config.yml']
+    # -compactor.blocks-retention-period: the YAML equivalent field does not exist in
+    # compactor.Config in Pyroscope 1.13.0 (the struct was refactored); pass it as a CLI flag.
+    command:
+      - '-config.file=/etc/pyroscope/pyroscope-config.yml'
+      - '-compactor.blocks-retention-period=72h'
     volumes:
       - ./infra/stack/observability/pyroscope:/etc/pyroscope:ro
       - pyroscope-data:/var/pyroscope
