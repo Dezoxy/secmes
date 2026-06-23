@@ -13,8 +13,10 @@ export interface PwaUpdateContextValue {
   updateReady: boolean;
   status: PwaUpdateStatus;
   lastCheckedAt: Date | null;
+  newVersion: string | null;
   checkForUpdate: () => Promise<void>;
   applyUpdate: () => Promise<void>;
+  dismissUpdate: () => void;
 }
 
 export const defaultPwaUpdateContext: PwaUpdateContextValue = {
@@ -22,8 +24,10 @@ export const defaultPwaUpdateContext: PwaUpdateContextValue = {
   updateReady: false,
   status: 'unsupported',
   lastCheckedAt: null,
+  newVersion: null,
   checkForUpdate: async () => undefined,
   applyUpdate: async () => undefined,
+  dismissUpdate: () => undefined,
 };
 
 const PwaUpdateContext = createContext<PwaUpdateContextValue>(defaultPwaUpdateContext);

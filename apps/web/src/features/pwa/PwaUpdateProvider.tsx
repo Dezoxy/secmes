@@ -26,6 +26,9 @@ export function PwaUpdateProvider({ children }: PwaUpdateProviderProps) {
     isDevUpdatePreviewEnabled() ? 'available' : supportsServiceWorkers() ? 'idle' : 'unsupported',
   );
   const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
+  const [newVersion, setNewVersion] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+  const newVersionFetched = useRef(false);
 
   const checkForWaitingUpdate = useCallback(async (options?: { silent?: boolean }) => {
     if (!supportsServiceWorkers()) {
@@ -120,14 +123,33 @@ export function PwaUpdateProvider({ children }: PwaUpdateProviderProps) {
     };
   }, [checkForWaitingUpdate]);
 
+  useEffect(() => {
+    if (status !== 'available' || newVersionFetched.current) return;
+    newVersionFetched.current = true;
+    fetch('/version.json', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data: unknown) => {
+        if (
+          data &&
+          typeof data === 'object' &&
+          'version' in data &&
+          typeof (data as { version: unknown }).version === 'string'
+        ) {
+          setNewVersion((data as { version: string }).version);
+        }
+      })
+      .catch(() => undefined);
+  }, [status]);
+
   const value = useMemo<PwaUpdateContextValue>(() => {
-    const updateReady = devUpdatePreview || status === 'available';
+    const updateReady = !dismissed && (devUpdatePreview || status === 'available');
 
     return {
       canCheckForUpdate: status !== 'unsupported',
       updateReady,
       status,
       lastCheckedAt,
+      newVersion,
       checkForUpdate: () => checkForWaitingUpdate(),
       applyUpdate: async () => {
         if (devUpdatePreview) {
@@ -140,8 +162,9 @@ export function PwaUpdateProvider({ children }: PwaUpdateProviderProps) {
         if (!updateServiceWorker.current) return;
         await updateServiceWorker.current(true);
       },
+      dismissUpdate: () => setDismissed(true),
     };
-  }, [checkForWaitingUpdate, devUpdatePreview, lastCheckedAt, status]);
+  }, [checkForWaitingUpdate, devUpdatePreview, dismissed, lastCheckedAt, newVersion, status]);
 
   return <PwaUpdateContextProvider value={value}>{children}</PwaUpdateContextProvider>;
 }

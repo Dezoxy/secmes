@@ -116,6 +116,22 @@ function bundleIntegrityManifestPlugin(): Plugin {
   };
 }
 
+function versionManifestPlugin(): Plugin {
+  const raw = process.env.VITE_APP_VERSION ?? webPackage.version;
+  const version = `v${raw.replace(/^aws-/, '').replace(/^v/, '')}`;
+  return {
+    name: 'argus-version-manifest',
+    apply: 'build',
+    generateBundle() {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'version.json',
+        source: JSON.stringify({ version }),
+      });
+    },
+  };
+}
+
 // React + Vite PWA — the static, crypto-blind-friendly client for argus.
 export default defineConfig({
   define: {
@@ -147,6 +163,7 @@ export default defineConfig({
     react(),
     tailwindcss(),
     bundleVisibilityPlugin(),
+    versionManifestPlugin(),
     VitePWA({
       registerType: 'prompt',
       // injectManifest: custom sw.ts handles precaching + push/notificationclick.

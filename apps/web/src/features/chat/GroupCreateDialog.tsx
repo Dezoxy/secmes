@@ -19,7 +19,9 @@ import {
   LoadingState,
   Modal,
   modalBackdropEnterMotion,
+  modalBackdropExitMotion,
   modalPanelEnterMotion,
+  modalPanelExitMotion,
 } from '../ui';
 import { toSafeUiError, type SafeUiError } from '../../lib/safe-ui-error';
 
@@ -73,6 +75,13 @@ export function GroupCreateDialog({
   const [groupName, setGroupName] = useState('');
   const [phase, setPhase] = useState<Phase>({ tag: 'picking' });
   const [actionError, setActionError] = useState<SafeUiError | null>(null);
+  const [closing, setClosing] = useState(false);
+
+  const handleClose = () => {
+    if (closing) return;
+    setClosing(true);
+    setTimeout(onClose, 220);
+  };
 
   const excluded = new Set<string>(
     [selfUserId, ...(existingMemberIds ?? [])].filter((id): id is string => id != null),
@@ -233,10 +242,10 @@ export function GroupCreateDialog({
   return (
     <Modal
       ariaLabel={title}
-      onClose={onClose}
+      onClose={handleClose}
       closeOnBackdrop
-      className={`items-center justify-center bg-black/40 p-4 backdrop-blur-md ${modalBackdropEnterMotion}`}
-      contentClassName={`w-full max-w-md rounded-3xl border border-white/5 bg-[#12121a] p-6 shadow-2xl shadow-black/50 ${modalPanelEnterMotion}`}
+      className={`items-center justify-center bg-black/40 p-4 backdrop-blur-md ${closing ? modalBackdropExitMotion : modalBackdropEnterMotion}`}
+      contentClassName={`w-full max-w-md rounded-3xl border border-white/5 bg-[#12121a] p-6 shadow-2xl shadow-black/50 ${closing ? modalPanelExitMotion : modalPanelEnterMotion}`}
     >
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -247,7 +256,7 @@ export function GroupCreateDialog({
           )}
           <h2 className="text-lg font-semibold text-white">{title}</h2>
         </div>
-        <IconButton onClick={onClose} size="sm" aria-label={`Close ${title}`}>
+        <IconButton onClick={handleClose} size="sm" aria-label={`Close ${title}`}>
           <X className="h-5 w-5" />
         </IconButton>
       </div>
