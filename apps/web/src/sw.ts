@@ -64,6 +64,12 @@ registerRoute(
   }),
 );
 
+// Prompt-mode updates: the update dialog calls wb.messageSkipWaiting() which posts this message.
+// injectManifest strategy requires adding this handler manually (generateSW would inject it automatically).
+self.addEventListener('message', (event: ExtendableMessageEvent) => {
+  if (event.data?.type === 'SKIP_WAITING') void self.skipWaiting();
+});
+
 // Push: content-free wake. The payload is {"type":"new_message"|"friend_request"} — zero plaintext,
 // no sender, no conversation id. On push: show a generic notification. The app reconnects via
 // WebSocket and fetches ciphertext normally. Tag collapses multiple pushes into one notification entry.

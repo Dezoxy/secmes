@@ -13,8 +13,14 @@ export interface PwaUpdateContextValue {
   updateReady: boolean;
   status: PwaUpdateStatus;
   lastCheckedAt: Date | null;
+  newVersion: string | null;
+  dialogOpen: boolean;
   checkForUpdate: () => Promise<void>;
   applyUpdate: () => Promise<void>;
+  /** Session-level dismiss: hides the pill without applying. Reserved for "remind me later" UI; not yet wired. */
+  dismissUpdate: () => void;
+  openUpdateDialog: () => void;
+  closeUpdateDialog: () => void;
 }
 
 export const defaultPwaUpdateContext: PwaUpdateContextValue = {
@@ -22,8 +28,13 @@ export const defaultPwaUpdateContext: PwaUpdateContextValue = {
   updateReady: false,
   status: 'unsupported',
   lastCheckedAt: null,
+  newVersion: null,
+  dialogOpen: false,
   checkForUpdate: async () => undefined,
   applyUpdate: async () => undefined,
+  dismissUpdate: () => undefined,
+  openUpdateDialog: () => undefined,
+  closeUpdateDialog: () => undefined,
 };
 
 const PwaUpdateContext = createContext<PwaUpdateContextValue>(defaultPwaUpdateContext);
