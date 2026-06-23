@@ -114,8 +114,9 @@ export class FriendsService {
         return {
           rowWritten: true,
           // Both sub families so sockets authenticated under either token family receive the nudge.
+          // Dedup in case externalSub already carries the argusid: prefix (defensive).
           recipientSubs: recipient
-            ? [recipient.externalSub, `argusid:${recipient.argusId}`]
+            ? [...new Set([recipient.externalSub, `argusid:${recipient.argusId}`])]
             : ([] as string[]),
           recipientUserId: recipient?.id ?? null,
         };
