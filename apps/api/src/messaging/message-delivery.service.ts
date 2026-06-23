@@ -1,9 +1,9 @@
-import { ConflictException, InternalServerErrorException } from '@nestjs/common';
-import { and, asc, eq, gt, inArray, max, min, ne, sql } from 'drizzle-orm';
+import { ConflictException } from '@nestjs/common';
+import { and, asc, eq, gt, inArray, max, min, sql } from 'drizzle-orm';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
-import { requireFriendship, requireMembership, requireUser } from './membership.js';
+import { requireDirectFriendship, requireMembership, requireUser } from './membership.js';
 import type { PushService } from '../push/push.service.js';
 import type {
   CommitCreatedEvent,
@@ -66,30 +66,10 @@ export class MessageDeliveryService {
         };
       }
 
-      // Friendship gate for direct (1:1) conversations: if the conversation is a DM, the sender
-      // must still be an accepted friend of the peer. Groups are ungated — friendship is a 1:1
-      // social-graph concept. Legacy rows where isDirect IS NULL are treated as non-DM (no gate).
-      // convRow is guaranteed non-null: requireMembership above confirms the conversation exists in
-      // this tenant under the active RLS context.
-      const [convRow] = await tx
-        .select({ isDirect: schema.conversations.isDirect })
-        .from(schema.conversations)
-        .where(eq(schema.conversations.id, conversationId))
-        .limit(1);
-      if (convRow!.isDirect) {
-        const [peerRow] = await tx
-          .select({ userId: schema.conversationMembers.userId })
-          .from(schema.conversationMembers)
-          .where(
-            and(
-              eq(schema.conversationMembers.conversationId, conversationId),
-              ne(schema.conversationMembers.userId, sender),
-            ),
-          )
-          .limit(1);
-        if (!peerRow) throw new InternalServerErrorException('DM conversation has no peer member');
-        await requireFriendship(tx, sender, peerRow.userId);
-      }
+      // Friendship gate for direct (1:1) conversations: if the conversation is a DM, the sender must
+      // still be an accepted friend of the peer. Groups are ungated — friendship is a 1:1 social-graph
+      // concept. The guard fails closed on a DM with anything other than exactly one peer.
+      await requireDirectFriendship(tx, conversationId, sender);
 
       // Epoch gate: reject messages at any epoch other than the current group epoch. A message
       // encrypted at an old epoch is undecryptable (MLS FS); one at a future epoch indicates the
@@ -226,27 +206,8 @@ export class MessageDeliveryService {
       // Friendship gate: DMs (isDirect=true) require an accepted friendship even for commits.
       // Architecturally DMs never use commits (their MLS epoch advances via addMember), but failing
       // closed here prevents a removed friend from committing membership changes to a DM conversation
-      // if that invariant is ever violated by a client bug. convRow is guaranteed non-null: the
-      // conversation exists in this tenant (requireMembership confirmed it above).
-      const [convDmRow] = await tx
-        .select({ isDirect: schema.conversations.isDirect })
-        .from(schema.conversations)
-        .where(eq(schema.conversations.id, conversationId))
-        .limit(1);
-      if (convDmRow!.isDirect) {
-        const [peerRow] = await tx
-          .select({ userId: schema.conversationMembers.userId })
-          .from(schema.conversationMembers)
-          .where(
-            and(
-              eq(schema.conversationMembers.conversationId, conversationId),
-              ne(schema.conversationMembers.userId, sender),
-            ),
-          )
-          .limit(1);
-        if (!peerRow) throw new InternalServerErrorException('DM conversation has no peer member');
-        await requireFriendship(tx, sender, peerRow.userId);
-      }
+      // if that invariant is ever violated by a client bug.
+      await requireDirectFriendship(tx, conversationId, sender);
 
       // Contiguity guard: reject commits that skip epochs. A gap commit would poison MAX(epoch) for
       // the sendMessage stale-epoch gate, cause peer drain loops to halt at a missing slot, and let

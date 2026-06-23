@@ -23,11 +23,13 @@ POST /conversations/:id/messages
     → INSERT message (ciphertext only)
 ```
 
-`requireFriendship(tx, userA, userB)` is the single shared guard in `messaging/membership.ts`. `resolveDmPeer` is an inline step inside `sendMessage()` (not a separate export) that returns `null` for non-DM conversations, short-circuiting the check.
+`requireFriendship(tx, userA, userB)` is the single shared guard in `messaging/membership.ts`. The DM peer-resolution + gate is wrapped in `requireDirectFriendship(tx, conversationId, callerUserId)` (same module), called by `sendMessage()` and `postCommit()`. It no-ops for non-DM conversations and **fails closed** (500) if a DM has anything other than exactly one peer besides the caller — so an `isDirect` row that somehow accumulated extra members can never gate against an arbitrary member and let the write through. (`createConversation()` calls `requireFriendship` directly, since at creation time the peer is the single id in the request body, not yet a DB membership row.)
 
 **Sensitive data on this path.** None new: the check reads `friendships.status` (metadata) and `conversation_members.user_id` (metadata). No plaintext, no keys. The server remains crypto-blind; it only decides *whether* to store the ciphertext, never *what* is in it.
 
 **Scope.** Group conversations (`isDirect=false`) are **not** gated — you can be in a group with users you have not added as friends. Friendship is a 1:1 social graph concept; groups are access-controlled by the group creator.
+
+The gate keys off the **client-declared** `isDirect` flag (the server deliberately does not infer it from membership — see `messaging.schemas.ts`, "groups start as solo rows"). A hostile client can therefore set `isDirect:false` with a single peer to create a 2-person *group* that is never friendship-gated — an ungated 1:1 channel by mislabelling. This is an accepted limitation (see §6, "isDirect is client-declared").
 
 ---
 
@@ -116,3 +118,4 @@ No invariant tension.
 - **RC isolation window** (see §3 Tampering): a concurrent unfriend + send in the same millisecond can slip through under `READ COMMITTED`. Acceptable for v1; a `SELECT FOR UPDATE` on the friendship row would close it but adds lock contention on every DM send — not worth it at this stage.
 - **Group conversations ungated**: a group member could add a non-friend. This is intentional and not a regression — groups were never friendship-gated.
 - **Legacy conversations** (`isDirect IS NULL`): treated as non-DM (no gate). These pre-date migration 0041 and are either group conversations or will be cleaned up in a later migration.
+- **`isDirect` is client-declared** (see §1 Scope): the gate's enforcement is bound to a flag the client sets at creation, so a hostile client can mislabel a 2-person DM as a group (`isDirect:false`) and bypass the friendship check entirely. **Accepted for v1** because: (a) groups are intentionally ungated, so a "group of two" is within the documented model; (b) the peer is still added via an MLS welcome the recipient's device must process — there is no silent insertion into a stranger's client; (c) the robust fix is to derive DM-ness from membership *shape* at send time (treat any 2-distinct-member conversation as a DM regardless of the flag), which conflicts with the documented reason the server refuses to infer `isDirect` (groups start as solo rows, so count-at-creation is ambiguous). The shape-based rule, applied at *send* time rather than creation, is the planned hardening if unsolicited 2-person groups become an abuse vector. Until then the anti-harassment value rests on the client surfacing unsolicited conversations distinctly, not on the server gate.

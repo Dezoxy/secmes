@@ -1,5 +1,10 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import {
+  BadRequestException,
+  ForbiddenException,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
+import { and, eq, ne } from 'drizzle-orm';
 
 import { schema, type Tx } from '../db/index.js';
 
@@ -66,8 +71,12 @@ export async function requireMembership(
 
 /**
  * Throw 403 unless `userA` and `userB` have an accepted friendship row. Looks up the canonical pair
- * (lower-cased, sorted) so the direction of the arguments doesn't matter. Must run inside a
- * `withTenant` transaction so the RLS tenant context is already set on the connection.
+ * (lower-cased, sorted) so the direction of the arguments doesn't matter.
+ *
+ * Tenant scope is enforced by RLS (FORCE) on the connection — there is deliberately NO explicit
+ * `tenant_id` predicate here. The canonical pair is unique only WITHIN a tenant, so this MUST run
+ * inside a `withTenant` transaction; calling it on a non-tenant-scoped connection would let a same-id
+ * pair from another tenant match.
  */
 export async function requireFriendship(tx: Tx, userA: string, userB: string): Promise<void> {
   const { low, high } = canonicalPair(userA, userB);
@@ -83,4 +92,46 @@ export async function requireFriendship(tx: Tx, userA: string, userB: string): P
     )
     .limit(1);
   if (!row) throw new ForbiddenException('friendship required');
+}
+
+/**
+ * Friendship gate for direct (1:1) conversations. If `conversationId` is a DM, the caller must still be
+ * an accepted friend of the peer; otherwise this is a no-op (groups are ungated — friendship is a 1:1
+ * social-graph concept, and legacy rows where `isDirect IS NULL` are treated as non-DM).
+ *
+ * Fails CLOSED on anomalies: a DM is asserted to have exactly one peer besides the caller. Zero peers
+ * (a DM with no other member) or more than one (an `isDirect` row that somehow accumulated extra members
+ * via an invariant violation) both throw 500 rather than gating against an arbitrary member and letting
+ * the write through. Callers MUST have run `requireMembership` first (so the conversation is known to
+ * exist in this tenant under the active RLS context) and MUST be inside a `withTenant` transaction.
+ */
+export async function requireDirectFriendship(
+  tx: Tx,
+  conversationId: string,
+  callerUserId: string,
+): Promise<void> {
+  const [conv] = await tx
+    .select({ isDirect: schema.conversations.isDirect })
+    .from(schema.conversations)
+    .where(eq(schema.conversations.id, conversationId))
+    .limit(1);
+  // requireMembership (run by every caller) already confirmed existence; a missing row here means the
+  // precondition was violated — fail closed rather than silently skip the gate.
+  if (!conv) throw new InternalServerErrorException('conversation not found for friendship gate');
+  if (conv.isDirect !== true) return;
+
+  const peers = await tx
+    .select({ userId: schema.conversationMembers.userId })
+    .from(schema.conversationMembers)
+    .where(
+      and(
+        eq(schema.conversationMembers.conversationId, conversationId),
+        ne(schema.conversationMembers.userId, callerUserId),
+      ),
+    )
+    .limit(2);
+  if (peers.length !== 1) {
+    throw new InternalServerErrorException('DM conversation has unexpected membership');
+  }
+  await requireFriendship(tx, callerUserId, peers[0]!.userId);
 }
