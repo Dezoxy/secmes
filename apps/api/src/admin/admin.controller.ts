@@ -26,7 +26,6 @@ import {
 
 import type { AdminAuditResponse, DeviceSummary } from '@argus/contracts';
 import { AdminGuard } from '../auth/admin.guard.js';
-import { CfAccessGuard } from '../auth/cf-access.guard.js';
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { CurrentAuth } from '../auth/current-auth.decorator.js';
 import { perMinute, SENSITIVE_LIMITS } from '../rate-limit/rate-limit.constants.js';
@@ -57,8 +56,11 @@ class AdminAuditResponseDto {
 
 @ApiTags('admin')
 @ApiBearerAuth()
-// CfAccessGuard (edge Cloudflare-Access JWT, env-gated) runs before AdminGuard (bearer + admin role).
-@UseGuards(CfAccessGuard, AdminGuard)
+// AdminGuard: verifies the Argus bearer JWT + session revocation + role='admin' in the tenant.
+// CF Access is NOT required here — regular admin users access this surface via the in-app settings
+// panel (Settings → Admin) without having gone through the breakglass CF Access flow.
+// See docs/threat-models/admin-access-gating.md.
+@UseGuards(AdminGuard)
 @Controller('admin')
 export class AdminController {
   constructor(private readonly adminService: AdminService) {}
