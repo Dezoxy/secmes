@@ -168,6 +168,12 @@ log "fetching runtime secrets via Managed Identity"
 # in step 3b/4. We hash (never hold/log the token value); empty when the file doesn't exist yet (first deploy).
 _tunnel_token_old_sha=""
 [ -f "$SECRETS_DIR/tunnel_token" ] && _tunnel_token_old_sha="$(sha256sum "$SECRETS_DIR/tunnel_token" | cut -d' ' -f1)"
+# Same gotcha for the OPTIONAL VAPID private key: the api's loadVapidConfig() reads the mounted file ONCE at
+# startup, so arming the key (empty → populated in Key Vault) only changes the file content — `up -d` won't
+# recreate the api, and push would stay disabled until an unrelated image/config change. Hash before the fetch
+# so step 6 can force-recreate the api when the key changes. Empty when the file doesn't exist yet (first deploy).
+_vapid_key_old_sha=""
+[ -f "$SECRETS_DIR/vapid_private_key" ] && _vapid_key_old_sha="$(sha256sum "$SECRETS_DIR/vapid_private_key" | cut -d' ' -f1)"
 systemctl restart argus-secrets.service
 systemctl enable argus-secrets.service >/dev/null 2>&1 || true
 # TUNNEL_TOKEN_CHANGED=1 unless the freshly-fetched token byte-matches the pre-fetch one. =1 on a first deploy
@@ -179,6 +185,15 @@ if [ -n "$_tunnel_token_old_sha" ] && [ -f "$SECRETS_DIR/tunnel_token" ] &&
   TUNNEL_TOKEN_CHANGED=0
 fi
 _tunnel_token_old_sha=""
+# VAPID_KEY_CHANGED=1 unless the freshly-fetched key byte-matches the pre-fetch one. =1 on a first deploy (old
+# hash empty) — harmless, the api is created anyway; =1 when the operator arms/rotates the key, driving the api
+# force-recreate in step 6; =0 on a routine unchanged deploy (incl. the seeded-empty file) so the api isn't bounced.
+VAPID_KEY_CHANGED=1
+if [ -n "$_vapid_key_old_sha" ] && [ -f "$SECRETS_DIR/vapid_private_key" ] &&
+  [ "$_vapid_key_old_sha" = "$(sha256sum "$SECRETS_DIR/vapid_private_key" | cut -d' ' -f1)" ]; then
+  VAPID_KEY_CHANGED=0
+fi
+_vapid_key_old_sha=""
 
 # --- 3. GHCR login (token from Key Vault, transient) + pull the signed images. ---
 log "pulling images ${IMAGE_TAG} from ${GHCR_REGISTRY}"
@@ -545,8 +560,11 @@ docker compose -f "$COMPOSE" up -d $STACK_SERVICES
 # now-rotated redis and break the realtime backplane. So when the conf changed (step 3b), force-recreate the
 # api too — symmetric with the redis recreate in step 4. A normal new-image deploy already recreates it (and
 # REDIS_CONF_CHANGED is 0 when the password didn't change), so this only fires on an actual rotation.
-if [ "${REDIS_CONF_CHANGED:-1}" = 1 ]; then
-  log "redis conf is new/changed — force-recreating api so it reconnects with the current password"
+# Same for the VAPID private key (step 2): loadVapidConfig() reads the mounted file once at startup, so arming/
+# rotating the key must force-recreate the api or push stays disabled until an unrelated change. VAPID_KEY_CHANGED
+# is 0 on a routine unchanged deploy, so this only fires on a first deploy or an actual arm/rotation.
+if [ "${REDIS_CONF_CHANGED:-1}" = 1 ] || [ "${VAPID_KEY_CHANGED:-1}" = 1 ]; then
+  log "redis conf or VAPID key is new/changed — force-recreating api to load the current secrets"
   docker compose -f "$COMPOSE" up -d --force-recreate --no-deps api
 fi
 # cloudflared reads TUNNEL_TOKEN_FILE ONCE at startup. On a token ROTATION the file content changed but the

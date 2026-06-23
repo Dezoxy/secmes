@@ -27,6 +27,8 @@ RUN pnpm install --frozen-lockfile
 # this build; the committed copy is the fallback) — the build only consumes it. Unset → falls back to 0.0.0.
 ARG VITE_APP_VERSION=
 ENV VITE_APP_VERSION=$VITE_APP_VERSION
+ARG VITE_VAPID_PUBLIC_KEY=
+ENV VITE_VAPID_PUBLIC_KEY=$VITE_VAPID_PUBLIC_KEY
 RUN pnpm --filter @argus/web build
 
 # ---- runtime: Caddy serving the built PWA + proxying the API ----
