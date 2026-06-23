@@ -28,6 +28,7 @@ export function PwaUpdateProvider({ children }: PwaUpdateProviderProps) {
   const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
   const [newVersion, setNewVersion] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const newVersionFetched = useRef(false);
 
   const checkForWaitingUpdate = useCallback(async (options?: { silent?: boolean }) => {
@@ -150,6 +151,7 @@ export function PwaUpdateProvider({ children }: PwaUpdateProviderProps) {
       status,
       lastCheckedAt,
       newVersion,
+      dialogOpen,
       checkForUpdate: () => checkForWaitingUpdate(),
       applyUpdate: async () => {
         if (devUpdatePreview) {
@@ -163,8 +165,18 @@ export function PwaUpdateProvider({ children }: PwaUpdateProviderProps) {
         await updateServiceWorker.current(true);
       },
       dismissUpdate: () => setDismissed(true),
+      openUpdateDialog: () => setDialogOpen(true),
+      closeUpdateDialog: () => setDialogOpen(false),
     };
-  }, [checkForWaitingUpdate, devUpdatePreview, dismissed, lastCheckedAt, newVersion, status]);
+  }, [
+    checkForWaitingUpdate,
+    devUpdatePreview,
+    dialogOpen,
+    dismissed,
+    lastCheckedAt,
+    newVersion,
+    status,
+  ]);
 
   return <PwaUpdateContextProvider value={value}>{children}</PwaUpdateContextProvider>;
 }

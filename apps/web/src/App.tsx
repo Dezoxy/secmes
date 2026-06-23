@@ -244,18 +244,18 @@ function LandingRoute() {
 }
 
 function RouteUpdateAction() {
-  const { updateReady, applyUpdate, newVersion } = usePwaUpdate();
-  const [open, setOpen] = useState(false);
+  const { updateReady, applyUpdate, newVersion, dialogOpen, openUpdateDialog, closeUpdateDialog } =
+    usePwaUpdate();
   const [applying, setApplying] = useState(false);
 
   if (!updateReady) return null;
 
-  if (!open) {
+  if (!dialogOpen) {
     return (
       <div className="fixed bottom-4 right-4 z-50 sm:bottom-6 sm:right-6">
         <button
           type="button"
-          onClick={() => setOpen(true)}
+          onClick={openUpdateDialog}
           aria-label="Update Argus"
           className="inline-flex h-10 items-center gap-2 rounded-full border border-purple-400/40 bg-[#2b123d]/95 px-4 text-sm font-semibold text-white shadow-2xl shadow-black/35 backdrop-blur transition-all duration-200 hover:border-purple-300/70 hover:bg-[#37164f] active:scale-95"
         >
@@ -282,7 +282,7 @@ function RouteUpdateAction() {
           <span className="text-sm font-semibold text-white">Update available</span>
           <button
             type="button"
-            onClick={() => setOpen(false)}
+            onClick={closeUpdateDialog}
             aria-label="Close"
             className="rounded-md p-1 text-white/50 transition-colors hover:text-white"
           >

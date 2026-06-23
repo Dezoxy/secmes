@@ -65,7 +65,7 @@ export function AboutSettings() {
     updateReady,
     status: updateStatus,
     checkForUpdate,
-    applyUpdate,
+    openUpdateDialog,
   } = usePwaUpdate();
 
   useEffect(() => {
@@ -168,7 +168,7 @@ export function AboutSettings() {
             </span>
             <button
               type="button"
-              onClick={() => void (updateReady ? applyUpdate() : checkForUpdate())}
+              onClick={() => void (updateReady ? openUpdateDialog() : checkForUpdate())}
               disabled={!canCheckForUpdate || checkingForUpdate}
               className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 px-3 py-1.5 text-xs font-semibold text-white/65 transition-colors hover:border-purple-400/40 hover:text-white disabled:cursor-not-allowed disabled:text-white/25"
             >
