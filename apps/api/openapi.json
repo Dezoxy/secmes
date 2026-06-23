@@ -4926,7 +4926,7 @@
             }
           },
           "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
+            "description": "direct conversation requires an accepted friendship (DM only, defence-in-depth)",
             "content": {
               "application/json": {
                 "schema": {

@@ -319,6 +319,9 @@ export class MessagingController {
   @ApiConflictResponse({
     description: 'epoch slot already occupied by another member (409 — rebase and retry)',
   })
+  @ApiForbiddenResponse({
+    description: 'direct conversation requires an accepted friendship (DM only, defence-in-depth)',
+  })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async postCommit(
     @CurrentAuth() auth: VerifiedAuth,

@@ -91,6 +91,21 @@ describe('MessagingController delegation', () => {
     ).rejects.toThrow(ForbiddenException);
   });
 
+  it('postCommit propagates 403 from service when DM parties are not friends', async () => {
+    const { controller, messaging } = makeController();
+    messaging.postCommit.mockRejectedValueOnce(new ForbiddenException('friendship required'));
+    await expect(
+      controller.postCommit(auth, CONV, {
+        clientCommitId: 'cc1',
+        epoch: 1,
+        commit: 'b64==',
+        welcomes: [],
+        addedUserIds: [],
+        removedUserIds: [],
+      }),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
   it('postCommit relays the opaque commit body to the service untouched', async () => {
     const { controller, messaging } = makeController();
     const body = {
