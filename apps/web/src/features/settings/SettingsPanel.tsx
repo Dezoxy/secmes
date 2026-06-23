@@ -82,7 +82,7 @@ const baseSections: Array<{ id: SectionId; label: string; icon: LucideIcon }> = 
 
 const teamSection: { id: SectionId; label: string; icon: LucideIcon } = {
   id: 'team',
-  label: 'Team',
+  label: 'Members',
   icon: Users,
 };
 
