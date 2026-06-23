@@ -1,6 +1,6 @@
 # Idea F — Loki alerting rules for security events
 
-**Effort:** S  **Impact:** Medium  **Status:** [ ] Not implemented
+**Effort:** S  **Impact:** Medium  **Status:** [x] Implemented
 
 ---
 

@@ -364,6 +364,7 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+      - /tmp/loki-ruler # ruler working directory (read_only root FS requires tmpfs)
     security_opt:
       - no-new-privileges:true
     cap_drop:
