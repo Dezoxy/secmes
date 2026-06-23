@@ -96,6 +96,7 @@ jobs:
           # The PWA About version follows the release tag (IMAGE_TAG = github.ref_name); the api image ignores it.
           build-args: |
             VITE_APP_VERSION=${{ env.IMAGE_TAG }}
+            VITE_VAPID_PUBLIC_KEY=${{ vars.VITE_VAPID_PUBLIC_KEY }}
           cache-from: type=registry,ref=${{ env.CACHE }}
           cache-to: type=registry,ref=${{ env.CACHE }},mode=max
 
