@@ -10,8 +10,3 @@ storage:
   filesystem:
     dir: /var/pyroscope
 
-compactor:
-  block_retention: 72h # profiles are more ephemeral than logs
-
-usage_report:
-  reporting_enabled: false
