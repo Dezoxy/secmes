@@ -243,12 +243,10 @@ body {
 
 #root {
   height: 100dvh;
-  overflow: hidden;
 }
 
 body {
   margin: 0;
-  overflow: hidden;
   overscroll-behavior: none;
   font-family:
     system-ui,
