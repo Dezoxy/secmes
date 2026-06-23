@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 
 import { schema, type Tx } from '../db/index.js';
@@ -52,4 +52,27 @@ export async function requireMembership(
     )
     .limit(1);
   if (!member) throw new NotFoundException('conversation not found');
+}
+
+/**
+ * Throw 403 unless `userA` and `userB` have an accepted friendship row. Looks up the canonical pair
+ * (lower-cased, sorted) so the direction of the arguments doesn't matter. Must run inside a
+ * `withTenant` transaction so the RLS tenant context is already set on the connection.
+ */
+export async function requireFriendship(tx: Tx, userA: string, userB: string): Promise<void> {
+  const a = userA.toLowerCase();
+  const b = userB.toLowerCase();
+  const [low, high] = a < b ? [a, b] : [b, a];
+  const [row] = await tx
+    .select({ id: schema.friendships.id })
+    .from(schema.friendships)
+    .where(
+      and(
+        eq(schema.friendships.userLowId, low),
+        eq(schema.friendships.userHighId, high),
+        eq(schema.friendships.status, 'accepted'),
+      ),
+    )
+    .limit(1);
+  if (!row) throw new ForbiddenException('friendship required');
 }

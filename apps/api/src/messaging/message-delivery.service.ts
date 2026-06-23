@@ -1,9 +1,9 @@
 import { ConflictException } from '@nestjs/common';
-import { and, asc, eq, gt, inArray, max, min, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, max, min, ne, sql } from 'drizzle-orm';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
-import { requireMembership, requireUser } from './membership.js';
+import { requireFriendship, requireMembership, requireUser } from './membership.js';
 import type { PushService } from '../push/push.service.js';
 import type {
   CommitCreatedEvent,
@@ -40,6 +40,30 @@ export class MessageDeliveryService {
     const { result, event } = await withTenant(auth.tenantId, async (tx) => {
       const sender = await requireUser(tx, auth);
       await requireMembership(tx, conversationId, sender);
+
+      // Friendship gate for direct (1:1) conversations: if the conversation is a DM, the sender
+      // must still be an accepted friend of the peer. Groups are ungated — friendship is a 1:1
+      // social-graph concept. Legacy rows where isDirect IS NULL are treated as non-DM (no gate).
+      const [convRow] = await tx
+        .select({ isDirect: schema.conversations.isDirect })
+        .from(schema.conversations)
+        .where(eq(schema.conversations.id, conversationId))
+        .limit(1);
+      if (convRow?.isDirect) {
+        const [peerRow] = await tx
+          .select({ userId: schema.conversationMembers.userId })
+          .from(schema.conversationMembers)
+          .where(
+            and(
+              eq(schema.conversationMembers.conversationId, conversationId),
+              ne(schema.conversationMembers.userId, sender),
+            ),
+          )
+          .limit(1);
+        if (peerRow) {
+          await requireFriendship(tx, sender, peerRow.userId);
+        }
+      }
 
       // Idempotent-retry fast path: if this (conversation, sender, clientMessageId) was already
       // stored, return it immediately BEFORE the stale-epoch check. This prevents a retry from

@@ -3,7 +3,7 @@ import { and, eq } from 'drizzle-orm';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
-import { requireMembership, requireUser } from './membership.js';
+import { requireFriendship, requireMembership, requireUser } from './membership.js';
 import type { CreatedConversation } from './messaging.types.js';
 
 // Conversation lifecycle + membership reads. One of four internal collaborators the MessagingService
@@ -42,6 +42,10 @@ export class ConversationService {
     }
     return withTenant(auth.tenantId, async (tx) => {
       const creator = await requireUser(tx, auth);
+
+      if (isDirect) {
+        await requireFriendship(tx, creator, memberUserIds[0]!);
+      }
 
       const [conv] = await tx
         .insert(schema.conversations)
