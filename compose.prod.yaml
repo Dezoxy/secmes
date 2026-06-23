@@ -160,6 +160,13 @@ services:
       # + docs/architecture/deploy.md + docs/threat-models/admin-access-gating.md.
       CF_ACCESS_TEAM_DOMAIN: ${CF_ACCESS_TEAM_DOMAIN:-}
       CF_ACCESS_AUD: ${CF_ACCESS_AUD:-}
+      # Distributed tracing (Track 2) — non-secret internal addresses, safe in env (invariant #5).
+      # Tempo receives OTLP over HTTP (port 4318) from the api; gRPC is also available on 4317.
+      # 10 % head-based sampling keeps trace volume low on a single VM (parentbased = respect upstream decision).
+      OTEL_EXPORTER_OTLP_ENDPOINT: 'http://tempo:4318'
+      OTEL_TRACES_SAMPLER: 'parentbased_traceidratio'
+      OTEL_TRACES_SAMPLER_ARG: '0.1'
+      IMAGE_TAG: ${IMAGE_TAG:-}
     secrets:
       - database_url
       - s3_secret_access_key
@@ -396,6 +403,84 @@ services:
           memory: 256m
           cpus: '0.5'
 
+  # Grafana Tempo — distributed trace backend (Track 2). OTLP receivers on :4317 (gRPC) and :4318 (HTTP),
+  # internal-only (no published ports). Grafana queries http://tempo:3200; the api sends spans to
+  # http://tempo:4318 (OTEL_EXPORTER_OTLP_ENDPOINT above). 72-h block retention — traces are more
+  # ephemeral than logs. Threat model: docs/threat-models/structured-logging-and-tracing.md.
+  tempo:
+    image: grafana/tempo:2.8.0
+    restart: unless-stopped
+    command: ['-config.file=/etc/tempo/tempo-config.yml']
+    volumes:
+      - ./infra/stack/observability/tempo:/etc/tempo:ro
+      - tempo-data:/var/tempo
+    depends_on:
+      grafana:
+        condition: service_started
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
+
+  # Infrastructure metrics exporters (Track 3). No published ports — Prometheus scrapes them over the
+  # internal Docker network. PG_EXPORTER_DISABLE_SETTINGS_METRICS prevents leaking GUC values as
+  # metric labels (invariant #6). redis-exporter reads auth from a file (invariant #5).
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.17.0
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME_FILE: /run/secrets/database_url
+      PG_EXPORTER_DISABLE_SETTINGS_METRICS: 'true'
+    secrets:
+      - database_url
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: '0.25'
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.74.0
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: 'redis://redis:6379'
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+    secrets:
+      - redis_password
+    depends_on:
+      redis:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 64m
+          cpus: '0.1'
+
   # ─── GlitchTip — self-hosted error tracking (#48 Slice B) ────────────────────────────────────────────────
   # Sentry-API-compatible, EU data residency, no new sub-processor. Three components:
   #   glitchtip-db   — dedicated Postgres (same isolation pattern as the app postgres: own cluster + volume)
@@ -609,5 +694,7 @@ volumes:
   # Centralized logs (roadmap #47b): Loki chunks/index, Alloy read offsets/WAL.
   loki-data:
   alloy-data:
+  # Distributed traces (Track 2): Tempo WAL and blocks (72-h retention).
+  tempo-data:
   # GlitchTip dedicated Postgres data (roadmap #48 Slice B) — separate cluster from the app DB.
   glitchtip-db-data:

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { argon2idAsync } from '@noble/hashes/argon2.js';
 import { generateKeyPair } from 'jose';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { AuditService } from '../audit/audit.service.js';
 import { getDb } from '../db/index.js';
@@ -48,8 +48,17 @@ async function makeHashFile(password: string): Promise<void> {
 
 async function makeService(): Promise<BreakglassService> {
   const kp = await generateKeyPair('EdDSA', { extractable: true });
+  const pinoMock = {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    trace: vi.fn(),
+    fatal: vi.fn(),
+  } as never;
   return new BreakglassService(
-    new SessionTokenService(kp.privateKey as CryptoKey),
+    pinoMock,
+    new SessionTokenService(pinoMock, kp.privateKey as CryptoKey),
     new AuditService(),
   );
 }

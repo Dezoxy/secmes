@@ -30,6 +30,15 @@ function setEnv(team: string | undefined, aud: string | undefined): void {
   else process.env[AUD_KEY] = aud;
 }
 
+const pinoMock = {
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+  trace: vi.fn(),
+  fatal: vi.fn(),
+} as never;
+
 describe('CfAccessGuard', () => {
   afterEach(() => {
     setEnv(savedTeam, savedAud);
@@ -39,14 +48,14 @@ describe('CfAccessGuard', () => {
 
   it('passes through when CF_ACCESS_* is unset (dev / un-armed deploy) — even with no header', async () => {
     setEnv(undefined, undefined);
-    const guard = new CfAccessGuard();
+    const guard = new CfAccessGuard(pinoMock);
     expect(await guard.canActivate(ctxWith({}))).toBe(true);
     expect(jwtVerifyMock).not.toHaveBeenCalled();
   });
 
   it('rejects when enabled and the Access header is absent (before any JWKS fetch)', async () => {
     setEnv('acme', 'aud-tag');
-    const guard = new CfAccessGuard();
+    const guard = new CfAccessGuard(pinoMock);
     await expect(guard.canActivate(ctxWith({}))).rejects.toBeInstanceOf(UnauthorizedException);
     expect(jwtVerifyMock).not.toHaveBeenCalled();
   });
@@ -54,7 +63,7 @@ describe('CfAccessGuard', () => {
   it('rejects when enabled and the Access JWT fails verification (forged / expired)', async () => {
     setEnv('acme', 'aud-tag');
     jwtVerifyMock.mockRejectedValueOnce(new Error('signature verification failed'));
-    const guard = new CfAccessGuard();
+    const guard = new CfAccessGuard(pinoMock);
     await expect(
       guard.canActivate(ctxWith({ 'cf-access-jwt-assertion': 'forged.jwt.token' })),
     ).rejects.toBeInstanceOf(UnauthorizedException);
@@ -64,7 +73,7 @@ describe('CfAccessGuard', () => {
   it('allows when enabled and the Access JWT verifies, pinning iss/aud/RS256', async () => {
     setEnv('acme', 'aud-tag');
     jwtVerifyMock.mockResolvedValueOnce({ payload: { sub: 'operator@example.com' } });
-    const guard = new CfAccessGuard();
+    const guard = new CfAccessGuard(pinoMock);
     expect(await guard.canActivate(ctxWith({ 'cf-access-jwt-assertion': 'valid.jwt.token' }))).toBe(
       true,
     );
@@ -83,7 +92,7 @@ describe('CfAccessGuard', () => {
   it('handles an array-valued Cf-Access-Jwt-Assertion header (takes the first)', async () => {
     setEnv('acme', 'aud-tag');
     jwtVerifyMock.mockResolvedValueOnce({ payload: {} });
-    const guard = new CfAccessGuard();
+    const guard = new CfAccessGuard(pinoMock);
     expect(
       await guard.canActivate(ctxWith({ 'cf-access-jwt-assertion': ['first.jwt', 'second.jwt'] })),
     ).toBe(true);
@@ -93,7 +102,7 @@ describe('CfAccessGuard', () => {
   it('normalizes a full-host team domain to the https issuer', async () => {
     setEnv('acme.cloudflareaccess.com', 'aud-tag');
     jwtVerifyMock.mockResolvedValueOnce({ payload: {} });
-    const guard = new CfAccessGuard();
+    const guard = new CfAccessGuard(pinoMock);
     await guard.canActivate(ctxWith({ 'cf-access-jwt-assertion': 't' }));
     expect(jwtVerifyMock).toHaveBeenCalledWith(
       't',

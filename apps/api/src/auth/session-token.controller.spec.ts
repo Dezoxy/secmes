@@ -28,7 +28,16 @@ function makeController() {
     revokeSession: vi.fn().mockResolvedValue(undefined),
   };
   const audit = { record: vi.fn().mockResolvedValue(undefined) };
+  const pinoMock = {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    trace: vi.fn(),
+    fatal: vi.fn(),
+  } as never;
   const controller = new SessionTokenController(
+    pinoMock,
     sessions as unknown as SessionTokenService,
     audit as unknown as AuditService,
   );

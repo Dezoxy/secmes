@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
-import { Logger } from '@nestjs/common';
+import pino from 'pino';
+import { pinoConfig } from '../observability/logger.js';
 
-const logger = new Logger('PushConfig');
+const logger = pino({ ...pinoConfig, name: 'PushConfig' });
 
 export interface VapidConfig {
   publicKey: string;

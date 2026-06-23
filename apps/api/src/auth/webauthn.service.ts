@@ -6,10 +6,10 @@ import {
   ConflictException,
   HttpException,
   Injectable,
-  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { InjectPinoLogger, PinoLogger } from 'nestjs-pino';
 import {
   generateAuthenticationOptions,
   generateRegistrationOptions,
@@ -64,12 +64,12 @@ function stripPrfOutput(response: { clientExtensionResults?: unknown }): void {
 
 @Injectable()
 export class WebAuthnService {
-  private readonly logger = new Logger(WebAuthnService.name);
   private readonly rpName: string;
   private readonly rpID: string;
   private readonly expectedOrigin: string;
 
   constructor(
+    @InjectPinoLogger(WebAuthnService.name) private readonly logger: PinoLogger,
     private readonly sessions: SessionTokenService,
     private readonly audit: AuditService,
   ) {
@@ -292,7 +292,7 @@ export class WebAuthnService {
               transports: credential.transports ?? null,
             });
 
-            this.logger.log(`passkey registered: argusId=${challenge.argusId}`);
+            this.logger.info({ argusId: challenge.argusId }, 'passkey registered');
             return { tenantId: DEFAULT_TENANT_ID, userId: user.id, sub };
           },
         );
@@ -473,7 +473,7 @@ export class WebAuthnService {
           );
         }
 
-        this.logger.log(`passkey authenticated: argusId=${cred.argusId}`);
+        this.logger.info({ argusId: cred.argusId }, 'passkey authenticated');
         return {
           tenantId: DEFAULT_TENANT_ID,
           userId: cred.userId,
@@ -484,7 +484,7 @@ export class WebAuthnService {
       return this.sessions.mintSession(result);
     } catch (err) {
       if (regressionArgusId !== null) {
-        this.logger.warn(`passkey.counter_regression: argusId=${regressionArgusId}`);
+        this.logger.warn({ argusId: regressionArgusId }, 'passkey.counter_regression');
         await this.audit
           .record(DEFAULT_TENANT_ID, {
             eventType: 'passkey.counter_regression',
@@ -493,7 +493,7 @@ export class WebAuthnService {
             userAgent: requestContext.userAgent || null,
           })
           .catch((auditErr: unknown) =>
-            this.logger.error('failed to write counter_regression audit event', auditErr),
+            this.logger.error({ err: auditErr }, 'failed to write counter_regression audit event'),
           );
       }
       // Remap non-HTTP library errors (e.g. WebAuthnError from verifyAuthenticationResponse)

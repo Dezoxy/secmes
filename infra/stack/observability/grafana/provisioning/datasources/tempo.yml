@@ -1,0 +1,24 @@
+# Grafana Tempo datasource provisioning. Internal-only (no auth — same posture as Loki and Prometheus).
+# tracesToLogsV2 links a Tempo trace view → Loki log search by trace_id.
+# lokiSearch enables searching Loki from the Tempo explorer.
+# Threat model: docs/threat-models/structured-logging-and-tracing.md.
+apiVersion: 1
+datasources:
+  - name: Tempo
+    uid: argus-tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: false
+    jsonData:
+      tracesToLogsV2:
+        datasourceUid: argus-loki
+        spanStartTimeShift: '-1m'
+        spanEndTimeShift: '1m'
+        filterByTraceID: true
+        filterBySpanID: false
+        customQuery: false
+      nodeGraph:
+        enabled: true
+      lokiSearch:
+        datasourceUid: argus-loki

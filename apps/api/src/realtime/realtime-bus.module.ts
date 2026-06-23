@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
+import pino from 'pino';
 
-import { Logger, Module } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 
+import { pinoConfig } from '../observability/logger.js';
 import { InProcessRealtimeBus } from './in-process-realtime-bus.js';
 import { RealtimeBus } from './realtime-bus.js';
 import { RedisRealtimeBus } from './redis-realtime-bus.js';
@@ -34,7 +36,9 @@ export function resolveRedisUrl(): string | undefined {
       useFactory: (): RealtimeBus => {
         const url = resolveRedisUrl();
         if (url) {
-          new Logger('RealtimeBus').log('using Redis backplane for cross-pod delivery');
+          pino({ ...pinoConfig, name: 'RealtimeBus' }).info(
+            'using Redis backplane for cross-pod delivery',
+          );
           return new RedisRealtimeBus(url);
         }
         return new InProcessRealtimeBus();

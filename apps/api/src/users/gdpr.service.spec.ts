@@ -34,7 +34,15 @@ describe.skipIf(!DB_URL)('GdprService', () => {
   let bobLookupAuditId: string; // ER-1: a row where alice is the lookup TARGET, bob the actor
 
   const blob = new FakeBlobStore();
-  const svc = new GdprService(blob);
+  const pinoMock = {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    trace: vi.fn(),
+    fatal: vi.fn(),
+  } as never;
+  const svc = new GdprService(pinoMock, blob);
 
   let aliceAuth: VerifiedAuth;
   let bobAuth: VerifiedAuth; // same tenant, different user
