@@ -619,20 +619,25 @@ wait_running grafana
 # on running + not-crash-looping (catches a bad config mount / missing log dir / image pull).
 wait_running loki
 # Alloy WAL-lock recovery: a stale WAL lock in the alloy-data volume causes alloy to crash-loop on
-# startup. Only wipe the volume when the crash loop is actually detected — alloy uses tail_from_end=false
-# (config.alloy), so an unconditional wipe would re-scan every Docker json log from byte 0 on each deploy,
-# replaying retained log lines into Loki. Safe to wipe on crash-loop: the volume holds only tail-position
-# offsets + WAL staging buffers; actual log content lives in Docker's json-file driver.
-_alloy_cid=$(docker compose -f "$COMPOSE" ps -q alloy)
-if [ -n "$_alloy_cid" ] && \
-   [ "$(docker inspect -f '{{.State.Restarting}}' "$_alloy_cid" 2>/dev/null)" = "true" ]; then
-  log "alloy crash-loop detected — clearing WAL volume for recovery"
-  docker compose -f "$COMPOSE" stop alloy 2>/dev/null || true
-  docker compose -f "$COMPOSE" rm -f alloy 2>/dev/null || true
-  docker volume rm "argus-prod_alloy-data" 2>/dev/null || true
-  docker compose -f "$COMPOSE" up -d --no-deps alloy
+# startup. Detect via wait_running's own restart-count failure path (the authoritative signal), so
+# a pre-flight State.Restarting sample can't race the brief window between restarts. If wait_running
+# confirms a crash loop (non-zero RestartCount after the health-check window), wipe the volume and
+# retry. alloy uses tail_from_end=false (config.alloy), so an unconditional wipe would re-scan all
+# Docker json logs from byte 0 and replay retained entries into Loki on every deploy — hence the guard.
+if ! wait_running alloy; then
+  _alloy_cid=$(docker compose -f "$COMPOSE" ps -q alloy 2>/dev/null || true)
+  if [ -n "$_alloy_cid" ] && \
+     [ "$(docker inspect -f '{{.RestartCount}}' "$_alloy_cid" 2>/dev/null || echo 0)" -gt 0 ]; then
+    log "alloy crash-loop confirmed — clearing WAL volume for recovery"
+    docker compose -f "$COMPOSE" stop alloy 2>/dev/null || true
+    docker compose -f "$COMPOSE" rm -f alloy 2>/dev/null || true
+    docker volume rm "argus-prod_alloy-data" 2>/dev/null || true
+    docker compose -f "$COMPOSE" up -d --no-deps alloy
+    wait_running alloy
+  else
+    exit 1
+  fi
 fi
-wait_running alloy
 # Error tracking (checkpoint 48): glitchtip has a healthcheck (wget /api/0/version/) that
 # only passes after migrations complete + gunicorn is serving — gate on HEALTHY to catch a
 # bad SECRET_KEY, migration failure, or DB connection error at deploy time.
