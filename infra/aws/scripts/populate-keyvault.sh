@@ -197,7 +197,13 @@ put_external() { # $1 = kv name ; $2 = env var name ; $3 = human prompt
   set_secret "$1" "$val"
   val=""
 }
-put_external argus-vapid-private-key ARGUS_VAPID_PRIVATE_KEY "VAPID private key (web push server identity)"
+# OPTIONAL: skip silently when neither the env var nor an existing KV secret is present — VAPID is not
+# required for boot. Provision later with `ARGUS_VAPID_PRIVATE_KEY=... ./populate-keyvault.sh --rotate`.
+if [ -n "${ARGUS_VAPID_PRIVATE_KEY:-}" ] || secret_exists argus-vapid-private-key; then
+  put_external argus-vapid-private-key ARGUS_VAPID_PRIVATE_KEY "VAPID private key (web push server identity)"
+else
+  log "optional: argus-vapid-private-key not set — skipping (arm later with ARGUS_VAPID_PRIVATE_KEY=... --rotate)"
+fi
 put_external argus-s3-secret-access-key ARGUS_S3_SECRET_ACCESS_KEY "B2 attachments-bucket secret access key"
 put_external argus-b2-app-key ARGUS_B2_APP_KEY "B2 db-backups app key"
 put_external argus-b2-cors-app-key ARGUS_B2_CORS_APP_KEY "B2 attachment-bucket CORS app key (listBuckets,writeBuckets, bucket-restricted)"
