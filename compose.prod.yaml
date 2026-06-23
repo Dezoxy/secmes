@@ -455,7 +455,11 @@ services:
   pyroscope:
     image: grafana/pyroscope:1.13.0
     restart: unless-stopped
-    command: ['-config.file=/etc/pyroscope/pyroscope-config.yml']
+    # -compactor.blocks-retention-period: the YAML equivalent field does not exist in
+    # compactor.Config in Pyroscope 1.13.0 (the struct was refactored); pass it as a CLI flag.
+    command:
+      - '-config.file=/etc/pyroscope/pyroscope-config.yml'
+      - '-compactor.blocks-retention-period=72h'
     volumes:
       - ./infra/stack/observability/pyroscope:/etc/pyroscope:ro
       - pyroscope-data:/var/pyroscope

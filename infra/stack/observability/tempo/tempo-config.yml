@@ -1,6 +1,5 @@
 # Grafana Tempo — distributed trace backend (monolithic mode, filesystem storage).
 # Internal-only: no published host port; Grafana queries port 3200, the API sends OTLP to port 4318.
-# usage_report disabled (same privacy posture as Loki and Prometheus).
 # Threat model: docs/threat-models/structured-logging-and-tracing.md.
 
 server:
