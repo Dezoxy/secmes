@@ -68,15 +68,15 @@ function LandingRoute() {
   return (
     <main
       aria-label="Argus sign-in"
-      className="flex min-h-screen items-center justify-center bg-[#1a1a24] p-4"
+      className="flex h-[100dvh] items-center justify-center bg-[#1a1a24] sm:p-4"
     >
       <section
         aria-label="Passkey sign-in"
-        className={`flex h-[90vh] max-h-[900px] w-full max-w-[430px] flex-col overflow-hidden rounded-3xl bg-[#12121a] shadow-2xl shadow-black/50 transition-all duration-700 ease-out ${
+        className={`flex h-full w-full flex-col overflow-hidden bg-[#12121a] shadow-2xl shadow-black/50 transition-all duration-700 ease-out sm:h-[90dvh] sm:max-h-[900px] sm:max-w-[430px] sm:rounded-3xl ${
           mounted ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
         }`}
       >
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-[#0f0f16] p-5 sm:p-6">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto bg-[#0f0f16] p-5 pt-[calc(env(safe-area-inset-top)_+_1.25rem)] pb-[calc(env(safe-area-inset-bottom)_+_1.25rem)] sm:p-6">
           {panel === 'register' ? (
             <div
               key="register"
@@ -265,7 +265,7 @@ function RouteUpdateAction() {
 
 function RouteLoadingFallback() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#1a1a24] p-4 text-sm text-white/50">
+    <div className="flex h-[100dvh] items-center justify-center bg-[#1a1a24] p-4 text-sm text-white/50">
       Loading...
     </div>
   );

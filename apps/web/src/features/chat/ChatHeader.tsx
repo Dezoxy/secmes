@@ -195,7 +195,7 @@ export function ChatHeader({
               : 'Security details';
 
   return (
-    <div className="flex items-center justify-between border-b border-white/5 bg-[#0f0f16] px-4 py-3">
+    <div className="flex items-center justify-between border-b border-white/5 bg-[#0f0f16] px-4 py-3 pt-[calc(env(safe-area-inset-top)_+_0.75rem)]">
       <div className="flex items-center gap-3">
         {onBack && (
           <IconButton
