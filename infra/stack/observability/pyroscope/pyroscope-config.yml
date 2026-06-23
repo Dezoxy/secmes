@@ -1,0 +1,17 @@
+# Grafana Pyroscope — continuous profiling backend (observability Track D).
+# Monolithic mode, filesystem storage on a named volume. INTERNAL ONLY — no published port.
+# Grafana queries http://pyroscope:4040; the API SDK pushes profiles via PYROSCOPE_SERVER_ADDRESS.
+# Profiles contain function names and call stacks only — no variable values or user data.
+server:
+  http_listen_port: 4040
+
+storage:
+  backend: filesystem
+  filesystem:
+    dir: /var/pyroscope
+
+compactor:
+  block_retention: 72h # profiles are more ephemeral than logs
+
+usage_report:
+  reporting_enabled: false

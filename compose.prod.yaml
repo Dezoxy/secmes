@@ -167,6 +167,10 @@ services:
       OTEL_TRACES_SAMPLER: 'parentbased_traceidratio'
       OTEL_TRACES_SAMPLER_ARG: '0.1'
       IMAGE_TAG: ${IMAGE_TAG:-}
+      # Continuous profiling (Track D) — non-secret internal address; safe in env (invariant #5).
+      # Zero-cost no-op if unset (profiling.ts gates on this var). Set here so Pyroscope scrapes
+      # from first boot; remove to disable profiling without a rebuild.
+      PYROSCOPE_SERVER_ADDRESS: 'http://pyroscope:4040'
     secrets:
       - database_url
       - s3_secret_access_key
@@ -431,6 +435,31 @@ services:
         limits:
           memory: 512m
           cpus: '0.5'
+
+  # Continuous profiling (observability Track D). INTERNAL ONLY — no published ports. Grafana queries
+  # http://pyroscope:4040; the API SDK pushes profiles. Profiles contain stack frames only (no data values).
+  pyroscope:
+    image: grafana/pyroscope:1.13.0
+    restart: unless-stopped
+    command: ['-config.file=/etc/pyroscope/pyroscope-config.yml']
+    volumes:
+      - ./infra/stack/observability/pyroscope:/etc/pyroscope:ro
+      - pyroscope-data:/var/pyroscope
+    depends_on:
+      grafana:
+        condition: service_started
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: '0.25'
 
   # Infrastructure metrics exporters (Track 3). No published ports — Prometheus scrapes them over the
   # internal Docker network. PG_EXPORTER_DISABLE_SETTINGS_METRICS prevents leaking GUC values as
@@ -713,5 +742,7 @@ volumes:
   alloy-data:
   # Distributed traces (Track 2): Tempo WAL and blocks (72-h retention).
   tempo-data:
+  # Continuous profiling (Track D): Pyroscope profile blocks (72-h retention).
+  pyroscope-data:
   # GlitchTip dedicated Postgres data (roadmap #48 Slice B) — separate cluster from the app DB.
   glitchtip-db-data:

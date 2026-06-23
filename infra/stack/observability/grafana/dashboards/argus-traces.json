@@ -84,6 +84,22 @@
           "tableType": "traces"
         }
       ]
+    },
+    {
+      "id": 5,
+      "type": "flamegraph",
+      "title": "CPU flame graph (same time window)",
+      "description": "Pyroscope continuous CPU profile. Drag the time range to correlate with a latency spike visible in the panels above.",
+      "datasource": { "type": "grafana-pyroscope-datasource", "uid": "argus-pyroscope" },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 24 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "grafana-pyroscope-datasource", "uid": "argus-pyroscope" },
+          "profileTypeId": "process_cpu:cpu:nanoseconds:cpu:nanoseconds",
+          "labelSelector": "{service_name=\"argus.api\"}"
+        }
+      ]
     }
   ]
 }

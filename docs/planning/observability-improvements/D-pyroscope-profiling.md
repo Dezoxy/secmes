@@ -1,6 +1,6 @@
 # Idea D — Continuous profiling with Grafana Pyroscope
 
-**Effort:** M  **Impact:** Medium  **Status:** [ ] Not implemented
+**Effort:** M  **Impact:** Medium  **Status:** [x] Implemented
 
 ---
 
