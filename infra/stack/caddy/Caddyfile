@@ -43,7 +43,7 @@ http://glitchtip.4rgus.com:8080 {
 
 # --- App origin (PWA + /api + /ws) — catch-all :8080 for every other host (4rgus.com, health, direct IP) ---
 :8080 {
-	# Code-delivery hardening response headers (#43; the edge adds HSTS). Served HERE at the static origin so
+	# Code-delivery hardening response headers (#43; HSTS set below at the origin). Served HERE at the static origin so
 	# the CSP applies to every response and `frame-ancestors` works (a <meta> CSP ignores it). The directive set
 	# is derived from the PWA's resource graph — UPDATE it when the client adds an external origin; smoke-test
 	# against the live app at arming (CSP violations surface in the browser console). SRI (sha384 integrity on
@@ -73,6 +73,14 @@ http://glitchtip.4rgus.com:8080 {
 		Referrer-Policy no-referrer
 		X-Content-Type-Options nosniff
 		X-Frame-Options DENY
+		# HSTS: pin HTTPS for a year. Set at the ORIGIN, not relying on the Cloudflare edge — a live review
+		# (docs/reviews/07-live-domain-security-overview.md) found HSTS absent on the HTTPS response despite the
+		# old assumption that "the edge adds it". cloudflared forwards this header to the client over the public
+		# HTTPS connection, so an origin-set value is reliable and lives in-repo (CI-visible) instead of as
+		# undocumented dashboard state. No includeSubDomains/preload yet: grafana.4rgus.com / glitchtip.4rgus.com
+		# are separate Access-gated hosts served by their own Caddy site blocks (they do NOT inherit this header);
+		# widen the directive only after confirming every subdomain is HTTPS-only.
+		Strict-Transport-Security "max-age=31536000"
 		-Server
 	}
 
