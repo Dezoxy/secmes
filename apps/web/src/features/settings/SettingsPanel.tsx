@@ -314,10 +314,10 @@ export function SettingsPanel({
     <Modal
       ariaLabel="Settings"
       onClose={closeSettings}
-      className={`items-center justify-center bg-black/40 p-4 backdrop-blur-md ${
+      className={`items-center justify-center bg-black/40 backdrop-blur-md sm:p-4 ${
         closing ? modalBackdropExitMotion : modalBackdropEnterMotion
       }`}
-      contentClassName={`flex h-[90dvh] w-full max-w-6xl overflow-hidden rounded-3xl border border-white/5 bg-[#12121a] shadow-2xl shadow-black/50 ${
+      contentClassName={`flex h-full w-full max-w-6xl overflow-hidden border border-white/5 bg-[#12121a] shadow-2xl shadow-black/50 sm:h-[90dvh] sm:rounded-3xl ${
         closing ? modalPanelExitMotion : modalPanelEnterMotion
       }`}
       style={accentVariables}
@@ -325,7 +325,7 @@ export function SettingsPanel({
       <aside
         className={`${
           mobileSectionOpen || mobileBackAnimating ? 'hidden' : 'flex'
-        } w-full flex-col overflow-y-auto bg-[#0f0f16] p-3 sm:flex sm:w-80 sm:shrink-0 sm:border-r sm:border-white/5 sm:p-4 ${
+        } w-full flex-col overflow-y-auto bg-[#0f0f16] px-3 pt-[calc(env(safe-area-inset-top)_+_0.75rem)] pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)] sm:flex sm:w-80 sm:shrink-0 sm:border-r sm:border-white/5 sm:px-4 sm:pt-4 sm:pb-4 ${
           mobileMenuReturning ? paneBackEnterMotion : ''
         }`}
       >
@@ -387,7 +387,7 @@ export function SettingsPanel({
         tabIndex={-1}
         className={`${
           mobileSectionOpen || mobileBackAnimating ? 'block' : 'hidden'
-        } flex-1 p-3 focus:outline-none sm:block sm:p-6 ${
+        } flex-1 px-3 pt-[calc(env(safe-area-inset-top)_+_0.75rem)] pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)] focus:outline-none sm:block sm:px-6 sm:pt-6 sm:pb-6 ${
           active === 'about' ? 'overflow-hidden' : 'overflow-y-auto'
         } ${mobileBackAnimating ? paneBackExitMotion : ''}`}
       >

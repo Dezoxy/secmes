@@ -183,7 +183,7 @@ export function RequireAuth({ children }: { children: ReactNode }): ReactNode {
   const { ready, demoMode: demo, authenticated } = useAuth();
   if (!ready) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#1a1a24] text-white/50">
+      <div className="flex h-[100dvh] items-center justify-center overflow-y-auto bg-[#1a1a24] text-white/50">
         Restoring session…
       </div>
     );

@@ -11,7 +11,7 @@ import { useDevice } from './DeviceContext';
 // a fresh start (ask your admin for a new registration code). A SWITCH path handles a browser already holding
 // a different account's device (single slot, v1). The breakglass admin and demo mode short-circuit ('ready').
 
-const CARD = 'w-full max-w-sm rounded-3xl bg-[#12121a] p-8 shadow-2xl shadow-black/50';
+const CARD = 'm-auto w-full max-w-sm rounded-3xl bg-[#12121a] p-8 shadow-2xl shadow-black/50';
 const PRIMARY =
   'flex w-full items-center justify-center gap-2 rounded-xl bg-purple-500 py-3 text-sm font-medium text-white shadow-lg shadow-purple-500/25 transition-all hover:bg-purple-400 disabled:cursor-not-allowed disabled:opacity-40';
 
@@ -35,7 +35,7 @@ export function UnlockGate({ children }: { children: ReactNode }): ReactNode {
   if (status === 'ready') return <>{children}</>;
 
   const shell = (icon: ReactNode, title: string, subtitle: string, body: ReactNode): ReactNode => (
-    <div className="flex min-h-screen items-center justify-center bg-[#1a1a24] p-4">
+    <div className="flex h-[100dvh] flex-col overflow-y-auto bg-[#1a1a24] p-4">
       <div className={CARD}>
         <div className="mb-6 flex flex-col items-center text-center">
           <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-500/20">
