@@ -94,6 +94,9 @@ OPTIONAL_SECRETS=(
   # lines) in a follow-up. See docs/threat-models/db-backup.md §7.
   "argus-backup-db-password=backup-db-password"
   "argus-cleanup-db-password=cleanup-db-password"
+  # Web push: VAPID private key. OPTIONAL — seeded empty until the operator provisions it in Key Vault.
+  # Empty = PushService runs degraded (push disabled) until provisioned. No boot dependency.
+  "argus-vapid-private-key=vapid_private_key"
 )
 
 log() { printf 'argus-secrets: %s\n' "$*" >&2; } # names/status only — NEVER a secret value

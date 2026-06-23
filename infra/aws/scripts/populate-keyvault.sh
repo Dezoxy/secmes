@@ -197,6 +197,7 @@ put_external() { # $1 = kv name ; $2 = env var name ; $3 = human prompt
   set_secret "$1" "$val"
   val=""
 }
+put_external argus-vapid-private-key ARGUS_VAPID_PRIVATE_KEY "VAPID private key (web push server identity)"
 put_external argus-s3-secret-access-key ARGUS_S3_SECRET_ACCESS_KEY "B2 attachments-bucket secret access key"
 put_external argus-b2-app-key ARGUS_B2_APP_KEY "B2 db-backups app key"
 put_external argus-b2-cors-app-key ARGUS_B2_CORS_APP_KEY "B2 attachment-bucket CORS app key (listBuckets,writeBuckets, bucket-restricted)"
