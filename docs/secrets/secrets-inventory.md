@@ -159,16 +159,7 @@ file is seeded so the compose mount still resolves and the consumer runs **degra
 secret introduced. Stripe / operator-API integrations, if ever added, are app-level and
 **not** part of this deploy's Key Vault fetch set.)
 
-## 9. Zitadel (full-stack only — NOT on the lean experiment box)
-
-These appear in the broader stack secret model (`docs/architecture/deploy.md`,
-`infra/stack/secrets/`) but are **not** in the AWS experiment's `keyvault.tf` seed
-or `populate.sh`. Listed for completeness; provision by hand if the experiment
-ever runs Zitadel: `argus-zitadel-masterkey` (**set-once, data-loss if lost**),
-`argus-zitadel-db-password` (set-once), `argus-zitadel-admin-password`
-(first-init only), `argus-zitadel-login-pat` (rotatable).
-
-## 10. Operator reference
+## 9. Operator reference
 
 ### Mandatory to boot (the stack won't reach healthy without these)
 The boot fetch (`fetch-keyvault-secrets.sh`) reads its `SECRETS[]` set
@@ -190,7 +181,7 @@ deploy-transient `argus-migration-database-url` and `argus-ghcr-token` (fetched 
 it unconditionally and fails without it, even though its *runtime* use is gated on
 `B2_CORS_KEY_ID` (`deploy.sh` skips CORS convergence when that's unset). So supply it
 at the `populate` prompt regardless. `argus-backup-age-key` (restore only — never in
-the boot fetch — but catastrophic if lost); the arming set (§8) and Zitadel set (§9).
+the boot fetch — but catastrophic if lost); the arming set (§8).
 
 ### ⚠️ The set-once placeholder trap
 Set-once secrets are burned at a component's **first init** (or pinned out-of-band)

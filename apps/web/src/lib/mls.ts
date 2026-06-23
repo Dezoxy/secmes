@@ -2,7 +2,7 @@
 // This proves the encrypt → opaque-wire-bytes → decrypt path works in the browser — the de-risking that
 // gates a live client. For now BOTH devices live in this browser (you + a local peer): it is a genuine
 // MLS round-trip, not a fake. The LIVE multi-user flow swaps the local peer for a remote member joined
-// via the key directory + a server-delivered Welcome, and additionally needs auth (Zitadel) +
+// via the key directory + a server-delivered Welcome, and additionally needs auth (passkey session) +
 // out-of-band fingerprint verification (#20, MITM defense) — none of which exist yet.
 
 import { MlsEngine, safetyNumber, type Conversation } from '@argus/crypto';
