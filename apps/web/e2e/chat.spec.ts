@@ -27,6 +27,23 @@ test('mobile layout shows chat after selecting a conversation', async ({ page })
 
   await expect(page.getByRole('main', { name: 'Chat' })).toBeVisible();
   await expect(page.getByRole('complementary', { name: 'Conversations' })).toHaveCount(0);
+  await expect(page.getByRole('navigation', { name: 'Main navigation' })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Back to conversations' }).click();
+  await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
+});
+
+test('mobile layout hides nav when entering a group conversation', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/groups');
+
+  await page.getByRole('button', { name: 'Open conversation with' }).first().click();
+
+  await expect(page.getByRole('main', { name: 'Group chat' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Main navigation' })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Back to conversations' }).click();
+  await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
 });
 
 test('voice and video call buttons show coming soon toast', async ({ page }) => {
