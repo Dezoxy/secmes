@@ -24,17 +24,18 @@ export default function AppShell() {
     return () => mq.removeEventListener('change', update);
   }, []);
 
-  const onTabSwipeLeft = useCallback(() => {
-    const next = Math.min(currentIndex + 1, TAB_PATHS.length - 1);
-    if (next !== currentIndex) navigate(TAB_PATHS[next]!);
-  }, [currentIndex, navigate]);
-
-  const onTabSwipeRight = useCallback(() => {
+  // Swipe right (finger moves right) → previous tab; swipe left → next tab.
+  const onSwipePrev = useCallback(() => {
     const prev = Math.max(currentIndex - 1, 0);
     if (prev !== currentIndex) navigate(TAB_PATHS[prev]!);
   }, [currentIndex, navigate]);
 
-  useSwipeTabs(contentRef, onTabSwipeLeft, onTabSwipeRight, isMobile);
+  const onSwipeNext = useCallback(() => {
+    const next = Math.min(currentIndex + 1, TAB_PATHS.length - 1);
+    if (next !== currentIndex) navigate(TAB_PATHS[next]!);
+  }, [currentIndex, navigate]);
+
+  useSwipeTabs(contentRef, onSwipePrev, onSwipeNext, isMobile);
 
   // Compute direction synchronously during render, before updating the ref.
   let motionClass = '';

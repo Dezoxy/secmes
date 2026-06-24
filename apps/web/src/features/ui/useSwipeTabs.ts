@@ -5,8 +5,8 @@ const MIN_TRAVEL = 80;
 
 export function useSwipeTabs(
   ref: RefObject<HTMLElement | null>,
-  onSwipeLeft: () => void,
-  onSwipeRight: () => void,
+  onSwipePrev: () => void,
+  onSwipeNext: () => void,
   enabled: boolean,
 ): void {
   useEffect(() => {
@@ -48,8 +48,10 @@ export function useSwipeTabs(
       if (!t) return;
       const dx = t.clientX - startX;
       if (Math.abs(dx) < MIN_TRAVEL) return;
-      if (dx > 0) onSwipeLeft();
-      else onSwipeRight();
+      // Rightward drag (dx > 0) = swipe-right gesture → go to previous tab.
+      // Leftward drag (dx < 0) = swipe-left gesture → go to next tab.
+      if (dx > 0) onSwipePrev();
+      else onSwipeNext();
     };
 
     el.addEventListener('touchstart', onTouchStart, { passive: true });
@@ -61,5 +63,5 @@ export function useSwipeTabs(
       el.removeEventListener('touchmove', onTouchMove);
       el.removeEventListener('touchend', onTouchEnd);
     };
-  }, [ref, onSwipeLeft, onSwipeRight, enabled]);
+  }, [ref, onSwipePrev, onSwipeNext, enabled]);
 }
