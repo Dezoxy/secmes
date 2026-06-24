@@ -103,7 +103,7 @@ This is the single most important *user-facing* privacy control. It is a **per-u
 - Default **relay-only**: ICE offers **only relay candidates**; host/srflx are suppressed so neither peer nor passive observers near the peer learn the IP. This directly answers the documented WebRTC IP-leakage class ([arXiv 2510.16168](https://arxiv.org/abs/2510.16168); [WebRTC Leaks – Security.org](https://www.security.org/vpn/webrtc-leak/)).
 - **Conservative AND**: if *either* peer is relay-only, the call is relay-only. A power user opting into direct cannot downgrade a privacy-conscious peer.
 - **Honest UI copy** at opt-in: "Direct calls are faster but the other person will see your IP address (your approximate location)." No dark patterns.
-- The setting fits cleanly as a **`relay_only boolean not null default true` column on `users`** (grounding: no settings table exists; single scalar → column, not a new table), inheriting `users` RLS automatically. Default is **`true`** (relay-only).
+- The setting fits cleanly as a **`call_relay_only boolean not null default true` column on `users`** (grounding: no settings table exists; single scalar → column, not a new table), inheriting `users` RLS automatically. Default is **`true`** (relay-only). *(Canonical column name per [08 P0-SET](./08-roadmap-and-delivery-slices.md) and `docs/threat-models/voip-calling.md` §6: `call_relay_only`.)*
 
 ---
 
@@ -148,7 +148,7 @@ VoIP touches the platform's canonical privacy artifacts. These are **explicit Ph
 | Control | Mechanism | Tier |
 |---|---|---|
 | **Friendship gating** | A call may only be *placed* to an **accepted friend**. Today friendships do **not** gate conversation/messaging (grounding: no `friend` check in messaging) — so this is **new logic** for VoIP and gates calls even though chat stays open. Stops cold-calling strangers entirely. | **Must** |
-| **Per-socket call rate limit** | Extend the existing `allowSubscribe` per-socket throttle to `call_offer`/`call_ice` inbound frames (these bypass the HTTP throttler — grounding ws-gateway). Bounds ring-flood and ICE-flood. | **Must** |
+| **Per-socket call rate limit** | Extend the existing `allowSubscribe` per-socket throttle to the inbound `call.signal`/`call.release` frames (the canonical gateway frame names per [02 §1.3](./02-signaling-protocol-and-state-machine.md); these bypass the HTTP throttler — grounding ws-gateway). Bounds ring-flood and ICE-flood. | **Must** |
 | **Block** | A block hard-stops both calls and (eventually) messages from that user; enforced server-side before any signaling routes. Decline/cancel reuse the friendship hard-DELETE pattern. | **Must** |
 | **coturn quotas** | `--user-quota`, `--total-quota`, `--max-bps` cap relay abuse and bandwidth-exhaustion DoS. | **Should** |
 | **Uniform ring/timeout** | Fixed minimum "calling…" window so abusive callers can't use connect-speed as a presence/online probe (§4 online-presence oracle). | **Should** |
