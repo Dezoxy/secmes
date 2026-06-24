@@ -2,6 +2,7 @@ import { Body, Controller, Get, HttpCode, Put } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiConflictResponse,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
@@ -126,6 +127,7 @@ export class MeController {
   @ApiOperation({ summary: 'Update own display name / avatar seed', operationId: 'updateMe' })
   @ApiBody({ type: UpdateProfileBody })
   @ApiNoContentResponse({ description: 'profile updated' })
+  @ApiConflictResponse({ description: 'display name already taken' })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async updateMe(
     @CurrentAuth() auth: MaybeUnboundAuth,

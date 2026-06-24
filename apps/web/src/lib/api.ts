@@ -251,18 +251,25 @@ export async function getConversationMembers(
 
 // ── Profile editing (Phase 4 + 5) ────────────────────────────────────────────
 
+/** Thrown by `updateProfile` when the chosen display name is already taken by another user. */
+export class DisplayNameTakenError extends Error {
+  constructor() {
+    super('display name is already taken');
+  }
+}
+
 /** Update the caller's display name and/or avatar seed (PUT /me → 204). */
 export type UpdateProfileBody = ContractUpdateProfile;
 
 export async function updateProfile(body: UpdateProfileBody): Promise<void> {
-  unwrapApiResult(
-    await requestStatus({
-      path: '/me',
-      method: 'PUT',
-      body,
-      requestSchema: UpdateProfileSchema,
-    }),
-  );
+  const result = await requestStatus({
+    path: '/me',
+    method: 'PUT',
+    body,
+    requestSchema: UpdateProfileSchema,
+  });
+  if (!result.ok && result.error.status === 409) throw new DisplayNameTakenError();
+  unwrapApiResult(result);
 }
 
 /** Fetch the caller's server-side privacy settings (GET /me/settings/privacy). */
