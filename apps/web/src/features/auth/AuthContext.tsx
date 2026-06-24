@@ -130,7 +130,16 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
         setToken(token);
         const me = await fetchMe();
         setProfile(me.bound ? me : null);
-      }).catch(() => clearSession());
+      }).catch((err: unknown) => {
+        clearSession();
+        // Mirror the boot-failure 401 logic: clear mutes only when the session is
+        // definitively revoked (401), not on transient 5xx/network errors.
+        const is401 = err instanceof Error && /status 401/.test(err.message);
+        if (is401) {
+          unmuteAll();
+          void syncMuteStateToCache(new Set());
+        }
+      });
     }, REFRESH_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [authenticated, clearSession]);
