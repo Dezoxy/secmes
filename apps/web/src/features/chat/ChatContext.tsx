@@ -15,6 +15,7 @@ import type { AnonymousProfile } from '../settings/ProfileSettings';
 import {
   listFriends,
   listFriendRequests,
+  listMyConversationsWithMeta,
   sendFriendRequest,
   acceptFriendRequest,
   declineFriendRequest,
@@ -42,7 +43,8 @@ import {
 import { useLiveConversations } from './useLiveConversations';
 import { contactDisplayName } from './user-label';
 import { loadArgusProfile, saveArgusProfile } from '../settings/argus-profile';
-import { persistPeerMapping } from './peer-naming';
+import { loadPersistedPeerMapping, persistPeerMapping } from './peer-naming';
+import { useReceiptSending } from './useReceiptSending';
 import { dicebearAvatar, isCustomPhoto } from '../../lib/dicebear';
 import {
   initialConversationsForMode,
@@ -100,10 +102,15 @@ interface ChatContextValue {
   ) => Promise<{ nextEpoch: number | undefined }>;
   // Friends
   friends: Friend[];
+  friendsLoaded: boolean;
   incomingRequests: FriendRequest[];
   outgoingRequests: FriendRequest[];
   friendsError: boolean;
   refreshFriends: () => Promise<void>;
+  // Peer maps (DM dedup + friendship gate)
+  peerToConvId: Map<string, string>;
+  convToPeerId: Map<string, string>;
+  peerMapsLoaded: boolean;
   handleSendFriendRequest: (argusId: string) => Promise<void>;
   handleAcceptRequest: (requestId: string) => Promise<void>;
   handleDeclineRequest: (requestId: string) => Promise<void>;
@@ -154,10 +161,15 @@ export function ChatProvider({ children }: ChatProviderProps) {
   const [peerKeyChangedConvId, setPeerKeyChangedConvId] = useState<string | null>(null);
   const [pendingEnrollmentId, setPendingEnrollmentId] = useState<string | null>(null);
   const [friends, setFriends] = useState<Friend[]>([]);
+  const [friendsLoaded, setFriendsLoaded] = useState(false);
   const [incomingRequests, setIncomingRequests] = useState<FriendRequest[]>([]);
   const [outgoingRequests, setOutgoingRequests] = useState<FriendRequest[]>([]);
   const [friendsError, setFriendsError] = useState(false);
   const inFlightRequestIds = useRef(new Set<string>());
+  const [peerToConvId, setPeerToConvId] = useState<Map<string, string>>(new Map());
+  const [convToPeerId, setConvToPeerId] = useState<Map<string, string>>(new Map());
+  const [peerMapsLoaded, setPeerMapsLoaded] = useState(false);
+  const mappedDMConvsRef = useRef(new Set<string>());
 
   const { device, pool, deviceId, keystore, sessionKey } = useDevice();
   const { profile, subjectId } = useAuth();
@@ -226,6 +238,7 @@ export function ChatProvider({ children }: ChatProviderProps) {
         listFriendRequests('outgoing'),
       ]);
       setFriends(fl);
+      setFriendsLoaded(true);
       setIncomingRequests(inc);
       setOutgoingRequests(out);
       setFriendsError(false);
@@ -299,6 +312,71 @@ export function ChatProvider({ children }: ChatProviderProps) {
   useEffect(() => {
     if (manager) void refreshFriends();
   }, [refreshFriends, manager]);
+
+  // Build peer↔conversation maps from the server-side enriched conversation list. Used for:
+  // (a) dedup: hide stale DMs after peer reinstall, (b) friendship gate: resolve peer userId.
+  useEffect(() => {
+    if (!manager) return;
+    void listMyConversationsWithMeta()
+      .then((convs) => {
+        const p2c = new Map<string, string>();
+        const c2p = new Map<string, string>();
+        for (const c of convs) {
+          if (!c.isDirect || !c.peerUserId) continue;
+          const existing = p2c.get(c.peerUserId);
+          if (!existing) {
+            p2c.set(c.peerUserId, c.id);
+            c2p.set(c.id, c.peerUserId);
+          } else {
+            c2p.set(c.id, c.peerUserId);
+            const existingConv = convs.find((x) => x.id === existing);
+            if (existingConv && c.createdAt > existingConv.createdAt) {
+              p2c.set(c.peerUserId, c.id);
+            }
+          }
+        }
+        convs.forEach((c) => mappedDMConvsRef.current.add(c.id));
+        setPeerToConvId(p2c);
+        setConvToPeerId(c2p);
+        setPeerMapsLoaded(true);
+      })
+      .catch(() => {
+        setPeerMapsLoaded(true);
+      });
+  }, [manager]);
+
+  // Keep peer maps fresh for DMs that arrive via WebSocket after the startup snapshot.
+  useEffect(() => {
+    if (!peerMapsLoaded) return;
+    const newDMs = conversations.filter(
+      (c) => c.type === 'direct' && !mappedDMConvsRef.current.has(c.id),
+    );
+    if (newDMs.length === 0) return;
+    newDMs.forEach((c) => mappedDMConvsRef.current.add(c.id));
+    setConvToPeerId((prev) => {
+      const next = new Map(prev);
+      for (const c of newDMs) {
+        const peer =
+          loadPersistedPeerMapping(c.id) ??
+          c.participants.find((p) => p.id !== currentUserProfile.id)?.id;
+        if (peer && !next.has(c.id)) next.set(c.id, peer);
+      }
+      return next;
+    });
+    setPeerToConvId((prev) => {
+      const next = new Map(prev);
+      for (const c of newDMs) {
+        const peer =
+          loadPersistedPeerMapping(c.id) ??
+          c.participants.find((p) => p.id !== currentUserProfile.id)?.id;
+        if (peer) next.set(peer, c.id);
+      }
+      return next;
+    });
+  }, [conversations, peerMapsLoaded, currentUserProfile.id]);
+
+  // Delivered receipts for ALL conversations — runs regardless of which tab is active.
+  useReceiptSending({ conversations, liveIds, selectedId: null, selectedIsLive: false });
 
   useEffect(() => {
     if ('setAppBadge' in navigator) {
@@ -496,10 +574,14 @@ export function ChatProvider({ children }: ChatProviderProps) {
     mergeIncoming,
     backfillInto,
     friends,
+    friendsLoaded,
     incomingRequests,
     outgoingRequests,
     friendsError,
     refreshFriends,
+    peerToConvId,
+    convToPeerId,
+    peerMapsLoaded,
     handleSendFriendRequest,
     handleAcceptRequest,
     handleDeclineRequest,

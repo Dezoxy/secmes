@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MessageCircle, Unplug } from 'lucide-react';
 import { getMlsSession } from '../../lib/mls';
 import { prefersReducedMotion } from '../../lib/pref';
@@ -63,6 +63,11 @@ export default function ChatScreen() {
     updateReady,
     applyUpdate,
     persistStartedConversation,
+    friends,
+    friendsLoaded,
+    peerToConvId,
+    convToPeerId,
+    peerMapsLoaded,
   } = useChatContext();
 
   const [mounted, setMounted] = useState(false);
@@ -91,6 +96,44 @@ export default function ChatScreen() {
   const effectiveSelectedIsLive = demoMode ? !!selectedId : selectedIsLive;
   const selectedIsSyncLost = selectedConversation?.recovery === 'sync-lost';
 
+  // Resolve peer userId for the selected DM: prefer server-side map, then localStorage, then participants.
+  const selectedPeerUserId = useMemo(() => {
+    if (!selectedId || !isDirect) return null;
+    return (
+      convToPeerId.get(selectedId) ??
+      loadPersistedPeerMapping(selectedId) ??
+      selectedConversation?.participants.find((p) => p.id !== profile?.userId)?.id ??
+      null
+    );
+  }, [selectedId, isDirect, convToPeerId, selectedConversation, profile?.userId]);
+
+  // Block the DM composer when the peer is no longer an accepted friend. Guard on friendsLoaded
+  // to avoid false-blocking before the first fetch, and on UUID_RE to skip synthetic placeholder IDs.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const peerIsFriend =
+    !isDirect ||
+    !selectedPeerUserId ||
+    !friendsLoaded ||
+    !UUID_RE.test(selectedPeerUserId) ||
+    friends.some((f) => f.userId === selectedPeerUserId);
+
+  // Sidebar dedup: hide stale duplicate DMs after peer reinstall.
+  const localConvIds = useMemo(() => new Set(conversations.map((c) => c.id)), [conversations]);
+  const dedupedConversations = useMemo(
+    () =>
+      !peerMapsLoaded
+        ? conversations
+        : conversations.filter((c) => {
+            if (c.type !== 'direct') return true;
+            const peer = convToPeerId.get(c.id);
+            if (!peer) return true;
+            const canonicalId = peerToConvId.get(peer);
+            if (canonicalId && canonicalId !== c.id && localConvIds.has(canonicalId)) return false;
+            return true;
+          }),
+    [conversations, peerMapsLoaded, peerToConvId, convToPeerId, localConvIds],
+  );
+
   const handleSend = useMessageSending({
     selectedId,
     isLive,
@@ -100,6 +143,7 @@ export default function ChatScreen() {
     setConversations,
   });
 
+  // Read receipts for the currently open conversation (delivered receipts handled by ChatProvider).
   useReceiptSending({ conversations, liveIds, selectedId, selectedIsLive });
 
   useEffect(() => {
@@ -120,6 +164,17 @@ export default function ChatScreen() {
         window.clearTimeout(mobileSidebarReturnTimerRef.current);
     };
   }, []);
+
+  // Redirect selection away from a stale duplicate DM when the canonical replacement is present locally.
+  useEffect(() => {
+    if (!selectedId || !peerMapsLoaded) return;
+    const peer = convToPeerId.get(selectedId);
+    if (!peer) return;
+    const canonicalId = peerToConvId.get(peer);
+    if (!canonicalId || canonicalId === selectedId) return;
+    if (!localConvIds.has(canonicalId)) return;
+    setSelectedId(canonicalId);
+  }, [selectedId, peerMapsLoaded, convToPeerId, peerToConvId, localConvIds]);
 
   // Compute the loopback safety number for direct non-live conversations.
   useEffect(() => {
@@ -173,9 +228,11 @@ export default function ChatScreen() {
   };
 
   const findConversationWith = (peerUserId: string): string | null =>
+    peerToConvId.get(peerUserId) ??
     conversations.find(
       (c) => c.type === 'direct' && c.participants.some((p) => p.id === peerUserId),
-    )?.id ?? null;
+    )?.id ??
+    null;
 
   const handleOpenExisting = (conversationId: string): void => {
     setSelectedId(conversationId);
@@ -231,7 +288,7 @@ export default function ChatScreen() {
           </div>
 
           <ConversationList
-            conversations={conversations}
+            conversations={dedupedConversations}
             selectedId={selectedId}
             onSelect={handleSelect}
             updateReady={updateReady}
@@ -288,7 +345,13 @@ export default function ChatScreen() {
                 </StateBlock>
               )}
               <MessageList conversation={selectedConversation} onImageClick={setPreviewImage} />
-              {effectiveSelectedIsLive && !selectedIsSyncLost && <ChatInput onSend={handleSend} />}
+              {effectiveSelectedIsLive && !selectedIsSyncLost && (
+                <ChatInput
+                  onSend={handleSend}
+                  disabled={!peerIsFriend}
+                  disabledNotice="You are no longer friends with this person. Re-add them as a friend to send messages."
+                />
+              )}
             </div>
           ) : (
             <div

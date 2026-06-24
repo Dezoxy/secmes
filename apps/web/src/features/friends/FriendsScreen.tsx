@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, UserMinus, UserPlus, Users, Check, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { lookupUserByArgusId, type Friend, type UserLookupResult } from '../../lib/api';
@@ -33,6 +33,7 @@ export default function FriendsScreen() {
     outgoingRequests,
     friendsError,
     manager,
+    refreshFriends,
     handleSendFriendRequest,
     handleAcceptRequest,
     handleDeclineRequest,
@@ -42,6 +43,11 @@ export default function FriendsScreen() {
 
   // Mutation actions are only available in authenticated mode (manager present).
   const canMutate = manager !== null;
+
+  // Refresh the friends list when the tab is opened so stale state is cleared immediately.
+  useEffect(() => {
+    if (manager) void refreshFriends();
+  }, [manager, refreshFriends]);
 
   const [friendQuery, setFriendQuery] = useState('');
   const [sendingRequest, setSendingRequest] = useState(false);

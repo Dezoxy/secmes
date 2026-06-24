@@ -80,7 +80,7 @@ export default function GroupsScreen() {
     setConversations,
   });
 
-  useReceiptSending({ conversations: groupConversations, liveIds, selectedId, selectedIsLive });
+  useReceiptSending({ conversations, liveIds, selectedId, selectedIsLive });
 
   useEffect(() => {
     setMounted(true);
