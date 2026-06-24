@@ -288,7 +288,11 @@ function RouteUpdateAction() {
 
   if (!dialogOpen) {
     return (
-      <div className="fixed right-4 top-1/2 z-50 -translate-y-1/2 sm:right-6">
+      <div
+        className="fixed right-4 top-1/2 z-50 -translate-y-1/2 sm:right-6"
+        role="status"
+        aria-live="polite"
+      >
         <button
           type="button"
           onClick={openUpdateDialog}
