@@ -223,6 +223,7 @@ export default function ChatScreen() {
   const [startPrefillArgusId, setStartPrefillArgusId] = useState<string | undefined>();
   const [groupCreateOpen, setGroupCreateOpen] = useState(false);
   const [friends, setFriends] = useState<Friend[]>([]);
+  const [friendsLoaded, setFriendsLoaded] = useState(false);
   const [incomingRequests, setIncomingRequests] = useState<FriendRequest[]>([]);
   const [outgoingRequests, setOutgoingRequests] = useState<FriendRequest[]>([]);
   const [friendsError, setFriendsError] = useState(false);
@@ -247,6 +248,7 @@ export default function ChatScreen() {
         listFriendRequests('outgoing'),
       ]);
       setFriends(fl);
+      setFriendsLoaded(true);
       setIncomingRequests(inc);
       setOutgoingRequests(out);
       setFriendsError(false);
@@ -331,8 +333,13 @@ export default function ChatScreen() {
 
   // For DMs, the composer is blocked when the peer is no longer an accepted friend. The server
   // already enforces this (403 on send); this is the UI signal. Groups are always unblocked here.
+  // Guard on friendsLoaded: don't block the composer before the first successful friends fetch
+  // (demo mode, slow network, or E2E without a real backend would otherwise false-block).
   const peerIsFriend =
-    !isDirect || !selectedPeerUserId || friends.some((f) => f.userId === selectedPeerUserId);
+    !isDirect ||
+    !selectedPeerUserId ||
+    !friendsLoaded ||
+    friends.some((f) => f.userId === selectedPeerUserId);
 
   const handleSend = useMessageSending({
     selectedId,
