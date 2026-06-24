@@ -68,9 +68,7 @@ export const CreateCallRequestSchema = z
   .strict();
 export type CreateCallRequest = z.infer<typeof CreateCallRequestSchema>;
 
-export const CreateCallResponseSchema = z.object({
-  callId: z.string().uuid(),
-});
+export const CreateCallResponseSchema = z.object({ callId: z.string().uuid() }).strict();
 export type CreateCallResponse = z.infer<typeof CreateCallResponseSchema>;
 
 // ── REST: GET/PUT /calls/settings (relay-only preference) ──

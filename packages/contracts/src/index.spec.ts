@@ -18,6 +18,7 @@ import {
   TurnCredentialsRequestSchema,
   TurnCredentialsResponseSchema,
   CreateCallRequestSchema,
+  CreateCallResponseSchema,
   UpdateCallSettingsRequestSchema,
 } from './index.js';
 
@@ -270,6 +271,11 @@ describe('voip call contracts', () => {
     expect(
       CreateCallRequestSchema.safeParse({ conversationId: UUID, media: 'audio', extra: 1 }).success,
     ).toBe(false);
+  });
+
+  it('CreateCallResponse is strict (rejects unknown keys)', () => {
+    expect(CreateCallResponseSchema.safeParse({ callId: UUID }).success).toBe(true);
+    expect(CreateCallResponseSchema.safeParse({ callId: UUID, extra: 1 }).success).toBe(false);
   });
 
   it('UpdateCallSettingsRequest accepts a relayOnly boolean and rejects extras', () => {

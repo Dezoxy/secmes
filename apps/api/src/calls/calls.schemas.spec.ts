@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CallEnvelopeSchema,
   CreateCallRequestSchema,
+  CreateCallResponseSchema,
   TurnCredentialsRequestSchema,
   TurnCredentialsResponseSchema,
   UpdateCallSettingsRequestSchema,
@@ -100,6 +101,11 @@ describe('CreateCallRequestSchema', () => {
     expect(
       CreateCallRequestSchema.safeParse({ conversationId: uuid, media: 'audio', extra: 1 }).success,
     ).toBe(false);
+  });
+
+  it('CreateCallResponse is strict (rejects unknown keys)', () => {
+    expect(CreateCallResponseSchema.safeParse({ callId: uuid }).success).toBe(true);
+    expect(CreateCallResponseSchema.safeParse({ callId: uuid, extra: 1 }).success).toBe(false);
   });
 });
 
