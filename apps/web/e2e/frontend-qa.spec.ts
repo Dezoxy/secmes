@@ -62,6 +62,18 @@ test('F1C mobile settings and profile QA flow stays navigable', async ({ page })
   const issues = collectPageIssues(page);
   await page.setViewportSize({ width: 390, height: 844 });
 
+  await page.route('**/api/me/settings/privacy', (route) => {
+    if (route.request().method() === 'GET') {
+      void route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ readReceipts: true, typingIndicators: true, linkPreviews: true }),
+      });
+    } else {
+      void route.fulfill({ status: 204 });
+    }
+  });
+
   await page.goto('/chat');
   await page.getByRole('button', { name: 'Open settings' }).click();
 
