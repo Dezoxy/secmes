@@ -167,9 +167,14 @@ export default function ChatScreen() {
   }, []);
 
   useEffect(() => {
-    if (window.innerWidth >= 1024) return;
-    setNavVisible(showSidebar);
-    return () => setNavVisible(true);
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const update = () => setNavVisible(mq.matches || showSidebar);
+    update();
+    mq.addEventListener('change', update);
+    return () => {
+      mq.removeEventListener('change', update);
+      setNavVisible(true);
+    };
   }, [showSidebar, setNavVisible]);
 
   useEffect(() => {
@@ -387,7 +392,7 @@ export default function ChatScreen() {
               <MessageList
                 conversation={selectedConversation}
                 onImageClick={setPreviewImage}
-                bottomNavClearance={!(effectiveSelectedIsLive && !selectedIsSyncLost)}
+                bottomNavClearance={false}
               />
               {effectiveSelectedIsLive && !selectedIsSyncLost && (
                 <ChatInput
