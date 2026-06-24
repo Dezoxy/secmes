@@ -34,7 +34,13 @@ export function useSwipeBack(
       if (!t) return;
       const dx = t.clientX - startX;
       const dy = Math.abs(t.clientY - startY);
-      if (dy > dx) armed = false;
+      if (dy > dx) {
+        armed = false;
+        return;
+      }
+      // Prevent the browser's own edge-swipe back-navigation from also firing
+      // while we own this gesture. Non-passive so preventDefault() is allowed.
+      e.preventDefault();
     };
 
     const onTouchEnd = (e: TouchEvent) => {
@@ -46,7 +52,9 @@ export function useSwipeBack(
     };
 
     el.addEventListener('touchstart', onTouchStart, { passive: true });
-    el.addEventListener('touchmove', onTouchMove, { passive: true });
+    // Non-passive so we can call preventDefault() to suppress the browser's
+    // native history-back gesture on the same left-edge swipe.
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
     el.addEventListener('touchend', onTouchEnd, { passive: true });
 
     return () => {
