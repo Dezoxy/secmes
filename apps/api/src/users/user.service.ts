@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { and, eq, ne, sql } from 'drizzle-orm';
 import type { UpdateProfile, UserLookupResult } from '@argus/contracts';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
+import { isHandleCollision } from './handle-words.js';
 
 export interface UserRecord {
   id: string;
@@ -88,16 +89,40 @@ export class UserService {
     dto: UpdateProfile,
   ): Promise<void> {
     if (!dto.displayName && !dto.avatarSeed) return;
+
+    if (dto.displayName !== undefined) {
+      const [conflict] = await withTenant(auth.tenantId, async (tx) =>
+        tx
+          .select({ id: schema.users.id })
+          .from(schema.users)
+          .where(
+            and(
+              eq(schema.users.tenantId, auth.tenantId),
+              sql`lower(${schema.users.displayName}) = lower(${dto.displayName})`,
+              ne(schema.users.id, auth.userId),
+              eq(schema.users.status, 'active'),
+            ),
+          )
+          .limit(1),
+      );
+      if (conflict) throw new ConflictException('display name is already taken');
+    }
+
     const set: Partial<typeof schema.users.$inferInsert> = {};
     if (dto.displayName !== undefined) set.displayName = dto.displayName;
     if (dto.avatarSeed !== undefined) set.avatarSeed = dto.avatarSeed;
-    const result = await withTenant(auth.tenantId, async (tx) =>
-      tx
-        .update(schema.users)
-        .set(set)
-        .where(and(eq(schema.users.id, auth.userId), eq(schema.users.tenantId, auth.tenantId)))
-        .returning({ id: schema.users.id }),
-    );
-    if (result.length === 0) throw new NotFoundException('user not found');
+    try {
+      const result = await withTenant(auth.tenantId, async (tx) =>
+        tx
+          .update(schema.users)
+          .set(set)
+          .where(and(eq(schema.users.id, auth.userId), eq(schema.users.tenantId, auth.tenantId)))
+          .returning({ id: schema.users.id }),
+      );
+      if (result.length === 0) throw new NotFoundException('user not found');
+    } catch (err) {
+      if (isHandleCollision(err)) throw new ConflictException('display name is already taken');
+      throw err;
+    }
   }
 }
