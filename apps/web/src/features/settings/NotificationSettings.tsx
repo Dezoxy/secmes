@@ -152,14 +152,7 @@ export function NotificationSettings({
         </div>
       )}
 
-      <SettingsRow
-        title="Mentions only"
-        value={
-          settings.mentionsOnly ? 'On – only @mentions notify you' : 'Off – all messages notify you'
-        }
-        enabled={settings.mentionsOnly}
-        onClick={() => toggle('mentionsOnly')}
-      />
+      <SettingsRow title="Mentions only" value="Uses the product default" badge="Default" />
 
       <SettingsRow
         title="Quiet hours"

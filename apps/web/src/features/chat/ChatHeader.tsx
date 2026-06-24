@@ -40,6 +40,11 @@ import {
   modalBackdropEnterMotion,
   modalPanelEnterMotion,
 } from '../ui';
+import {
+  isConversationMuted,
+  muteConversation,
+  unmuteConversation,
+} from '../settings/conversation-mute';
 
 interface ChatHeaderProps {
   conversation: Conversation;
@@ -122,7 +127,10 @@ export function ChatHeader({
 }: ChatHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [activePanel, setActivePanel] = useState<HeaderPanel | null>(null);
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(() => isConversationMuted(conversation.id));
+  useEffect(() => {
+    setMuted(isConversationMuted(conversation.id));
+  }, [conversation.id]);
   const [searchQuery, setSearchQuery] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -342,7 +350,10 @@ export function ChatHeader({
               label={muted ? 'Unmute notifications' : 'Mute notifications'}
               tabIndex={menuTabIndex}
               onClick={() => {
-                setMuted((value) => !value);
+                const next = !muted;
+                if (next) muteConversation(conversation.id);
+                else unmuteConversation(conversation.id);
+                setMuted(next);
                 setMenuOpen(false);
               }}
             />
@@ -506,7 +517,16 @@ export function ChatHeader({
                   title="Notification state"
                   value={muted ? 'Muted on this device' : 'Enabled on this device'}
                 />
-                <Button size="lg" onClick={() => setMuted((value) => !value)} className="w-full">
+                <Button
+                  size="lg"
+                  onClick={() => {
+                    const next = !muted;
+                    if (next) muteConversation(conversation.id);
+                    else unmuteConversation(conversation.id);
+                    setMuted(next);
+                  }}
+                  className="w-full"
+                >
                   {muted ? 'Unmute notifications' : 'Mute notifications'}
                 </Button>
               </div>
