@@ -32,3 +32,4 @@ export {
   type AccentId,
   type AccentOption,
 } from './theme';
+export { applyThemeToDocument } from './apply-theme';

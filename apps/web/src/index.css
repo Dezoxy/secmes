@@ -219,9 +219,10 @@
   --argus-color-text-muted: rgb(255 255 255 / 60%);
   --argus-color-danger: #f43f5e;
   --argus-color-success: #22c55e;
-  --argus-color-accent: #7c3aed;
-  --argus-color-accent-hover: #9333ea;
-  --argus-color-accent-soft: rgb(124 58 237 / 20%);
+  --argus-color-accent: #a855f7;
+  --argus-color-accent-hover: color-mix(in srgb, #a855f7 80%, white);
+  --argus-color-accent-soft: rgb(168 85 247 / 20%);
+  --argus-font-size: 100%;
   --argus-space-1: 0.25rem;
   --argus-space-2: 0.5rem;
   --argus-space-3: 0.75rem;
@@ -234,6 +235,10 @@
   --argus-radius-xl: 1.5rem;
   --argus-shadow-panel: 0 25px 50px -12px rgb(0 0 0 / 50%);
   --argus-shadow-accent: 0 18px 34px var(--argus-color-accent-soft);
+}
+
+html {
+  font-size: var(--argus-font-size, 100%);
 }
 
 html,

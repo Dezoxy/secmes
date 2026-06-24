@@ -22,23 +22,15 @@ import {
   modalPanelExitMotion,
   paneBackEnterMotion,
   paneBackExitMotion,
-  defaultAccentId,
   surfaceEnterMotion,
   getAccentById,
-  isAccentId,
+  applyThemeToDocument,
   type AccentId,
 } from '../ui';
 import { safeAvatarSrc } from '../chat/seed';
-import {
-  browserLocalStorage,
-  LEGACY_ACCENT_STORAGE_KEY,
-  LEGACY_FONT_SIZE_STORAGE_KEY,
-  readVersionedRecord,
-  versionedStorageKey,
-  writeVersionedRecord,
-} from '../../lib/persistence';
+import { readStoredDeviceSettings, writeStoredDeviceSettings } from './device-settings';
 import { AboutSettings } from './AboutSettings';
-import { AppearanceSettings, FONT_SIZE_LEVELS } from './AppearanceSettings';
+import { AppearanceSettings } from './AppearanceSettings';
 import { DataStorageSettings } from './DataStorageSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { PrivacySettings, type PrivacySettingsRecord } from './PrivacySettings';
@@ -92,58 +84,7 @@ const adminSection: { id: SectionId; label: string; icon: LucideIcon } = {
   icon: ShieldCheck,
 };
 
-const DEVICE_SETTINGS_STORAGE_KEY = versionedStorageKey('settings', 'device');
 const SETTINGS_CLOSE_ANIMATION_MS = 220;
-
-interface DeviceSettingsRecord {
-  accentId: AccentId;
-  fontSizeLevel: number;
-}
-
-function decodeDeviceSettingsRecord(value: unknown): DeviceSettingsRecord | null {
-  if (typeof value !== 'object' || value === null) return null;
-  const record = value as Record<string, unknown>;
-  const accentId = typeof record.accentId === 'string' ? record.accentId : defaultAccentId;
-  const fontSizeLevel = typeof record.fontSizeLevel === 'number' ? record.fontSizeLevel : 5;
-
-  return {
-    accentId: isAccentId(accentId) ? accentId : defaultAccentId,
-    fontSizeLevel: FONT_SIZE_LEVELS.includes(fontSizeLevel) ? fontSizeLevel : 5,
-  };
-}
-
-function readStoredDeviceSettings(): DeviceSettingsRecord {
-  if (typeof window === 'undefined') {
-    return { accentId: defaultAccentId, fontSizeLevel: 5 };
-  }
-
-  const storage = browserLocalStorage();
-  const stored = readVersionedRecord({
-    storage,
-    key: DEVICE_SETTINGS_STORAGE_KEY,
-    decode: decodeDeviceSettingsRecord,
-  });
-  if (stored.status === 'ok') return stored.value;
-
-  const legacyAccent = storage.getItem(LEGACY_ACCENT_STORAGE_KEY);
-  const legacyFontSize = Number.parseInt(storage.getItem(LEGACY_FONT_SIZE_STORAGE_KEY) ?? '', 10);
-  const migrated = {
-    accentId: isAccentId(legacyAccent) ? legacyAccent : defaultAccentId,
-    fontSizeLevel: FONT_SIZE_LEVELS.includes(legacyFontSize) ? legacyFontSize : 5,
-  };
-
-  writeVersionedRecord({ storage, key: DEVICE_SETTINGS_STORAGE_KEY, value: migrated });
-  return migrated;
-}
-
-function writeStoredDeviceSettings(settings: DeviceSettingsRecord): void {
-  if (typeof window === 'undefined') return;
-  writeVersionedRecord({
-    storage: browserLocalStorage(),
-    key: DEVICE_SETTINGS_STORAGE_KEY,
-    value: settings,
-  });
-}
 
 function isMobileSettingsViewport(): boolean {
   return typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches;
@@ -153,14 +94,6 @@ function prefersReducedMotion(): boolean {
   return (
     typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
   );
-}
-
-function readStoredAccent(): AccentId {
-  return readStoredDeviceSettings().accentId;
-}
-
-function readStoredFontSize(): number {
-  return readStoredDeviceSettings().fontSizeLevel;
 }
 
 export function SettingsPanel({
@@ -178,8 +111,10 @@ export function SettingsPanel({
   const [mobileSectionOpen, setMobileSectionOpen] = useState(false);
   const [mobileBackAnimating, setMobileBackAnimating] = useState(false);
   const [mobileMenuReturning, setMobileMenuReturning] = useState(false);
-  const [accentId, setAccentId] = useState<AccentId>(() => readStoredAccent());
-  const [fontSizeLevel, setFontSizeLevel] = useState(() => readStoredFontSize());
+  const [accentId, setAccentId] = useState<AccentId>(() => readStoredDeviceSettings().accentId);
+  const [fontSizeLevel, setFontSizeLevel] = useState(
+    () => readStoredDeviceSettings().fontSizeLevel,
+  );
   const [privacySettings, setPrivacySettings] = useState<PrivacySettingsRecord>(() =>
     readStoredPrivacySettings(),
   );
@@ -198,6 +133,7 @@ export function SettingsPanel({
 
   useEffect(() => {
     writeStoredDeviceSettings({ accentId, fontSizeLevel });
+    applyThemeToDocument(accentId, fontSizeLevel);
   }, [accentId, fontSizeLevel]);
 
   useEffect(() => {
