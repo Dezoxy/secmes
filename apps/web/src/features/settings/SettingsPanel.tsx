@@ -194,8 +194,13 @@ export function SettingsPanel({
   const mobileBackTimerRef = useRef<number | undefined>(undefined);
   const mobileMenuTimerRef = useRef<number | undefined>(undefined);
   const closeTimerRef = useRef<number | undefined>(undefined);
-  // Skip the server save on initial mount — localStorage is stale until the fetch resolves.
+  // Guards for the privacy save effect:
+  // - mounted: skip the first run (initial localStorage value, not a user edit)
+  // - fromServer: skip when state was set by the server fetch (hydration, not a user edit)
+  // - userEdited: if the user toggles before the fetch resolves, ignore the late server value
   const privacySettingsMounted = useRef(false);
+  const privacySettingsFromServer = useRef(false);
+  const privacySettingsUserEdited = useRef(false);
 
   useEffect(() => {
     setAvatar(profile.avatar);
@@ -212,6 +217,11 @@ export function SettingsPanel({
       privacySettingsMounted.current = true;
       return;
     }
+    if (privacySettingsFromServer.current) {
+      privacySettingsFromServer.current = false;
+      return;
+    }
+    privacySettingsUserEdited.current = true;
     savePrivacySettings(privacySettings).catch(() => {
       // Fire-and-forget: localStorage write already applied; server sync failure is non-blocking.
     });
@@ -221,7 +231,9 @@ export function SettingsPanel({
   useEffect(() => {
     fetchPrivacySettings()
       .then((serverSettings) => {
+        if (privacySettingsUserEdited.current) return;
         syncFromServer(serverSettings);
+        privacySettingsFromServer.current = true;
         setPrivacySettings(serverSettings);
       })
       .catch(() => {

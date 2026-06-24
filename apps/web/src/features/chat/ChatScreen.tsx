@@ -46,6 +46,8 @@ import { useLiveConversations } from './useLiveConversations';
 import { useMessageSending } from './useMessageSending';
 import { useReceiptSending } from './useReceiptSending';
 import { loadArgusProfile, saveArgusProfile } from '../settings/argus-profile';
+import { syncFromServer } from '../settings/privacy-settings';
+import { fetchPrivacySettings } from '../../lib/api';
 import type { AnonymousProfile } from '../settings/SettingsPanel';
 import {
   IconButton,
@@ -365,6 +367,14 @@ export default function ChatScreen() {
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  // Seed localStorage with server-side privacy preferences on chat init so isReadReceiptsEnabled()
+  // returns the correct value on any device, even if the user never opens Settings.
+  useEffect(() => {
+    void fetchPrivacySettings()
+      .then(syncFromServer)
+      .catch(() => {});
   }, []);
 
   // When a peer key-change is detected for the currently-selected conversation, open the Verify panel
