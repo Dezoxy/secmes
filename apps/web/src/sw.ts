@@ -155,10 +155,11 @@ self.addEventListener('push', (event: PushEvent) => {
       ([notifSettings, mutedCount]) => {
         // userVisibleOnly: true (set at subscription time) means every push MUST produce a visible
         // notification — silently returning causes browsers to show their own fallback or penalise
-        // the subscription. During quiet hours or while any conversation is muted we still show the
-        // notification but silence it (no sound, no vibration, no re-alert) so it lands in the
-        // notification tray without waking the user.
-        const silent = isInQuietHours(notifSettings) || mutedCount > 0;
+        // the subscription. During quiet hours or while any new_message conversation is muted we
+        // still show the notification but silence it (no sound, no vibration, no re-alert) so it
+        // lands in the notification tray without waking the user. Muted-conversations silencing
+        // is scoped to new_message — friend_request alerts are always audible.
+        const silent = isInQuietHours(notifSettings) || (type === 'new_message' && mutedCount > 0);
         return self.registration.showNotification('argus', {
           body,
           icon: '/icon-192.png',

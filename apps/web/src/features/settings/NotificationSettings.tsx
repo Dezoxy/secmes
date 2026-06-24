@@ -5,14 +5,12 @@ import { subscribeToPush, unsubscribeFromPush } from '../../lib/push';
 import { readMutedConversationIds, syncMuteStateToCache, unmuteAll } from './conversation-mute';
 
 export type NotificationSettingsRecord = {
-  mentionsOnly: boolean;
   quietHoursEnabled: boolean;
   quietHoursStart: string; // "HH:MM" 24-hour
   quietHoursEnd: string;
 };
 
 export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettingsRecord = {
-  mentionsOnly: false,
   quietHoursEnabled: false,
   quietHoursStart: '22:00',
   quietHoursEnd: '07:00',
@@ -101,8 +99,8 @@ export function NotificationSettings({
     setMutedCount(0);
   }, []);
 
-  const toggle = (key: 'mentionsOnly' | 'quietHoursEnabled') => {
-    onSettingsChange({ ...settings, [key]: !settings[key] });
+  const toggleQuietHours = () => {
+    onSettingsChange({ ...settings, quietHoursEnabled: !settings.quietHoursEnabled });
   };
 
   return (
@@ -163,7 +161,7 @@ export function NotificationSettings({
             : 'Off – notifications always allowed'
         }
         enabled={settings.quietHoursEnabled}
-        onClick={() => toggle('quietHoursEnabled')}
+        onClick={toggleQuietHours}
       />
 
       {settings.quietHoursEnabled && (
