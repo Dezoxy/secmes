@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowLeft, ExternalLink, Shield } from 'lucide-react';
 import { ArgusAppIcon } from '../features/brand/ArgusAppIcon';
 import { surfaceEnterMotion } from '../features/ui';
+import { useSurfaceBackground } from '../lib/use-surface-background';
 
 interface BundleManifest {
   algorithm: string;
@@ -23,6 +24,7 @@ function formatBytes(bytes: number): string {
 
 export default function TransparencyRoute() {
   const [manifestState, setManifestState] = useState<ManifestState>({ status: 'loading' });
+  useSurfaceBackground('#0c0c12');
 
   useEffect(() => {
     let cancelled = false;

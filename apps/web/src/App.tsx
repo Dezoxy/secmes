@@ -9,6 +9,7 @@ import { usePwaUpdate } from './features/pwa/PwaUpdateContext';
 import { APP_VERSION_TAG } from './lib/app-version';
 import { conversationEnterMotion, modalPanelExitMotion, paneBackEnterMotion } from './features/ui';
 import ChatRoute from './routes/ChatRoute';
+import { useSurfaceBackground } from './lib/use-surface-background';
 
 const DevicesRoute = lazy(() => import('./routes/DevicesRoute'));
 const SecurityRoute = lazy(() => import('./routes/SecurityRoute'));
@@ -31,6 +32,7 @@ type Panel = null | 'register';
 function LandingRoute() {
   const { ready, profile, demoMode, login } = useAuth();
   const navigate = useNavigate();
+  useSurfaceBackground('#0f0f16'); // login card's scroll bg → matches the home-indicator strip
   const [mounted, setMounted] = useState(false);
   const [activeSlide, setActiveSlide] = useState(0);
   const [panel, setPanel] = useState<Panel>(null);
