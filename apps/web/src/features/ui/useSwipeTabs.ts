@@ -26,6 +26,12 @@ export function useSwipeTabs(
         armed = false;
         return;
       }
+      // Don't arm when the touch starts on an interactive control (e.g. a range
+      // slider) — dragging such an element should not also switch tabs.
+      if (e.target instanceof Element && e.target.closest('input, select, textarea, button')) {
+        armed = false;
+        return;
+      }
       startX = t.clientX;
       startY = t.clientY;
       armed = true;
