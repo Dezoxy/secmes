@@ -303,7 +303,7 @@ export default function ChatScreen() {
               <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-[#964cdc]/25" />
               <span className="text-xl font-bold tracking-wider">
                 <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
-                  ARGUS
+                  CHAT
                 </span>
               </span>
             </div>

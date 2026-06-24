@@ -392,11 +392,15 @@ export function SettingsPanel({
         }`}
       >
         {/* Fixed header */}
-        <div className="mb-4 flex shrink-0 items-center justify-between">
+        <div
+          className={`mb-4 flex shrink-0 items-center ${
+            standalone ? 'justify-center' : 'justify-between'
+          }`}
+        >
           <h2 className="flex items-center gap-2">
             <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />
             <span className="text-xl font-bold tracking-wider">
-              <span className="bg-gradient-to-r from-purple-400 to-purple-600 bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
                 SETTINGS
               </span>
             </span>
