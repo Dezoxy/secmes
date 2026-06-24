@@ -267,6 +267,8 @@ function AuthenticatedShell() {
   );
 }
 
+const AUTH_ROUTES = new Set(['/', '/admin']);
+
 function RouteUpdateAction() {
   const { pathname } = useLocation();
   const { updateReady, applyUpdate, newVersion, dialogOpen, openUpdateDialog, closeUpdateDialog } =
@@ -274,7 +276,6 @@ function RouteUpdateAction() {
   const [applying, setApplying] = useState(false);
   const [closing, setClosing] = useState(false);
 
-  const AUTH_ROUTES = new Set(['/', '/admin']);
   if (!updateReady || AUTH_ROUTES.has(pathname)) return null;
 
   const handleClose = () => {
