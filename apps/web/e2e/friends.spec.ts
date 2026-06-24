@@ -106,7 +106,7 @@ test('friend search filters the accepted-friend list', async ({ page }) => {
 
   await page.getByRole('link', { name: 'Friends' }).click();
   // Search is collapsed by default — open it before interacting with the textbox.
-  await page.getByRole('button', { name: 'Search friends' }).click();
+  await page.getByRole('button', { name: 'Reveal friend search' }).click();
   const search = page.getByRole('textbox', { name: 'Search friends or enter Argus ID' });
 
   // query matches Alice
@@ -192,7 +192,7 @@ test('send-friend-request flow: lookup-then-confirm (authenticated) / "no match"
   await page.goto('/chat');
   await page.getByRole('link', { name: 'Friends' }).click();
   // Search is collapsed by default — open it before interacting with the textbox.
-  await page.getByRole('button', { name: 'Search friends' }).click();
+  await page.getByRole('button', { name: 'Reveal friend search' }).click();
   const search = page.getByRole('textbox', { name: 'Search friends or enter Argus ID' });
   await search.fill(VALID_SEND_ID);
 

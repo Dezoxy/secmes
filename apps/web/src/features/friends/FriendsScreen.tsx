@@ -62,6 +62,10 @@ export default function FriendsScreen() {
   const [confirmingUnfriendId, setConfirmingUnfriendId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const infightLookupQuery = useRef<string | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
 
   const trimmedFriendQuery = friendQuery.trim();
   const filteredFriends = useMemo(
@@ -134,7 +138,7 @@ export default function FriendsScreen() {
     <div className="relative h-full lg:flex lg:items-center lg:justify-center lg:bg-[#1a1a24] lg:p-4">
       <div className="flex h-full flex-col overflow-hidden bg-[#0f0f16] lg:h-[calc(100%-2rem)] lg:w-full lg:max-w-2xl lg:rounded-3xl lg:bg-[#12121a] lg:shadow-2xl lg:shadow-black/50">
         <div className="bg-[#0f0f16] p-4 pt-[env(safe-area-inset-top)] lg:pt-4 lg:bg-[#12121a]">
-          <div className="relative flex flex-col items-center">
+          <div className="flex flex-col items-center gap-0.5">
             <h1 className="flex items-center gap-2">
               <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />
               <span className="text-xl font-bold tracking-wider">
@@ -146,28 +150,17 @@ export default function FriendsScreen() {
             <p className="text-xs text-white/45">
               {friends.length} accepted {friends.length === 1 ? 'friend' : 'friends'}
             </p>
-            <button
-              type="button"
-              onClick={() => {
-                if (searchOpen) {
-                  // Closing — reset the query so a hidden search can't keep driving the list / CTA.
-                  setFriendQuery('');
-                  setLookupResult(null);
-                  setSendRequestError(null);
-                  infightLookupQuery.current = null;
-                }
-                setSearchOpen((open) => !open);
-              }}
-              aria-label={searchOpen ? 'Close search' : 'Search friends'}
-              aria-expanded={searchOpen}
-              className="absolute right-0 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg border border-white/5 text-white/60 transition-colors hover:bg-white/[0.05] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60"
-            >
-              {searchOpen ? <X className="h-4 w-4" /> : <Search className="h-4 w-4" />}
-            </button>
           </div>
 
-          {searchOpen && (
-            <div className="relative mt-3">
+          {/* Search input — slides in when open */}
+          <div
+            id="friend-search-panel"
+            className={`overflow-hidden transition-all duration-300 ease-out ${
+              searchOpen ? 'mt-3 max-h-20 opacity-100' : 'pointer-events-none max-h-0 opacity-0'
+            }`}
+            aria-hidden={!searchOpen}
+          >
+            <div className="relative">
               <Search
                 aria-hidden="true"
                 className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30"
@@ -183,11 +176,46 @@ export default function FriendsScreen() {
                 }}
                 aria-label="Search friends or enter Argus ID"
                 placeholder="Search friends or enter Argus ID..."
-                autoFocus
-                className="w-full rounded-xl border border-white/5 bg-[#1a1a26] py-2.5 pl-10 pr-4 text-sm text-white placeholder-white/30 transition-colors focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20"
+                ref={searchInputRef}
+                tabIndex={searchOpen ? undefined : -1}
+                className="w-full rounded-xl border border-white/5 bg-[#1a1a26] py-2.5 pl-10 pr-9 text-sm text-white placeholder-white/30 transition-colors focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20"
               />
+              <button
+                type="button"
+                tabIndex={searchOpen ? undefined : -1}
+                onClick={() => {
+                  setFriendQuery('');
+                  setLookupResult(null);
+                  setSendRequestError(null);
+                  infightLookupQuery.current = null;
+                  setSearchOpen(false);
+                }}
+                aria-label="Close search"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
-          )}
+          </div>
+
+          {/* Pill handle — tap to reveal search */}
+          <div
+            aria-hidden={searchOpen}
+            className={`overflow-hidden transition-all duration-300 ${
+              searchOpen ? 'max-h-0 py-0 opacity-0' : 'max-h-9 py-1 opacity-100'
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => setSearchOpen(true)}
+              aria-label="Reveal friend search"
+              aria-expanded={searchOpen}
+              aria-controls="friend-search-panel"
+              className="group mx-auto flex h-7 w-12 items-center justify-center rounded-full transition-colors hover:bg-white/[0.03]"
+            >
+              <span className="block h-1 w-10 rounded-full bg-white/15 transition-colors group-hover:bg-white/25" />
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 space-y-2 overflow-y-auto px-2 pt-3 pb-[calc(env(safe-area-inset-bottom)_+_6rem)] lg:pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)]">
