@@ -317,7 +317,7 @@ export default function ChatScreen() {
             mounted ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-8'
           } ${mobileSidebarReturning ? paneBackEnterMotion : ''}`}
         >
-          <div className="bg-[#0f0f16] p-4">
+          <div className="bg-[#0f0f16] p-4 pt-[env(safe-area-inset-top)] sm:pt-4">
             <div className="flex items-center justify-center gap-2">
               <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-[#964cdc]/25" />
               <span className="text-xl font-bold tracking-wider">
