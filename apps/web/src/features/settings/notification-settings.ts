@@ -20,6 +20,10 @@ function decodeNotificationSettingsRecord(value: unknown): NotificationSettingsR
   const record = value as Record<string, unknown>;
 
   return {
+    mentionsOnly:
+      typeof record.mentionsOnly === 'boolean'
+        ? record.mentionsOnly
+        : DEFAULT_NOTIFICATION_SETTINGS.mentionsOnly,
     quietHoursEnabled:
       typeof record.quietHoursEnabled === 'boolean'
         ? record.quietHoursEnabled

@@ -104,7 +104,10 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
       applySession(token, me.bound ? me : null);
     })
       .catch(() => {
-        // No valid cookie — start unauthenticated.
+        // No valid cookie — start unauthenticated; clear any per-user state
+        // so a device shared between accounts doesn't inherit stale mutes.
+        unmuteAll();
+        void syncMuteStateToCache(new Set());
       })
       .finally(() => {
         if (active) setReady(true);

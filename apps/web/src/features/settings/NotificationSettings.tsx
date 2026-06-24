@@ -5,12 +5,15 @@ import { subscribeToPush, unsubscribeFromPush } from '../../lib/push';
 import { readMutedConversationIds, syncMuteStateToCache, unmuteAll } from './conversation-mute';
 
 export type NotificationSettingsRecord = {
+  // Persisted for future server-side push filtering; not yet enforced by the SW.
+  mentionsOnly: boolean;
   quietHoursEnabled: boolean;
   quietHoursStart: string; // "HH:MM" 24-hour
   quietHoursEnd: string;
 };
 
 export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettingsRecord = {
+  mentionsOnly: false,
   quietHoursEnabled: false,
   quietHoursStart: '22:00',
   quietHoursEnd: '07:00',
@@ -99,8 +102,10 @@ export function NotificationSettings({
     setMutedCount(0);
   }, []);
 
-  const toggleQuietHours = () => {
-    onSettingsChange({ ...settings, quietHoursEnabled: !settings.quietHoursEnabled });
+  const toggle = (
+    key: keyof Pick<NotificationSettingsRecord, 'mentionsOnly' | 'quietHoursEnabled'>,
+  ) => {
+    onSettingsChange({ ...settings, [key]: !settings[key] });
   };
 
   return (
@@ -152,6 +157,17 @@ export function NotificationSettings({
       )}
 
       <SettingsRow
+        title="Mentions only"
+        value={
+          settings.mentionsOnly
+            ? 'On – preference saved; will filter when server push support lands'
+            : 'Off – all messages trigger notifications'
+        }
+        enabled={settings.mentionsOnly}
+        onClick={() => toggle('mentionsOnly')}
+      />
+
+      <SettingsRow
         title="Quiet hours"
         value={
           settings.quietHoursEnabled
@@ -159,7 +175,7 @@ export function NotificationSettings({
             : 'Off – notifications always allowed'
         }
         enabled={settings.quietHoursEnabled}
-        onClick={toggleQuietHours}
+        onClick={() => toggle('quietHoursEnabled')}
       />
 
       {settings.quietHoursEnabled && (
