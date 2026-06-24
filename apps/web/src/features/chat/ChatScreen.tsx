@@ -10,6 +10,7 @@ import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import { StartConversation } from './StartConversation';
+import { GroupCreateDialog } from './GroupCreateDialog';
 import { ApproveDevicePanel } from '../device/ApproveDevicePanel';
 import { VerifySecurity } from './VerifySecurity';
 import { useSelectedConversationBackfill } from './useConversationBackfill';
@@ -27,6 +28,8 @@ import {
 } from '../ui';
 import { currentUser, getConversationDisplayName } from './seed';
 import { loadPersistedPeerMapping } from './peer-naming';
+import { contactDisplayName } from './user-label';
+import { dicebearAvatar } from '../../lib/dicebear';
 import { safetyNumberFromMember } from '@argus/crypto';
 import { useLocation } from 'react-router-dom';
 
@@ -41,6 +44,7 @@ export default function ChatScreen() {
     conversations,
     setConversations,
     manager,
+    groupManager,
     messagingDeps,
     liveIds,
     liveGroups,
@@ -318,13 +322,38 @@ export default function ChatScreen() {
           }}
         />
       )}
-      {addMemberOpen && selectedId && messagingDeps && (
-        <StartConversation
-          manager={manager!}
+      {addMemberOpen && selectedId && groupManager && messagingDeps && (
+        <GroupCreateDialog
+          mode="add"
+          manager={groupManager}
+          deps={messagingDeps}
           selfUserId={profile?.userId}
-          existingConversationWith={findConversationWith}
-          onOpenExisting={handleOpenExisting}
-          onStarted={handleStarted}
+          conversationId={selectedId}
+          existingConversation={liveGroups.current.get(selectedId)}
+          existingMemberIds={new Set(selectedConversation?.participants.map((p) => p.id) ?? [])}
+          existingGroupName={selectedConversation?.name}
+          onAdded={(addedUsers) => {
+            setAddMemberOpen(false);
+            if (addedUsers.length > 0 && selectedId) {
+              setConversations((prev) =>
+                prev.map((c) => {
+                  if (c.id !== selectedId) return c;
+                  const existingIds = new Set(c.participants.map((p) => p.id));
+                  const fresh = addedUsers
+                    .filter((u) => !existingIds.has(u.userId))
+                    .map((u) => ({
+                      id: u.userId,
+                      name: contactDisplayName(u),
+                      argusId: u.argusId,
+                      avatar: dicebearAvatar(u.userId),
+                    }));
+                  return fresh.length === 0
+                    ? c
+                    : { ...c, participants: [...c.participants, ...fresh] };
+                }),
+              );
+            }
+          }}
           onClose={() => setAddMemberOpen(false)}
         />
       )}

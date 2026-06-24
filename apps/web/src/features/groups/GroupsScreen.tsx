@@ -9,6 +9,8 @@ import { MessageList } from '../chat/MessageList';
 import { ChatInput } from '../chat/ChatInput';
 import { GroupCreateDialog } from '../chat/GroupCreateDialog';
 import { ImagePreviewModal } from '../chat/ImagePreviewModal';
+import { contactDisplayName } from '../chat/user-label';
+import { dicebearAvatar } from '../../lib/dicebear';
 import { useSelectedConversationBackfill } from '../chat/useConversationBackfill';
 import { useChatState } from '../chat/useChatState';
 import { useMessageSending } from '../chat/useMessageSending';
@@ -54,6 +56,7 @@ export default function GroupsScreen() {
   const [mobileThreadClosing, setMobileThreadClosing] = useState(false);
   const [mobileSidebarReturning, setMobileSidebarReturning] = useState(false);
   const [groupCreateOpen, setGroupCreateOpen] = useState(false);
+  const [addMemberOpen, setAddMemberOpen] = useState(false);
   const mobileThreadBackTimerRef = useRef<number | undefined>(undefined);
   const mobileSidebarReturnTimerRef = useRef<number | undefined>(undefined);
 
@@ -200,7 +203,13 @@ export default function GroupsScreen() {
                 onBack={handleBackToConversations}
                 verified={false}
                 onVerify={undefined}
-                onAddMember={undefined}
+                onAddMember={
+                  selectedConversation.creatorId === profile?.userId &&
+                  liveGroups.current.has(selectedConversation.id) &&
+                  !selectedIsSyncLost
+                    ? () => setAddMemberOpen(true)
+                    : undefined
+                }
                 updateReady={updateReady}
                 onApplyUpdate={applyUpdate}
               />
@@ -258,6 +267,41 @@ export default function GroupsScreen() {
             if (window.innerWidth < 1024) setShowSidebar(false);
           }}
           onClose={() => setGroupCreateOpen(false)}
+        />
+      )}
+      {addMemberOpen && selectedId && groupManager && messagingDeps && (
+        <GroupCreateDialog
+          mode="add"
+          manager={groupManager}
+          deps={messagingDeps}
+          selfUserId={profile?.userId}
+          conversationId={selectedId}
+          existingConversation={liveGroups.current.get(selectedId)}
+          existingMemberIds={new Set(selectedConversation?.participants.map((p) => p.id) ?? [])}
+          existingGroupName={selectedConversation?.name}
+          onAdded={(addedUsers) => {
+            setAddMemberOpen(false);
+            if (addedUsers.length > 0 && selectedId) {
+              setConversations((prev) =>
+                prev.map((c) => {
+                  if (c.id !== selectedId) return c;
+                  const existingIds = new Set(c.participants.map((p) => p.id));
+                  const fresh = addedUsers
+                    .filter((u) => !existingIds.has(u.userId))
+                    .map((u) => ({
+                      id: u.userId,
+                      name: contactDisplayName(u),
+                      argusId: u.argusId,
+                      avatar: dicebearAvatar(u.userId),
+                    }));
+                  return fresh.length === 0
+                    ? c
+                    : { ...c, participants: [...c.participants, ...fresh] };
+                }),
+              );
+            }
+          }}
+          onClose={() => setAddMemberOpen(false)}
         />
       )}
     </div>

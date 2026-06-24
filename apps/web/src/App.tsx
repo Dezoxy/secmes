@@ -274,9 +274,9 @@ function RouteUpdateAction() {
   const [applying, setApplying] = useState(false);
   const [closing, setClosing] = useState(false);
 
-  // Bottom-nav routes have in-page update UIs (chat sidebar) — skip the global pill to avoid duplicates.
-  const BOTTOM_NAV = new Set(['/chat', '/groups', '/friends', '/settings', '/profile']);
-  if (!updateReady || BOTTOM_NAV.has(pathname)) return null;
+  // Only chat and groups have in-page update affordances (the ConversationList update action).
+  const ROUTES_WITH_OWN_UPDATE_UI = new Set(['/chat', '/groups']);
+  if (!updateReady || ROUTES_WITH_OWN_UPDATE_UI.has(pathname)) return null;
 
   const handleClose = () => {
     if (closing) return;

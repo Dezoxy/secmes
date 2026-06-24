@@ -132,7 +132,7 @@ test('mobile chat keeps the update action reachable in an open thread', async ({
 
 test('non-chat routes keep a reachable PWA update action', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/settings?previewPwaUpdate=1');
+  await page.goto('/security?previewPwaUpdate=1');
 
   // Pill button (aria-label="Update Argus") opens the update dialog.
   const updateButton = page.getByRole('button', { name: 'Update Argus' });
