@@ -8,9 +8,15 @@ import { currentUser, type Conversation } from './seed';
 interface UseReceiptSendingOptions {
   conversations: Conversation[];
   /** Ids of LIVE (real server) conversations — demo/seed conversations never POST receipts. */
-  liveIds: Set<string>;
+  liveIds: ReadonlySet<string>;
   selectedId: string | null;
   selectedIsLive: boolean;
+  /**
+   * Set to false to skip the delivered-receipt loop. Use in per-screen hooks when ChatProvider
+   * already handles delivered receipts globally, so only the read-receipt effect runs.
+   * @default true
+   */
+  sendDelivered?: boolean;
 }
 
 /**
@@ -30,6 +36,7 @@ export function useReceiptSending({
   liveIds,
   selectedId,
   selectedIsLive,
+  sendDelivered = true,
 }: UseReceiptSendingOptions): void {
   const lastDelivered = useRef(new Map<string, string>());
   const lastRead = useRef(new Map<string, string>());
@@ -48,6 +55,7 @@ export function useReceiptSending({
 
   // delivered — every live conversation, newest incoming message.
   useEffect(() => {
+    if (!sendDelivered) return;
     for (const conv of conversations) {
       if (!liveIds.has(conv.id)) continue;
       const target = nextReceiptToPost(
@@ -61,7 +69,7 @@ export function useReceiptSending({
         if (lastDelivered.current.get(conv.id) === target) lastDelivered.current.delete(conv.id);
       });
     }
-  }, [conversations, liveIds]);
+  }, [conversations, liveIds, sendDelivered]);
 
   // read — only the open, focused conversation, gated by the privacy toggle.
   useEffect(() => {

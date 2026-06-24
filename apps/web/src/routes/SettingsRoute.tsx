@@ -1,18 +1,17 @@
-import { Settings } from 'lucide-react';
-import { ProfileEdit } from '../features/settings/ProfileEdit';
-import { RoutePageShell } from './RoutePageShell';
+import { SettingsPanel } from '../features/settings/SettingsPanel';
+import { useChatContext } from '../features/chat/ChatContext';
 
 export default function SettingsRoute() {
+  const { anonymousProfile, serverProfile, handleProfileChange, deviceId } = useChatContext();
+
   return (
-    <RoutePageShell
-      eyebrow="Settings"
-      title="Account settings"
-      description="Manage your profile and account preferences."
-      icon={Settings}
-    >
-      <div className="mx-auto max-w-lg space-y-4">
-        <ProfileEdit />
-      </div>
-    </RoutePageShell>
+    <SettingsPanel
+      standalone
+      profile={anonymousProfile}
+      deviceId={deviceId}
+      serverHandle={serverProfile?.displayName ?? null}
+      serverProfile={serverProfile}
+      onProfileChange={handleProfileChange}
+    />
   );
 }
