@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useSwipeBack } from '../ui/useSwipeBack';
 import {
   Bell,
   Brush,
@@ -148,6 +149,7 @@ export function SettingsPanel({
   const [mobileSectionOpen, setMobileSectionOpen] = useState(false);
   const [mobileBackAnimating, setMobileBackAnimating] = useState(false);
   const [mobileMenuReturning, setMobileMenuReturning] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 1024);
   const [accentId, setAccentId] = useState<AccentId>(() => readStoredDeviceSettings().accentId);
   const [fontSizeLevel, setFontSizeLevel] = useState(
     () => readStoredDeviceSettings().fontSizeLevel,
@@ -162,6 +164,7 @@ export function SettingsPanel({
   const [profileError, setProfileError] = useState<string | null>(null);
   const sectionButtonRefs = useRef(new Map<SectionId, HTMLButtonElement>());
   const sectionContentRef = useRef<HTMLElement>(null);
+  const standaloneWrapperRef = useRef<HTMLDivElement>(null);
   const mobileBackTimerRef = useRef<number | undefined>(undefined);
   const mobileMenuTimerRef = useRef<number | undefined>(undefined);
   const closeTimerRef = useRef<number | undefined>(undefined);
@@ -357,6 +360,28 @@ export function SettingsPanel({
     };
   }, []);
 
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 1023px)');
+    const update = () => setIsMobile(mq.matches);
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+
+  // Standalone mode: intercept left-edge swipes so the browser's native history-back
+  // gesture never navigates away from the /settings route (which uses local state, not URLs).
+  const standaloneSwipeBack = useCallback(() => {
+    if (mobileSectionOpen) returnToSettingsMenu();
+    // When the menu itself is showing, do nothing — this just suppresses the native gesture.
+  }, [mobileSectionOpen, returnToSettingsMenu]);
+
+  // Modal mode: prefer returning to the menu over closing the whole panel.
+  const modalSwipeBack = useCallback(() => {
+    if (mobileSectionOpen) returnToSettingsMenu();
+    else closeSettings();
+  }, [mobileSectionOpen, returnToSettingsMenu, closeSettings]);
+
+  useSwipeBack(standaloneWrapperRef, standaloneSwipeBack, isMobile && standalone);
+
   const settingsContent = (
     <>
       <aside
@@ -527,7 +552,11 @@ export function SettingsPanel({
 
   if (standalone) {
     return (
-      <div className="flex h-full w-full overflow-hidden" style={accentVariables}>
+      <div
+        ref={standaloneWrapperRef}
+        className="flex h-full w-full overflow-hidden"
+        style={accentVariables}
+      >
         {settingsContent}
       </div>
     );
@@ -537,6 +566,7 @@ export function SettingsPanel({
     <Modal
       ariaLabel="Settings"
       onClose={closeSettings}
+      onSwipeBack={modalSwipeBack}
       className={`items-center justify-center bg-black/40 backdrop-blur-md sm:p-4 ${
         closing ? modalBackdropExitMotion : modalBackdropEnterMotion
       }`}
