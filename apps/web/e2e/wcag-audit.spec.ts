@@ -80,11 +80,6 @@ test.describe('@a11y WCAG 2.1 AA axe scan', () => {
   // axe-core 4.11 misinterprets oklab L (0-1 scale) as a percentage,
   // producing false positives. Contrast is verified manually in the
   // "Manual contrast" section below.
-  //
-  // meta-viewport is excluded by deliberate product decision: the
-  // installed PWA pins `maximum-scale=1` so iOS never zooms the page when
-  // a small input is focused (native-app feel). Pinch-zoom is mitigated by
-  // the in-app font-size control (Settings → Appearance).
   // ------------------------------------------------------------------
   test('chat view — desktop — zero structural violations', async ({ page }) => {
     await page.goto('/chat');
@@ -92,7 +87,7 @@ test.describe('@a11y WCAG 2.1 AA axe scan', () => {
 
     const results = await new AxeBuilder({ page })
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
-      .disableRules(['color-contrast', 'meta-viewport'])
+      .disableRules(['color-contrast'])
       .analyze();
 
     expect(results.violations).toEqual([]);
@@ -105,7 +100,7 @@ test.describe('@a11y WCAG 2.1 AA axe scan', () => {
 
     const results = await new AxeBuilder({ page })
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
-      .disableRules(['color-contrast', 'meta-viewport'])
+      .disableRules(['color-contrast'])
       .analyze();
 
     expect(results.violations).toEqual([]);
@@ -118,7 +113,7 @@ test.describe('@a11y WCAG 2.1 AA axe scan', () => {
 
     const results = await new AxeBuilder({ page })
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
-      .disableRules(['color-contrast', 'meta-viewport'])
+      .disableRules(['color-contrast'])
       .analyze();
 
     expect(results.violations).toEqual([]);
@@ -130,7 +125,7 @@ test.describe('@a11y WCAG 2.1 AA axe scan', () => {
 
     const results = await new AxeBuilder({ page })
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
-      .disableRules(['color-contrast', 'meta-viewport'])
+      .disableRules(['color-contrast'])
       .analyze();
 
     expect(results.violations).toEqual([]);
@@ -148,7 +143,7 @@ test.describe('@a11y WCAG 2.1 AA axe scan', () => {
 
     const results = await new AxeBuilder({ page })
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
-      .disableRules(['color-contrast', 'meta-viewport'])
+      .disableRules(['color-contrast'])
       .analyze();
 
     expect(results.violations).toEqual([]);
