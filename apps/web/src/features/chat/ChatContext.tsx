@@ -36,7 +36,6 @@ import type { MessageSocketStatus } from '../../lib/ws';
 import { useAuth } from '../auth/AuthContext';
 import { demoMode } from '../../lib/auth';
 import { useDevice } from '../device/DeviceContext';
-import { usePwaUpdate } from '../pwa/PwaUpdateContext';
 import {
   useConversationBackfill,
   useConversationHistoryRehydration,
@@ -134,9 +133,6 @@ interface ChatContextValue {
   // Device enrollment
   pendingEnrollmentId: string | null;
   setPendingEnrollmentId: React.Dispatch<React.SetStateAction<string | null>>;
-  // PWA
-  updateReady: boolean;
-  applyUpdate: () => void | Promise<void>;
   // Privacy settings
   privacySettingsVersion: number;
   // Conversation creation helpers (shared core logic; screens wrap with local state)
@@ -178,7 +174,6 @@ export function ChatProvider({ children }: ChatProviderProps) {
 
   const { device, pool, deviceId, keystore, sessionKey } = useDevice();
   const { profile, subjectId } = useAuth();
-  const { updateReady, applyUpdate } = usePwaUpdate();
   const profileSubjectId = subjectId ?? DEMO_PROFILE_SUBJECT;
 
   const [anonymousProfile, setAnonymousProfile] = useState<AnonymousProfile>(() =>
@@ -624,8 +619,6 @@ export function ChatProvider({ children }: ChatProviderProps) {
     setPeerKeyChangedConvId,
     pendingEnrollmentId,
     setPendingEnrollmentId,
-    updateReady,
-    applyUpdate,
     privacySettingsVersion,
     persistStartedConversation,
     persistGroupCreated,

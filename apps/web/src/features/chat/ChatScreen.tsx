@@ -64,8 +64,6 @@ export default function ChatScreen() {
     setPeerKeyChangedConvId,
     pendingEnrollmentId,
     setPendingEnrollmentId,
-    updateReady,
-    applyUpdate,
     persistStartedConversation,
     friends,
     friendsLoaded,
@@ -335,8 +333,6 @@ export default function ChatScreen() {
             selectedId={selectedId}
             onSelect={handleSelect}
             mutedConversationIds={mutedConversationIds}
-            updateReady={updateReady}
-            onApplyUpdate={applyUpdate}
           />
         </aside>
 
@@ -369,8 +365,6 @@ export default function ChatScreen() {
                     ? handleOpenAddMember
                     : undefined
                 }
-                updateReady={updateReady}
-                onApplyUpdate={applyUpdate}
               />
               {effectiveSelectedIsLive && !selectedIsSyncLost && (
                 <ReconnectBanner status={connectionStatus} className="mx-4 mt-3" />
