@@ -12,6 +12,7 @@ import {
 import { ArgusAppIcon } from '../features/brand/ArgusAppIcon';
 import { surfaceEnterMotion } from '../features/ui';
 import { AuthenticatedRouteBoundary } from './AuthenticatedRouteBoundary';
+import { useSurfaceBackground } from '../lib/use-surface-background';
 
 interface RoutePageShellProps {
   eyebrow: string;
@@ -56,6 +57,9 @@ export function RoutePageShell({
       navigate('/chat', { replace: true });
     }
   }, [location.key, navigate]);
+
+  // Match the home-indicator strip to this page's bg (see useSurfaceBackground).
+  useSurfaceBackground('#0c0c12');
 
   return (
     <AuthenticatedRouteBoundary>

@@ -60,6 +60,7 @@ import {
 import type { Conversation, User } from './seed';
 import { loadPersistedPeerMapping, persistPeerMapping } from './peer-naming';
 import { dicebearAvatar, isCustomPhoto } from '../../lib/dicebear';
+import { useSurfaceBackground } from '../../lib/use-surface-background';
 import {
   initialConversationsForMode,
   currentUser,
@@ -140,6 +141,8 @@ function SettingsPanelFallback({ onClose }: SettingsPanelFallbackProps) {
 
 export default function ChatScreen() {
   const [mounted, setMounted] = useState(false);
+  // The chat bottom edge is the composer / conversation list on the #0f0f16 sidebar.
+  useSurfaceBackground('#0f0f16');
   // Demo seed (sample contacts + chats) is for demo mode / E2E only; real (prod) builds start empty so a
   // freshly-registered user never sees fabricated conversations (initialConversationsForMode gates on the
   // build-time VITE_DEMO_MODE flag, never set in prod). selectedId likewise only auto-selects a seed chat.
