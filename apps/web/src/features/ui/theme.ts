@@ -18,7 +18,7 @@ export type AccentId = (typeof accentOptions)[number]['id'];
 export type AccentOption = (typeof accentOptions)[number];
 
 export const argusColorTokens = {
-  appBackground: '#1a1a24',
+  appBackground: '#0f0f16',
   panel: '#12121a',
   panelSubtle: '#0f0f16',
   surface: '#1a1a26',
