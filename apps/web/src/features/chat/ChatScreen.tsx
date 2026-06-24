@@ -420,12 +420,13 @@ export default function ChatScreen() {
             p2c.set(c.peerUserId, c.id);
             c2p.set(c.id, c.peerUserId);
           } else {
-            // Replace if this conversation is newer.
+            // Track ALL DM conversations for this peer in c2p (sidebar dedup uses it to check
+            // peerToConvId.get(peer) === c.id — non-canonical convs must be in c2p or the
+            // !peer fallback would let them through). Then update the canonical pointer if newer.
+            c2p.set(c.id, c.peerUserId);
             const existingConv = convs.find((x) => x.id === existing);
             if (existingConv && c.createdAt > existingConv.createdAt) {
-              c2p.delete(existing);
               p2c.set(c.peerUserId, c.id);
-              c2p.set(c.id, c.peerUserId);
             }
           }
         }
