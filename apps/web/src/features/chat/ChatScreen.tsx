@@ -234,6 +234,9 @@ export default function ChatScreen() {
   // (b) friendship gate: resolve the peer's userId for the selected conversation.
   const [peerToConvId, setPeerToConvId] = useState<Map<string, string>>(new Map());
   const [convToPeerId, setConvToPeerId] = useState<Map<string, string>>(new Map());
+  // Tracks which DM conversation IDs are already reflected in the peer maps. Prevents the
+  // secondary "keep maps fresh" effect from looping on every state update.
+  const mappedDMConvsRef = useRef(new Set<string>());
   const { appendHistory, mergeIncoming, backfillInto } = useConversationBackfill({
     messagingDeps,
     sessionKey,
@@ -430,6 +433,7 @@ export default function ChatScreen() {
             }
           }
         }
+        convs.forEach((c) => mappedDMConvsRef.current.add(c.id));
         setPeerToConvId(p2c);
         setConvToPeerId(c2p);
       })
@@ -437,6 +441,38 @@ export default function ChatScreen() {
         /* best-effort; falls back to participants-based dedup */
       });
   }, [manager]);
+
+  // Keep peer maps current for DMs that arrive via WebSocket after the startup snapshot (e.g. a
+  // peer reinstalls and sends a new Welcome while the app is open). Uses a ref to avoid looping.
+  // WS-arrived DMs are always newer than the snapshot canonical, so they take the canonical slot.
+  useEffect(() => {
+    if (peerToConvId.size === 0) return; // startup maps not yet loaded
+    const newDMs = conversations.filter(
+      (c) => c.type === 'direct' && !mappedDMConvsRef.current.has(c.id),
+    );
+    if (newDMs.length === 0) return;
+    newDMs.forEach((c) => mappedDMConvsRef.current.add(c.id));
+    setConvToPeerId((prev) => {
+      const next = new Map(prev);
+      for (const c of newDMs) {
+        const peer =
+          loadPersistedPeerMapping(c.id) ??
+          c.participants.find((p) => p.id !== currentUserProfile.id)?.id;
+        if (peer && !next.has(c.id)) next.set(c.id, peer);
+      }
+      return next;
+    });
+    setPeerToConvId((prev) => {
+      const next = new Map(prev);
+      for (const c of newDMs) {
+        const peer =
+          loadPersistedPeerMapping(c.id) ??
+          c.participants.find((p) => p.id !== currentUserProfile.id)?.id;
+        if (peer) next.set(peer, c.id); // WS-arrived → always newer → becomes canonical
+      }
+      return next;
+    });
+  }, [conversations, peerToConvId.size, currentUserProfile.id]);
 
   useEffect(() => {
     if ('setAppBadge' in navigator) {
@@ -765,7 +801,7 @@ export default function ChatScreen() {
   };
 
   return (
-    <div className="h-[100dvh] bg-[#1a1a24] flex sm:items-center sm:justify-center sm:p-4">
+    <div className="argus-screen relative flex bg-[#1a1a24] sm:items-center sm:justify-center sm:p-4">
       <div
         className={`absolute inset-0 w-full sm:static sm:h-[90dvh] sm:max-w-6xl bg-[#12121a] sm:rounded-3xl overflow-hidden flex shadow-2xl shadow-black/50 transition-all duration-700 ease-out ${
           mounted ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
