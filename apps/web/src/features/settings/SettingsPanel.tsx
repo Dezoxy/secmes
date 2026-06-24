@@ -194,6 +194,8 @@ export function SettingsPanel({
   const mobileBackTimerRef = useRef<number | undefined>(undefined);
   const mobileMenuTimerRef = useRef<number | undefined>(undefined);
   const closeTimerRef = useRef<number | undefined>(undefined);
+  // Skip the server save on initial mount — localStorage is stale until the fetch resolves.
+  const privacySettingsMounted = useRef(false);
 
   useEffect(() => {
     setAvatar(profile.avatar);
@@ -206,6 +208,10 @@ export function SettingsPanel({
 
   useEffect(() => {
     writeStoredPrivacySettings(privacySettings);
+    if (!privacySettingsMounted.current) {
+      privacySettingsMounted.current = true;
+      return;
+    }
     savePrivacySettings(privacySettings).catch(() => {
       // Fire-and-forget: localStorage write already applied; server sync failure is non-blocking.
     });

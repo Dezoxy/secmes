@@ -8831,6 +8831,26 @@
                 "format": "date-time",
                 "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
                 "maxLength": 40
+              },
+              "privacySettings": {
+                "type": "object",
+                "properties": {
+                  "readReceipts": {
+                    "type": "boolean"
+                  },
+                  "typingIndicators": {
+                    "type": "boolean"
+                  },
+                  "linkPreviews": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "readReceipts",
+                  "typingIndicators",
+                  "linkPreviews"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -8841,7 +8861,8 @@
               "avatarSeed",
               "role",
               "status",
-              "createdAt"
+              "createdAt",
+              "privacySettings"
             ],
             "additionalProperties": false
           },

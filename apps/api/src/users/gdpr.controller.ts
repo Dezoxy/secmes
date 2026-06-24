@@ -32,6 +32,12 @@ import { GdprService } from './gdpr.service.js';
 // No ciphertext, keys, or message content is ever present.
 // ---------------------------------------------------------------------------
 
+class ExportPrivacySettingsDto {
+  @ApiProperty() readReceipts!: boolean;
+  @ApiProperty() typingIndicators!: boolean;
+  @ApiProperty() linkPreviews!: boolean;
+}
+
 class ExportProfileDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ format: 'uuid' }) tenantId!: string;
@@ -41,6 +47,7 @@ class ExportProfileDto {
   @ApiProperty() role!: string;
   @ApiProperty() status!: string;
   @ApiProperty({ format: 'date-time' }) createdAt!: string;
+  @ApiProperty({ type: ExportPrivacySettingsDto }) privacySettings!: ExportPrivacySettingsDto;
 }
 
 class ExportDeviceDto {
@@ -143,6 +150,16 @@ class MeExportDto {
       role: { type: 'string' },
       status: { type: 'string' },
       createdAt: { type: 'string', format: 'date-time' },
+      privacySettings: {
+        type: 'object',
+        properties: {
+          readReceipts: { type: 'boolean' },
+          typingIndicators: { type: 'boolean' },
+          linkPreviews: { type: 'boolean' },
+        },
+        required: ['readReceipts', 'typingIndicators', 'linkPreviews'],
+        additionalProperties: false,
+      },
     },
     required: [
       'id',
@@ -153,6 +170,7 @@ class MeExportDto {
       'role',
       'status',
       'createdAt',
+      'privacySettings',
     ],
     additionalProperties: false,
   })
