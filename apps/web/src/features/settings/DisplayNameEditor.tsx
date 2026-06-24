@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { DISPLAY_NAME_MAX } from '@argus/contracts';
-import { updateProfile } from '../../lib/api';
+import { DisplayNameTakenError, updateProfile } from '../../lib/api';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../ui';
 import { DISPLAY_NAME_HINT, displayNameFieldError } from './display-name';
@@ -47,8 +47,13 @@ export function DisplayNameEditor() {
       await updateProfile({ displayName: displayName.trim().replace(/ +/g, ' ') });
       await refreshProfile();
       toast('Saved', { variant: 'success' });
-    } catch {
-      toast('Couldn’t save — try again', { variant: 'error' });
+    } catch (err) {
+      if (err instanceof DisplayNameTakenError) {
+        toast('This display name is already taken', { variant: 'error' });
+        setHasError(true);
+      } else {
+        toast("Couldn't save — try again", { variant: 'error' });
+      }
     } finally {
       setBusy(false);
     }

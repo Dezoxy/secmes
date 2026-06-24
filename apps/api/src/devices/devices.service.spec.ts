@@ -325,7 +325,14 @@ describe.skipIf(!DB_URL)('DevicesService', () => {
       expect(mine).toBeDefined();
       expect(mine!.isDirect).toBe(true);
       // Metadata only — no content fields on the shape.
-      expect(Object.keys(mine!).sort()).toEqual(['conversationId', 'createdAt', 'isDirect']);
+      expect(Object.keys(mine!).sort()).toEqual([
+        'conversationId',
+        'createdAt',
+        'isDirect',
+        'peerUserId',
+      ]);
+      // Solo DM (only Alice added, no peer yet) → peerUserId is null.
+      expect(mine!.peerUserId).toBeNull();
     });
   });
 });

@@ -142,13 +142,23 @@ describe('DevicesController behaviour', () => {
   it('listConversations emits both the conversations array and the deprecated conversationIds shim', async () => {
     const { controller, devices } = makeController();
     devices.listMyConversations.mockResolvedValue([
-      { conversationId: 'c1', isDirect: true, createdAt: new Date('2026-01-01T00:00:00.000Z') },
-      { conversationId: 'c2', isDirect: null, createdAt: new Date('2026-01-02T00:00:00.000Z') },
+      {
+        conversationId: 'c1',
+        isDirect: true,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        peerUserId: 'peer-uuid',
+      },
+      {
+        conversationId: 'c2',
+        isDirect: null,
+        createdAt: new Date('2026-01-02T00:00:00.000Z'),
+        peerUserId: null,
+      },
     ]);
     const result = await controller.listConversations(auth);
     expect(result.conversations).toEqual([
-      { id: 'c1', isDirect: true, createdAt: '2026-01-01T00:00:00.000Z' },
-      { id: 'c2', isDirect: null, createdAt: '2026-01-02T00:00:00.000Z' },
+      { id: 'c1', isDirect: true, createdAt: '2026-01-01T00:00:00.000Z', peerUserId: 'peer-uuid' },
+      { id: 'c2', isDirect: null, createdAt: '2026-01-02T00:00:00.000Z', peerUserId: null },
     ]);
     expect(result.conversationIds).toEqual(['c1', 'c2']);
   });
