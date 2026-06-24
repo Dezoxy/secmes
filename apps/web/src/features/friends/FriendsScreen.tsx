@@ -133,7 +133,7 @@ export default function FriendsScreen() {
   return (
     <div className="relative h-full sm:flex sm:items-center sm:justify-center sm:bg-[#1a1a24] sm:p-4">
       <div className="flex h-full flex-col overflow-hidden bg-[#0f0f16] sm:h-[calc(100%-2rem)] sm:w-full sm:max-w-2xl sm:rounded-3xl sm:bg-[#12121a] sm:shadow-2xl sm:shadow-black/50">
-        <div className="bg-[#0f0f16] p-4 pt-[calc(env(safe-area-inset-top)_+_1rem)]">
+        <div className="bg-[#0f0f16] p-4 pt-[calc(env(safe-area-inset-top)_+_1rem)] sm:bg-[#12121a]">
           <div className="relative flex flex-col items-center">
             <h1 className="flex items-center gap-2">
               <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />
@@ -190,7 +190,7 @@ export default function FriendsScreen() {
           )}
         </div>
 
-        <div className="flex-1 space-y-2 overflow-y-auto px-2 pt-3 pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)]">
+        <div className="flex-1 space-y-2 overflow-y-auto px-2 pt-3 pb-[calc(env(safe-area-inset-bottom)_+_6rem)] sm:pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)]">
           {friendsError && (
             <p className="mx-2 text-xs text-amber-400/70">
               Could not refresh friends — data may be stale.
