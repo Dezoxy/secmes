@@ -98,7 +98,7 @@ test('mobile chat switches between conversation list and active thread landmarks
   await expect(page.getByRole('complementary', { name: 'Conversations' })).toBeVisible();
 });
 
-test('chat shows the sidebar update action in local preview mode only', async ({ page }) => {
+test('chat shows the global update action in local preview mode only', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/chat?previewPwaUpdate=1');
 
@@ -106,6 +106,9 @@ test('chat shows the sidebar update action in local preview mode only', async ({
   await expect(updateButton).toBeVisible();
   await expect(page.getByRole('button', { name: 'Dismiss update prompt' })).toHaveCount(0);
 
+  // First click opens the dialog; dialog's "Update Argus" button applies the update.
+  await updateButton.click();
+  await expect(updateButton).toBeVisible();
   await updateButton.click();
 
   await expect(updateButton).toHaveCount(0);
@@ -124,6 +127,9 @@ test('mobile chat keeps the update action reachable in an open thread', async ({
   const updateButton = page.getByRole('button', { name: 'Update Argus' });
   await expect(updateButton).toBeVisible();
 
+  // Global pill opens the dialog; dialog's "Update Argus" button applies the update.
+  await updateButton.click();
+  await expect(updateButton).toBeVisible();
   await updateButton.click();
 
   await expect(updateButton).toHaveCount(0);
