@@ -13,6 +13,7 @@ interface ModalProps {
   ariaLabel: string;
   children: ReactNode;
   onClose: () => void;
+  onSwipeBack?: () => void;
   className?: string;
   contentClassName?: string;
   closeOnBackdrop?: boolean;
@@ -30,6 +31,7 @@ export function Modal({
   ariaLabel,
   children,
   onClose,
+  onSwipeBack,
   className,
   contentClassName,
   closeOnBackdrop = false,
@@ -61,7 +63,7 @@ export function Modal({
     mq.addEventListener('change', update);
     return () => mq.removeEventListener('change', update);
   }, []);
-  useSwipeBack(dialogRef, onClose, isMobile);
+  useSwipeBack(dialogRef, onSwipeBack ?? onClose, isMobile);
 
   const trapFocus = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'Tab' || !dialogRef.current) return;
