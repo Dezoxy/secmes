@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 import { ToastContext, type ToastOptions, type ToastVariant } from './ToastContext';
 
@@ -64,23 +65,29 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ toast }}>
       {children}
-      <div
-        className="pointer-events-none fixed inset-x-0 bottom-6 z-[60] flex flex-col items-center gap-2 px-4"
-        role="status"
-        aria-live="polite"
-      >
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            aria-atomic="true"
-            className={`pointer-events-auto max-w-[90vw] rounded-xl border px-4 py-2.5 text-sm shadow-lg shadow-black/40 ${
-              variantClass[t.variant]
-            } ${t.leaving ? 'argus-toast-exit' : 'argus-toast-enter'}`}
-          >
-            {t.message}
-          </div>
-        ))}
-      </div>
+      {/* Portal to <body> so the z-[60] toast layer sits ABOVE modals — which also portal to <body>
+          at z-50. Without this the toasts render inside #root (now position:fixed) and a full-screen
+          modal portaled to body would cover them, hiding feedback shown while a modal is open. */}
+      {createPortal(
+        <div
+          className="pointer-events-none fixed inset-x-0 bottom-6 z-[60] flex flex-col items-center gap-2 px-4"
+          role="status"
+          aria-live="polite"
+        >
+          {toasts.map((t) => (
+            <div
+              key={t.id}
+              aria-atomic="true"
+              className={`pointer-events-auto max-w-[90vw] rounded-xl border px-4 py-2.5 text-sm shadow-lg shadow-black/40 ${
+                variantClass[t.variant]
+              } ${t.leaving ? 'argus-toast-exit' : 'argus-toast-enter'}`}
+            >
+              {t.message}
+            </div>
+          ))}
+        </div>,
+        document.body,
+      )}
     </ToastContext.Provider>
   );
 }
