@@ -34,8 +34,10 @@ import { contactDisplayName } from './user-label';
 import { dicebearAvatar } from '../../lib/dicebear';
 import { safetyNumberFromMember } from '@argus/crypto';
 import { useLocation } from 'react-router-dom';
+import { useSetNavVisible } from '../../routes/NavVisibilityContext';
 
 export default function ChatScreen() {
+  const setNavVisible = useSetNavVisible();
   const location = useLocation();
   const locationState = location.state as
     | { selectedId?: string; startArgusId?: string }
@@ -161,6 +163,17 @@ export default function ChatScreen() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const update = () => setNavVisible(mq.matches || showSidebar);
+    update();
+    mq.addEventListener('change', update);
+    return () => {
+      mq.removeEventListener('change', update);
+      setNavVisible(true);
+    };
+  }, [showSidebar, setNavVisible]);
 
   useEffect(() => {
     if (peerKeyChangedConvId !== null && peerKeyChangedConvId === selectedId) {
@@ -304,7 +317,7 @@ export default function ChatScreen() {
             mounted ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-8'
           } ${mobileSidebarReturning ? paneBackEnterMotion : ''}`}
         >
-          <div className="bg-[#0f0f16] p-4 pt-[calc(env(safe-area-inset-top)_+_1rem)]">
+          <div className="bg-[#0f0f16] p-4 pt-[env(safe-area-inset-top)] sm:pt-4">
             <div className="flex items-center justify-center gap-2">
               <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-[#964cdc]/25" />
               <span className="text-xl font-bold tracking-wider">
@@ -373,7 +386,7 @@ export default function ChatScreen() {
               <MessageList
                 conversation={selectedConversation}
                 onImageClick={setPreviewImage}
-                bottomNavClearance={!(effectiveSelectedIsLive && !selectedIsSyncLost)}
+                bottomNavClearance={false}
               />
               {effectiveSelectedIsLive && !selectedIsSyncLost && (
                 <ChatInput
