@@ -19,7 +19,7 @@ export default function AdminLoginRoute() {
   return (
     <main
       aria-label="Admin access"
-      className="flex h-[100dvh] flex-col overflow-y-auto bg-[#1a1a24] p-4"
+      className="flex h-[100dvh] flex-col overflow-y-auto bg-[#1a1a24] px-4 pt-4 pb-[calc(env(safe-area-inset-bottom)_+_1rem)]"
     >
       <section
         className={`m-auto w-full max-w-[430px] rounded-3xl bg-[#12121a] p-6 shadow-2xl shadow-black/50 ${surfaceEnterMotion}`}

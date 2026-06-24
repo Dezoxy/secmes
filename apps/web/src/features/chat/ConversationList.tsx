@@ -347,7 +347,7 @@ export function ConversationList({
           </div>
         </div>
 
-        <div className="flex-1 space-y-2 overflow-y-auto px-2 py-3">
+        <div className="flex-1 space-y-2 overflow-y-auto px-2 pt-3 pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)]">
           {friendsLoadError && (
             <p className="mx-2 text-xs text-amber-400/70">
               Could not refresh friends — data may be stale.

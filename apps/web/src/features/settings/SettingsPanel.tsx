@@ -48,7 +48,6 @@ import { SecuritySettings } from './SecuritySettings';
 import { AdminPanel } from './AdminPanel';
 import { TeamSettings } from './TeamSettings';
 import type { MeBound } from '../../lib/api';
-import { useSurfaceBackground } from '../../lib/use-surface-background';
 
 export type { AnonymousProfile } from './ProfileSettings';
 
@@ -174,7 +173,6 @@ export function SettingsPanel({
 }: SettingsPanelProps) {
   const isAdmin = serverProfile?.role === 'admin';
   const sections = isAdmin ? [...baseSections, teamSection, adminSection] : baseSections;
-  useSurfaceBackground('#12121a'); // full-screen settings sheet bg → matches the home-indicator strip
   const [active, setActive] = useState<SectionId>('security');
   const [closing, setClosing] = useState(false);
   const [mobileSectionOpen, setMobileSectionOpen] = useState(false);
