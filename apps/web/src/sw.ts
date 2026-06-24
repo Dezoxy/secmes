@@ -137,13 +137,18 @@ self.addEventListener('push', (event: PushEvent) => {
 
   event.waitUntil(
     readCachedNotificationSettings().then((notifSettings) => {
-      if (isInQuietHours(notifSettings)) return; // swallow push silently during quiet hours
+      // userVisibleOnly: true (set at subscription time) means every push MUST produce a visible
+      // notification — silently returning causes browsers to show their own fallback or penalise
+      // the subscription. During quiet hours we still show the notification but silence it
+      // (no sound, no vibration, no re-alert) so it lands in the tray without waking the user.
+      const quiet = isInQuietHours(notifSettings);
       return self.registration.showNotification('argus', {
         body,
         icon: '/icon-192.png',
         badge: '/icon-192.png',
         tag,
-        renotify: true,
+        renotify: !quiet,
+        silent: quiet,
       });
     }),
   );
