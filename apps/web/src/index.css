@@ -276,16 +276,3 @@ body {
   -webkit-font-smoothing: antialiased;
   background: var(--argus-color-app-bg);
 }
-
-/* iOS Safari zooms the page in when you focus a form control whose text is < 16px
-   (e.g. the chat composer at text-sm/14px). Force >= 16px on the mobile breakpoint so
-   focusing any input never triggers that zoom. This rule is un-layered, so it wins over
-   Tailwind's layered text-* utilities without needing !important; desktop (>= 640px)
-   keeps the designed sizes. font-size on range/checkbox/radio is a harmless no-op. */
-@media (max-width: 639px) {
-  input,
-  textarea,
-  select {
-    font-size: 16px;
-  }
-}

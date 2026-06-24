@@ -56,9 +56,9 @@ export default function TransparencyRoute() {
       aria-label="Security and transparency"
       className="flex h-[100dvh] flex-col bg-[#0c0c12] text-white"
     >
-      <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col px-4 pt-[calc(env(safe-area-inset-top)_+_1.25rem)] sm:px-6 lg:px-8">
-        {/* Header — mirrors the in-app route shell, minus the signed-in nav (this page is public). */}
-        <header className="flex items-center gap-3 border-b border-white/5 pb-5">
+      <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col overflow-y-auto">
+        {/* Glassy header — sticky + translucent + blurred so content scrolls under it (native iOS look). */}
+        <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-white/5 bg-[#0c0c12]/70 px-4 pt-[calc(env(safe-area-inset-top)_+_1.25rem)] pb-5 backdrop-blur-xl sm:px-6 lg:px-8">
           <Link
             to="/"
             aria-label="Back to Argus sign-in"
@@ -73,7 +73,7 @@ export default function TransparencyRoute() {
         </header>
 
         <div
-          className={`flex min-h-0 flex-1 flex-col overflow-y-auto py-8 pb-[calc(env(safe-area-inset-bottom)_+_2rem)] ${surfaceEnterMotion}`}
+          className={`flex flex-1 flex-col px-4 py-8 pb-[calc(env(safe-area-inset-bottom)_+_2rem)] sm:px-6 lg:px-8 ${surfaceEnterMotion}`}
         >
           {/* Hero — same icon/eyebrow/title/description rhythm as RoutePageShell. */}
           <section className="max-w-3xl">

@@ -105,7 +105,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
 
   if (disabled) {
     return (
-      <div className="border-t border-white/5 bg-[#0f0f16] p-4 pb-[calc(env(safe-area-inset-bottom)_+_1rem)] pl-[calc(env(safe-area-inset-left)_+_1rem)] pr-[calc(env(safe-area-inset-right)_+_1rem)]">
+      <div className="border-t border-white/5 bg-[#0f0f16]/80 p-4 pb-[calc(env(safe-area-inset-bottom)_+_1rem)] pl-[calc(env(safe-area-inset-left)_+_1rem)] pr-[calc(env(safe-area-inset-right)_+_1rem)] backdrop-blur-xl">
         <EmptyState title="Messaging unavailable" compact>
           {disabledNotice ?? 'Messaging is not available here yet.'}
         </EmptyState>
@@ -114,7 +114,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
   }
 
   return (
-    <div className="border-t border-white/5 bg-[#0f0f16] p-3 pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)] pl-[calc(env(safe-area-inset-left)_+_0.75rem)] pr-[calc(env(safe-area-inset-right)_+_0.75rem)]">
+    <div className="border-t border-white/5 bg-[#0f0f16]/80 p-3 pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)] pl-[calc(env(safe-area-inset-left)_+_0.75rem)] pr-[calc(env(safe-area-inset-right)_+_0.75rem)] backdrop-blur-xl">
       {/* Attachment previews */}
       {attachments.length > 0 && (
         <div

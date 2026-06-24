@@ -77,16 +77,15 @@ test('mobile settings sections expose current state and focus section content', 
   const settingsPanel = dialog.locator(':scope > div');
   // On mobile the settings modal is a full-screen sheet (flush to all four edges, filling the
   // 390×844 viewport) — not the inset, centered card used at the sm breakpoint and above.
+  // Poll the WHOLE geometry so the panel's enter animation (scale/translate) has fully settled
+  // before asserting — a single read right after the x-poll can catch a mid-animation frame and
+  // flake under parallel load (now that the glassy headers add backdrop-blur render cost).
   await expect
-    .poll(async () => (await settingsPanel.boundingBox())?.x ?? 999)
-    .toBeLessThanOrEqual(1);
-
-  const panelBox = await settingsPanel.boundingBox();
-  expect(panelBox).not.toBeNull();
-  expect(panelBox!.x).toBeLessThanOrEqual(1);
-  expect(panelBox!.y).toBeLessThanOrEqual(1);
-  expect(panelBox!.width).toBeGreaterThanOrEqual(388);
-  expect(panelBox!.height).toBeGreaterThanOrEqual(840);
+    .poll(async () => {
+      const b = await settingsPanel.boundingBox();
+      return b ? b.x <= 1 && b.y <= 1 && b.width >= 388 && b.height >= 840 : false;
+    })
+    .toBe(true);
 
   const securitySection = dialog.getByRole('button', { name: 'Security', exact: true });
 

@@ -60,8 +60,8 @@ export function RoutePageShell({
   return (
     <AuthenticatedRouteBoundary>
       <div className="flex h-[100dvh] flex-col bg-[#0c0c12] text-white">
-        <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col px-4 pt-[calc(env(safe-area-inset-top)_+_1.25rem)] sm:px-6 lg:px-8">
-          <header className="flex flex-col gap-4 border-b border-white/5 pb-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col overflow-y-auto">
+          <header className="sticky top-0 z-20 flex flex-col gap-4 border-b border-white/5 bg-[#0c0c12]/70 px-4 pt-[calc(env(safe-area-inset-top)_+_1.25rem)] pb-5 backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
             <div className="flex items-center gap-3">
               <button
                 type="button"
@@ -102,7 +102,7 @@ export function RoutePageShell({
 
           <main
             key={location.pathname}
-            className={`flex min-h-0 flex-1 flex-col overflow-y-auto py-8 pb-[calc(env(safe-area-inset-bottom)_+_2rem)] ${surfaceEnterMotion}`}
+            className={`flex flex-1 flex-col px-4 py-8 pb-[calc(env(safe-area-inset-bottom)_+_2rem)] sm:px-6 lg:px-8 ${surfaceEnterMotion}`}
           >
             <section className="max-w-3xl">
               <div className="mb-5 flex items-center gap-3">
