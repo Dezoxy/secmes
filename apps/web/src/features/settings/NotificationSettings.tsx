@@ -151,8 +151,6 @@ export function NotificationSettings({
         </div>
       )}
 
-      <SettingsRow title="Mentions only" value="Uses the product default" badge="Default" />
-
       <SettingsRow
         title="Quiet hours"
         value={
