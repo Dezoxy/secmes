@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ConflictException } from '@nestjs/common';
 import { UpdateProfileSchema } from '@argus/contracts';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
@@ -53,9 +54,65 @@ describe('updateMe body validation (boundary)', () => {
   });
 });
 
-// Integration — proves /me resolves the user inside the verified tenant's RLS context (13–14 → 15).
-// Needs a live Postgres with migrations applied; auto-skips without DATABASE_URL.
+// Integration — DB-backed tests. Auto-skip without DATABASE_URL.
 const DB_URL = process.env.DATABASE_URL;
+
+// Uniqueness gate: two active users in the same tenant may not share a display name
+// (case-insensitive). Cross-tenant and self-update are both allowed.
+describe.skipIf(!DB_URL)('UserService.updateProfile uniqueness', () => {
+  let sql: ReturnType<typeof getDb>['sql'];
+  let tenantA: string;
+  let tenantB: string;
+  let userA: string;
+  let userB: string;
+  const service = new UserService();
+
+  beforeAll(async () => {
+    sql = getDb().sql;
+    [{ id: tenantA }] = await sql`insert into tenants (name) values ('Uniq-A') returning id`;
+    [{ id: tenantB }] = await sql`insert into tenants (name) values ('Uniq-B') returning id`;
+    [{ id: userA }] = await sql`insert into users (tenant_id, external_identity_id, display_name)
+                values (${tenantA}, 'uniq-sub-a', 'BraveOtter') returning id`;
+    [{ id: userB }] = await sql`insert into users (tenant_id, external_identity_id)
+                values (${tenantA}, 'uniq-sub-b') returning id`;
+  });
+
+  afterAll(async () => {
+    if (sql) {
+      // Do NOT call sql.end() — the MeController.me block below owns the connection lifecycle.
+      await sql`delete from tenants where id in (${tenantA}, ${tenantB})`;
+    }
+  });
+
+  it('rejects a name already taken by another user (exact match)', async () => {
+    await expect(
+      service.updateProfile({ tenantId: tenantA, userId: userB }, { displayName: 'BraveOtter' }),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('rejects a name already taken by another user (case-variant)', async () => {
+    await expect(
+      service.updateProfile({ tenantId: tenantA, userId: userB }, { displayName: 'braveotter' }),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('allows the same name in a different tenant', async () => {
+    const rows = await sql<{ id: string }[]>`insert into users (tenant_id, external_identity_id)
+                values (${tenantB}, 'uniq-sub-c') returning id`;
+    const userC = rows[0]!.id;
+    await expect(
+      service.updateProfile({ tenantId: tenantB, userId: userC }, { displayName: 'BraveOtter' }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('allows a user to re-save their own current display name', async () => {
+    await expect(
+      service.updateProfile({ tenantId: tenantA, userId: userA }, { displayName: 'BraveOtter' }),
+    ).resolves.toBeUndefined();
+  });
+});
+
+// Proves /me resolves the user inside the verified tenant's RLS context (13–14 → 15).
 
 describe.skipIf(!DB_URL)('MeController.me', () => {
   let sql: ReturnType<typeof getDb>['sql'];

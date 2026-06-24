@@ -195,6 +195,40 @@
   will-change: opacity, transform;
 }
 
+@keyframes argus-tab-enter-right {
+  from {
+    opacity: 0.6;
+    transform: translateX(100%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes argus-tab-enter-left {
+  from {
+    opacity: 0.6;
+    transform: translateX(-100%);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.argus-tab-enter-right {
+  animation: argus-tab-enter-right 280ms ease-out both;
+  will-change: opacity, transform;
+}
+
+.argus-tab-enter-left {
+  animation: argus-tab-enter-left 280ms ease-out both;
+  will-change: opacity, transform;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .argus-surface-enter,
   .argus-modal-enter,
@@ -206,7 +240,9 @@
   .argus-pane-back-exit,
   .argus-message-send-enter,
   .argus-toast-enter,
-  .argus-toast-exit {
+  .argus-toast-exit,
+  .argus-tab-enter-right,
+  .argus-tab-enter-left {
     animation: none;
   }
 }

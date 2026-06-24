@@ -1,7 +1,6 @@
 import { expect, test } from '@playwright/test';
 
 const routeShells = [
-  { path: '/settings', heading: 'Account settings', marker: 'Manage your profile' },
   { path: '/security', heading: 'Security', marker: 'Unlocked by your passkey' },
   { path: '/devices', heading: 'Trusted devices', marker: 'Device management shell' },
   { path: '/storage', heading: 'Data & storage', marker: 'Encrypted local state only' },
@@ -20,13 +19,13 @@ for (const route of routeShells) {
 }
 
 test('the route shell back button steps back through in-app history', async ({ page }) => {
-  await page.goto('/settings');
+  await page.goto('/security');
   // In-app navigation (PUSH) to another shell so there is genuine Argus history to return to.
-  await page.getByRole('link', { name: 'Security', exact: true }).click();
-  await expect(page).toHaveURL(/\/security$/);
+  await page.getByRole('link', { name: 'Devices', exact: true }).click();
+  await expect(page).toHaveURL(/\/devices$/);
 
   await page.getByRole('button', { name: 'Go back' }).click();
-  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page).toHaveURL(/\/security$/);
 });
 
 test('the route shell back button falls back to chat on a deep link with no in-app history', async ({
@@ -34,13 +33,13 @@ test('the route shell back button falls back to chat on a deep link with no in-a
 }) => {
   // Direct load → React Router's first location has key "default", so there is nowhere in-app to go
   // back to. Smart back must land on /chat rather than navigating off-site.
-  await page.goto('/settings');
+  await page.goto('/security');
   await page.getByRole('button', { name: 'Go back' }).click();
   await expect(page).toHaveURL(/\/chat$/);
 
-  // The fallback replaces the deep-link entry, so browser Back must not bounce back into /settings.
+  // The fallback replaces the deep-link entry, so browser Back must not bounce back into /security.
   await page.goBack();
-  await expect(page).not.toHaveURL(/\/settings/);
+  await expect(page).not.toHaveURL(/\/security/);
 });
 
 test('/transparency renders the public security page without auth', async ({ page }) => {

@@ -1,4 +1,5 @@
 export { Avatar } from './Avatar';
+export { BottomNav, TAB_PATHS } from './BottomNav';
 export { Button } from './Button';
 export { IconButton } from './IconButton';
 export { Modal } from './Modal';

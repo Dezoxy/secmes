@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ArrowLeft,
   Bell,
@@ -39,7 +39,15 @@ import {
   floatingMenuSurfaceClass,
   modalBackdropEnterMotion,
   modalPanelEnterMotion,
+  useToast,
 } from '../ui';
+import {
+  isConversationMuted,
+  muteConversation,
+  readMutedConversationIds,
+  syncMuteStateToCache,
+  unmuteConversation,
+} from '../settings/conversation-mute';
 
 interface ChatHeaderProps {
   conversation: Conversation;
@@ -122,10 +130,26 @@ export function ChatHeader({
 }: ChatHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [activePanel, setActivePanel] = useState<HeaderPanel | null>(null);
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(() => isConversationMuted(conversation.id));
+  useEffect(() => {
+    setMuted(isConversationMuted(conversation.id));
+  }, [conversation.id]);
+  useEffect(() => {
+    const onMutesCleared = () => setMuted(false);
+    window.addEventListener('argus:mutes-cleared', onMutesCleared);
+    return () => window.removeEventListener('argus:mutes-cleared', onMutesCleared);
+  }, []);
   const [searchQuery, setSearchQuery] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const { toast } = useToast();
+  const lastCallToastAt = useRef(0);
+  const handleComingSoon = useCallback(() => {
+    const now = Date.now();
+    if (now - lastCallToastAt.current < 2500) return;
+    lastCallToastAt.current = now;
+    toast('Voice and video calls are coming soon');
+  }, [toast]);
   const displayName = getConversationDisplayName(conversation, currentUser.id);
   const avatar = getConversationAvatar(conversation, currentUser.id);
   const otherUser = getOtherParticipant(conversation, currentUser.id);
@@ -250,6 +274,7 @@ export function ChatHeader({
 
       <div className="flex items-center gap-1">
         <IconButton
+          onClick={handleComingSoon}
           size="lg"
           className="rounded-xl text-white/40 hover:bg-[#1a1a26] hover:text-white/70"
           aria-label="Start voice call"
@@ -257,6 +282,7 @@ export function ChatHeader({
           <Phone className="h-5 w-5" />
         </IconButton>
         <IconButton
+          onClick={handleComingSoon}
           size="lg"
           className="rounded-xl text-white/40 hover:bg-[#1a1a26] hover:text-white/70"
           aria-label="Start video call"
@@ -339,10 +365,15 @@ export function ChatHeader({
             />
             <MenuItem
               icon={muted ? Bell : BellOff}
-              label={muted ? 'Unmute notifications' : 'Mute notifications'}
+              label={muted ? 'Unmute conversation' : 'Mute conversation'}
+              value={muted ? undefined : 'in-app only'}
               tabIndex={menuTabIndex}
               onClick={() => {
-                setMuted((value) => !value);
+                const next = !muted;
+                if (next) muteConversation(conversation.id);
+                else unmuteConversation(conversation.id);
+                void syncMuteStateToCache(readMutedConversationIds());
+                setMuted(next);
                 setMenuOpen(false);
               }}
             />
@@ -503,11 +534,21 @@ export function ChatHeader({
             {activePanel === 'notifications' && (
               <div className="space-y-3">
                 <PanelRow
-                  title="Notification state"
-                  value={muted ? 'Muted on this device' : 'Enabled on this device'}
+                  title="In-app alerts"
+                  value={muted ? 'Muted (push still delivered)' : 'Enabled'}
                 />
-                <Button size="lg" onClick={() => setMuted((value) => !value)} className="w-full">
-                  {muted ? 'Unmute notifications' : 'Mute notifications'}
+                <Button
+                  size="lg"
+                  onClick={() => {
+                    const next = !muted;
+                    if (next) muteConversation(conversation.id);
+                    else unmuteConversation(conversation.id);
+                    void syncMuteStateToCache(readMutedConversationIds());
+                    setMuted(next);
+                  }}
+                  className="w-full"
+                >
+                  {muted ? 'Unmute conversation' : 'Mute conversation'}
                 </Button>
               </div>
             )}
