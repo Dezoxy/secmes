@@ -36,8 +36,9 @@ export default function AppShell() {
 
       const container = contentRef.current;
       const inner = container?.firstElementChild as HTMLElement | null;
+      const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-      if (inner && container) {
+      if (inner && container && !prefersReducedMotion) {
         navigatingRef.current = true;
         const exitClass =
           targetIndex > currentIndex ? 'argus-tab-exit-left' : 'argus-tab-exit-right';
