@@ -103,11 +103,15 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
       if (!active) return;
       applySession(token, me.bound ? me : null);
     })
-      .catch(() => {
-        // No valid cookie — start unauthenticated; clear any per-user state
-        // so a device shared between accounts doesn't inherit stale mutes.
-        unmuteAll();
-        void syncMuteStateToCache(new Set());
+      .catch((err: unknown) => {
+        // Distinguish a definitive "no session" (401) from transient failures
+        // (network errors, 5xx). Only wipe per-user state when the refresh
+        // cookie is genuinely gone — not when the server is briefly unavailable.
+        const is401 = err instanceof Error && /status 401/.test(err.message);
+        if (is401) {
+          unmuteAll();
+          void syncMuteStateToCache(new Set());
+        }
       })
       .finally(() => {
         if (active) setReady(true);
