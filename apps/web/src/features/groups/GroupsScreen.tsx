@@ -158,31 +158,18 @@ export default function GroupsScreen() {
           aria-label="Group conversations"
           className={`${
             showSidebar && !mobileThreadClosing ? 'flex' : 'hidden lg:flex'
-          } w-full lg:w-80 shrink-0 flex-col bg-[#0f0f16] border-r border-white/5 transition-all duration-500 ${
+          } relative w-full lg:w-80 shrink-0 flex-col bg-[#0f0f16] border-r border-white/5 transition-all duration-500 ${
             mounted ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-8'
           } ${mobileSidebarReturning ? paneBackEnterMotion : ''}`}
         >
-          <div className="bg-[#0f0f16] p-4 pt-[env(safe-area-inset-top)] sm:pt-4">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-[#964cdc]/25" />
-                <span className="text-xl font-bold tracking-wider">
-                  <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
-                    GROUPS
-                  </span>
+          <div className="bg-[#0f0f16] p-4">
+            <div className="flex items-center justify-center gap-2">
+              <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-[#964cdc]/25" />
+              <span className="text-xl font-bold tracking-wider">
+                <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
+                  GROUPS
                 </span>
-              </div>
-              {groupManager && messagingDeps && (
-                <button
-                  type="button"
-                  onClick={() => setGroupCreateOpen(true)}
-                  className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-white/70 transition-colors hover:border-purple-500/30 hover:bg-purple-500/10 hover:text-purple-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60"
-                  aria-label="Create new group"
-                >
-                  <Users className="h-3.5 w-3.5" />
-                  New group
-                </button>
-              )}
+              </span>
             </div>
           </div>
 
@@ -191,6 +178,18 @@ export default function GroupsScreen() {
             selectedId={selectedId}
             onSelect={handleSelect}
           />
+
+          {groupManager && messagingDeps && (
+            <button
+              type="button"
+              onClick={() => setGroupCreateOpen(true)}
+              className="absolute bottom-[calc(env(safe-area-inset-bottom)_+_6.5rem)] right-4 z-10 flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-white/70 transition-colors hover:border-purple-500/30 hover:bg-purple-500/10 hover:text-purple-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60 lg:bottom-4"
+              aria-label="Create new group"
+            >
+              <Users className="h-3.5 w-3.5" />
+              New group
+            </button>
+          )}
         </aside>
 
         {/* Main */}

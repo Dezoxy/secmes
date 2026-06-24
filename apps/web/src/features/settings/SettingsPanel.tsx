@@ -387,7 +387,7 @@ export function SettingsPanel({
       <aside
         className={`${
           mobileSectionOpen || mobileBackAnimating ? 'hidden' : 'flex'
-        } w-full flex-col bg-[#0f0f16] px-3 pt-[env(safe-area-inset-top)] sm:flex sm:w-80 sm:shrink-0 sm:border-r sm:border-white/5 sm:px-4 sm:pt-4 ${
+        } w-full flex-col bg-[#0f0f16] px-3 pt-4 sm:flex sm:w-80 sm:shrink-0 sm:border-r sm:border-white/5 sm:px-4 sm:pt-4 ${
           mobileMenuReturning ? paneBackEnterMotion : ''
         }`}
       >
@@ -474,7 +474,7 @@ export function SettingsPanel({
           mobileBackAnimating ? paneBackExitMotion : ''
         }`}
       >
-        <div className="shrink-0 flex items-center gap-3 px-3 pt-[env(safe-area-inset-top)] pb-4 sm:px-6 sm:pt-6 sm:pb-4">
+        <div className="shrink-0 flex items-center gap-3 px-3 pt-4 pb-4 sm:px-6 sm:pt-6 sm:pb-4">
           <IconButton
             onClick={returnToSettingsMenu}
             className="sm:hidden"

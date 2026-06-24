@@ -53,7 +53,7 @@ export default function AppShell() {
   const [navVisible, setNavVisible] = useState(true);
 
   return (
-    <div className="flex h-[100dvh] flex-col bg-[#0f0f16] text-white">
+    <div className="flex h-[100dvh] flex-col bg-[#0f0f16] text-white pt-[env(safe-area-inset-top)]">
       <div ref={contentRef} className="relative min-h-0 flex-1 overflow-hidden">
         <div key={location.pathname} className={`absolute inset-0 ${motionClass}`}>
           <NavVisibilityContext.Provider value={setNavVisible}>
