@@ -9,7 +9,6 @@ import {
   LockKeyhole,
   MoreVertical,
   Phone,
-  RefreshCw,
   Search,
   Shield,
   ShieldCheck,
@@ -55,8 +54,6 @@ interface ChatHeaderProps {
   /** Out-of-band safety-number verification state + opener (checkpoint 20). */
   verified?: boolean;
   onVerify?: () => void;
-  updateReady?: boolean;
-  onApplyUpdate?: () => void | Promise<void>;
   /** Open the add-member dialog. Provided only for group conversations where the current user is creator. */
   onAddMember?: () => void;
 }
@@ -124,8 +121,6 @@ export function ChatHeader({
   onBack,
   verified,
   onVerify,
-  updateReady,
-  onApplyUpdate,
   onAddMember,
 }: ChatHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -219,7 +214,7 @@ export function ChatHeader({
               : 'Security details';
 
   return (
-    <div className="relative z-20 flex items-center justify-between border-b border-white/5 bg-[#0f0f16]/75 px-4 py-3 pt-[calc(env(safe-area-inset-top)_+_0.75rem)] pl-[calc(env(safe-area-inset-left)_+_1rem)] pr-[calc(env(safe-area-inset-right)_+_1rem)] backdrop-blur-xl">
+    <div className="relative z-20 flex items-center justify-between border-b border-white/5 bg-[#0f0f16]/75 px-4 py-3 pt-[env(safe-area-inset-top)] sm:pt-3 pl-[calc(env(safe-area-inset-left)_+_1rem)] pr-[calc(env(safe-area-inset-right)_+_1rem)] backdrop-blur-xl">
       <div className="flex items-center gap-3">
         {onBack && (
           <IconButton
@@ -289,17 +284,6 @@ export function ChatHeader({
         >
           <Video className="h-5 w-5" />
         </IconButton>
-        {updateReady && onApplyUpdate && (
-          <IconButton
-            onClick={() => void onApplyUpdate()}
-            size="lg"
-            title="Update Argus"
-            className="rounded-xl border border-purple-400/30 bg-purple-500/15 text-purple-100 hover:border-purple-300/60 hover:bg-purple-500/25 lg:hidden"
-            aria-label="Update Argus"
-          >
-            <RefreshCw className="h-5 w-5" />
-          </IconButton>
-        )}
         <div ref={menuRef} className="relative">
           <IconButton
             onClick={(event) => {

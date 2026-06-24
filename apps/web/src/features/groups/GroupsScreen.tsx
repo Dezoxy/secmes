@@ -16,6 +16,7 @@ import { useChatState } from '../chat/useChatState';
 import { useMessageSending } from '../chat/useMessageSending';
 import { useReceiptSending } from '../chat/useReceiptSending';
 import { useChatContext } from '../chat/ChatContext';
+import { useSetNavVisible } from '../../routes/NavVisibilityContext';
 import { tabSelectedId } from '../chat/tabSelectedId';
 import {
   ReconnectBanner,
@@ -26,6 +27,7 @@ import {
 } from '../ui';
 
 export default function GroupsScreen() {
+  const setNavVisible = useSetNavVisible();
   const {
     conversations,
     setConversations,
@@ -39,8 +41,6 @@ export default function GroupsScreen() {
     serverProfile: profile,
     numbersByConv,
     verifiedByConv,
-    updateReady,
-    applyUpdate,
     persistGroupCreated,
   } = useChatContext();
 
@@ -86,6 +86,17 @@ export default function GroupsScreen() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const update = () => setNavVisible(mq.matches || showSidebar);
+    update();
+    mq.addEventListener('change', update);
+    return () => {
+      mq.removeEventListener('change', update);
+      setNavVisible(true);
+    };
+  }, [showSidebar, setNavVisible]);
 
   useEffect(() => {
     return () => {
@@ -151,7 +162,7 @@ export default function GroupsScreen() {
             mounted ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-8'
           } ${mobileSidebarReturning ? paneBackEnterMotion : ''}`}
         >
-          <div className="bg-[#0f0f16] p-4 pt-[calc(env(safe-area-inset-top)_+_1rem)]">
+          <div className="bg-[#0f0f16] p-4 pt-[env(safe-area-inset-top)] sm:pt-4">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-[#964cdc]/25" />
@@ -179,8 +190,6 @@ export default function GroupsScreen() {
             conversations={groupConversations}
             selectedId={selectedId}
             onSelect={handleSelect}
-            updateReady={updateReady}
-            onApplyUpdate={applyUpdate}
           />
         </aside>
 
@@ -211,8 +220,6 @@ export default function GroupsScreen() {
                     ? () => setAddMemberOpen(true)
                     : undefined
                 }
-                updateReady={updateReady}
-                onApplyUpdate={applyUpdate}
               />
               {effectiveSelectedIsLive && !selectedIsSyncLost && (
                 <ReconnectBanner status={connectionStatus} className="mx-4 mt-3" />
@@ -234,7 +241,7 @@ export default function GroupsScreen() {
               <MessageList
                 conversation={selectedConversation}
                 onImageClick={setPreviewImage}
-                bottomNavClearance={!(effectiveSelectedIsLive && !selectedIsSyncLost)}
+                bottomNavClearance={false}
               />
               {effectiveSelectedIsLive && !selectedIsSyncLost && <ChatInput onSend={handleSend} />}
             </div>

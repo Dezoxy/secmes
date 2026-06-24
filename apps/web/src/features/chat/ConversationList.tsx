@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Search, Users, RefreshCw } from 'lucide-react';
+import { Search, Users } from 'lucide-react';
 import type { Conversation } from './seed';
 import {
   currentUser,
@@ -16,8 +16,6 @@ interface ConversationListProps {
   onSelect: (id: string) => void;
   /** Conversation IDs with in-app notification badges suppressed. */
   mutedConversationIds?: ReadonlySet<string>;
-  updateReady?: boolean;
-  onApplyUpdate?: () => void | Promise<void>;
 }
 
 export function ConversationList({
@@ -25,8 +23,6 @@ export function ConversationList({
   selectedId,
   onSelect,
   mutedConversationIds,
-  updateReady = false,
-  onApplyUpdate,
 }: ConversationListProps) {
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
@@ -279,24 +275,6 @@ export function ConversationList({
           );
         })}
       </div>
-
-      {updateReady && onApplyUpdate && (
-        <div
-          className="relative mb-[5.25rem] shrink-0 bg-[#0f0f16] px-4 pb-4 pt-3 before:absolute before:left-0 before:right-[-1px] before:top-0 before:h-px before:bg-white/5 lg:mb-0"
-          role="status"
-          aria-live="polite"
-        >
-          <button
-            type="button"
-            onClick={() => void onApplyUpdate()}
-            aria-label="Update Argus"
-            className="mx-auto flex h-9 items-center gap-2 rounded-full border border-purple-400/30 bg-purple-500/15 px-4 text-sm font-semibold text-purple-100 shadow-lg shadow-purple-950/25 transition-all duration-300 hover:-translate-y-0.5 hover:border-purple-300/50 hover:bg-purple-500/25 active:translate-y-0"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Update
-          </button>
-        </div>
-      )}
     </div>
   );
 }
