@@ -4,7 +4,8 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { AuthProvider } from './features/auth/AuthContext';
 import { PwaUpdateProvider } from './features/pwa/PwaUpdateProvider';
-import { ToastProvider } from './features/ui';
+import { ToastProvider, applyThemeToDocument } from './features/ui';
+import { readStoredDeviceSettings } from './features/settings/device-settings';
 import './index.css';
 
 // Only an installed (standalone) PWA pins maximum-scale=1 — this stops iOS from zooming the page
@@ -19,6 +20,10 @@ if (isStandalone) {
     .querySelector('meta[name="viewport"]')
     ?.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1');
 }
+
+// Apply stored appearance settings before first paint to avoid FOUC.
+const { accentId, fontSizeLevel } = readStoredDeviceSettings();
+applyThemeToDocument(accentId, fontSizeLevel);
 
 const root = document.getElementById('root');
 if (!root) throw new Error('#root not found');

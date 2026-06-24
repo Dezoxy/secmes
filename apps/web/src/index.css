@@ -1,11 +1,16 @@
 @import 'tailwindcss';
 
 @theme {
-  /* Override Tailwind v4's purple palette so bg-purple-500 text-white meets WCAG AA (≥4.5:1).
-     Tailwind v4's default purple-500 (oklch 0.627) = #ad46ff which gives 3.83:1 with white.
-     #7c3aed (resting) → 5.71:1; #9333ea (hover/purple-400) → 4.99:1. Both pass. */
-  --color-purple-500: #7c3aed;
-  --color-purple-400: #9333ea;
+  /* Purple palette defaults — keep white-on-accent surfaces AA-safe before main.tsx applies
+     the user-selected accent. applyThemeToDocument() keeps the full runtime scale in sync. */
+  --color-purple-100: color-mix(in srgb, #a855f7 20%, white);
+  --color-purple-200: color-mix(in srgb, #a855f7 40%, white);
+  --color-purple-300: color-mix(in srgb, #a855f7 60%, white);
+  --color-purple-400: #9a53dd;
+  --color-purple-500: #964cdc;
+  --color-purple-600: color-mix(in srgb, #964cdc 80%, black);
+  --color-purple-700: color-mix(in srgb, #964cdc 60%, black);
+  --color-purple-950: color-mix(in srgb, #a855f7 20%, black);
 }
 
 @keyframes argus-surface-enter {
@@ -255,9 +260,10 @@
   --argus-color-text-muted: rgb(255 255 255 / 60%);
   --argus-color-danger: #f43f5e;
   --argus-color-success: #22c55e;
-  --argus-color-accent: #7c3aed;
-  --argus-color-accent-hover: #9333ea;
-  --argus-color-accent-soft: rgb(124 58 237 / 20%);
+  --argus-color-accent: #a855f7;
+  --argus-color-accent-hover: color-mix(in srgb, #a855f7 80%, white);
+  --argus-color-accent-soft: rgb(168 85 247 / 20%);
+  --argus-font-size: 100%;
   --argus-space-1: 0.25rem;
   --argus-space-2: 0.5rem;
   --argus-space-3: 0.75rem;
@@ -270,6 +276,10 @@
   --argus-radius-xl: 1.5rem;
   --argus-shadow-panel: 0 25px 50px -12px rgb(0 0 0 / 50%);
   --argus-shadow-accent: 0 18px 34px var(--argus-color-accent-soft);
+}
+
+html {
+  font-size: var(--argus-font-size, 100%);
 }
 
 html,
