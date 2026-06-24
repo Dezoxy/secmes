@@ -801,7 +801,7 @@ export default function ChatScreen() {
   };
 
   return (
-    <div className="argus-screen relative flex bg-[#1a1a24] sm:items-center sm:justify-center sm:p-4">
+    <div className="h-[100dvh] bg-[#1a1a24] flex sm:items-center sm:justify-center sm:p-4">
       <div
         className={`absolute inset-0 w-full sm:static sm:h-[90dvh] sm:max-w-6xl bg-[#12121a] sm:rounded-3xl overflow-hidden flex shadow-2xl shadow-black/50 transition-all duration-700 ease-out ${
           mounted ? 'opacity-100 scale-100' : 'opacity-0 scale-95'

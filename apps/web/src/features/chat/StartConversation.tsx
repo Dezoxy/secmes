@@ -139,8 +139,10 @@ export function StartConversation({
         onOpenExisting(existingId);
         return;
       }
+      setBusy(true);
       conversationHasState(existingId)
         .then((hasState) => {
+          setBusy(false);
           if (hasState) {
             onOpenExisting(existingId);
           } else {
@@ -148,7 +150,10 @@ export function StartConversation({
             startPrepare(u);
           }
         })
-        .catch(() => startPrepare(u)); // on IDB error, err on the side of creating fresh
+        .catch(() => {
+          setBusy(false);
+          startPrepare(u);
+        });
       return;
     }
     startPrepare(u);
