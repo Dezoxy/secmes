@@ -32,12 +32,19 @@ function decodeDeviceSettingsRecord(value: unknown): DeviceSettingsRecord | null
   };
 }
 
+const DEFAULTS: DeviceSettingsRecord = { accentId: defaultAccentId, fontSizeLevel: 5 };
+
 export function readStoredDeviceSettings(): DeviceSettingsRecord {
-  if (typeof window === 'undefined') {
-    return { accentId: defaultAccentId, fontSizeLevel: 5 };
+  if (typeof window === 'undefined') return DEFAULTS;
+
+  let storage: ReturnType<typeof browserLocalStorage>;
+  try {
+    storage = browserLocalStorage();
+  } catch {
+    // Safari throws SecurityError when storage is blocked (private mode / ITP).
+    return DEFAULTS;
   }
 
-  const storage = browserLocalStorage();
   const stored = readVersionedRecord({
     storage,
     key: DEVICE_SETTINGS_STORAGE_KEY,
@@ -58,9 +65,13 @@ export function readStoredDeviceSettings(): DeviceSettingsRecord {
 
 export function writeStoredDeviceSettings(settings: DeviceSettingsRecord): void {
   if (typeof window === 'undefined') return;
-  writeVersionedRecord({
-    storage: browserLocalStorage(),
-    key: DEVICE_SETTINGS_STORAGE_KEY,
-    value: settings,
-  });
+  try {
+    writeVersionedRecord({
+      storage: browserLocalStorage(),
+      key: DEVICE_SETTINGS_STORAGE_KEY,
+      value: settings,
+    });
+  } catch {
+    // Storage unavailable; settings won't persist but the app remains functional.
+  }
 }
