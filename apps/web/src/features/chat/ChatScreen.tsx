@@ -234,6 +234,9 @@ export default function ChatScreen() {
   // (b) friendship gate: resolve the peer's userId for the selected conversation.
   const [peerToConvId, setPeerToConvId] = useState<Map<string, string>>(new Map());
   const [convToPeerId, setConvToPeerId] = useState<Map<string, string>>(new Map());
+  // True once the startup snapshot has been fetched (even when the result is empty).
+  // Distinct from peerToConvId.size===0 which can't tell "not loaded" from "loaded but no DMs".
+  const [peerMapsLoaded, setPeerMapsLoaded] = useState(false);
   // Tracks which DM conversation IDs are already reflected in the peer maps. Prevents the
   // secondary "keep maps fresh" effect from looping on every state update.
   const mappedDMConvsRef = useRef(new Set<string>());
@@ -436,9 +439,11 @@ export default function ChatScreen() {
         convs.forEach((c) => mappedDMConvsRef.current.add(c.id));
         setPeerToConvId(p2c);
         setConvToPeerId(c2p);
+        setPeerMapsLoaded(true);
       })
       .catch(() => {
         /* best-effort; falls back to participants-based dedup */
+        setPeerMapsLoaded(true); // mark loaded even on failure so the secondary effect runs
       });
   }, [manager]);
 
@@ -446,7 +451,7 @@ export default function ChatScreen() {
   // peer reinstalls and sends a new Welcome while the app is open). Uses a ref to avoid looping.
   // WS-arrived DMs are always newer than the snapshot canonical, so they take the canonical slot.
   useEffect(() => {
-    if (peerToConvId.size === 0) return; // startup maps not yet loaded
+    if (!peerMapsLoaded) return; // startup snapshot not yet fetched
     const newDMs = conversations.filter(
       (c) => c.type === 'direct' && !mappedDMConvsRef.current.has(c.id),
     );
@@ -472,7 +477,7 @@ export default function ChatScreen() {
       }
       return next;
     });
-  }, [conversations, peerToConvId.size, currentUserProfile.id]);
+  }, [conversations, peerMapsLoaded, currentUserProfile.id]);
 
   useEffect(() => {
     if ('setAppBadge' in navigator) {
