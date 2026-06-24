@@ -14,6 +14,8 @@ import type { PrivacySettings } from '../../lib/api';
 
 export const PRIVACY_SETTINGS_STORAGE_KEY = versionedStorageKey('settings', 'privacy');
 
+let privacySettingsRevision = 0;
+
 function decodePrivacySettingsRecord(value: unknown): PrivacySettingsRecord | null {
   if (typeof value !== 'object' || value === null) return null;
   const record = value as Record<string, unknown>;
@@ -53,6 +55,11 @@ export function writeStoredPrivacySettings(settings: PrivacySettingsRecord): voi
     key: PRIVACY_SETTINGS_STORAGE_KEY,
     value: settings,
   });
+  privacySettingsRevision += 1;
+}
+
+export function readPrivacySettingsRevision(): number {
+  return privacySettingsRevision;
 }
 
 /**

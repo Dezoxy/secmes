@@ -149,6 +149,8 @@ export function SettingsPanel({
   const privacySettingsMounted = useRef(false);
   const privacySettingsFromServer = useRef(false);
   const privacySettingsUserEdited = useRef(false);
+  const pendingPrivacySettingsRef = useRef<PrivacySettingsRecord | null>(null);
+  const privacySaveTimerRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     setAvatar(profile.avatar);
@@ -171,15 +173,34 @@ export function SettingsPanel({
     }
     privacySettingsUserEdited.current = true;
     writeStoredPrivacySettings(privacySettings);
-    const timer = window.setTimeout(() => {
-      savePrivacySettings(privacySettings).catch(() => {
+    pendingPrivacySettingsRef.current = privacySettings;
+    if (privacySaveTimerRef.current !== undefined) {
+      window.clearTimeout(privacySaveTimerRef.current);
+    }
+    privacySaveTimerRef.current = window.setTimeout(() => {
+      const pending = pendingPrivacySettingsRef.current;
+      pendingPrivacySettingsRef.current = null;
+      privacySaveTimerRef.current = undefined;
+      if (!pending) return;
+      savePrivacySettings(pending).catch(() => {
         // Fire-and-forget: localStorage write already applied; server sync failure is non-blocking.
       });
     }, 500);
-    return () => {
-      window.clearTimeout(timer);
-    };
   }, [privacySettings]);
+
+  useEffect(() => {
+    return () => {
+      if (privacySaveTimerRef.current !== undefined) {
+        window.clearTimeout(privacySaveTimerRef.current);
+        privacySaveTimerRef.current = undefined;
+      }
+      const pending = pendingPrivacySettingsRef.current;
+      pendingPrivacySettingsRef.current = null;
+      if (pending) {
+        void savePrivacySettings(pending).catch(() => {});
+      }
+    };
+  }, []);
 
   // On mount, sync privacy settings from the server so preferences roam across devices.
   useEffect(() => {

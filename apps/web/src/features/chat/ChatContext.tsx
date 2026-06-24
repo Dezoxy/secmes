@@ -44,7 +44,7 @@ import {
 import { useLiveConversations } from './useLiveConversations';
 import { contactDisplayName } from './user-label';
 import { loadArgusProfile, saveArgusProfile } from '../settings/argus-profile';
-import { syncFromServer } from '../settings/privacy-settings';
+import { readPrivacySettingsRevision, syncFromServer } from '../settings/privacy-settings';
 import { loadPersistedPeerMapping, persistPeerMapping } from './peer-naming';
 import { useReceiptSending } from './useReceiptSending';
 import { dicebearAvatar, isCustomPhoto } from '../../lib/dicebear';
@@ -321,9 +321,11 @@ export function ChatProvider({ children }: ChatProviderProps) {
   // Seed the shared privacy cache from the server before read receipts are allowed on fresh devices.
   useEffect(() => {
     let cancelled = false;
+    const revisionBeforeFetch = readPrivacySettingsRevision();
     void fetchPrivacySettings()
       .then((settings) => {
         if (cancelled) return;
+        if (readPrivacySettingsRevision() !== revisionBeforeFetch) return;
         syncFromServer(settings);
         setPrivacySettingsVersion((version) => version + 1);
       })

@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { DEFAULT_PRIVACY_SETTINGS } from './PrivacySettings';
 import {
   isReadReceiptsEnabled,
+  readPrivacySettingsRevision,
   readStoredPrivacySettings,
   writeStoredPrivacySettings,
 } from './privacy-settings';
@@ -54,5 +55,13 @@ describe('privacy-settings', () => {
     expect(isReadReceiptsEnabled()).toBe(false);
     writeStoredPrivacySettings({ ...DEFAULT_PRIVACY_SETTINGS, readReceipts: true });
     expect(isReadReceiptsEnabled()).toBe(true);
+  });
+
+  it('increments the in-runtime revision when the shared cache changes', () => {
+    const before = readPrivacySettingsRevision();
+
+    writeStoredPrivacySettings({ ...DEFAULT_PRIVACY_SETTINGS, readReceipts: false });
+
+    expect(readPrivacySettingsRevision()).toBeGreaterThan(before);
   });
 });
