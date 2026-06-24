@@ -55,8 +55,16 @@ export function readStoredDeviceSettings(): DeviceSettingsRecord {
   if (stored.status === 'ok') return stored.value;
   if (stored.status === 'unavailable') return DEFAULTS;
 
-  const legacyAccent = storage.getItem(LEGACY_ACCENT_STORAGE_KEY);
-  const legacyFontSize = Number.parseInt(storage.getItem(LEGACY_FONT_SIZE_STORAGE_KEY) ?? '', 10);
+  let legacyAccent: string | null;
+  let legacyFontSizeRaw: string | null;
+  try {
+    legacyAccent = storage.getItem(LEGACY_ACCENT_STORAGE_KEY);
+    legacyFontSizeRaw = storage.getItem(LEGACY_FONT_SIZE_STORAGE_KEY);
+  } catch {
+    return DEFAULTS;
+  }
+
+  const legacyFontSize = Number.parseInt(legacyFontSizeRaw ?? '', 10);
   const migrated = {
     accentId: isAccentId(legacyAccent) ? legacyAccent : defaultAccentId,
     fontSizeLevel:

@@ -1,16 +1,15 @@
 @import 'tailwindcss';
 
 @theme {
-  /* Purple palette defaults — match theme.ts purple accent (#a855f7). applyThemeToDocument()
-     overrides these at runtime so the full scale stays in sync with whichever accent the user
-     chose; these values are only visible during the (near-zero) gap before main.tsx runs. */
+  /* Purple palette defaults — keep white-on-accent surfaces AA-safe before main.tsx applies
+     the user-selected accent. applyThemeToDocument() keeps the full runtime scale in sync. */
   --color-purple-100: color-mix(in srgb, #a855f7 20%, white);
   --color-purple-200: color-mix(in srgb, #a855f7 40%, white);
   --color-purple-300: color-mix(in srgb, #a855f7 60%, white);
-  --color-purple-400: color-mix(in srgb, #a855f7 80%, white);
-  --color-purple-500: #a855f7;
-  --color-purple-600: color-mix(in srgb, #a855f7 80%, black);
-  --color-purple-700: color-mix(in srgb, #a855f7 60%, black);
+  --color-purple-400: #9a53dd;
+  --color-purple-500: #964cdc;
+  --color-purple-600: color-mix(in srgb, #964cdc 80%, black);
+  --color-purple-700: color-mix(in srgb, #964cdc 60%, black);
   --color-purple-950: color-mix(in srgb, #a855f7 20%, black);
 }
 
