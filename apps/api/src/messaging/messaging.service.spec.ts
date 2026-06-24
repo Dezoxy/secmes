@@ -3,7 +3,7 @@ import {
   signWelcomeConsume,
   signWelcomeFetch,
 } from '@argus/crypto/device-proof';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
@@ -92,6 +92,15 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     [{ id: bobDeviceId }] =
       await sql`insert into devices (tenant_id, user_id, signature_public_key) values (${tenantA}, ${bobId}, ${Buffer.from(bDev.publicKey).toString('base64')}) returning id`;
 
+    // Seed accepted friendships required for isDirect=true DM creation.
+    // alice↔bob: used by newConversation() and most send/list tests.
+    // alice↔dave: used by the cross-conversation sync test.
+    await sql`
+      insert into friendships (tenant_id, user_low_id, user_high_id, status, resolved_at) values
+        (${tenantA}, least(${aliceId}::uuid, ${bobId}::uuid), greatest(${aliceId}::uuid, ${bobId}::uuid), 'accepted', now()),
+        (${tenantA}, least(${aliceId}::uuid, ${daveId}::uuid), greatest(${aliceId}::uuid, ${daveId}::uuid), 'accepted', now())
+    `;
+
     aliceAuth = { sub: 'm-alice', tenantId: tenantA };
     bobAuth = { sub: 'm-bob', tenantId: tenantA };
     daveAuth = { sub: 'm-dave', tenantId: tenantA };
@@ -106,7 +115,17 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     }
   });
 
+  // A generic GROUP conversation (alice + bob). isDirect=false, so the friendship gate never fires — used
+  // by the membership / send / welcome / commit MECHANICS tests, several of which add a further member
+  // (e.g. dave). DM-specific friendship behaviour uses newDm() instead.
   async function newConversation(): Promise<string> {
+    const { conversationId } = await svc.createConversation(aliceAuth, [bobId], false);
+    return conversationId;
+  }
+
+  // A DIRECT (1:1) conversation between alice and bob (seeded as friends in beforeAll). Use for the DM
+  // friendship-gate tests. createConversation gates the direct create against the seeded friendship.
+  async function newDm(): Promise<string> {
     const { conversationId } = await svc.createConversation(aliceAuth, [bobId], true);
     return conversationId;
   }
@@ -119,9 +138,12 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     expect(ids).toEqual([aliceId, bobId].sort());
   });
 
-  it('rejects a member id from another tenant (composite FK → 400)', async () => {
+  it('rejects a direct create with a cross-tenant peer (403 — friendship gate fires before the FK)', async () => {
+    // carolId is from tenantB. A direct create that names a real peer is friendship-gated, and no
+    // alice↔carol friendship can exist across tenants (RLS-scoped), so the caller gets 403 — the gate
+    // runs before the members insert that would otherwise reject the cross-tenant id with 400.
     await expect(svc.createConversation(aliceAuth, [carolId], true)).rejects.toBeInstanceOf(
-      BadRequestException,
+      ForbiddenException,
     );
   });
 
@@ -192,6 +214,78 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     expect(a.deduplicated).toBe(false);
     expect(b.deduplicated).toBe(false); // different conversation → not a dup, stored separately
     expect(a.messageId).not.toBe(b.messageId);
+  });
+
+  it('DM send is blocked with 403 after the peer unfriends the caller', async () => {
+    const conv = await newDm();
+    await sql`delete from friendships where tenant_id = ${tenantA}
+      and user_low_id = least(${aliceId}::uuid, ${bobId}::uuid)
+      and user_high_id = greatest(${aliceId}::uuid, ${bobId}::uuid)`;
+    try {
+      await expect(svc.sendMessage(bobAuth, conv, msg())).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+    } finally {
+      await sql`insert into friendships (tenant_id, user_low_id, user_high_id, status, resolved_at)
+        values (${tenantA}, least(${aliceId}::uuid, ${bobId}::uuid), greatest(${aliceId}::uuid, ${bobId}::uuid), 'accepted', now())`;
+    }
+  });
+
+  it('idempotent retry of an already-stored DM message succeeds after unfriending (fast-path bypasses gate)', async () => {
+    const conv = await newDm();
+    const body = msg();
+    const first = await svc.sendMessage(bobAuth, conv, body);
+    expect(first.deduplicated).toBe(false);
+    await sql`delete from friendships where tenant_id = ${tenantA}
+      and user_low_id = least(${aliceId}::uuid, ${bobId}::uuid)
+      and user_high_id = greatest(${aliceId}::uuid, ${bobId}::uuid)`;
+    try {
+      // The idempotent-retry fast path runs BEFORE the friendship gate, so the stored message is
+      // returned as-is — the client gets its ACK even though the friendship has been revoked.
+      const retry = await svc.sendMessage(bobAuth, conv, body);
+      expect(retry.deduplicated).toBe(true);
+      expect(retry.messageId).toBe(first.messageId);
+    } finally {
+      await sql`insert into friendships (tenant_id, user_low_id, user_high_id, status, resolved_at)
+        values (${tenantA}, least(${aliceId}::uuid, ${bobId}::uuid), greatest(${aliceId}::uuid, ${bobId}::uuid), 'accepted', now())`;
+    }
+  });
+
+  it('deliverWelcome adds the peer to a solo DM when they are an accepted friend (gate at the add site)', async () => {
+    // Real client flow: create a SOLO DM (just the creator), then add the peer via deliverWelcome.
+    const { conversationId } = await svc.createConversation(aliceAuth, [aliceId], true);
+    await svc.deliverWelcome(aliceAuth, conversationId, {
+      recipientUserId: bobId,
+      recipientDeviceId: bobDeviceId,
+      welcome: 'd2VsY29tZQ==',
+      ratchetTree: 'dHJlZQ==',
+    });
+    const members =
+      await sql`select user_id from conversation_members where conversation_id = ${conversationId} order by user_id`;
+    expect(members.map((r) => r.user_id).sort()).toEqual([aliceId, bobId].sort());
+  });
+
+  it('deliverWelcome adding a non-friend to a DM is blocked with 403 and writes no member row', async () => {
+    const { conversationId } = await svc.createConversation(aliceAuth, [aliceId], true);
+    await sql`delete from friendships where tenant_id = ${tenantA}
+      and user_low_id = least(${aliceId}::uuid, ${bobId}::uuid)
+      and user_high_id = greatest(${aliceId}::uuid, ${bobId}::uuid)`;
+    try {
+      await expect(
+        svc.deliverWelcome(aliceAuth, conversationId, {
+          recipientUserId: bobId,
+          recipientDeviceId: bobDeviceId,
+          welcome: 'd2VsY29tZQ==',
+          ratchetTree: 'dHJlZQ==',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      const bobRows =
+        await sql`select 1 from conversation_members where conversation_id = ${conversationId} and user_id = ${bobId}`;
+      expect(bobRows.length).toBe(0); // rejected add wrote no member row (gate runs before the insert)
+    } finally {
+      await sql`insert into friendships (tenant_id, user_low_id, user_high_id, status, resolved_at)
+        values (${tenantA}, least(${aliceId}::uuid, ${bobId}::uuid), greatest(${aliceId}::uuid, ${bobId}::uuid), 'accepted', now())`;
+    }
   });
 
   it('a suspended (soft-deleted) caller cannot create or send, even with a valid token', async () => {

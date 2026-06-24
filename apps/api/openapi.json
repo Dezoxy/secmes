@@ -3133,6 +3133,227 @@
         ]
       }
     },
+    "/push/subscription": {
+      "put": {
+        "operationId": "subscribePush",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscribePushBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "subscription stored"
+          },
+          "400": {
+            "description": "invalid body, unsafe endpoint, or device not owned by caller",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted to perform this action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Register or update the caller's device push subscription",
+        "tags": [
+          "push"
+        ]
+      },
+      "delete": {
+        "operationId": "unsubscribePush",
+        "parameters": [
+          {
+            "name": "deviceId",
+            "required": true,
+            "in": "query",
+            "description": "UUID of the device whose subscription to remove",
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "maxLength": 36,
+              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "subscription removed (or was not present)"
+          },
+          "400": {
+            "description": "deviceId is missing or not a valid UUID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted to perform this action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Remove the caller's push subscription for a specific device",
+        "tags": [
+          "push"
+        ]
+      }
+    },
     "/me": {
       "get": {
         "operationId": "getMe",
@@ -4306,7 +4527,7 @@
             }
           },
           "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
+            "description": "a direct conversation naming a peer directly requires an accepted friendship",
             "content": {
               "application/json": {
                 "schema": {
@@ -4435,7 +4656,7 @@
             }
           },
           "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
+            "description": "direct conversation requires an accepted friendship",
             "content": {
               "application/json": {
                 "schema": {
@@ -4705,7 +4926,7 @@
             }
           },
           "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
+            "description": "direct conversation requires an accepted friendship (DM only, defence-in-depth)",
             "content": {
               "application/json": {
                 "schema": {
@@ -5530,7 +5751,7 @@
             }
           },
           "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
+            "description": "direct conversation requires an accepted friendship with the added recipient",
             "content": {
               "application/json": {
                 "schema": {
@@ -6256,227 +6477,6 @@
         "summary": "Mint a download grant for an encrypted attachment (member-only)",
         "tags": [
           "messaging"
-        ]
-      }
-    },
-    "/push/subscription": {
-      "put": {
-        "operationId": "subscribePush",
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SubscribePushBody"
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "subscription stored"
-          },
-          "400": {
-            "description": "invalid body, unsafe endpoint, or device not owned by caller",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Register or update the caller's device push subscription",
-        "tags": [
-          "push"
-        ]
-      },
-      "delete": {
-        "operationId": "unsubscribePush",
-        "parameters": [
-          {
-            "name": "deviceId",
-            "required": true,
-            "in": "query",
-            "description": "UUID of the device whose subscription to remove",
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "maxLength": 36,
-              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "subscription removed (or was not present)"
-          },
-          "400": {
-            "description": "deviceId is missing or not a valid UUID",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "missing or invalid bearer token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "406": {
-            "description": "No acceptable representation for the requested `Accept` header.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "Unsupported request media type.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "429": {
-            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Remove the caller's push subscription for a specific device",
-        "tags": [
-          "push"
         ]
       }
     },
@@ -8053,6 +8053,55 @@
         ],
         "additionalProperties": false
       },
+      "PushSubscriptionBody": {
+        "type": "object",
+        "properties": {
+          "p256dh": {
+            "type": "string",
+            "description": "base64url RFC 8291 receiver public key",
+            "maxLength": 256,
+            "pattern": "^[A-Za-z0-9_-]+=*$"
+          },
+          "auth": {
+            "type": "string",
+            "description": "base64url RFC 8291 auth secret",
+            "maxLength": 64,
+            "pattern": "^[A-Za-z0-9_-]+=*$"
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "push service endpoint URL (https only)",
+            "maxLength": 2048,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          }
+        },
+        "required": [
+          "p256dh",
+          "auth",
+          "endpoint"
+        ],
+        "additionalProperties": false
+      },
+      "SubscribePushBody": {
+        "type": "object",
+        "properties": {
+          "deviceId": {
+            "type": "string",
+            "description": "the device registering this subscription",
+            "format": "uuid",
+            "maxLength": 36,
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+          },
+          "subscription": {
+            "$ref": "#/components/schemas/PushSubscriptionBody"
+          }
+        },
+        "required": [
+          "deviceId",
+          "subscription"
+        ],
+        "additionalProperties": false
+      },
       "UpdateProfileBody": {
         "type": "object",
         "properties": {
@@ -9458,55 +9507,6 @@
         },
         "required": [
           "url"
-        ],
-        "additionalProperties": false
-      },
-      "PushSubscriptionBody": {
-        "type": "object",
-        "properties": {
-          "p256dh": {
-            "type": "string",
-            "description": "base64url RFC 8291 receiver public key",
-            "maxLength": 256,
-            "pattern": "^[A-Za-z0-9_-]+=*$"
-          },
-          "auth": {
-            "type": "string",
-            "description": "base64url RFC 8291 auth secret",
-            "maxLength": 64,
-            "pattern": "^[A-Za-z0-9_-]+=*$"
-          },
-          "endpoint": {
-            "type": "string",
-            "description": "push service endpoint URL (https only)",
-            "maxLength": 2048,
-            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
-          }
-        },
-        "required": [
-          "p256dh",
-          "auth",
-          "endpoint"
-        ],
-        "additionalProperties": false
-      },
-      "SubscribePushBody": {
-        "type": "object",
-        "properties": {
-          "deviceId": {
-            "type": "string",
-            "description": "the device registering this subscription",
-            "format": "uuid",
-            "maxLength": 36,
-            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-          },
-          "subscription": {
-            "$ref": "#/components/schemas/PushSubscriptionBody"
-          }
-        },
-        "required": [
-          "deviceId",
-          "subscription"
         ],
         "additionalProperties": false
       },
