@@ -11,7 +11,6 @@ import {
   writeVersionedRecord,
 } from '../../lib/persistence';
 import { defaultAccentId, isAccentId, type AccentId } from '../ui';
-import { FONT_SIZE_LEVELS } from './AppearanceSettings';
 
 export const DEVICE_SETTINGS_STORAGE_KEY = versionedStorageKey('settings', 'device');
 
@@ -28,7 +27,10 @@ function decodeDeviceSettingsRecord(value: unknown): DeviceSettingsRecord | null
 
   return {
     accentId: isAccentId(accentId) ? accentId : defaultAccentId,
-    fontSizeLevel: FONT_SIZE_LEVELS.includes(fontSizeLevel) ? fontSizeLevel : 5,
+    fontSizeLevel:
+      Number.isInteger(fontSizeLevel) && fontSizeLevel >= 1 && fontSizeLevel <= 10
+        ? fontSizeLevel
+        : 5,
   };
 }
 
@@ -51,12 +53,16 @@ export function readStoredDeviceSettings(): DeviceSettingsRecord {
     decode: decodeDeviceSettingsRecord,
   });
   if (stored.status === 'ok') return stored.value;
+  if (stored.status === 'unavailable') return DEFAULTS;
 
   const legacyAccent = storage.getItem(LEGACY_ACCENT_STORAGE_KEY);
   const legacyFontSize = Number.parseInt(storage.getItem(LEGACY_FONT_SIZE_STORAGE_KEY) ?? '', 10);
   const migrated = {
     accentId: isAccentId(legacyAccent) ? legacyAccent : defaultAccentId,
-    fontSizeLevel: FONT_SIZE_LEVELS.includes(legacyFontSize) ? legacyFontSize : 5,
+    fontSizeLevel:
+      Number.isInteger(legacyFontSize) && legacyFontSize >= 1 && legacyFontSize <= 10
+        ? legacyFontSize
+        : 5,
   };
 
   writeVersionedRecord({ storage, key: DEVICE_SETTINGS_STORAGE_KEY, value: migrated });

@@ -1,11 +1,17 @@
 @import 'tailwindcss';
 
 @theme {
-  /* Override Tailwind v4's purple palette so bg-purple-500 text-white meets WCAG AA (≥4.5:1).
-     Tailwind v4's default purple-500 (oklch 0.627) = #ad46ff which gives 3.83:1 with white.
-     #7c3aed (resting) → 5.71:1; #9333ea (hover/purple-400) → 4.99:1. Both pass. */
-  --color-purple-500: #7c3aed;
-  --color-purple-400: #9333ea;
+  /* Purple palette defaults — match theme.ts purple accent (#a855f7). applyThemeToDocument()
+     overrides these at runtime so the full scale stays in sync with whichever accent the user
+     chose; these values are only visible during the (near-zero) gap before main.tsx runs. */
+  --color-purple-100: color-mix(in srgb, #a855f7 20%, white);
+  --color-purple-200: color-mix(in srgb, #a855f7 40%, white);
+  --color-purple-300: color-mix(in srgb, #a855f7 60%, white);
+  --color-purple-400: color-mix(in srgb, #a855f7 80%, white);
+  --color-purple-500: #a855f7;
+  --color-purple-600: color-mix(in srgb, #a855f7 80%, black);
+  --color-purple-700: color-mix(in srgb, #a855f7 60%, black);
+  --color-purple-950: color-mix(in srgb, #a855f7 20%, black);
 }
 
 @keyframes argus-surface-enter {
