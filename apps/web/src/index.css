@@ -13,6 +13,13 @@
   --color-purple-950: color-mix(in srgb, #a855f7 20%, black);
 }
 
+:root {
+  /* Brand identity colours — never overridden by the accent theme */
+  --argus-brand-300: color-mix(in srgb, #a855f7 60%, white);
+  --argus-brand-400: #9a53dd;
+  --argus-brand-600: color-mix(in srgb, #964cdc 80%, black);
+}
+
 @keyframes argus-surface-enter {
   from {
     opacity: 0;

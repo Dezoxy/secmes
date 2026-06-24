@@ -72,8 +72,10 @@ export function RoutePageShell({
                 <ArrowLeft className="h-4 w-4" />
               </button>
               <Link to="/chat" className="flex items-center gap-3" aria-label="Open chat">
-                <ArgusAppIcon className="h-10 w-10 rounded-xl shadow-lg shadow-purple-500/20" />
-                <span className="text-xl font-bold tracking-[0.08em] text-purple-300">ARGUS</span>
+                <ArgusAppIcon className="h-10 w-10 rounded-xl shadow-lg shadow-[#964cdc]/20" />
+                <span className="text-xl font-bold tracking-[0.08em] text-[var(--argus-brand-300)]">
+                  ARGUS
+                </span>
               </Link>
             </div>
 
