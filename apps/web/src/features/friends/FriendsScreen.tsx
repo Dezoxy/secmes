@@ -133,14 +133,14 @@ export default function FriendsScreen() {
     <div className="flex h-full flex-col bg-[#0f0f16]">
       <div className="border-b border-white/5 bg-[#0f0f16]/75 p-4 pt-[calc(env(safe-area-inset-top)_+_1rem)] backdrop-blur-xl">
         <div className="mb-1">
-          <div className="flex items-center gap-2">
+          <h1 className="flex items-center gap-2">
             <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />
             <span className="text-xl font-bold tracking-wider">
               <span className="bg-gradient-to-r from-purple-400 to-purple-600 bg-clip-text text-transparent">
                 FRIENDS
               </span>
             </span>
-          </div>
+          </h1>
           <p className="text-xs text-white/45">
             {friends.length} accepted {friends.length === 1 ? 'friend' : 'friends'}
           </p>

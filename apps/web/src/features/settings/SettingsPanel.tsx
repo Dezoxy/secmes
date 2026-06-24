@@ -368,14 +368,14 @@ export function SettingsPanel({
       >
         {/* Fixed header */}
         <div className="mb-4 flex shrink-0 items-center justify-between">
-          <div className="flex items-center gap-2">
+          <h2 className="flex items-center gap-2">
             <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />
             <span className="text-xl font-bold tracking-wider">
               <span className="bg-gradient-to-r from-purple-400 to-purple-600 bg-clip-text text-transparent">
                 SETTINGS
               </span>
             </span>
-          </div>
+          </h2>
           {!standalone && (
             <IconButton onClick={closeSettings} size="sm" aria-label="Close settings">
               <X className="h-5 w-5" />
