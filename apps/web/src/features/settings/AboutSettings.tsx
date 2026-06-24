@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type UIEvent } from 'react';
+import { useEffect, useState } from 'react';
 import { ServiceInfoSchema } from '@argus/contracts';
 import { ExternalLink, RefreshCw } from 'lucide-react';
 import { requestJson, type ApiResult } from '../../lib/api-client';
@@ -7,14 +7,6 @@ import { releaseNotes } from '../../lib/release-notes';
 import { usePwaUpdate, type PwaUpdateStatus } from '../pwa/PwaUpdateContext';
 
 type BackendStatus = 'online' | 'offline';
-
-interface ScrollThumbMetrics {
-  height: number;
-  offset: number;
-  scrollable: boolean;
-}
-
-const hiddenScrollThumb: ScrollThumbMetrics = { height: 0, offset: 0, scrollable: false };
 
 function backendStatusFromResult(result: ApiResult<unknown>): BackendStatus {
   return result.ok ? 'online' : 'offline';
@@ -56,10 +48,6 @@ function updateStatusLabel(status: PwaUpdateStatus): string {
 
 export function AboutSettings() {
   const [backendStatus, setBackendStatus] = useState<BackendStatus>('offline');
-  const releaseNotesRef = useRef<HTMLElement | null>(null);
-  const scrollHideTimerRef = useRef<number | undefined>(undefined);
-  const [scrollThumb, setScrollThumb] = useState<ScrollThumbMetrics>(hiddenScrollThumb);
-  const [scrollThumbVisible, setScrollThumbVisible] = useState(false);
   const {
     canCheckForUpdate,
     updateReady,
@@ -81,57 +69,8 @@ export function AboutSettings() {
   const online = backendStatus === 'online';
   const checkingForUpdate = updateStatus === 'checking';
 
-  function updateScrollThumb(node: HTMLElement): ScrollThumbMetrics {
-    const trackHeight = Math.max(0, node.clientHeight - 16);
-    const scrollable = node.scrollHeight > node.clientHeight + 1 && trackHeight > 0;
-    if (!scrollable) {
-      setScrollThumb(hiddenScrollThumb);
-      return hiddenScrollThumb;
-    }
-
-    const thumbHeight = Math.max(28, (node.clientHeight / node.scrollHeight) * trackHeight);
-    const maxThumbOffset = Math.max(0, trackHeight - thumbHeight);
-    const maxScroll = Math.max(1, node.scrollHeight - node.clientHeight);
-    const offset = (node.scrollTop / maxScroll) * maxThumbOffset;
-    const nextMetrics = { height: thumbHeight, offset, scrollable };
-    setScrollThumb(nextMetrics);
-    return nextMetrics;
-  }
-
-  function showScrollThumb(node: HTMLElement): void {
-    const nextMetrics = updateScrollThumb(node);
-    if (!nextMetrics.scrollable) return;
-
-    setScrollThumbVisible(true);
-    if (scrollHideTimerRef.current !== undefined) window.clearTimeout(scrollHideTimerRef.current);
-    scrollHideTimerRef.current = window.setTimeout(() => {
-      setScrollThumbVisible(false);
-    }, 700);
-  }
-
-  function handleReleaseNotesScroll(event: UIEvent<HTMLElement>): void {
-    showScrollThumb(event.currentTarget);
-  }
-
-  useEffect(() => {
-    const node = releaseNotesRef.current;
-    if (!node) return undefined;
-
-    updateScrollThumb(node);
-
-    function handleResize(): void {
-      if (releaseNotesRef.current) updateScrollThumb(releaseNotesRef.current);
-    }
-
-    window.addEventListener('resize', handleResize);
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      if (scrollHideTimerRef.current !== undefined) window.clearTimeout(scrollHideTimerRef.current);
-    };
-  }, []);
-
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex flex-col">
       <div className="flex items-center justify-between gap-4 rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3">
         <span className="text-sm font-medium text-white">Version</span>
         <span className="text-sm font-medium text-white/60">{APP_VERSION_TAG}</span>
@@ -183,62 +122,41 @@ export function AboutSettings() {
         </p>
       </div>
 
-      <div className="relative mt-3 min-h-0 w-full flex-1">
-        <section
-          ref={releaseNotesRef}
-          aria-label="Release notes"
-          onScroll={handleReleaseNotesScroll}
-          className="h-full min-h-0 w-full overscroll-contain overflow-y-auto rounded-xl border border-white/5 bg-white/[0.025] px-4 py-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        >
-          <h4 className="text-sm font-medium text-white/75">Release notes</h4>
-          <div className="mt-3 space-y-4">
-            {releaseNotes.map((note) => (
-              <article key={`${note.version}-${note.title}`} className="space-y-2">
-                <div className="flex items-baseline justify-between gap-3">
-                  <p className="text-xs font-medium text-white/65">{note.version}</p>
-                  <p className="truncate text-xs text-white/60">{note.title}</p>
-                </div>
-                <div className="space-y-2">
-                  {note.groups.map((group) => (
-                    <div key={group.label} className="space-y-1">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-white/45">
-                        {group.label}
-                      </p>
-                      <ul className="space-y-1 pl-4 text-xs leading-5 text-white/60">
-                        {group.items.map((item) => (
-                          <li key={item} className="list-disc">
-                            {item}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ))}
-                  {note.overflowNote && (
-                    <p className="pl-4 text-xs leading-5 text-white/45">{note.overflowNote}</p>
-                  )}
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-        {scrollThumb.scrollable && (
-          <div
-            aria-hidden="true"
-            className={`pointer-events-none absolute bottom-2 right-2 top-2 w-1.5 rounded-full bg-white/[0.04] transition-opacity duration-200 ${
-              scrollThumbVisible ? 'opacity-100' : 'opacity-0'
-            }`}
-            data-testid="release-notes-scrollbar"
-          >
-            <span
-              className="absolute left-0 w-full rounded-full bg-white/45 shadow-[0_0_10px_rgba(168,85,247,0.3)]"
-              style={{
-                height: `${scrollThumb.height}px`,
-                transform: `translateY(${scrollThumb.offset}px)`,
-              }}
-            />
-          </div>
-        )}
-      </div>
+      <section
+        aria-label="Release notes"
+        className="mt-3 rounded-xl border border-white/5 bg-white/[0.025] px-4 py-3"
+      >
+        <h4 className="text-sm font-medium text-white/75">Release notes</h4>
+        <div className="mt-3 space-y-4">
+          {releaseNotes.map((note) => (
+            <article key={`${note.version}-${note.title}`} className="space-y-2">
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="text-xs font-medium text-white/65">{note.version}</p>
+                <p className="truncate text-xs text-white/60">{note.title}</p>
+              </div>
+              <div className="space-y-2">
+                {note.groups.map((group) => (
+                  <div key={group.label} className="space-y-1">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-white/45">
+                      {group.label}
+                    </p>
+                    <ul className="space-y-1 pl-4 text-xs leading-5 text-white/60">
+                      {group.items.map((item) => (
+                        <li key={item} className="list-disc">
+                          {item}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+                {note.overflowNote && (
+                  <p className="pl-4 text-xs leading-5 text-white/45">{note.overflowNote}</p>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
