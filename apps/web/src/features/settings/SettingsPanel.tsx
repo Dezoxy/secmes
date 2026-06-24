@@ -42,12 +42,16 @@ import { AppearanceSettings, FONT_SIZE_LEVELS } from './AppearanceSettings';
 import { DataStorageSettings } from './DataStorageSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { PrivacySettings, type PrivacySettingsRecord } from './PrivacySettings';
-import { readStoredPrivacySettings, writeStoredPrivacySettings } from './privacy-settings';
+import {
+  readStoredPrivacySettings,
+  syncFromServer,
+  writeStoredPrivacySettings,
+} from './privacy-settings';
 import { ProfileSettings, type AnonymousProfile } from './ProfileSettings';
 import { SecuritySettings } from './SecuritySettings';
 import { AdminPanel } from './AdminPanel';
 import { TeamSettings } from './TeamSettings';
-import type { MeBound } from '../../lib/api';
+import { fetchPrivacySettings, savePrivacySettings, type MeBound } from '../../lib/api';
 
 export type { AnonymousProfile } from './ProfileSettings';
 
@@ -202,7 +206,22 @@ export function SettingsPanel({
 
   useEffect(() => {
     writeStoredPrivacySettings(privacySettings);
+    savePrivacySettings(privacySettings).catch(() => {
+      // Fire-and-forget: localStorage write already applied; server sync failure is non-blocking.
+    });
   }, [privacySettings]);
+
+  // On mount, sync privacy settings from the server so preferences roam across devices.
+  useEffect(() => {
+    fetchPrivacySettings()
+      .then((serverSettings) => {
+        syncFromServer(serverSettings);
+        setPrivacySettings(serverSettings);
+      })
+      .catch(() => {
+        // Network unavailable — keep the localStorage value already loaded by useState.
+      });
+  }, []);
 
   const activeSection = sections.find((section) => section.id === active) ?? sections[0]!;
   const ActiveIcon = activeSection.icon;

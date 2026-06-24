@@ -43,6 +43,9 @@ export class GdprService {
             role: schema.users.role,
             status: schema.users.status,
             createdAt: schema.users.createdAt,
+            privacyReadReceipts: schema.users.privacyReadReceipts,
+            privacyTypingIndicators: schema.users.privacyTypingIndicators,
+            privacyLinkPreviews: schema.users.privacyLinkPreviews,
           })
           .from(schema.users)
           .where(
@@ -252,6 +255,11 @@ export class GdprService {
         role: profile.role,
         status: profile.status,
         createdAt: profile.createdAt.toISOString(),
+        privacySettings: {
+          readReceipts: profile.privacyReadReceipts ?? true,
+          typingIndicators: profile.privacyTypingIndicators ?? true,
+          linkPreviews: profile.privacyLinkPreviews ?? true,
+        },
       },
       devices: devices.map((d) => ({
         id: d.id,

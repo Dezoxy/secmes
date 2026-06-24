@@ -44,6 +44,10 @@ export const users = pgTable('users', {
   status: text('status').notNull().default('active'),
   role: text('role').notNull().default('member'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  // Privacy preferences (0045). NULL = use server default (true). Coerced before returning to clients.
+  privacyReadReceipts: boolean('privacy_read_receipts'),
+  privacyTypingIndicators: boolean('privacy_typing_indicators'),
+  privacyLinkPreviews: boolean('privacy_link_previews'),
 });
 
 // Key directory (roadmap 19) — PUBLIC MLS key material only (base64 text, opaque to the server).

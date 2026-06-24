@@ -89,9 +89,13 @@ import {
   SendFriendRequestSchema,
   SendFriendRequestResponseSchema,
   OLDEST_RETAINED_EPOCH_HEADER,
+  PrivacySettingsSchema,
+  UpdatePrivacySettingsSchema,
   type Friend,
   type FriendRequest,
   type FriendRequestBox,
+  type PrivacySettings,
+  type UpdatePrivacySettings,
 } from '@argus/contracts';
 import { type ApiResult, requestJson, requestStatus, unwrapApiResult } from './api-client';
 
@@ -257,6 +261,27 @@ export async function updateProfile(body: UpdateProfileBody): Promise<void> {
       method: 'PUT',
       body,
       requestSchema: UpdateProfileSchema,
+    }),
+  );
+}
+
+/** Fetch the caller's server-side privacy settings (GET /me/settings/privacy). */
+export type { PrivacySettings, UpdatePrivacySettings };
+
+export async function fetchPrivacySettings(): Promise<PrivacySettings> {
+  return unwrapApiResult(
+    await requestJson({ path: '/me/settings/privacy', responseSchema: PrivacySettingsSchema }),
+  );
+}
+
+/** Persist the caller's privacy settings to the server (PUT /me/settings/privacy → 204). */
+export async function savePrivacySettings(body: UpdatePrivacySettings): Promise<void> {
+  unwrapApiResult(
+    await requestStatus({
+      path: '/me/settings/privacy',
+      method: 'PUT',
+      body,
+      requestSchema: UpdatePrivacySettingsSchema,
     }),
   );
 }

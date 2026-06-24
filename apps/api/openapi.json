@@ -3754,6 +3754,238 @@
         ]
       }
     },
+    "/me/settings/privacy": {
+      "get": {
+        "operationId": "getMyPrivacySettings",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "current privacy settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "readReceipts": {
+                      "type": "boolean"
+                    },
+                    "typingIndicators": {
+                      "type": "boolean"
+                    },
+                    "linkPreviews": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "readReceipts",
+                    "typingIndicators",
+                    "linkPreviews"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted to perform this action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Get own privacy settings",
+        "tags": [
+          "users"
+        ]
+      },
+      "put": {
+        "operationId": "updateMyPrivacySettings",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePrivacySettingsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "privacy settings updated"
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated, but not permitted to perform this action.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded — too many requests; retry after the `Retry-After` interval.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Update own privacy settings",
+        "tags": [
+          "users"
+        ]
+      }
+    },
     "/users/lookup": {
       "get": {
         "operationId": "lookupUser",
@@ -8125,6 +8357,24 @@
             "description": "aesthetic seed token for deterministic avatar generation (≤64 chars)",
             "maxLength": 64,
             "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdatePrivacySettingsBody": {
+        "type": "object",
+        "properties": {
+          "readReceipts": {
+            "type": "boolean",
+            "description": "Send and display read watermarks"
+          },
+          "typingIndicators": {
+            "type": "boolean",
+            "description": "Send and display typing indicators"
+          },
+          "linkPreviews": {
+            "type": "boolean",
+            "description": "Generate link previews (client-side only)"
           }
         },
         "additionalProperties": false

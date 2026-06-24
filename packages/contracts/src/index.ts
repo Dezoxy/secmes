@@ -174,6 +174,24 @@ export const UpdateProfileSchema = z.object({
 });
 export type UpdateProfile = z.infer<typeof UpdateProfileSchema>;
 
+// ─── Privacy settings ─────────────────────────────────────────────────────────────────────────────
+
+export const PrivacySettingsSchema = z.object({
+  readReceipts: z.boolean(),
+  typingIndicators: z.boolean(),
+  linkPreviews: z.boolean(),
+});
+export type PrivacySettings = z.infer<typeof PrivacySettingsSchema>;
+
+export const UpdatePrivacySettingsSchema = z
+  .object({
+    readReceipts: z.boolean().optional(),
+    typingIndicators: z.boolean().optional(),
+    linkPreviews: z.boolean().optional(),
+  })
+  .strict();
+export type UpdatePrivacySettings = z.infer<typeof UpdatePrivacySettingsSchema>;
+
 // ─── Friends (contact-list recovery) ──────────────────────────────────────────────────────────────
 // Server-backed friend graph: accepted friendships are the durable contact source after a reinstall.
 // Requests are ephemeral (TTL'd pending; decline/cancel = hard DELETE). The server stores metadata only.
@@ -675,6 +693,7 @@ export const MeExportSchema = z.object({
       role: z.string().max(32),
       status: z.string().max(32),
       createdAt: z.string().datetime(),
+      privacySettings: PrivacySettingsSchema,
     })
     .nullable(),
   devices: z.array(

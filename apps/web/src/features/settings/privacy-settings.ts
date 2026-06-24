@@ -10,6 +10,7 @@ import {
   writeVersionedRecord,
 } from '../../lib/persistence';
 import { DEFAULT_PRIVACY_SETTINGS, type PrivacySettingsRecord } from './PrivacySettings';
+import type { PrivacySettings } from '../../lib/api';
 
 export const PRIVACY_SETTINGS_STORAGE_KEY = versionedStorageKey('settings', 'privacy');
 
@@ -51,6 +52,18 @@ export function writeStoredPrivacySettings(settings: PrivacySettingsRecord): voi
     storage: browserLocalStorage(),
     key: PRIVACY_SETTINGS_STORAGE_KEY,
     value: settings,
+  });
+}
+
+/**
+ * Write server-fetched settings into localStorage so the local cache agrees with the server.
+ * Call once after a successful `fetchPrivacySettings()` response.
+ */
+export function syncFromServer(serverSettings: PrivacySettings): void {
+  writeStoredPrivacySettings({
+    readReceipts: serverSettings.readReceipts,
+    typingIndicators: serverSettings.typingIndicators,
+    linkPreviews: serverSettings.linkPreviews,
   });
 }
 
