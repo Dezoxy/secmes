@@ -26,6 +26,7 @@ import {
   paneBackEnterMotion,
   paneBackExitMotion,
 } from '../ui';
+import { useSwipeBack } from '../ui/useSwipeBack';
 import { currentUser, getConversationDisplayName } from './seed';
 import { loadPersistedPeerMapping } from './peer-naming';
 import { contactDisplayName } from './user-label';
@@ -89,6 +90,7 @@ export default function ChatScreen() {
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   const mobileThreadBackTimerRef = useRef<number | undefined>(undefined);
   const mobileSidebarReturnTimerRef = useRef<number | undefined>(undefined);
+  const mainPanelRef = useRef<HTMLDivElement>(null);
 
   const { selectedConversation, isDirect, selectedIsLive, currentNumber, verified, isLive } =
     useChatState({ conversations, selectedId, liveIds, numbersByConv, verifiedByConv });
@@ -207,7 +209,7 @@ export default function ChatScreen() {
     if (window.innerWidth < 1024) setShowSidebar(false);
   };
 
-  const handleBackToConversations = () => {
+  const handleBackToConversations = useCallback(() => {
     if (window.innerWidth >= 1024 || prefersReducedMotion()) {
       setShowSidebar(true);
       return;
@@ -225,7 +227,9 @@ export default function ChatScreen() {
         setMobileSidebarReturning(false);
       }, 220);
     }, 180);
-  };
+  }, []);
+
+  useSwipeBack(mainPanelRef, handleBackToConversations, !showSidebar);
 
   const findConversationWith = (peerUserId: string): string | null =>
     peerToConvId.get(peerUserId) ??
@@ -298,6 +302,7 @@ export default function ChatScreen() {
 
         {/* Main */}
         <div
+          ref={mainPanelRef}
           role="main"
           aria-label="Chat"
           className={`${
