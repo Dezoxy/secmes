@@ -376,7 +376,11 @@ export default function ChatScreen() {
                   older ones may be unavailable.
                 </StateBlock>
               )}
-              <MessageList conversation={selectedConversation} onImageClick={setPreviewImage} />
+              <MessageList
+                conversation={selectedConversation}
+                onImageClick={setPreviewImage}
+                bottomNavClearance={!(effectiveSelectedIsLive && !selectedIsSyncLost)}
+              />
               {effectiveSelectedIsLive && !selectedIsSyncLost && (
                 <ChatInput
                   onSend={handleSend}
