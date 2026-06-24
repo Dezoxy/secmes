@@ -3601,6 +3601,16 @@
               }
             }
           },
+          "409": {
+            "description": "display name already taken",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "415": {
             "description": "Unsupported request media type.",
             "content": {
