@@ -195,6 +195,7 @@ export default function FriendsScreen() {
 
           {/* Pill handle — tap to reveal search */}
           <div
+            aria-hidden={searchOpen}
             className={`overflow-hidden transition-all duration-300 ${
               searchOpen ? 'max-h-0 py-0 opacity-0' : 'max-h-9 py-1 opacity-100'
             }`}
