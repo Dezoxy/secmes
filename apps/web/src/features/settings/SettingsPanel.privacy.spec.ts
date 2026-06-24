@@ -86,8 +86,6 @@ describe('SettingsPanel privacy persistence', () => {
 
     expect(savePrivacySettings).toHaveBeenCalledWith({
       readReceipts: false,
-      typingIndicators: true,
-      linkPreviews: true,
     });
   });
 });

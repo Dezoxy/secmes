@@ -49,7 +49,12 @@ import { ProfileSettings, type AnonymousProfile } from './ProfileSettings';
 import { SecuritySettings } from './SecuritySettings';
 import { AdminPanel } from './AdminPanel';
 import { TeamSettings } from './TeamSettings';
-import { fetchPrivacySettings, savePrivacySettings, type MeBound } from '../../lib/api';
+import {
+  fetchPrivacySettings,
+  savePrivacySettings,
+  type MeBound,
+  type UpdatePrivacySettings,
+} from '../../lib/api';
 
 export type { AnonymousProfile } from './ProfileSettings';
 
@@ -64,6 +69,23 @@ interface SettingsPanelProps {
   /** When true: renders as a plain full-height div instead of a modal overlay,
    *  hides the profile section and close buttons. */
   standalone?: boolean;
+}
+
+function privacySettingsPatch(
+  previous: PrivacySettingsRecord,
+  next: PrivacySettingsRecord,
+): UpdatePrivacySettings {
+  const patch: UpdatePrivacySettings = {};
+  if (next.readReceipts !== previous.readReceipts) patch.readReceipts = next.readReceipts;
+  if (next.typingIndicators !== previous.typingIndicators) {
+    patch.typingIndicators = next.typingIndicators;
+  }
+  if (next.linkPreviews !== previous.linkPreviews) patch.linkPreviews = next.linkPreviews;
+  return patch;
+}
+
+function hasPrivacySettingsPatch(patch: UpdatePrivacySettings): boolean {
+  return Object.keys(patch).length > 0;
 }
 
 type SectionId =
@@ -142,14 +164,9 @@ export function SettingsPanel({
   const mobileBackTimerRef = useRef<number | undefined>(undefined);
   const mobileMenuTimerRef = useRef<number | undefined>(undefined);
   const closeTimerRef = useRef<number | undefined>(undefined);
-  // Guards for the privacy save effect:
-  // - mounted: skip the first run (initial localStorage value, not a user edit)
-  // - fromServer: skip when state was set by the server fetch (hydration, not a user edit)
-  // - userEdited: if the user toggles before the fetch resolves, ignore the late server value
-  const privacySettingsMounted = useRef(false);
-  const privacySettingsFromServer = useRef(false);
+  // If the user toggles before the server fetch resolves, ignore the late server value.
   const privacySettingsUserEdited = useRef(false);
-  const pendingPrivacySettingsRef = useRef<PrivacySettingsRecord | null>(null);
+  const pendingPrivacySettingsRef = useRef<UpdatePrivacySettings | null>(null);
   const privacySaveTimerRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
@@ -162,45 +179,56 @@ export function SettingsPanel({
     applyThemeToDocument(accentId, fontSizeLevel);
   }, [accentId, fontSizeLevel]);
 
-  useEffect(() => {
-    if (!privacySettingsMounted.current) {
-      privacySettingsMounted.current = true;
-      return;
-    }
-    if (privacySettingsFromServer.current) {
-      privacySettingsFromServer.current = false;
-      return;
-    }
-    privacySettingsUserEdited.current = true;
-    writeStoredPrivacySettings(privacySettings);
-    pendingPrivacySettingsRef.current = privacySettings;
+  const flushPendingPrivacySettings = useCallback(() => {
+    const pending = pendingPrivacySettingsRef.current;
+    pendingPrivacySettingsRef.current = null;
     if (privacySaveTimerRef.current !== undefined) {
       window.clearTimeout(privacySaveTimerRef.current);
-    }
-    privacySaveTimerRef.current = window.setTimeout(() => {
-      const pending = pendingPrivacySettingsRef.current;
-      pendingPrivacySettingsRef.current = null;
       privacySaveTimerRef.current = undefined;
-      if (!pending) return;
-      savePrivacySettings(pending).catch(() => {
-        // Fire-and-forget: localStorage write already applied; server sync failure is non-blocking.
+    }
+    if (pending && hasPrivacySettingsPatch(pending)) {
+      void savePrivacySettings(pending).catch(() => {});
+    }
+  }, []);
+
+  const queuePrivacySettingsSave = useCallback(
+    (patch: UpdatePrivacySettings) => {
+      if (!hasPrivacySettingsPatch(patch)) return;
+      pendingPrivacySettingsRef.current = {
+        ...(pendingPrivacySettingsRef.current ?? {}),
+        ...patch,
+      };
+      if (privacySaveTimerRef.current !== undefined) {
+        window.clearTimeout(privacySaveTimerRef.current);
+      }
+
+      privacySaveTimerRef.current = window.setTimeout(() => {
+        flushPendingPrivacySettings();
+      }, 500);
+    },
+    [flushPendingPrivacySettings],
+  );
+
+  const handlePrivacySettingsChange = useCallback(
+    (next: PrivacySettingsRecord) => {
+      setPrivacySettings((previous) => {
+        const patch = privacySettingsPatch(previous, next);
+        if (!hasPrivacySettingsPatch(patch)) return previous;
+
+        privacySettingsUserEdited.current = true;
+        writeStoredPrivacySettings(next);
+        queuePrivacySettingsSave(patch);
+        return next;
       });
-    }, 500);
-  }, [privacySettings]);
+    },
+    [queuePrivacySettingsSave],
+  );
 
   useEffect(() => {
     return () => {
-      if (privacySaveTimerRef.current !== undefined) {
-        window.clearTimeout(privacySaveTimerRef.current);
-        privacySaveTimerRef.current = undefined;
-      }
-      const pending = pendingPrivacySettingsRef.current;
-      pendingPrivacySettingsRef.current = null;
-      if (pending) {
-        void savePrivacySettings(pending).catch(() => {});
-      }
+      flushPendingPrivacySettings();
     };
-  }, []);
+  }, [flushPendingPrivacySettings]);
 
   // On mount, sync privacy settings from the server so preferences roam across devices.
   useEffect(() => {
@@ -208,7 +236,6 @@ export function SettingsPanel({
       .then((serverSettings) => {
         if (privacySettingsUserEdited.current) return;
         syncFromServer(serverSettings);
-        privacySettingsFromServer.current = true;
         setPrivacySettings(serverSettings);
       })
       .catch(() => {
@@ -452,7 +479,10 @@ export function SettingsPanel({
             {active === 'security' && <SecuritySettings />}
 
             {active === 'privacy' && (
-              <PrivacySettings settings={privacySettings} onSettingsChange={setPrivacySettings} />
+              <PrivacySettings
+                settings={privacySettings}
+                onSettingsChange={handlePrivacySettingsChange}
+              />
             )}
 
             {active === 'notifications' && (

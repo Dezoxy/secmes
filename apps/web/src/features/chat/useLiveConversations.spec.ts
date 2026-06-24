@@ -5,6 +5,7 @@ import {
   addLiveId,
   classifyCommitDrain,
   classifyDeliveryFrame,
+  foldConversationsFromPeerWatermarks,
   liveConversationShell,
   prependConversationIfMissing,
   setsEqual,
@@ -58,6 +59,45 @@ describe('live conversation helpers', () => {
       name: 'New contact',
     });
     expect(shell.participants[1]?.avatar).toMatch(/^data:image\/svg\+xml,/);
+  });
+
+  it('re-folds stored peer read watermarks when read receipts become enabled', () => {
+    const conversations: Conversation[] = [
+      {
+        id: 'conv-live',
+        type: 'direct',
+        participants: [],
+        unreadCount: 0,
+        messages: [
+          {
+            id: 'm1',
+            senderId: currentUser.id,
+            content: 'ciphertext decrypted locally',
+            timestamp: new Date('2026-01-01T00:00:00.000Z'),
+            status: 'sent',
+          },
+        ],
+      },
+    ];
+    const peerWatermarks = new Map([
+      ['conv-live', { deliveredThroughMessageId: 'm1', readThroughMessageId: 'm1' }],
+    ]);
+
+    const capped = foldConversationsFromPeerWatermarks(
+      conversations,
+      currentUser.id,
+      peerWatermarks,
+      false,
+    );
+    expect(capped[0]?.messages[0]?.status).toBe('delivered');
+
+    const uncapped = foldConversationsFromPeerWatermarks(
+      capped,
+      currentUser.id,
+      peerWatermarks,
+      true,
+    );
+    expect(uncapped[0]?.messages[0]?.status).toBe('read');
   });
 });
 
