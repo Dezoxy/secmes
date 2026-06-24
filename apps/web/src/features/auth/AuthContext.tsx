@@ -20,7 +20,7 @@ import {
   type MeBound,
 } from '../../lib/api';
 import { stashUnlockKey, unlockKeyFromResponse, withPrfSalt } from '../../lib/prf';
-import { syncMuteStateToCache } from '../settings/conversation-mute';
+import { syncMuteStateToCache, unmuteAll } from '../settings/conversation-mute';
 
 export type { MeBound };
 
@@ -85,8 +85,9 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
     setToken(null);
     setAuthenticated(false);
     setProfile(null);
-    // Clear the SW-readable mute cache so a subsequent user on this device
-    // doesn't inherit a stale silent-notification state.
+    // Clear per-conversation mute state so a subsequent user on this device
+    // doesn't inherit stale mute data via localStorage or the SW cache.
+    unmuteAll();
     void syncMuteStateToCache(new Set());
   }, []);
 
