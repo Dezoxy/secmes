@@ -341,10 +341,15 @@ export default function ChatScreen() {
   // already enforces this (403 on send); this is the UI signal. Groups are always unblocked here.
   // Guard on friendsLoaded: don't block the composer before the first successful friends fetch
   // (demo mode, slow network, or E2E without a real backend would otherwise false-block).
+  // Also pass through non-UUID peer IDs (synthetic `peer-${convId}` placeholders from
+  // liveConversationShell while peer naming is still resolving — comparing them to real friend IDs
+  // would false-block a valid DM).
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const peerIsFriend =
     !isDirect ||
     !selectedPeerUserId ||
     !friendsLoaded ||
+    !UUID_RE.test(selectedPeerUserId) ||
     friends.some((f) => f.userId === selectedPeerUserId);
 
   const handleSend = useMessageSending({
@@ -604,6 +609,19 @@ export default function ChatScreen() {
           }),
     [conversations, peerMapsLoaded, peerToConvId, convToPeerId, localConvIds],
   );
+
+  // If the currently selected conversation is being hidden by the dedup filter (it's a stale older
+  // DM and the canonical replacement is locally present), redirect selection to the canonical so the
+  // user doesn't send into a conversation the reinstalled peer no longer has MLS state for.
+  useEffect(() => {
+    if (!selectedId || !peerMapsLoaded) return;
+    const peer = convToPeerId.get(selectedId);
+    if (!peer) return;
+    const canonicalId = peerToConvId.get(peer);
+    if (!canonicalId || canonicalId === selectedId) return;
+    if (!localConvIds.has(canonicalId)) return; // canonical not locally joined yet — don't redirect
+    setSelectedId(canonicalId);
+  }, [selectedId, peerMapsLoaded, convToPeerId, peerToConvId, localConvIds]);
 
   // instead of creating a duplicate). Checks the server-side peer map first (populated at startup from
   // the enriched conversation list — survives reinstall even when localStorage/IDB is wiped), then
