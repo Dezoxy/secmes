@@ -276,3 +276,16 @@ body {
   -webkit-font-smoothing: antialiased;
   background: var(--argus-color-app-bg);
 }
+
+/* iOS Safari zooms the page when a focused input's text is < 16px. The installed PWA pins
+   maximum-scale=1 (honored in standalone) to prevent that while keeping the designed small
+   text — but plain Safari IGNORES maximum-scale, so there the only fix is >= 16px text.
+   Scope the bump to display-mode: browser so it applies in Safari (no zoom) but NOT in the
+   standalone PWA (which keeps text-sm). Un-layered so it wins over Tailwind's text-* utilities. */
+@media (display-mode: browser) and (max-width: 639px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
