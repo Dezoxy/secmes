@@ -244,10 +244,19 @@ body {
      chrome. The app's real pages are exactly 100dvh with their own inner scrollers,
      so the page never needs to scroll. */
   overflow: hidden;
+  /* Paint the app background on the root canvas too (not just <body>). In an installed
+     iOS PWA the area behind the safe-area insets (status bar / home indicator) shows the
+     document canvas — if only <body> is coloured, those strips render a non-app colour
+     (the "ugly bars" bug). */
+  background: var(--argus-color-app-bg);
 }
 
 #root {
-  height: 100dvh;
+  position: fixed;
+  inset: 0;
+  /* Paint the app background so the safe-area inset strips (status bar / home indicator)
+     in an installed iOS PWA always render the app colour instead of a bare canvas. */
+  background: var(--argus-color-app-bg);
   /* Fallback scroller: real pages fit 100dvh exactly (no scroll appears), but any
      routed surface that still relies on document scrolling (e.g. the /v2 design
      sketches) stays reachable here instead of being clipped. */
