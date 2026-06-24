@@ -271,6 +271,7 @@ test('notification settings: conversation mute controls show 0 muted by default'
 
 test('conversation mute: kebab menu mutes and unmutes a conversation', async ({ page }) => {
   await page.goto('/chat');
+  await expect(page.getByLabel('2 unread')).toBeVisible();
 
   // Open the first conversation's action menu
   await page.getByRole('button', { name: 'Open conversation actions' }).click();
@@ -278,6 +279,7 @@ test('conversation mute: kebab menu mutes and unmutes a conversation', async ({ 
 
   // Mute the conversation
   await page.getByRole('menuitem', { name: /Mute conversation/ }).click();
+  await expect(page.getByLabel('2 unread')).toHaveCount(0);
 
   // Re-open the menu — the item should now say "Unmute conversation"
   await page.getByRole('button', { name: 'Open conversation actions' }).click();
@@ -293,4 +295,5 @@ test('conversation mute: kebab menu mutes and unmutes a conversation', async ({ 
   // Unmute all from settings
   await dialog.getByRole('button', { name: /Conversation mute controls/ }).click();
   await expect(dialog.getByText('0 muted')).toBeVisible();
+  await expect(page.getByLabel('2 unread')).toBeVisible();
 });

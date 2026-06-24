@@ -16,6 +16,7 @@ function renderConversationList(options?: {
   updateReady?: boolean;
   friends?: Friend[];
   onNewGroup?: () => void;
+  mutedConversationIds?: ReadonlySet<string>;
 }): string {
   return renderToStaticMarkup(
     createElement(ConversationList, {
@@ -27,6 +28,7 @@ function renderConversationList(options?: {
       onApplyUpdate: () => undefined,
       friends: options?.friends,
       onNewGroup: options?.onNewGroup,
+      mutedConversationIds: options?.mutedConversationIds,
     }),
   );
 }
@@ -89,5 +91,19 @@ describe('ConversationList', () => {
     expect(html).toContain('aria-live="polite"');
     expect(html).toContain('Update Argus');
     expect(html).toContain('Update');
+  });
+
+  it('shows unread badges for unmuted conversations', () => {
+    const html = renderConversationList();
+
+    expect(html).toContain('aria-label="2 unread"');
+  });
+
+  it('hides unread badges for muted conversations', () => {
+    const html = renderConversationList({
+      mutedConversationIds: new Set(['conv-1']),
+    });
+
+    expect(html).not.toContain('aria-label="2 unread"');
   });
 });

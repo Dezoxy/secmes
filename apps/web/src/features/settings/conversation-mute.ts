@@ -10,6 +10,7 @@ import {
 } from '../../lib/persistence';
 
 const MUTED_CONVERSATIONS_KEY = versionedStorageKey('muted-conversations');
+export const MUTES_CHANGED_EVENT = 'argus:mutes-changed';
 
 function decodeMutedIds(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null;
@@ -33,6 +34,7 @@ function writeMutedConversationIds(ids: Set<string>): void {
     key: MUTED_CONVERSATIONS_KEY,
     value: [...ids],
   });
+  window.dispatchEvent(new CustomEvent(MUTES_CHANGED_EVENT, { detail: { ids: [...ids] } }));
 }
 
 export function muteConversation(id: string): void {
@@ -49,11 +51,7 @@ export function unmuteConversation(id: string): void {
 
 export function unmuteAll(): void {
   if (typeof window === 'undefined') return;
-  writeVersionedRecord({
-    storage: browserLocalStorage(),
-    key: MUTED_CONVERSATIONS_KEY,
-    value: [],
-  });
+  writeMutedConversationIds(new Set());
   // Notify mounted components (ChatHeader) that all mutes were cleared so they
   // can refresh their local muted state without requiring a full re-render.
   window.dispatchEvent(new CustomEvent('argus:mutes-cleared'));

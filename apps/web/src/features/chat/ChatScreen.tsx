@@ -45,6 +45,7 @@ import { useLiveConversations } from './useLiveConversations';
 import { useMessageSending } from './useMessageSending';
 import { useReceiptSending } from './useReceiptSending';
 import { loadArgusProfile, saveArgusProfile } from '../settings/argus-profile';
+import { MUTES_CHANGED_EVENT, readMutedConversationIds } from '../settings/conversation-mute';
 import type { AnonymousProfile } from '../settings/SettingsPanel';
 import {
   IconButton,
@@ -227,6 +228,9 @@ export default function ChatScreen() {
   const [friendsError, setFriendsError] = useState(false);
   const inFlightRequestIds = useRef(new Set<string>());
   const [addMemberOpen, setAddMemberOpen] = useState(false);
+  const [mutedConversationIds, setMutedConversationIds] = useState<ReadonlySet<string>>(() =>
+    readMutedConversationIds(),
+  );
   const { appendHistory, mergeIncoming, backfillInto } = useConversationBackfill({
     messagingDeps,
     sessionKey,
@@ -354,6 +358,12 @@ export default function ChatScreen() {
       prev.map((conversation) => withCurrentUserProfile(conversation, currentUserProfile)),
     );
   }, [currentUserProfile]);
+
+  useEffect(() => {
+    const refreshMutedConversations = () => setMutedConversationIds(readMutedConversationIds());
+    window.addEventListener(MUTES_CHANGED_EVENT, refreshMutedConversations);
+    return () => window.removeEventListener(MUTES_CHANGED_EVENT, refreshMutedConversations);
+  }, []);
 
   const handleProfileChange = (next: AnonymousProfile): boolean => {
     const safeNext = {
@@ -709,6 +719,7 @@ export default function ChatScreen() {
             selectedId={selectedId}
             onSelect={handleSelect}
             currentUserProfile={currentUserProfile}
+            mutedConversationIds={mutedConversationIds}
             onSettings={openSettings}
             onNewGroup={groupManager ? () => setGroupCreateOpen(true) : undefined}
             updateReady={updateReady}
