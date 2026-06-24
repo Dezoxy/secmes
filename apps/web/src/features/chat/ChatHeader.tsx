@@ -43,6 +43,8 @@ import {
 import {
   isConversationMuted,
   muteConversation,
+  readMutedConversationIds,
+  syncMuteStateToCache,
   unmuteConversation,
 } from '../settings/conversation-mute';
 
@@ -353,6 +355,7 @@ export function ChatHeader({
                 const next = !muted;
                 if (next) muteConversation(conversation.id);
                 else unmuteConversation(conversation.id);
+                void syncMuteStateToCache(readMutedConversationIds());
                 setMuted(next);
                 setMenuOpen(false);
               }}
@@ -523,6 +526,7 @@ export function ChatHeader({
                     const next = !muted;
                     if (next) muteConversation(conversation.id);
                     else unmuteConversation(conversation.id);
+                    void syncMuteStateToCache(readMutedConversationIds());
                     setMuted(next);
                   }}
                   className="w-full"

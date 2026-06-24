@@ -113,6 +113,21 @@ function isInQuietHours(settings: StoredNotificationSettings): boolean {
   return hhmm >= start || hhmm < end;
 }
 
+// Push payloads carry no conversation ID (intentional — metadata privacy). Per-conversation mute
+// must therefore be coarse: if any conversations are muted, ALL pushes are silenced. The muted list
+// is written to Cache API by the app so the SW can read it without touching localStorage.
+async function readMutedConversationCount(): Promise<number> {
+  try {
+    const cache = await caches.open('argus-settings');
+    const response = await cache.match('/muted-conversations');
+    if (!response) return 0;
+    const data = (await response.json()) as unknown;
+    return Array.isArray(data) ? data.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
 // Push: content-free wake. The payload is {"type":"new_message"|"friend_request"} — zero plaintext,
 // no sender, no conversation id. On push: show a generic notification. The app reconnects via
 // WebSocket and fetches ciphertext normally. Tag collapses multiple pushes into one notification entry.
@@ -136,21 +151,24 @@ self.addEventListener('push', (event: PushEvent) => {
   }
 
   event.waitUntil(
-    readCachedNotificationSettings().then((notifSettings) => {
-      // userVisibleOnly: true (set at subscription time) means every push MUST produce a visible
-      // notification — silently returning causes browsers to show their own fallback or penalise
-      // the subscription. During quiet hours we still show the notification but silence it
-      // (no sound, no vibration, no re-alert) so it lands in the tray without waking the user.
-      const quiet = isInQuietHours(notifSettings);
-      return self.registration.showNotification('argus', {
-        body,
-        icon: '/icon-192.png',
-        badge: '/icon-192.png',
-        tag,
-        renotify: !quiet,
-        silent: quiet,
-      });
-    }),
+    Promise.all([readCachedNotificationSettings(), readMutedConversationCount()]).then(
+      ([notifSettings, mutedCount]) => {
+        // userVisibleOnly: true (set at subscription time) means every push MUST produce a visible
+        // notification — silently returning causes browsers to show their own fallback or penalise
+        // the subscription. During quiet hours or while any conversation is muted we still show the
+        // notification but silence it (no sound, no vibration, no re-alert) so it lands in the
+        // notification tray without waking the user.
+        const silent = isInQuietHours(notifSettings) || mutedCount > 0;
+        return self.registration.showNotification('argus', {
+          body,
+          icon: '/icon-192.png',
+          badge: '/icon-192.png',
+          tag,
+          renotify: !silent,
+          silent,
+        });
+      },
+    ),
   );
 });
 

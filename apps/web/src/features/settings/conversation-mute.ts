@@ -59,3 +59,24 @@ export function unmuteAll(): void {
 export function isConversationMuted(id: string): boolean {
   return readMutedConversationIds().has(id);
 }
+
+/**
+ * Persist the muted-conversation count to Cache API so the service worker can
+ * deliver pushes silently while any conversations are muted. Content-free push
+ * payloads carry no conversation ID, so only coarse (any-muted → silent) is
+ * possible without leaking metadata in the push payload.
+ */
+export async function syncMuteStateToCache(ids: Set<string>): Promise<void> {
+  if (typeof caches === 'undefined') return;
+  try {
+    const cache = await caches.open('argus-settings');
+    await cache.put(
+      '/muted-conversations',
+      new Response(JSON.stringify([...ids]), {
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+  } catch {
+    // Cache API unavailable; mute enforcement via SW degrades gracefully.
+  }
+}

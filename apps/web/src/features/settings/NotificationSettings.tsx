@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Bell } from 'lucide-react';
 import { SettingsRow, StateBlock } from '../ui';
 import { subscribeToPush, unsubscribeFromPush } from '../../lib/push';
-import { readMutedConversationIds, unmuteAll } from './conversation-mute';
+import { readMutedConversationIds, syncMuteStateToCache, unmuteAll } from './conversation-mute';
 
 export type NotificationSettingsRecord = {
   mentionsOnly: boolean;
@@ -97,6 +97,7 @@ export function NotificationSettings({
 
   const handleUnmuteAll = useCallback(() => {
     unmuteAll();
+    void syncMuteStateToCache(new Set());
     setMutedCount(0);
   }, []);
 

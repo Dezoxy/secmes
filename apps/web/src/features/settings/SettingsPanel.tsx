@@ -48,6 +48,7 @@ import {
   writeStoredNotificationSettings,
   syncNotificationSettingsToCache,
 } from './notification-settings';
+import { readMutedConversationIds, syncMuteStateToCache } from './conversation-mute';
 import { ProfileSettings, type AnonymousProfile } from './ProfileSettings';
 import { SecuritySettings } from './SecuritySettings';
 import { AdminPanel } from './AdminPanel';
@@ -216,6 +217,10 @@ export function SettingsPanel({
     writeStoredNotificationSettings(notificationSettings);
     void syncNotificationSettingsToCache(notificationSettings);
   }, [notificationSettings]);
+
+  useEffect(() => {
+    void syncMuteStateToCache(readMutedConversationIds());
+  }, []);
 
   const activeSection = sections.find((section) => section.id === active) ?? sections[0]!;
   const ActiveIcon = activeSection.icon;
