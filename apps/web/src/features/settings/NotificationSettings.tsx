@@ -2,9 +2,26 @@ import { useCallback, useEffect, useState } from 'react';
 import { Bell } from 'lucide-react';
 import { SettingsRow, StateBlock } from '../ui';
 import { subscribeToPush, unsubscribeFromPush } from '../../lib/push';
+import { readMutedConversationIds, unmuteAll } from './conversation-mute';
+
+export type NotificationSettingsRecord = {
+  mentionsOnly: boolean;
+  quietHoursEnabled: boolean;
+  quietHoursStart: string; // "HH:MM" 24-hour
+  quietHoursEnd: string;
+};
+
+export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettingsRecord = {
+  mentionsOnly: false,
+  quietHoursEnabled: false,
+  quietHoursStart: '22:00',
+  quietHoursEnd: '07:00',
+};
 
 interface NotificationSettingsProps {
   deviceId: string | null;
+  settings: NotificationSettingsRecord;
+  onSettingsChange: (settings: NotificationSettingsRecord) => void;
 }
 
 const VAPID_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined;
@@ -16,7 +33,11 @@ function currentPermission(): NotificationPermission | 'unsupported' {
   return Notification.permission;
 }
 
-export function NotificationSettings({ deviceId }: NotificationSettingsProps) {
+export function NotificationSettings({
+  deviceId,
+  settings,
+  onSettingsChange,
+}: NotificationSettingsProps) {
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(
     currentPermission,
   );
@@ -30,6 +51,7 @@ export function NotificationSettings({ deviceId }: NotificationSettingsProps) {
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mutedCount, setMutedCount] = useState(() => readMutedConversationIds().size);
 
   useEffect(() => {
     const perm = currentPermission();
@@ -72,6 +94,15 @@ export function NotificationSettings({ deviceId }: NotificationSettingsProps) {
       setBusy(false);
     }
   }, [deviceId]);
+
+  const handleUnmuteAll = useCallback(() => {
+    unmuteAll();
+    setMutedCount(0);
+  }, []);
+
+  const toggle = (key: 'mentionsOnly' | 'quietHoursEnabled') => {
+    onSettingsChange({ ...settings, [key]: !settings[key] });
+  };
 
   return (
     <div className="space-y-3">
@@ -121,11 +152,62 @@ export function NotificationSettings({ deviceId }: NotificationSettingsProps) {
         </div>
       )}
 
-      <SettingsRow title="Mentions only" value="Uses the product default" badge="Default" />
-      <SettingsRow title="Quiet hours" value="Uses the product default" badge="Default" />
-      <StateBlock icon={Bell} title="Conversation mute controls">
-        Menu item is in place. We can wire the backend setting in the next pass.
-      </StateBlock>
+      <SettingsRow
+        title="Mentions only"
+        value={
+          settings.mentionsOnly ? 'On – only @mentions notify you' : 'Off – all messages notify you'
+        }
+        enabled={settings.mentionsOnly}
+        onClick={() => toggle('mentionsOnly')}
+      />
+
+      <SettingsRow
+        title="Quiet hours"
+        value={
+          settings.quietHoursEnabled
+            ? `${settings.quietHoursStart} – ${settings.quietHoursEnd}`
+            : 'Off – notifications always allowed'
+        }
+        enabled={settings.quietHoursEnabled}
+        onClick={() => toggle('quietHoursEnabled')}
+      />
+
+      {settings.quietHoursEnabled && (
+        <div className="flex gap-6 rounded-xl border border-white/5 bg-white/[0.03] px-4 py-3">
+          <label className="flex items-center gap-2 text-xs text-white/60">
+            From
+            <input
+              type="time"
+              value={settings.quietHoursStart}
+              onChange={(e) => onSettingsChange({ ...settings, quietHoursStart: e.target.value })}
+              className="bg-transparent text-sm text-white focus:outline-none"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-xs text-white/60">
+            To
+            <input
+              type="time"
+              value={settings.quietHoursEnd}
+              onChange={(e) => onSettingsChange({ ...settings, quietHoursEnd: e.target.value })}
+              className="bg-transparent text-sm text-white focus:outline-none"
+            />
+          </label>
+        </div>
+      )}
+
+      {mutedCount > 0 ? (
+        <SettingsRow
+          title="Conversation mute controls"
+          value={`${mutedCount} conversation${mutedCount === 1 ? '' : 's'} muted — tap to unmute all`}
+          onClick={handleUnmuteAll}
+        />
+      ) : (
+        <SettingsRow
+          title="Conversation mute controls"
+          value="Mute individual conversations from their long-press menu"
+          badge="0 muted"
+        />
+      )}
     </div>
   );
 }

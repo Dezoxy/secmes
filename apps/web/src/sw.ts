@@ -71,6 +71,48 @@ self.addEventListener('message', (event: ExtendableMessageEvent) => {
   if (event.data?.type === 'SKIP_WAITING') void self.skipWaiting();
 });
 
+interface StoredNotificationSettings {
+  quietHoursEnabled: boolean;
+  quietHoursStart: string;
+  quietHoursEnd: string;
+}
+
+async function readCachedNotificationSettings(): Promise<StoredNotificationSettings> {
+  const defaults: StoredNotificationSettings = {
+    quietHoursEnabled: false,
+    quietHoursStart: '22:00',
+    quietHoursEnd: '07:00',
+  };
+  try {
+    const cache = await caches.open('argus-settings');
+    const response = await cache.match('/notification-settings');
+    if (!response) return defaults;
+    const data = (await response.json()) as Partial<StoredNotificationSettings>;
+    return {
+      quietHoursEnabled:
+        typeof data.quietHoursEnabled === 'boolean'
+          ? data.quietHoursEnabled
+          : defaults.quietHoursEnabled,
+      quietHoursStart:
+        typeof data.quietHoursStart === 'string' ? data.quietHoursStart : defaults.quietHoursStart,
+      quietHoursEnd:
+        typeof data.quietHoursEnd === 'string' ? data.quietHoursEnd : defaults.quietHoursEnd,
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+function isInQuietHours(settings: StoredNotificationSettings): boolean {
+  if (!settings.quietHoursEnabled) return false;
+  const now = new Date();
+  const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  const { quietHoursStart: start, quietHoursEnd: end } = settings;
+  // Handle overnight ranges (e.g. 22:00 → 07:00 crosses midnight).
+  if (start <= end) return hhmm >= start && hhmm < end;
+  return hhmm >= start || hhmm < end;
+}
+
 // Push: content-free wake. The payload is {"type":"new_message"|"friend_request"} — zero plaintext,
 // no sender, no conversation id. On push: show a generic notification. The app reconnects via
 // WebSocket and fetches ciphertext normally. Tag collapses multiple pushes into one notification entry.
@@ -94,12 +136,15 @@ self.addEventListener('push', (event: PushEvent) => {
   }
 
   event.waitUntil(
-    self.registration.showNotification('argus', {
-      body,
-      icon: '/icon-192.png',
-      badge: '/icon-192.png',
-      tag,
-      renotify: true,
+    readCachedNotificationSettings().then((notifSettings) => {
+      if (isInQuietHours(notifSettings)) return; // swallow push silently during quiet hours
+      return self.registration.showNotification('argus', {
+        body,
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
+        tag,
+        renotify: true,
+      });
     }),
   );
 });
