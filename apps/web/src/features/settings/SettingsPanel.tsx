@@ -412,7 +412,7 @@ export function SettingsPanel({
           )}
         </div>
 
-        <div className="-mx-3 min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)] sm:-mx-4 sm:px-4 sm:pb-4">
+        <div className="-mx-3 min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(env(safe-area-inset-bottom)_+_6rem)] sm:-mx-4 sm:px-4 lg:pb-4">
           {!standalone && (
             <section
               className="rounded-2xl border border-white/5 bg-white/[0.02] p-3"
@@ -504,7 +504,7 @@ export function SettingsPanel({
 
         <div
           key={active}
-          className={`flex-1 px-3 pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)] sm:px-6 sm:pb-6 ${
+          className={`flex-1 px-3 pb-[calc(env(safe-area-inset-bottom)_+_6rem)] sm:px-6 lg:pb-6 ${
             active === 'about' ? 'overflow-hidden' : 'overflow-y-auto'
           }`}
         >
