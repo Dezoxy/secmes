@@ -21,9 +21,9 @@ export function BottomNav() {
   return (
     <nav
       aria-label="Main navigation"
-      className="shrink-0 border-t border-white/5 bg-[#0f0f16] px-3 pb-[env(safe-area-inset-bottom)] pt-2"
+      className="shrink-0 px-4 pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)] pt-1"
     >
-      <div className="mx-auto flex max-w-md items-center justify-around rounded-2xl bg-[#12121a] p-1.5">
+      <div className="mx-auto flex max-w-md items-center justify-around rounded-2xl bg-[#12121a] p-1.5 shadow-[0_-2px_24px_rgba(0,0,0,0.55)] ring-1 ring-white/[0.08]">
         {NAV_ITEMS.map(({ to, label, icon: Icon }) => {
           const active = pathname === to || (pathname.startsWith(to + '/') && to !== '/');
           return (

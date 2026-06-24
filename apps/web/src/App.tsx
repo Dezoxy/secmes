@@ -115,8 +115,8 @@ function LandingRoute() {
                   aria-label="Argus brand"
                   className="flex items-center justify-center gap-3 text-3xl font-bold tracking-[0.12em] text-white"
                 >
-                  <ArgusAppIcon className="h-12 w-12 rounded-2xl shadow-lg shadow-purple-500/25" />
-                  <span className="bg-gradient-to-r from-purple-300 to-purple-600 bg-clip-text text-transparent">
+                  <ArgusAppIcon className="h-12 w-12 rounded-2xl shadow-lg shadow-[#964cdc]/25" />
+                  <span className="bg-gradient-to-r from-[var(--argus-brand-300)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
                     ARGUS
                   </span>
                 </div>
