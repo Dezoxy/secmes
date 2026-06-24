@@ -64,7 +64,10 @@ interface SettingsPanelProps {
   /** Full server profile — used to render admin-only sections. */
   serverProfile?: MeBound | null;
   onProfileChange: (profile: AnonymousProfile) => boolean;
-  onClose: () => void;
+  onClose?: () => void;
+  /** When true: renders as a plain full-height div instead of a modal overlay,
+   *  hides the profile section and close buttons. */
+  standalone?: boolean;
 }
 
 type SectionId =
@@ -176,6 +179,7 @@ export function SettingsPanel({
   serverProfile,
   onProfileChange,
   onClose,
+  standalone = false,
 }: SettingsPanelProps) {
   const isAdmin = serverProfile?.role === 'admin';
   const sections = isAdmin ? [...baseSections, teamSection, adminSection] : baseSections;
@@ -253,14 +257,12 @@ export function SettingsPanel({
 
   const closeSettings = useCallback(() => {
     if (closing) return;
-
     saveProfileDraft(avatar);
-
+    if (!onClose) return;
     if (prefersReducedMotion()) {
       onClose();
       return;
     }
-
     setClosing(true);
     closeTimerRef.current = window.setTimeout(() => {
       onClose();
@@ -328,18 +330,8 @@ export function SettingsPanel({
     };
   }, []);
 
-  return (
-    <Modal
-      ariaLabel="Settings"
-      onClose={closeSettings}
-      className={`items-center justify-center bg-black/40 backdrop-blur-md sm:p-4 ${
-        closing ? modalBackdropExitMotion : modalBackdropEnterMotion
-      }`}
-      contentClassName={`absolute inset-0 flex w-full overflow-hidden bg-[#12121a] shadow-2xl shadow-black/50 sm:static sm:h-[90dvh] sm:max-w-6xl sm:rounded-3xl sm:border sm:border-white/5 ${
-        closing ? modalPanelExitMotion : modalPanelEnterMotion
-      }`}
-      style={accentVariables}
-    >
+  const settingsContent = (
+    <>
       <aside
         className={`${
           mobileSectionOpen || mobileBackAnimating ? 'hidden' : 'flex'
@@ -347,32 +339,36 @@ export function SettingsPanel({
           mobileMenuReturning ? paneBackEnterMotion : ''
         }`}
       >
-        {/* Fixed header — stays put while the profile + section list scroll below it. */}
+        {/* Fixed header */}
         <div className="mb-4 flex shrink-0 items-center justify-between">
           <h2 className="text-lg font-semibold text-white">Settings</h2>
-          <IconButton onClick={closeSettings} size="sm" aria-label="Close settings">
-            <X className="h-5 w-5" />
-          </IconButton>
+          {!standalone && (
+            <IconButton onClick={closeSettings} size="sm" aria-label="Close settings">
+              <X className="h-5 w-5" />
+            </IconButton>
+          )}
         </div>
 
         <div className="-mx-3 min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)] sm:-mx-4 sm:px-4 sm:pb-4">
-          <section
-            className="rounded-2xl border border-white/5 bg-white/[0.02] p-3"
-            aria-labelledby="settings-profile-heading"
-          >
-            <h3 id="settings-profile-heading" className="mb-4 text-base font-semibold text-white">
-              Profile
-            </h3>
-            <ProfileSettings
-              profile={profile}
-              displayName={serverHandle}
-              avatar={avatar}
-              profileError={profileError}
-            />
-          </section>
+          {!standalone && (
+            <section
+              className="rounded-2xl border border-white/5 bg-white/[0.02] p-3"
+              aria-labelledby="settings-profile-heading"
+            >
+              <h3 id="settings-profile-heading" className="mb-4 text-base font-semibold text-white">
+                Profile
+              </h3>
+              <ProfileSettings
+                profile={profile}
+                displayName={serverHandle}
+                avatar={avatar}
+                profileError={profileError}
+              />
+            </section>
+          )}
 
           <nav
-            className="mt-5 space-y-1 border-t border-white/5 pt-4"
+            className={`${standalone ? '' : 'mt-5 border-t border-white/5 pt-4'} space-y-1`}
             aria-label="Settings sections"
           >
             {sections.map(({ id, label, icon: Icon }) => (
@@ -432,13 +428,15 @@ export function SettingsPanel({
           <div className="min-w-0">
             <h3 className="text-xl font-semibold text-white">{activeSection.label}</h3>
           </div>
-          <IconButton
-            onClick={closeSettings}
-            className="ml-auto sm:hidden"
-            aria-label="Close settings"
-          >
-            <X className="h-5 w-5" />
-          </IconButton>
+          {!standalone && (
+            <IconButton
+              onClick={closeSettings}
+              className="ml-auto sm:hidden"
+              aria-label="Close settings"
+            >
+              <X className="h-5 w-5" />
+            </IconButton>
+          )}
         </div>
 
         <div
@@ -487,6 +485,30 @@ export function SettingsPanel({
           </div>
         </div>
       </section>
+    </>
+  );
+
+  if (standalone) {
+    return (
+      <div className="flex h-full w-full overflow-hidden" style={accentVariables}>
+        {settingsContent}
+      </div>
+    );
+  }
+
+  return (
+    <Modal
+      ariaLabel="Settings"
+      onClose={closeSettings}
+      className={`items-center justify-center bg-black/40 backdrop-blur-md sm:p-4 ${
+        closing ? modalBackdropExitMotion : modalBackdropEnterMotion
+      }`}
+      contentClassName={`absolute inset-0 flex w-full overflow-hidden bg-[#12121a] shadow-2xl shadow-black/50 sm:static sm:h-[90dvh] sm:max-w-6xl sm:rounded-3xl sm:border sm:border-white/5 ${
+        closing ? modalPanelExitMotion : modalPanelEnterMotion
+      }`}
+      style={accentVariables}
+    >
+      {settingsContent}
     </Modal>
   );
 }

@@ -106,10 +106,9 @@ test.describe('@a11y WCAG 2.1 AA axe scan', () => {
     expect(results.violations).toEqual([]);
   });
 
-  test('settings dialog open — zero structural violations', async ({ page }) => {
-    await page.goto('/chat');
-    await page.getByRole('button', { name: 'Open settings' }).click();
-    await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+  test('settings page open — zero structural violations', async ({ page }) => {
+    await page.goto('/settings');
+    await expect(page.getByRole('navigation', { name: 'Settings sections' })).toBeVisible();
 
     const results = await new AxeBuilder({ page })
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])

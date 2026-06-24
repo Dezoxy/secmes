@@ -475,6 +475,8 @@ export const ConversationSummarySchema = z.object({
   id: z.string().uuid(),
   isDirect: z.boolean().nullable(),
   createdAt: z.string().datetime(),
+  /** Peer user ID for DMs; null/absent for groups, in-flight solo convs, and GDPR-erased peers. */
+  peerUserId: z.string().uuid().nullable().optional(),
 });
 export type ConversationSummary = z.infer<typeof ConversationSummarySchema>;
 

@@ -4,15 +4,24 @@ import { createElement, act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { hooks, mockToast } = vi.hoisted(() => ({
+const { hooks, mockToast, MockDisplayNameTakenError, mockUpdateProfile } = vi.hoisted(() => ({
   hooks: {
     profile: null as null | Record<string, unknown>,
     refreshProfile: vi.fn().mockResolvedValue(undefined),
   },
   mockToast: vi.fn(),
+  MockDisplayNameTakenError: class DisplayNameTakenError extends Error {
+    constructor() {
+      super('display name is already taken');
+    }
+  },
+  mockUpdateProfile: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('../../lib/api', () => ({ updateProfile: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('../../lib/api', () => ({
+  updateProfile: mockUpdateProfile,
+  DisplayNameTakenError: MockDisplayNameTakenError,
+}));
 vi.mock('../auth/AuthContext', () => ({
   useAuth: () => ({ profile: hooks.profile, refreshProfile: hooks.refreshProfile }),
 }));
@@ -39,6 +48,7 @@ function mount() {
 afterEach(() => {
   hooks.profile = null;
   mockToast.mockClear();
+  mockUpdateProfile.mockClear();
 });
 
 describe('DisplayNameEditor', () => {
@@ -85,6 +95,30 @@ describe('DisplayNameEditor', () => {
     expect(mockToast.mock.calls[0]?.[1]).toMatchObject({ variant: 'error' });
     // The field stays flagged after the (self-dismissing) toast.
     expect(input.getAttribute('aria-invalid')).toBe('true');
+
+    await act(async () => root.unmount());
+  });
+
+  it('toasts "already taken" and marks the field invalid when the name is in use', async () => {
+    mockUpdateProfile.mockRejectedValueOnce(new MockDisplayNameTakenError());
+    hooks.profile = { ...BOUND };
+    const { container, root } = mount();
+    await act(async () => {
+      root.render(createElement(DisplayNameEditor));
+    });
+
+    await act(async () => {
+      container
+        .querySelector('form')!
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+
+    expect(mockToast).toHaveBeenCalledWith('This display name is already taken', {
+      variant: 'error',
+    });
+    expect(
+      container.querySelector<HTMLInputElement>('#display-name')!.getAttribute('aria-invalid'),
+    ).toBe('true');
 
     await act(async () => root.unmount());
   });

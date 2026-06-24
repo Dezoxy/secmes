@@ -2,15 +2,13 @@ import { expect, test } from '@playwright/test';
 
 // B2 device-linking E2E tests. The full two-device flow (D1 approves D2) requires two separate
 // browser contexts plus a live backend — those tests are marked skip until the staging environment
-// exposes enrollment endpoints. The static Settings modal currently hides device-linking entrypoints.
+// exposes enrollment endpoints. Settings is now a standalone route at /settings.
 
 test('Devices settings section is hidden from Settings', async ({ page }) => {
-  await page.goto('/chat');
-  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.goto('/settings');
 
-  const dialog = page.getByRole('dialog', { name: 'Settings' });
-  await expect(dialog.getByRole('button', { name: 'Devices' })).toHaveCount(0);
-  await expect(dialog.getByRole('button', { name: 'Link another device' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Devices' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Link another device' })).toHaveCount(0);
 });
 
 // The tests below require two live browser contexts authenticated as the SAME user on a real

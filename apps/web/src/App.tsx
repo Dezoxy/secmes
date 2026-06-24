@@ -8,11 +8,20 @@ import { ArgusAppIcon } from './features/brand/ArgusAppIcon';
 import { usePwaUpdate } from './features/pwa/PwaUpdateContext';
 import { APP_VERSION_TAG } from './lib/app-version';
 import { conversationEnterMotion, modalPanelExitMotion, paneBackEnterMotion } from './features/ui';
-import ChatRoute from './routes/ChatRoute';
+import { ChatProvider } from './features/chat/ChatContext';
+import { DeviceProvider } from './features/device/DeviceContext';
+import { UnlockGate } from './features/device/UnlockGate';
+import { AuthenticatedRouteBoundary } from './routes/AuthenticatedRouteBoundary';
+import AppShell from './routes/AppShell';
+
+const ChatScreen = lazy(() => import('./features/chat/ChatScreen'));
+const GroupsScreen = lazy(() => import('./features/groups/GroupsScreen'));
+const FriendsScreen = lazy(() => import('./features/friends/FriendsScreen'));
+const SettingsRoute = lazy(() => import('./routes/SettingsRoute'));
+const ProfileRoute = lazy(() => import('./routes/ProfileRoute'));
 
 const DevicesRoute = lazy(() => import('./routes/DevicesRoute'));
 const SecurityRoute = lazy(() => import('./routes/SecurityRoute'));
-const SettingsRoute = lazy(() => import('./routes/SettingsRoute'));
 const StorageRoute = lazy(() => import('./routes/StorageRoute'));
 const TransparencyRoute = lazy(() => import('./routes/TransparencyRoute'));
 const V2SketchRoute = lazy(() => import('./routes/V2SketchRoute'));
@@ -243,6 +252,21 @@ function LandingRoute() {
   );
 }
 
+// Shell wrapping all bottom-nav routes with shared auth + device + chat context.
+function AuthenticatedShell() {
+  return (
+    <AuthenticatedRouteBoundary>
+      <DeviceProvider>
+        <UnlockGate>
+          <ChatProvider>
+            <AppShell />
+          </ChatProvider>
+        </UnlockGate>
+      </DeviceProvider>
+    </AuthenticatedRouteBoundary>
+  );
+}
+
 function RouteUpdateAction() {
   const { pathname } = useLocation();
   const { updateReady, applyUpdate, newVersion, dialogOpen, openUpdateDialog, closeUpdateDialog } =
@@ -250,8 +274,9 @@ function RouteUpdateAction() {
   const [applying, setApplying] = useState(false);
   const [closing, setClosing] = useState(false);
 
-  // Chat has its own sidebar update buttons — skip the global pill to avoid duplicates.
-  if (!updateReady || pathname === '/chat') return null;
+  // Only chat and groups have in-page update affordances (the ConversationList update action).
+  const ROUTES_WITH_OWN_UPDATE_UI = new Set(['/chat', '/groups']);
+  if (!updateReady || ROUTES_WITH_OWN_UPDATE_UI.has(pathname)) return null;
 
   const handleClose = () => {
     if (closing) return;
@@ -349,8 +374,17 @@ export default function App() {
       <Suspense fallback={<RouteLoadingFallback />}>
         <Routes>
           <Route path="/" element={<LandingRoute />} />
-          <Route path="/chat" element={<ChatRoute />} />
-          <Route path="/settings" element={<SettingsRoute />} />
+
+          {/* Authenticated bottom-nav routes — all share AppShell + ChatProvider */}
+          <Route element={<AuthenticatedShell />}>
+            <Route path="/chat" element={<ChatScreen />} />
+            <Route path="/groups" element={<GroupsScreen />} />
+            <Route path="/friends" element={<FriendsScreen />} />
+            <Route path="/settings" element={<SettingsRoute />} />
+            <Route path="/profile" element={<ProfileRoute />} />
+          </Route>
+
+          {/* Legacy authenticated routes — keep their own RoutePageShell top-nav */}
           <Route path="/security" element={<SecurityRoute />} />
           <Route path="/devices" element={<DevicesRoute />} />
           <Route path="/storage" element={<StorageRoute />} />

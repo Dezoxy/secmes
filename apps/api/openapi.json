@@ -3601,6 +3601,16 @@
               }
             }
           },
+          "409": {
+            "description": "display name already taken",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "415": {
             "description": "Unsupported request media type.",
             "content": {
@@ -7853,6 +7863,14 @@
             "description": "When the conversation was created",
             "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
             "maxLength": 40
+          },
+          "peerUserId": {
+            "type": "string",
+            "format": "uuid",
+            "nullable": true,
+            "description": "Peer user ID for DMs; null for groups, in-flight solo convs, and GDPR-erased peers",
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+            "maxLength": 36
           }
         },
         "required": [

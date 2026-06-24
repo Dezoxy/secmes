@@ -2,32 +2,20 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { ConversationList } from './ConversationList';
-import {
-  conversations as seedConversations,
-  currentUser,
-  type Conversation,
-  type User,
-} from './seed';
-import type { Friend } from '../../lib/api';
+import { conversations as seedConversations, type Conversation } from './seed';
 
 function renderConversationList(options?: {
   conversations?: Conversation[];
-  currentUserProfile?: User;
   updateReady?: boolean;
-  friends?: Friend[];
-  onNewGroup?: () => void;
   mutedConversationIds?: ReadonlySet<string>;
 }): string {
   return renderToStaticMarkup(
     createElement(ConversationList, {
       conversations: options?.conversations ?? seedConversations.slice(0, 1),
-      currentUserProfile: options?.currentUserProfile ?? currentUser,
       selectedId: 'conv-1',
       onSelect: () => undefined,
       updateReady: options?.updateReady,
       onApplyUpdate: () => undefined,
-      friends: options?.friends,
-      onNewGroup: options?.onNewGroup,
       mutedConversationIds: options?.mutedConversationIds,
     }),
   );
@@ -40,48 +28,12 @@ describe('ConversationList', () => {
     expect(html).not.toContain('Update Argus');
   });
 
-  it('renders the friends entry point', () => {
+  it('renders the conversation list without friends or group buttons', () => {
     const html = renderConversationList();
 
-    expect(html).toContain('Friends');
-    expect(html).toContain('accepted');
-  });
-
-  it('shows only the Group button — no separate 1:1 button (1:1 chats start from Friends)', () => {
-    const html = renderConversationList({ onNewGroup: () => undefined });
-
-    expect(html).toContain('Group');
-    expect(html).not.toContain('1:1');
-    expect(html).not.toContain('New Conversation');
-  });
-
-  it('shows the accepted-friend count from the friends prop', () => {
-    const stubFriends: Friend[] = [
-      {
-        userId: 'peer-one',
-        argusId: 'argus-peer-one',
-        displayName: 'Peer One',
-        avatarSeed: null,
-        since: new Date().toISOString(),
-      },
-      {
-        userId: 'peer-two',
-        argusId: 'argus-peer-two',
-        displayName: 'Peer Two',
-        avatarSeed: null,
-        since: new Date().toISOString(),
-      },
-    ];
-
-    const html = renderConversationList({ friends: stubFriends });
-
-    expect(html).toContain('2 accepted');
-  });
-
-  it('shows 0 accepted friends when the friends prop is absent (demo / unauthenticated)', () => {
-    const html = renderConversationList({ friends: undefined });
-
-    expect(html).toContain('0 accepted');
+    expect(html).not.toContain('Friends');
+    expect(html).not.toContain('New group');
+    expect(html).not.toContain('Group');
   });
 
   it('shows a bottom app update action when a PWA update is ready', () => {
