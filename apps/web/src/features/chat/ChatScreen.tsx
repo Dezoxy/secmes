@@ -143,8 +143,8 @@ export default function ChatScreen() {
     setConversations,
   });
 
-  // Read receipts for the currently open conversation (delivered receipts handled by ChatProvider).
-  useReceiptSending({ conversations, liveIds, selectedId, selectedIsLive });
+  // Read receipts only — delivered receipts are handled globally by ChatProvider.
+  useReceiptSending({ conversations, liveIds, selectedId, selectedIsLive, sendDelivered: false });
 
   useEffect(() => {
     setMounted(true);

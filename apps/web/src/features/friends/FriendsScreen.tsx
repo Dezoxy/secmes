@@ -45,9 +45,11 @@ export default function FriendsScreen() {
   const canMutate = manager !== null;
 
   // Refresh the friends list when the tab is opened so stale state is cleared immediately.
+  // Call unconditionally: the API is accessible in demo mode too, and the auth/error
+  // handling inside refreshFriends is sufficient (it silently ignores failures without manager).
   useEffect(() => {
-    if (manager) void refreshFriends();
-  }, [manager, refreshFriends]);
+    void refreshFriends();
+  }, [refreshFriends]);
 
   const [friendQuery, setFriendQuery] = useState('');
   const [sendingRequest, setSendingRequest] = useState(false);

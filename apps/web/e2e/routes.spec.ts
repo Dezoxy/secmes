@@ -21,7 +21,7 @@ for (const route of routeShells) {
 test('the route shell back button steps back through in-app history', async ({ page }) => {
   await page.goto('/security');
   // In-app navigation (PUSH) to another shell so there is genuine Argus history to return to.
-  await page.getByRole('link', { name: 'Trusted devices', exact: true }).click();
+  await page.getByRole('link', { name: 'Devices', exact: true }).click();
   await expect(page).toHaveURL(/\/devices$/);
 
   await page.getByRole('button', { name: 'Go back' }).click();

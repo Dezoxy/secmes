@@ -80,7 +80,8 @@ export default function GroupsScreen() {
     setConversations,
   });
 
-  useReceiptSending({ conversations, liveIds, selectedId, selectedIsLive });
+  // Read receipts only — delivered receipts are handled globally by ChatProvider.
+  useReceiptSending({ conversations, liveIds, selectedId, selectedIsLive, sendDelivered: false });
 
   useEffect(() => {
     setMounted(true);
