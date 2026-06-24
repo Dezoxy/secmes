@@ -20,6 +20,7 @@ import {
   type MeBound,
 } from '../../lib/api';
 import { stashUnlockKey, unlockKeyFromResponse, withPrfSalt } from '../../lib/prf';
+import { syncMuteStateToCache } from '../settings/conversation-mute';
 
 export type { MeBound };
 
@@ -84,6 +85,9 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
     setToken(null);
     setAuthenticated(false);
     setProfile(null);
+    // Clear the SW-readable mute cache so a subsequent user on this device
+    // doesn't inherit a stale silent-notification state.
+    void syncMuteStateToCache(new Set());
   }, []);
 
   // Boot: try to restore session from the argus_refresh cookie.
