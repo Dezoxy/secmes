@@ -4527,7 +4527,7 @@
             }
           },
           "403": {
-            "description": "Authenticated, but not permitted to perform this action.",
+            "description": "a direct conversation naming a peer directly requires an accepted friendship",
             "content": {
               "application/json": {
                 "schema": {

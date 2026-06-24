@@ -137,17 +137,18 @@ export async function requireDirectFriendship(
 }
 
 /**
- * Friendship gate for the moment peers are ADDED to a conversation (deliverWelcome adds one,
- * postCommit may add several via `addedUserIds`) — checked against the EXPLICIT ids being added, not
- * members derived from the table (a peer isn't a member yet at bootstrap). No-op for groups/legacy and
- * for self-adds (a creator pulling in their own other devices reuses the caller id). For a DM every added
- * peer must be an accepted friend of the caller.
+ * Friendship gate for a DM write that adds members and/or touches an established DM (deliverWelcome adds
+ * one recipient; postCommit may add several via `addedUserIds`, or none). It gates the DM peer that will
+ * exist AFTER the operation, computed from the union of current members and the added ids — so it covers
+ * both the bootstrap add (peer not a member yet) AND an established DM whose commit adds nobody (the
+ * existing peer is still re-checked, closing the path where an unfriended peer keeps committing). No-op for
+ * groups/legacy. For a DM, every non-caller member of the resulting set must be an accepted friend.
  *
- * The whole add set is evaluated AT ONCE: a DM holds exactly two members, so existing members + the
- * distinct NEW peers must not exceed two — otherwise 500 (an invariant breach, never a 403 oracle).
- * Checking per-entry would be unsafe: a single commit adding two new friends would slip past, because each
- * entry on its own sees only the solo creator. Must run inside the SAME `withTenant` transaction as the
- * member-add and BEFORE it, so a rejected add writes no member row.
+ * The resulting member set is evaluated AT ONCE: a DM holds exactly two members, so the union of existing
+ * members and added ids must not exceed two — otherwise 500 (an invariant breach, never a 403 oracle).
+ * Per-entry checking would be unsafe: a single commit adding two new friends would slip past, because each
+ * entry alone sees only the solo creator. Must run inside the SAME `withTenant` transaction as the
+ * member-add and BEFORE it, so a rejected write touches no row.
  */
 export async function requireDirectFriendshipForAdd(
   tx: Tx,
@@ -163,23 +164,21 @@ export async function requireDirectFriendshipForAdd(
   if (!conv) throw new InternalServerErrorException('conversation not found for friendship gate');
   if (conv.isDirect !== true) return; // groups + legacy rows are ungated
 
-  // Distinct peers being added — drop self-adds (own other devices reuse the caller id) and duplicates.
-  const peers = [...new Set(addedUserIds)].filter((id) => id !== callerUserId);
-  if (peers.length === 0) return; // nothing peer-facing to gate (self-only / empty add)
-
-  // DM cardinality across the whole batch: existing members + distinct new peers must not exceed two.
+  // Resulting member set = current members ∪ added ids. `existing` already includes the caller
+  // (requireMembership ran), so this also re-checks the established peer when nothing new is added.
   const existing = await tx
     .select({ userId: schema.conversationMembers.userId })
     .from(schema.conversationMembers)
     .where(eq(schema.conversationMembers.conversationId, conversationId))
     .limit(3);
-  const existingIds = new Set(existing.map((m) => m.userId));
-  const newPeerCount = peers.filter((id) => !existingIds.has(id)).length;
-  if (existingIds.size + newPeerCount > 2) {
+  const finalMembers = new Set<string>([...existing.map((m) => m.userId), ...addedUserIds]);
+  if (finalMembers.size > 2) {
     throw new InternalServerErrorException('DM cannot exceed two members');
   }
 
-  for (const peer of peers) {
+  // Every member other than the caller must be an accepted friend (a DM has at most one such peer).
+  finalMembers.delete(callerUserId);
+  for (const peer of finalMembers) {
     await requireFriendship(tx, callerUserId, peer);
   }
 }

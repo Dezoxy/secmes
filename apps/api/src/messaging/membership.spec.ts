@@ -133,12 +133,29 @@ describe('requireDirectFriendshipForAdd', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('is a no-op when the only added id is the caller (self-add — own other devices)', async () => {
-    const tx = mockTxSeq([[{ isDirect: true }]]);
+  it('resolves with no friendship check when the only added id is the caller on a solo DM (self-add)', async () => {
+    const tx = mockTxSeq([[{ isDirect: true }], [{ userId: USER_A }]]);
     await expect(
       requireDirectFriendshipForAdd(tx, CONV, USER_A, [USER_A]),
     ).resolves.toBeUndefined();
-    expect((tx.select as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1); // no cardinality/friendship read
+    expect((tx.select as ReturnType<typeof vi.fn>).mock.calls.length).toBe(2); // isDirect + members, no friendship
+  });
+
+  it('re-checks the EXISTING peer on an established DM even when nothing is added (P1-2)', async () => {
+    // postCommit with addedUserIds: [] on an alice+bob DM must still confirm alice & bob are friends.
+    const tx = mockTxSeq([
+      [{ isDirect: true }],
+      [{ userId: USER_A }, { userId: USER_B }],
+      [{ id: 'f1' }],
+    ]);
+    await expect(requireDirectFriendshipForAdd(tx, CONV, USER_A, [])).resolves.toBeUndefined();
+  });
+
+  it('throws Forbidden on an established DM commit after the peer was unfriended (empty add)', async () => {
+    const tx = mockTxSeq([[{ isDirect: true }], [{ userId: USER_A }, { userId: USER_B }], []]);
+    await expect(requireDirectFriendshipForAdd(tx, CONV, USER_A, [])).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 
   it('resolves at DM bootstrap (only the creator is a member) when the added peer is a friend', async () => {

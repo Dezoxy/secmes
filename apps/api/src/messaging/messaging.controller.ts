@@ -273,6 +273,9 @@ export class MessagingController {
   @ApiBadRequestResponse({
     description: 'invalid body, or a member id is not a user in this tenant',
   })
+  @ApiForbiddenResponse({
+    description: 'a direct conversation naming a peer directly requires an accepted friendship',
+  })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async createConversation(
     @CurrentAuth() auth: VerifiedAuth,

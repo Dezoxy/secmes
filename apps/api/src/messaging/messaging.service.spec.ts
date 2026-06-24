@@ -115,7 +115,17 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     }
   });
 
+  // A generic GROUP conversation (alice + bob). isDirect=false, so the friendship gate never fires — used
+  // by the membership / send / welcome / commit MECHANICS tests, several of which add a further member
+  // (e.g. dave). DM-specific friendship behaviour uses newDm() instead.
   async function newConversation(): Promise<string> {
+    const { conversationId } = await svc.createConversation(aliceAuth, [bobId], false);
+    return conversationId;
+  }
+
+  // A DIRECT (1:1) conversation between alice and bob (seeded as friends in beforeAll). Use for the DM
+  // friendship-gate tests. createConversation gates the direct create against the seeded friendship.
+  async function newDm(): Promise<string> {
     const { conversationId } = await svc.createConversation(aliceAuth, [bobId], true);
     return conversationId;
   }
@@ -128,12 +138,12 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
     expect(ids).toEqual([aliceId, bobId].sort());
   });
 
-  it('rejects a member id from another tenant (400 — composite FK rejects the cross-tenant id)', async () => {
-    // carolId is from tenantB. createConversation no longer gates friendship (the gate moved to the
-    // peer-ADD sites — deliverWelcome / postCommit), so the cross-tenant id is caught by the members
-    // composite FK and surfaced as 400, as it was before the friendship feature.
+  it('rejects a direct create with a cross-tenant peer (403 — friendship gate fires before the FK)', async () => {
+    // carolId is from tenantB. A direct create that names a real peer is friendship-gated, and no
+    // alice↔carol friendship can exist across tenants (RLS-scoped), so the caller gets 403 — the gate
+    // runs before the members insert that would otherwise reject the cross-tenant id with 400.
     await expect(svc.createConversation(aliceAuth, [carolId], true)).rejects.toBeInstanceOf(
-      BadRequestException,
+      ForbiddenException,
     );
   });
 
@@ -207,7 +217,7 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
   });
 
   it('DM send is blocked with 403 after the peer unfriends the caller', async () => {
-    const conv = await newConversation();
+    const conv = await newDm();
     await sql`delete from friendships where tenant_id = ${tenantA}
       and user_low_id = least(${aliceId}::uuid, ${bobId}::uuid)
       and user_high_id = greatest(${aliceId}::uuid, ${bobId}::uuid)`;
@@ -222,7 +232,7 @@ describe.skipIf(!DB_URL)('MessagingService — membership authz + ciphertext-onl
   });
 
   it('idempotent retry of an already-stored DM message succeeds after unfriending (fast-path bypasses gate)', async () => {
-    const conv = await newConversation();
+    const conv = await newDm();
     const body = msg();
     const first = await svc.sendMessage(bobAuth, conv, body);
     expect(first.deduplicated).toBe(false);

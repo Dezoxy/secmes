@@ -14,7 +14,8 @@
 
 ```
 1. POST /conversations            { memberUserIds: [SELF], isDirect: true }
-     requireUser → INSERT solo conversation (creator only)        — NO friendship gate (peer not present yet)
+     requireUser → INSERT solo conversation (creator only)        — solo create (memberUserIds=[SELF]) is ungated;
+                                                                    a direct create that names a real peer IS gated
 
 2. Peer is added to the DM — friendship is checked HERE, against the EXPLICIT added id:
    single-device:  POST /conversations/:id/welcomes  { recipientUserId: peer, ... }
@@ -29,8 +30,9 @@
 
 Guards in `messaging/membership.ts` (one base check, two wrappers):
 - `requireFriendship(tx, a, b)` — throws 403 unless an `accepted` row exists for the canonical pair. RLS-tenant-scoped (no explicit `tenant_id` predicate); must run inside `withTenant`.
-- `requireDirectFriendshipForAdd(tx, conv, caller, addedId)` — **peer-explicit**, used at the add sites. No-op for groups/legacy and self-adds; **fails closed (500)** if the add would push the DM past two members (an invariant breach, never a 403 oracle); otherwise `requireFriendship(caller, addedId)`.
+- `requireDirectFriendshipForAdd(tx, conv, caller, addedIds)` — used at the add sites. Gates the DM peer that will exist AFTER the operation, computed from the union of current members and the added ids — so it covers the bootstrap add (peer not a member yet) AND an established DM whose commit adds nobody (the existing peer is re-checked, so an unfriended peer can't keep committing). No-op for groups/legacy. **Fails closed (500)** if the resulting member set would exceed two (an invariant breach, never a 403 oracle); otherwise requires friendship with each non-caller member.
 - `requireDirectFriendship(tx, conv, caller)` — **peer-derived** from `conversation_members`, used at send; fails closed (500) on a DM that doesn't have exactly one peer.
+- `createConversation` also calls `requireFriendship` directly when a direct create names a real (non-self) peer in the body — closing the path where a modified client inserts the peer as a member at creation rather than via an add site.
 
 **Sensitive data on this path.** None new: the checks read `friendships.status` and `conversation_members.user_id` (metadata) plus the request-body added id. No plaintext, no keys. The server stays crypto-blind — it decides only *whether* to store the ciphertext/welcome blob, never *what* is in it.
 
@@ -102,21 +104,22 @@ No invariant tension.
 
 ## 5. Decision & Mitigations
 
-**Decision**: a base guard `requireFriendship(tx, userA, userB)` in `messaging/membership.ts`, wrapped by two call-site helpers, gated at the points where the peer actually crosses into the DM plus on send (NOT at `createConversation`, which under the real client only ever sees the creator's own id):
+**Decision**: a base guard `requireFriendship(tx, userA, userB)` in `messaging/membership.ts`, wrapped by call-site helpers, gated at the points where the peer crosses into the DM plus on send. The solo-create path the real client uses is ungated at creation (it only names the creator's own id); the gate fires where the actual peer appears:
 
-1. `WelcomeService.deliverWelcome()` — `requireDirectFriendshipForAdd(sender, recipientUserId)` after `requireMembership`, before the member insert (single-device DM peer-add).
-2. `MessageDeliveryService.postCommit()` — `requireDirectFriendshipForAdd(sender, u)` for each `u ∈ addedUserIds`, before the commit insert (multi-device DM bootstrap).
+1. `WelcomeService.deliverWelcome()` — `requireDirectFriendshipForAdd(sender, [recipientUserId])` after `requireMembership`, before the member insert (single-device DM peer-add).
+2. `MessageDeliveryService.postCommit()` — `requireDirectFriendshipForAdd(sender, addedUserIds)` before the commit insert; gates the resulting DM peer (existing ∪ added), so an established DM is re-checked even when the commit adds nobody.
 3. `MessageDeliveryService.sendMessage()` — `requireDirectFriendship(sender)` after the idempotent-retry fast path; derives the single peer from membership. Primary gate for unfriending an existing DM.
-4. `ConversationService.createConversation()` — **no** friendship gate (kept only the `isDirect ⇒ exactly-one-member` structural check).
+4. `ConversationService.createConversation()` — `requireFriendship(creator, peer)` only when a direct create names a real non-self peer (`memberUserIds[0] !== creator`); the solo-create case is ungated (gated downstream at the add site). Kept the `isDirect ⇒ exactly-one-member` structural check.
 
 **Must-fix mitigations (all in place):**
 
 - M1: every guard runs in the SAME `withTenant` `Tx` as the write it protects (no separate connection); add-site gates run BEFORE the insert, so a rejected add writes no row.
 - M2: 403 body is the static string `"friendship required"` — no user/conversation ids.
 - M3: groups (`isDirect=false`) and legacy (`isDirect IS NULL`) are NOT gated at any site.
-- M4: controller specs pin the 403 posture for `deliverWelcome`, `postCommit`, and `sendMessage`; the obsolete `createConversation`-403 assertion was removed.
+- M4: controller specs pin the 403 posture for `createConversation` (direct-peer create), `deliverWelcome`, `postCommit`, and `sendMessage`.
 - M5: **add-site gates evaluate the live friendship on every call (no idempotent bypass)** — a stale retry re-adding a peer after an unfriend gets 403. Only the *send* path bypasses the gate, and only for an already-durable message retry (returning the stored row's ACK).
 - M6: a DM is capped at two members — an add that would grow it past two fails closed (500), never a 403.
+- M7: the `postCommit`/`deliverWelcome` gate checks the resulting peer set (current members ∪ added), so an established DM still gates its existing peer when a commit adds nobody — the commit endpoint is not a post-unfriend DM write path.
 
 **Subagent reviews:**
 
