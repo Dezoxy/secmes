@@ -11,6 +11,8 @@ interface UseReceiptSendingOptions {
   liveIds: Set<string>;
   selectedId: string | null;
   selectedIsLive: boolean;
+  /** Bumped after privacy settings hydrate so the read-receipt gate re-checks the local cache. */
+  privacySettingsVersion: number;
 }
 
 /**
@@ -30,6 +32,7 @@ export function useReceiptSending({
   liveIds,
   selectedId,
   selectedIsLive,
+  privacySettingsVersion,
 }: UseReceiptSendingOptions): void {
   const lastDelivered = useRef(new Map<string, string>());
   const lastRead = useRef(new Map<string, string>());
@@ -80,5 +83,5 @@ export function useReceiptSending({
     void recordReceipt(selectedId, 'read', target).catch(() => {
       if (lastRead.current.get(selectedId) === target) lastRead.current.delete(selectedId);
     });
-  }, [conversations, selectedId, selectedIsLive, focusTick]);
+  }, [conversations, selectedId, selectedIsLive, focusTick, privacySettingsVersion]);
 }

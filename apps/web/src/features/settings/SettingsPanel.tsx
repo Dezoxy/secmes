@@ -215,7 +215,6 @@ export function SettingsPanel({
   }, [accentId, fontSizeLevel]);
 
   useEffect(() => {
-    writeStoredPrivacySettings(privacySettings);
     if (!privacySettingsMounted.current) {
       privacySettingsMounted.current = true;
       return;
@@ -225,6 +224,7 @@ export function SettingsPanel({
       return;
     }
     privacySettingsUserEdited.current = true;
+    writeStoredPrivacySettings(privacySettings);
     const timer = window.setTimeout(() => {
       savePrivacySettings(privacySettings).catch(() => {
         // Fire-and-forget: localStorage write already applied; server sync failure is non-blocking.

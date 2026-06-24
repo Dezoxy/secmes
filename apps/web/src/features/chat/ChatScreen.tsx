@@ -155,6 +155,7 @@ export default function ChatScreen() {
   const [mobileThreadClosing, setMobileThreadClosing] = useState(false);
   const [mobileSidebarReturning, setMobileSidebarReturning] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [privacySettingsVersion, setPrivacySettingsVersion] = useState(0);
   const settingsReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   const mobileThreadBackTimerRef = useRef<number | undefined>(undefined);
   const mobileSidebarReturnTimerRef = useRef<number | undefined>(undefined);
@@ -363,7 +364,13 @@ export default function ChatScreen() {
     setConversations,
   });
 
-  useReceiptSending({ conversations, liveIds, selectedId, selectedIsLive });
+  useReceiptSending({
+    conversations,
+    liveIds,
+    selectedId,
+    selectedIsLive,
+    privacySettingsVersion,
+  });
 
   useEffect(() => {
     setMounted(true);
@@ -372,9 +379,17 @@ export default function ChatScreen() {
   // Seed localStorage with server-side privacy preferences on chat init so isReadReceiptsEnabled()
   // returns the correct value on any device, even if the user never opens Settings.
   useEffect(() => {
+    let cancelled = false;
     void fetchPrivacySettings()
-      .then(syncFromServer)
+      .then((settings) => {
+        if (cancelled) return;
+        syncFromServer(settings);
+        setPrivacySettingsVersion((version) => version + 1);
+      })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // When a peer key-change is detected for the currently-selected conversation, open the Verify panel
