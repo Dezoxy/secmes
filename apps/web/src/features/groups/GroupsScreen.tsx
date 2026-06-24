@@ -177,6 +177,11 @@ export default function GroupsScreen() {
             conversations={groupConversations}
             selectedId={selectedId}
             onSelect={handleSelect}
+            listPb={
+              groupManager && messagingDeps
+                ? 'pb-[calc(env(safe-area-inset-bottom)_+_6rem)] lg:pb-14'
+                : undefined
+            }
           />
 
           {groupManager && messagingDeps && (

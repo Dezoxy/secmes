@@ -16,6 +16,8 @@ interface ConversationListProps {
   onSelect: (id: string) => void;
   /** Conversation IDs with in-app notification badges suppressed. */
   mutedConversationIds?: ReadonlySet<string>;
+  /** Replaces the default bottom padding on the scrollable list. Pass a Tailwind `pb-` class when an absolutely-positioned element (e.g. a FAB) overlaps the list bottom. */
+  listPb?: string;
 }
 
 export function ConversationList({
@@ -23,6 +25,7 @@ export function ConversationList({
   selectedId,
   onSelect,
   mutedConversationIds,
+  listPb,
 }: ConversationListProps) {
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
@@ -189,7 +192,7 @@ export function ConversationList({
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-        className="flex-1 overflow-y-auto px-2 pb-[calc(env(safe-area-inset-bottom)_+_6rem)] space-y-1 lg:pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)]"
+        className={`flex-1 overflow-y-auto px-2 space-y-1 ${listPb ?? 'pb-[calc(env(safe-area-inset-bottom)_+_6rem)] lg:pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)]'}`}
       >
         {conversations.length === 0 && (
           <EmptyState title="No conversations yet" icon={Users} compact className="mx-2 mt-4">

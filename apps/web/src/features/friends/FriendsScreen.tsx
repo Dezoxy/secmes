@@ -62,6 +62,10 @@ export default function FriendsScreen() {
   const [confirmingUnfriendId, setConfirmingUnfriendId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const infightLookupQuery = useRef<string | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
 
   const trimmedFriendQuery = friendQuery.trim();
   const filteredFriends = useMemo(
@@ -150,6 +154,7 @@ export default function FriendsScreen() {
 
           {/* Search input — slides in when open */}
           <div
+            id="friend-search-panel"
             className={`overflow-hidden transition-all duration-300 ease-out ${
               searchOpen ? 'mt-3 max-h-20 opacity-100' : 'pointer-events-none max-h-0 opacity-0'
             }`}
@@ -171,7 +176,7 @@ export default function FriendsScreen() {
                 }}
                 aria-label="Search friends or enter Argus ID"
                 placeholder="Search friends or enter Argus ID..."
-                autoFocus={searchOpen}
+                ref={searchInputRef}
                 tabIndex={searchOpen ? undefined : -1}
                 className="w-full rounded-xl border border-white/5 bg-[#1a1a26] py-2.5 pl-10 pr-9 text-sm text-white placeholder-white/30 transition-colors focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20"
               />
@@ -204,6 +209,8 @@ export default function FriendsScreen() {
               type="button"
               onClick={() => setSearchOpen(true)}
               aria-label="Reveal friend search"
+              aria-expanded={searchOpen}
+              aria-controls="friend-search-panel"
               className="group mx-auto flex h-7 w-12 items-center justify-center rounded-full transition-colors hover:bg-white/[0.03]"
             >
               <span className="block h-1 w-10 rounded-full bg-white/15 transition-colors group-hover:bg-white/25" />
