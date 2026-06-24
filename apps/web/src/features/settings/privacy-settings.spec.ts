@@ -30,9 +30,9 @@ describe('privacy-settings', () => {
     vi.unstubAllGlobals();
   });
 
-  it('defaults read receipts to on when nothing is stored', () => {
-    expect(isReadReceiptsEnabled()).toBe(DEFAULT_PRIVACY_SETTINGS.readReceipts);
-    expect(isReadReceiptsEnabled()).toBe(true);
+  it('defaults read receipts to off (safe default) when nothing is cached', () => {
+    // Privacy-safe: no receipts until syncFromServer() confirms the user's preference.
+    expect(isReadReceiptsEnabled()).toBe(false);
   });
 
   it('round-trips the stored privacy record and reflects a disabled read-receipt toggle', () => {

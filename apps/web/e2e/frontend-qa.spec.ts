@@ -40,6 +40,18 @@ async function expectComposerAligned(page: Page): Promise<void> {
 test('F1C desktop chat and composer QA flow stays usable', async ({ page }) => {
   const issues = collectPageIssues(page);
 
+  await page.route('**/api/me/settings/privacy', (route) => {
+    if (route.request().method() === 'GET') {
+      void route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ readReceipts: true, typingIndicators: true, linkPreviews: true }),
+      });
+    } else {
+      void route.fulfill({ status: 204 });
+    }
+  });
+
   await page.goto('/chat');
 
   await expect(page.getByRole('main', { name: 'Chat' })).toBeVisible();

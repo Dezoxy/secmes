@@ -201,6 +201,9 @@ export function SettingsPanel({
   const privacySettingsMounted = useRef(false);
   const privacySettingsFromServer = useRef(false);
   const privacySettingsUserEdited = useRef(false);
+  // Debounce timer: rapid consecutive toggles produce one PUT (the last state wins), preventing
+  // out-of-order server writes from overwriting the final user-intended value with a stale one.
+  const privacySaveTimerRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     setAvatar(profile.avatar);
@@ -222,9 +225,15 @@ export function SettingsPanel({
       return;
     }
     privacySettingsUserEdited.current = true;
-    savePrivacySettings(privacySettings).catch(() => {
-      // Fire-and-forget: localStorage write already applied; server sync failure is non-blocking.
-    });
+    const timer = window.setTimeout(() => {
+      savePrivacySettings(privacySettings).catch(() => {
+        // Fire-and-forget: localStorage write already applied; server sync failure is non-blocking.
+      });
+    }, 500);
+    privacySaveTimerRef.current = timer;
+    return () => {
+      window.clearTimeout(timer);
+    };
   }, [privacySettings]);
 
   // On mount, sync privacy settings from the server so preferences roam across devices.

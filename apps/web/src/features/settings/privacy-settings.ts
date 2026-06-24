@@ -71,7 +71,16 @@ export function syncFromServer(serverSettings: PrivacySettings): void {
  * Whether to SEND read receipts and RENDER peers' read ticks. Reciprocal privacy: when off, the client both
  * stops POSTing `read` watermarks and caps a peer's tick at `delivered` (see foldOwnMessageStatuses). Reads
  * live from storage each call so a toggle in settings takes effect on the next message event without a reload.
+ *
+ * Returns false when localStorage has no cached value (first load / cleared storage) so that read receipts
+ * are not sent in the brief window before syncFromServer() writes the server-confirmed preference.
  */
 export function isReadReceiptsEnabled(): boolean {
-  return readStoredPrivacySettings().readReceipts;
+  if (typeof window === 'undefined') return false;
+  const stored = readVersionedRecord({
+    storage: browserLocalStorage(),
+    key: PRIVACY_SETTINGS_STORAGE_KEY,
+    decode: decodePrivacySettingsRecord,
+  });
+  return stored.status === 'ok' ? stored.value.readReceipts : false;
 }
