@@ -797,7 +797,7 @@ export default function ChatScreen() {
     if (window.innerWidth < 1024) setShowSidebar(false);
   };
 
-  const handleBackToConversations = () => {
+  const handleBackToConversations = useCallback(() => {
     if (window.innerWidth >= 1024 || prefersReducedMotion()) {
       setShowSidebar(true);
       return;
@@ -819,7 +819,7 @@ export default function ChatScreen() {
         setMobileSidebarReturning(false);
       }, 220);
     }, 180);
-  };
+  }, []);
 
   useSwipeBack(mainPanelRef, handleBackToConversations, !showSidebar);
 

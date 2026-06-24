@@ -34,7 +34,7 @@ export function useSwipeBack(
       if (!t) return;
       const dx = t.clientX - startX;
       const dy = Math.abs(t.clientY - startY);
-      if (dy > dx) {
+      if (dy > Math.abs(dx)) {
         armed = false;
         return;
       }

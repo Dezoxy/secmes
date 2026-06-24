@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { useSwipeBack } from './useSwipeBack';
 
@@ -47,7 +54,14 @@ export function Modal({
     return () => document.removeEventListener('keydown', closeOnEscape);
   }, [onClose]);
 
-  useSwipeBack(dialogRef, onClose, true);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 1024);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 1023px)');
+    const update = () => setIsMobile(mq.matches);
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+  useSwipeBack(dialogRef, onClose, isMobile);
 
   const trapFocus = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'Tab' || !dialogRef.current) return;
