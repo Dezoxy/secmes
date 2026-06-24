@@ -28,3 +28,21 @@ test('mobile layout shows chat after selecting a conversation', async ({ page })
   await expect(page.getByRole('main', { name: 'Chat' })).toBeVisible();
   await expect(page.getByRole('complementary', { name: 'Conversations' })).toHaveCount(0);
 });
+
+test('voice and video call buttons show coming soon toast', async ({ page }) => {
+  await page.goto('/chat');
+
+  await page.getByRole('button', { name: 'Start voice call' }).click();
+  await expect(page.getByText('Voice and video calls are coming soon')).toBeVisible();
+});
+
+test('call button toast is debounced — rapid clicks show only one toast', async ({ page }) => {
+  await page.goto('/chat');
+
+  const btn = page.getByRole('button', { name: 'Start video call' });
+  await btn.click();
+  await btn.click();
+  await btn.click();
+
+  await expect(page.getByText('Voice and video calls are coming soon')).toHaveCount(1);
+});
