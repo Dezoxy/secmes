@@ -5,6 +5,7 @@ import type { UserLookupResult, Friend, FriendRequest } from '../../lib/api';
 import {
   listFriends,
   listFriendRequests,
+  listMyConversationsWithMeta,
   sendFriendRequest,
   acceptFriendRequest,
   declineFriendRequest,
@@ -222,11 +223,23 @@ export default function ChatScreen() {
   const [startPrefillArgusId, setStartPrefillArgusId] = useState<string | undefined>();
   const [groupCreateOpen, setGroupCreateOpen] = useState(false);
   const [friends, setFriends] = useState<Friend[]>([]);
+  const [friendsLoaded, setFriendsLoaded] = useState(false);
   const [incomingRequests, setIncomingRequests] = useState<FriendRequest[]>([]);
   const [outgoingRequests, setOutgoingRequests] = useState<FriendRequest[]>([]);
   const [friendsError, setFriendsError] = useState(false);
   const inFlightRequestIds = useRef(new Set<string>());
   const [addMemberOpen, setAddMemberOpen] = useState(false);
+  // Server-side peer maps built from the enriched conversation list on startup. Used for:
+  // (a) dedup: find an existing DM with a peer even after reinstall (when localStorage is wiped),
+  // (b) friendship gate: resolve the peer's userId for the selected conversation.
+  const [peerToConvId, setPeerToConvId] = useState<Map<string, string>>(new Map());
+  const [convToPeerId, setConvToPeerId] = useState<Map<string, string>>(new Map());
+  // True once the startup snapshot has been fetched (even when the result is empty).
+  // Distinct from peerToConvId.size===0 which can't tell "not loaded" from "loaded but no DMs".
+  const [peerMapsLoaded, setPeerMapsLoaded] = useState(false);
+  // Tracks which DM conversation IDs are already reflected in the peer maps. Prevents the
+  // secondary "keep maps fresh" effect from looping on every state update.
+  const mappedDMConvsRef = useRef(new Set<string>());
   const { appendHistory, mergeIncoming, backfillInto } = useConversationBackfill({
     messagingDeps,
     sessionKey,
@@ -241,6 +254,7 @@ export default function ChatScreen() {
         listFriendRequests('outgoing'),
       ]);
       setFriends(fl);
+      setFriendsLoaded(true);
       setIncomingRequests(inc);
       setOutgoingRequests(out);
       setFriendsError(false);
@@ -311,6 +325,33 @@ export default function ChatScreen() {
   // encrypt into, and v1 does not auto-recover (re-establishment is slice 5c-2).
   const selectedIsSyncLost = selectedConversation?.recovery === 'sync-lost';
 
+  // Resolve the peer's userId for the selected DM: prefer the server-side map (survives reinstall),
+  // then the persisted localStorage mapping, then the live participants array.
+  const selectedPeerUserId = useMemo(() => {
+    if (!selectedId || !isDirect) return null;
+    return (
+      convToPeerId.get(selectedId) ??
+      loadPersistedPeerMapping(selectedId) ??
+      selectedConversation?.participants.find((p) => p.id !== currentUserProfile.id)?.id ??
+      null
+    );
+  }, [selectedId, isDirect, convToPeerId, selectedConversation, currentUserProfile.id]);
+
+  // For DMs, the composer is blocked when the peer is no longer an accepted friend. The server
+  // already enforces this (403 on send); this is the UI signal. Groups are always unblocked here.
+  // Guard on friendsLoaded: don't block the composer before the first successful friends fetch
+  // (demo mode, slow network, or E2E without a real backend would otherwise false-block).
+  // Also pass through non-UUID peer IDs (synthetic `peer-${convId}` placeholders from
+  // liveConversationShell while peer naming is still resolving — comparing them to real friend IDs
+  // would false-block a valid DM).
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const peerIsFriend =
+    !isDirect ||
+    !selectedPeerUserId ||
+    !friendsLoaded ||
+    !UUID_RE.test(selectedPeerUserId) ||
+    friends.some((f) => f.userId === selectedPeerUserId);
+
   const handleSend = useMessageSending({
     selectedId,
     isLive,
@@ -373,6 +414,75 @@ export default function ChatScreen() {
   useEffect(() => {
     if (manager) void refreshFriends();
   }, [refreshFriends, manager]);
+
+  // Build peer↔conversation maps from the server-side enriched conversation list. Best-effort:
+  // failures are silently swallowed — the local participants array is the fallback for dedup.
+  useEffect(() => {
+    if (!manager) return;
+    void listMyConversationsWithMeta()
+      .then((convs) => {
+        const p2c = new Map<string, string>();
+        const c2p = new Map<string, string>();
+        for (const c of convs) {
+          if (!c.isDirect || !c.peerUserId) continue;
+          // Keep the most recently created conversation per peer (dedup: show only the latest).
+          const existing = p2c.get(c.peerUserId);
+          if (!existing) {
+            p2c.set(c.peerUserId, c.id);
+            c2p.set(c.id, c.peerUserId);
+          } else {
+            // Track ALL DM conversations for this peer in c2p (sidebar dedup uses it to check
+            // peerToConvId.get(peer) === c.id — non-canonical convs must be in c2p or the
+            // !peer fallback would let them through). Then update the canonical pointer if newer.
+            c2p.set(c.id, c.peerUserId);
+            const existingConv = convs.find((x) => x.id === existing);
+            if (existingConv && c.createdAt > existingConv.createdAt) {
+              p2c.set(c.peerUserId, c.id);
+            }
+          }
+        }
+        convs.forEach((c) => mappedDMConvsRef.current.add(c.id));
+        setPeerToConvId(p2c);
+        setConvToPeerId(c2p);
+        setPeerMapsLoaded(true);
+      })
+      .catch(() => {
+        /* best-effort; falls back to participants-based dedup */
+        setPeerMapsLoaded(true); // mark loaded even on failure so the secondary effect runs
+      });
+  }, [manager]);
+
+  // Keep peer maps current for DMs that arrive via WebSocket after the startup snapshot (e.g. a
+  // peer reinstalls and sends a new Welcome while the app is open). Uses a ref to avoid looping.
+  // WS-arrived DMs are always newer than the snapshot canonical, so they take the canonical slot.
+  useEffect(() => {
+    if (!peerMapsLoaded) return; // startup snapshot not yet fetched
+    const newDMs = conversations.filter(
+      (c) => c.type === 'direct' && !mappedDMConvsRef.current.has(c.id),
+    );
+    if (newDMs.length === 0) return;
+    newDMs.forEach((c) => mappedDMConvsRef.current.add(c.id));
+    setConvToPeerId((prev) => {
+      const next = new Map(prev);
+      for (const c of newDMs) {
+        const peer =
+          loadPersistedPeerMapping(c.id) ??
+          c.participants.find((p) => p.id !== currentUserProfile.id)?.id;
+        if (peer && !next.has(c.id)) next.set(c.id, peer);
+      }
+      return next;
+    });
+    setPeerToConvId((prev) => {
+      const next = new Map(prev);
+      for (const c of newDMs) {
+        const peer =
+          loadPersistedPeerMapping(c.id) ??
+          c.participants.find((p) => p.id !== currentUserProfile.id)?.id;
+        if (peer) next.set(peer, c.id); // WS-arrived → always newer → becomes canonical
+      }
+      return next;
+    });
+  }, [conversations, peerMapsLoaded, currentUserProfile.id]);
 
   useEffect(() => {
     if ('setAppBadge' in navigator) {
@@ -476,13 +586,52 @@ export default function ChatScreen() {
 
   // ─────────────────────────────────────────────────────────────────────────────
 
-  // instead of creating a duplicate). Matches on the REAL peer user id, which creator-made conversations
-  // carry from the start and joined/rehydrated ones gain via peer-naming (or the persisted mapping on
-  // reload — see persistPeerMapping in handleStarted below and useConversationHistoryRehydration).
+  // Sidebar dedup: when the server map is loaded, filter the conversation list so that only the
+  // canonical (latest-createdAt) DM per peer is shown. Old duplicate rows (created before a
+  // reinstall) are hidden without deleting server data. Non-DMs and peers absent from the server
+  // map pass through unchanged. Before the snapshot loads, show all conversations so there's no
+  // flash of removed content. When the canonical row isn't in the local conversation list yet
+  // (e.g. this device had no key package and missed the Welcome), keep the older local DM visible
+  // so the user isn't left with a blank sidebar.
+  const localConvIds = useMemo(() => new Set(conversations.map((c) => c.id)), [conversations]);
+  const dedupedConversations = useMemo(
+    () =>
+      !peerMapsLoaded
+        ? conversations
+        : conversations.filter((c) => {
+            if (c.type !== 'direct') return true;
+            const peer = convToPeerId.get(c.id);
+            if (!peer) return true; // peer not in server map → show as-is
+            const canonicalId = peerToConvId.get(peer);
+            // Hide this conv only if the canonical is a different conv AND it's locally present.
+            if (canonicalId && canonicalId !== c.id && localConvIds.has(canonicalId)) return false;
+            return true;
+          }),
+    [conversations, peerMapsLoaded, peerToConvId, convToPeerId, localConvIds],
+  );
+
+  // If the currently selected conversation is being hidden by the dedup filter (it's a stale older
+  // DM and the canonical replacement is locally present), redirect selection to the canonical so the
+  // user doesn't send into a conversation the reinstalled peer no longer has MLS state for.
+  useEffect(() => {
+    if (!selectedId || !peerMapsLoaded) return;
+    const peer = convToPeerId.get(selectedId);
+    if (!peer) return;
+    const canonicalId = peerToConvId.get(peer);
+    if (!canonicalId || canonicalId === selectedId) return;
+    if (!localConvIds.has(canonicalId)) return; // canonical not locally joined yet — don't redirect
+    setSelectedId(canonicalId);
+  }, [selectedId, peerMapsLoaded, convToPeerId, peerToConvId, localConvIds]);
+
+  // instead of creating a duplicate). Checks the server-side peer map first (populated at startup from
+  // the enriched conversation list — survives reinstall even when localStorage/IDB is wiped), then
+  // falls back to the local participants array (populated via peer-naming as messages arrive).
   const findConversationWith = (peerUserId: string): string | null =>
+    peerToConvId.get(peerUserId) ??
     conversations.find(
       (c) => c.type === 'direct' && c.participants.some((p) => p.id === peerUserId),
-    )?.id ?? null;
+    )?.id ??
+    null;
 
   const handleOpenExisting = (conversationId: string): void => {
     setSelectedId(conversationId);
@@ -517,6 +666,9 @@ export default function ChatScreen() {
           ],
     );
     persistPeerMapping(session.conversationId, peer.userId);
+    // Keep the in-session peer maps current so dedup and friendship gate reflect the new conversation.
+    setPeerToConvId((prev) => new Map([...prev, [peer.userId, session.conversationId]]));
+    setConvToPeerId((prev) => new Map([...prev, [session.conversationId, peer.userId]]));
     setNumbersByConv((prev) => ({ ...prev, [session.conversationId]: session.safetyNumber }));
     setVerifiedByConv((prev) => ({ ...prev, [session.conversationId]: session.safetyNumber }));
     setSelectedId(session.conversationId);
@@ -705,7 +857,7 @@ export default function ChatScreen() {
           </div>
 
           <ConversationList
-            conversations={conversations}
+            conversations={dedupedConversations}
             selectedId={selectedId}
             onSelect={handleSelect}
             currentUserProfile={currentUserProfile}
@@ -776,7 +928,13 @@ export default function ChatScreen() {
                 </StateBlock>
               )}
               <MessageList conversation={selectedConversation} onImageClick={setPreviewImage} />
-              {effectiveSelectedIsLive && !selectedIsSyncLost && <ChatInput onSend={handleSend} />}
+              {effectiveSelectedIsLive && !selectedIsSyncLost && (
+                <ChatInput
+                  onSend={handleSend}
+                  disabled={!peerIsFriend}
+                  disabledNotice="You are no longer friends with this person. Re-add them as a friend to send messages."
+                />
+              )}
             </div>
           ) : (
             <div
@@ -816,6 +974,7 @@ export default function ChatScreen() {
           onOpenExisting={handleOpenExisting}
           onStarted={handleStarted}
           prefillArgusId={startPrefillArgusId}
+          conversationHasState={manager.hasStateForConversation.bind(manager)}
           onClose={() => {
             setStartOpen(false);
             setStartPrefillArgusId(undefined);

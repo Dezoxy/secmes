@@ -309,6 +309,13 @@ export class ConversationManager {
   get(conversationId: string): ConversationSession | undefined {
     return this.sessions.get(conversationId);
   }
+
+  /** Whether this device has persisted MLS group state for `conversationId`. Used to detect the
+   * reinstall path: if the server says a DM exists with a peer but no local state is present, the
+   * conversation can't be decrypted and a fresh one must be established instead. */
+  hasStateForConversation(conversationId: string): Promise<boolean> {
+    return this.keystore.hasConversationState(this.device, conversationId);
+  }
 }
 
 // ── Group conversation manager (B1) ──────────────────────────────────────────────────────────────────
