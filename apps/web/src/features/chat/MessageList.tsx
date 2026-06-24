@@ -6,9 +6,14 @@ import { currentUser, users } from './seed';
 interface MessageListProps {
   conversation: Conversation;
   onImageClick: (url: string) => void;
+  bottomNavClearance?: boolean;
 }
 
-export function MessageList({ conversation, onImageClick }: MessageListProps) {
+export function MessageList({
+  conversation,
+  onImageClick,
+  bottomNavClearance = false,
+}: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const previousMessageCount = useRef(conversation.messages.length);
   const seenMessageIds = useRef(new Set(conversation.messages.map((message) => message.id)));
@@ -55,6 +60,9 @@ export function MessageList({ conversation, onImageClick }: MessageListProps) {
 
   const getSender = (senderId: string) =>
     senderId === currentUser.id ? currentUser : users.find((u) => u.id === senderId);
+  const bottomPadding = bottomNavClearance
+    ? 'pb-[calc(env(safe-area-inset-bottom)_+_6rem)] lg:pb-4'
+    : 'pb-4';
 
   return (
     <div
@@ -62,7 +70,7 @@ export function MessageList({ conversation, onImageClick }: MessageListProps) {
       role="region"
       aria-label="Message thread"
       aria-live="polite"
-      className="flex-1 overflow-y-auto px-4 py-4 space-y-3"
+      className={`flex-1 space-y-3 overflow-y-auto px-4 pt-4 ${bottomPadding}`}
     >
       {conversation.messages.map((message, index) => {
         const isOwn = message.senderId === currentUser.id;
