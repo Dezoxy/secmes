@@ -539,6 +539,24 @@ export default function ChatScreen() {
 
   // ─────────────────────────────────────────────────────────────────────────────
 
+  // Sidebar dedup: when the server map is loaded, filter the conversation list so that only the
+  // canonical (latest-createdAt) DM per peer is shown. Old duplicate rows (created before a
+  // reinstall) are hidden without deleting server data. Non-DMs and peers absent from the server
+  // map pass through unchanged. When the map hasn't loaded yet (size === 0), show all conversations
+  // so there's no visible flash of content being removed on startup.
+  const dedupedConversations = useMemo(
+    () =>
+      peerToConvId.size === 0
+        ? conversations
+        : conversations.filter((c) => {
+            if (c.type !== 'direct') return true;
+            const peer = convToPeerId.get(c.id);
+            if (!peer) return true; // peer not in server map → show as-is
+            return peerToConvId.get(peer) === c.id; // only the canonical conversation for this peer
+          }),
+    [conversations, peerToConvId, convToPeerId],
+  );
+
   // instead of creating a duplicate). Checks the server-side peer map first (populated at startup from
   // the enriched conversation list — survives reinstall even when localStorage/IDB is wiped), then
   // falls back to the local participants array (populated via peer-naming as messages arrive).
@@ -773,7 +791,7 @@ export default function ChatScreen() {
           </div>
 
           <ConversationList
-            conversations={conversations}
+            conversations={dedupedConversations}
             selectedId={selectedId}
             onSelect={handleSelect}
             currentUserProfile={currentUserProfile}
