@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useSwipeBack } from './useSwipeBack';
 
 interface ModalProps {
   ariaLabel: string;
@@ -45,6 +46,8 @@ export function Modal({
     document.addEventListener('keydown', closeOnEscape);
     return () => document.removeEventListener('keydown', closeOnEscape);
   }, [onClose]);
+
+  useSwipeBack(dialogRef, onClose, true);
 
   const trapFocus = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'Tab' || !dialogRef.current) return;

@@ -58,6 +58,7 @@ import {
   paneBackEnterMotion,
   paneBackExitMotion,
 } from '../ui';
+import { useSwipeBack } from '../ui/useSwipeBack';
 import type { Conversation, User } from './seed';
 import { loadPersistedPeerMapping, persistPeerMapping } from './peer-naming';
 import { dicebearAvatar, isCustomPhoto } from '../../lib/dicebear';
@@ -156,6 +157,7 @@ export default function ChatScreen() {
   const settingsReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   const mobileThreadBackTimerRef = useRef<number | undefined>(undefined);
   const mobileSidebarReturnTimerRef = useRef<number | undefined>(undefined);
+  const mainPanelRef = useRef<HTMLDivElement>(null);
   const [verifyOpen, setVerifyOpen] = useState(false);
   // B2: set when D2 registers an enrollment on this user's account — triggers approval UI on D1.
   const [pendingEnrollmentId, setPendingEnrollmentId] = useState<string | null>(null);
@@ -819,6 +821,8 @@ export default function ChatScreen() {
     }, 180);
   };
 
+  useSwipeBack(mainPanelRef, handleBackToConversations, !showSidebar);
+
   const openSettings = (trigger: HTMLButtonElement) => {
     settingsReturnFocusRef.current = trigger;
     setSettingsOpen(true);
@@ -881,6 +885,7 @@ export default function ChatScreen() {
 
         {/* Main */}
         <div
+          ref={mainPanelRef}
           role="main"
           aria-label="Chat"
           className={`${
