@@ -31,6 +31,20 @@ What the crypto-blind server (and therefore an operator, or a DB/infra compromis
 - **Device topology** — `devices` / `device_enrollments`: how many devices a user has and when they linked.
 - **Presence / online activity** — live WebSocket connection state and subscription set. (The per-`(socket, conversation)` `deliverySeq` added in Track 3 item D adds **no new operator-side inference**: it is ephemeral per-socket transport state the operator already implicitly knows — it counts the frames it just fanned out — and is **not** a persisted per-conversation message-volume counter; nothing about it lands at rest.)
 - **Attachment existence, size, and timing** — blob object keys + B2 object sizes (content encrypted).
+- **Call graph — who-calls-whom (VoIP)** — to route 1:1 call signaling the gateway necessarily sees the
+  caller/callee `(tenant, sub)` pair in real time. **V1 persists no call record** (signaling is emitted to the
+  bus, never written to disk), so there is no durable call graph at rest — but the operator can observe it
+  *live*. The V1.1 missed-call ledger (`call_sessions`) would persist this as metadata-only with a 30-day TTL +
+  RLS. See [`voip-calling.md`](./voip-calling.md) §4.
+- **Call timing, duration & frequency (VoIP)** — offer→answer→hangup events through the gateway, and relay
+  flow start/stop at coturn, reveal when a call happened, roughly how long it lasted, and repeated-pair
+  patterns. No durable timing log in V1; inferable in real time only. **Accepted** (same class as message
+  timing). See [`voip-calling.md`](./voip-calling.md) §4.
+- **Relay peer-IP (VoIP, transient)** — with relay-only default, the self-hosted coturn relay sees **both
+  peers' IP/port 5-tuples** for every call (the deliberate trade that blinds peers to each other). IPs are
+  personal data but are **never logged or persisted** (coturn `simple-log`, no verbose, excluded from
+  long-term Loki) and stay in-region (EU VM). See [`voip-turn.md`](./voip-turn.md) and
+  [`../gdpr/data-residency.md`](../gdpr/data-residency.md).
 - **Lookup / discovery history (incl. hit/miss)** — `audit_events.metadata` records the argus-id each user
   probed via `users.lookup` and `friends.request_created` (`schema.ts:237-246`; `users.controller.ts:70-73`,
   `friends.controller.ts:142-144`). For `users.lookup` the metadata is `{ targetArgusId, found }`, so it records

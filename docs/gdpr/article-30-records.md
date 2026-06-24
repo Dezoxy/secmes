@@ -2,7 +2,7 @@
 
 **Controller**: Argus Secure Messaging (operator entity — fill in legal name)  
 **DPO contact**: dpo@[operator-domain] (fill in)  
-**Last updated**: 2026-06-19  
+**Last updated**: 2026-06-24  
 **Regulation**: GDPR Art. 30(1)
 
 ---
@@ -34,6 +34,7 @@
 | GDPR account deletion (Art. 17 erasure) | Art. 6(1)(c) — legal obligation | |
 | Error tracking / observability | Art. 6(1)(f) — legitimate interest | No content, no tokens in logs |
 | Web Push notification delivery | Art. 6(1)(b) — contract | Endpoint URL prefixes only |
+| 1:1 voice calling (VoIP) | Art. 6(1)(b) — contract | E2EE audio (DTLS-SRTP, server crypto-blind); only call-routing **metadata** and transient relay 5-tuples are processed. V1 persists **no** call record. See `docs/threat-models/voip-calling.md` + `dpia-voip-calling.md`. |
 
 ---
 
@@ -49,6 +50,10 @@
 | Audit events | Users | Actor sub, event type, IDs in metadata, timestamp | Low |
 | Push subscriptions | Users | Endpoint URL (capability URL — access-granting), p256dh public key, auth secret | Medium |
 | Invites | Users | Single-use invite tokens (SHA-256 hashed at rest), timestamps | Low |
+| Call peer IP address (VoIP) | Users | Source IP/port 5-tuple processed **transiently in memory** by the self-hosted coturn relay during a call | High (personal data; **never logged or persisted**) |
+| Call metadata (VoIP, V1.1) | Users | Caller/callee UUIDs, conversation ID, started/answered/ended timestamps — metadata only, no content, no SDP/keys | Low — **dormant in V1** (no `call_sessions` table ships until V1.1) |
+
+**Note on call peer IP**: relay 5-tuples are inherent to running a TURN relay and are **transient only** — coturn runs `simple-log` (no verbose), logs no credentials, and its logs are excluded from the long-term Loki store. No IP is written to the database. The relay is crypto-blind (relays opaque DTLS-SRTP, holds no media key). See `docs/threat-models/voip-turn.md`.
 
 **Note on push subscriptions**: the full endpoint URL is a capability URL and must be treated as a credential. It is never returned in exports (only the first 40 chars are exported for identification). It is never logged.
 
@@ -63,8 +68,9 @@
 | Microsoft Azure (VM compute, Key Vault) | Encrypted-at-rest data volumes | DPA + EU region pinned (germanywestcentral) |
 | Backblaze B2 (blob storage) | Encrypted attachment blobs (ciphertext only) | DPA + EU region (eu-central-003) |
 | GlitchTip (self-hosted error tracking) | Stack traces, error metadata (no content, no tokens) | Same VM, EU, no third-party transfer |
+| Browser push services — Apple (APNs), Google (FCM), Mozilla autopush | **Content-free** push wake-ups (a `{type}` tag only — no caller, conversation, message text, or SDP). Selected per the subscriber's browser. Covers existing message-notification push; the VoIP **call-wake** branch is **V1.1** (V1 is foreground-ring only, sends no push). | Web Push protocol (RFC 8030); payloads carry no personal content. **Third-country note:** Apple/Google operate these services globally; argus minimizes by sending content-free pushes only. Tracked here as the named sub-processors for transparency. |
 
-No personal data is transferred to third countries outside the EU/EEA.
+No message content, call content, or media keys are transferred to third countries. Push wake-ups are content-free metadata only.
 
 ---
 
@@ -79,6 +85,7 @@ No personal data is transferred to third countries outside the EU/EEA.
 | Audit events | 90 days from event creation (rolling window, enforced by the `argus-audit-prune` systemd-timer worker; see `docs/threat-models/audit-logging.md`) | Proportionality + Art. 6(1)(f) |
 | Auth sessions | 30 days past expiry (rolling window, same prune worker) | Proportionality + Art. 6(1)(f) |
 | Push subscriptions | Until device deletion or account deletion | Art. 6(1)(b) |
+| Call metadata (`call_sessions`, VoIP missed-call list) | **30 days** (rolling window, dedicated `argus_call_prune` worker) — **dormant in V1** (no table ships until V1.1); the retention literal is fixed now so the worker and ROPA agree when it lands | Proportionality + Art. 6(1)(f) |
 | Error tracking events | 30 days (GlitchTip default) | Proportionality |
 | Backups (encrypted DB snapshots) | 30 days (Backblaze backup bucket lifecycle) | Operational necessity |
 
@@ -87,6 +94,7 @@ No personal data is transferred to third countries outside the EU/EEA.
 ## 6. Technical and organisational security measures (Art. 30(1)(g))
 
 - **End-to-end encryption**: all message content is encrypted on-device using MLS before reaching the server. The server is crypto-blind.
+- **End-to-end encrypted calling (VoIP)**: 1:1 call media is encrypted browser-to-browser with WebRTC DTLS-SRTP; the self-hosted coturn relay forwards opaque ciphertext and holds no media key. Call signaling (SDP/ICE) rides inside MLS ciphertext. No call content or media key is ever accessible to the server or relay; no call recording exists. Relay peer-IPs are transient and unlogged.
 - **Encryption at rest**: Azure managed disk encryption (AES-256) for the VM volume; Backblaze server-side encryption for blobs.
 - **Encryption in transit**: TLS 1.2+ enforced via Cloudflare Tunnel (no public ports).
 - **Access control**: per-tenant PostgreSQL Row-Level Security enforced for all tenant-scoped tables. No cross-tenant query path exists.

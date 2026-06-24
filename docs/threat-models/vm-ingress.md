@@ -6,6 +6,19 @@
 > Key Vault → credential-file wiring are Slice 3 (this slice references file/env placeholders only).
 > Cross-references the infra-foundation threat model in `vm-deploy.md` (slice 1).
 
+> **⚠️ Update (VoIP, 2026-06-24): the "tunnel is the only ingress / zero published ports"
+> assertion below is no longer absolute.** The VoIP relay introduces the platform's **first
+> sanctioned public inbound port** — a self-hosted **coturn** TURN relay on the VM public IP
+> (UDP/TCP `3478`, TCP/TLS `5349`, and a narrow `49160-49260/udp` relay range), gated by three
+> narrow Azure NSG allows above the `deny-all-inbound`. This is a **deliberate, audited single
+> exception**, not a regression: coturn is crypto-blind (relays opaque DTLS-SRTP, holds no media
+> key), runs `network_mode: host` non-root/read-only/caps-dropped, and the HTTP/WS origin
+> (Caddy/api) **stays tunnel-only and unreachable**. `compose-guard` is tightened to still assert
+> **zero published `ports:`** and additionally that the **only** `network_mode: host` service is
+> `coturn`. Full analysis: [`voip-turn.md`](./voip-turn.md). Where this note says "the only path
+> in is the authenticated tunnel," read it as "the only path in **to the application surface**;"
+> the TURN relay is the one separately-audited media-plane ingress.
+
 ## 1. Feature & data flow
 
 ```
@@ -47,7 +60,11 @@ the API are crypto-blind (server stores/forwards ciphertext only; invariant #1).
 - **Spoofing the origin / bypassing the edge.** If the VM published ports, an attacker could hit Caddy or
   Postgres directly and skip Cloudflare's WAF/rate-limit/Access. → The NSG denies all inbound and
   `compose.prod.yaml` publishes **no host ports** (cloudflared is outbound-only; Caddy and the data services
-  are reachable only on the internal Docker network). The only path in is the authenticated tunnel.
+  are reachable only on the internal Docker network). The only path in **to the application surface** is the
+  authenticated tunnel. *(VoIP exception: the coturn relay binds the VM public IP via `network_mode: host` —
+  a media-plane ingress that speaks only STUN/TURN and never reaches Caddy/api/data services; see
+  [`voip-turn.md`](./voip-turn.md). It still publishes no Compose `ports:`, so the `compose-guard` zero-ports
+  assertion holds; the guard additionally pins coturn as the sole host-network service.)*
 - **Tampering / info-disclosure in transit.** → TLS terminates at Cloudflare; the Cloudflare↔cloudflared leg
   is an authenticated tunnel; the internal cloudflared↔Caddy↔api legs are plain HTTP but never leave the
   host's Docker network. Message bodies are E2EE ciphertext regardless of the transport.
@@ -93,7 +110,10 @@ the API are crypto-blind (server stores/forwards ciphertext only; invariant #1).
 Ship the topology as code, gated and undeployed. Must-hold mitigations baked into this slice:
 
 - **No published host ports** in `compose.prod.yaml` (cloudflared outbound-only; Caddy + data services
-  internal). This is the single most important control — it forces all traffic through the Cloudflare edge.
+  internal). This is the single most important control — it forces all *application* traffic through the
+  Cloudflare edge. **VoIP exception:** the coturn relay uses `network_mode: host` (not `ports:`) to bind the
+  TURN ports directly; `compose-guard` is tightened to assert zero `ports:` **and** that coturn is the only
+  host-network service, so the exception stays visible and bounded ([`voip-turn.md`](./voip-turn.md)).
 - **Container hardening** — non-root, `no-new-privileges`, `cap_drop: [ALL]`, read-only FS where feasible,
   restart policy, resource limits.
 - **No secret values** anywhere in the tree; placeholders + `.env.prod.example` only. Real values land via
