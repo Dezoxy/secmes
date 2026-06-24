@@ -41,7 +41,7 @@ describe('argus theme tokens', () => {
 
   it('defines the core color, spacing, radius, and shadow tokens', () => {
     expect(argusColorTokens).toMatchObject({
-      appBackground: '#1a1a24',
+      appBackground: '#0f0f16',
       panel: '#12121a',
       panelSubtle: '#0f0f16',
       border: 'rgb(255 255 255 / 5%)',

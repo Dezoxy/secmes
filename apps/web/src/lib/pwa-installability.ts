@@ -30,8 +30,8 @@ export const argusPwaManifest = {
   lang: 'en',
   start_url: '/',
   scope: '/',
-  theme_color: '#1a1a24',
-  background_color: '#1a1a24',
+  theme_color: '#0f0f16',
+  background_color: '#0f0f16',
   display: 'standalone',
   orientation: 'portrait',
   icons: [
