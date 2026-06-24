@@ -38,6 +38,12 @@ interface StartConversationProps {
   onClose: () => void;
   /** When set, pre-populates the argus-id input and fires the lookup automatically on mount. */
   prefillArgusId?: string;
+  /**
+   * Async check: does this device have persisted MLS state for the given conversation? Used on the
+   * reinstall path: if a server-side DM exists with the peer but local MLS state is absent (cleared
+   * on reinstall), skip `onOpenExisting` and start a fresh conversation instead.
+   */
+  conversationHasState?: (conversationId: string) => Promise<boolean>;
 }
 
 const CARD =
@@ -56,6 +62,7 @@ export function StartConversation({
   onStarted,
   onClose,
   prefillArgusId,
+  conversationHasState,
 }: StartConversationProps) {
   const [argusId, setArgusId] = useState('');
   const [lookupResult, setLookupResult] = useState<UserLookupResult | null>(null);
@@ -102,13 +109,7 @@ export function StartConversation({
       .finally(() => setLooking(false));
   };
 
-  // Phase 1: claim the peer's KeyPackage + derive the safety number. Trusts nothing yet.
-  const pick = (u: UserLookupResult): void => {
-    const existing = existingConversationWith(u.userId);
-    if (existing) {
-      onOpenExisting(existing);
-      return;
-    }
+  const startPrepare = (u: UserLookupResult): void => {
     setPeer(u);
     setSecondaryStep(-1);
     setBusy(true);
@@ -126,6 +127,31 @@ export function StartConversation({
         setPeer(null);
       })
       .finally(() => setBusy(false));
+  };
+
+  // Phase 1: claim the peer's KeyPackage + derive the safety number. Trusts nothing yet.
+  // If a server-side DM already exists with this peer AND local MLS state is present → open it.
+  // If a server-side DM exists but MLS state is absent (reinstall) → start a fresh conversation.
+  const pick = (u: UserLookupResult): void => {
+    const existingId = existingConversationWith(u.userId);
+    if (existingId) {
+      if (!conversationHasState) {
+        onOpenExisting(existingId);
+        return;
+      }
+      conversationHasState(existingId)
+        .then((hasState) => {
+          if (hasState) {
+            onOpenExisting(existingId);
+          } else {
+            // No local MLS state (app reinstalled) — create a fresh conversation.
+            startPrepare(u);
+          }
+        })
+        .catch(() => startPrepare(u)); // on IDB error, err on the side of creating fresh
+      return;
+    }
+    startPrepare(u);
   };
 
   // Phase 2: ONLY after the user confirms the number out-of-band — add + create + deliver.

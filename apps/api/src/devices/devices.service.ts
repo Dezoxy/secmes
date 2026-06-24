@@ -420,27 +420,52 @@ export class DevicesService {
   /**
    * Return the caller's conversations with type metadata. Used by D1 for the enrollment fan-out
    * diff and by the client for roster recovery after reinstall. METADATA ONLY: no content.
+   *
+   * For direct (1:1) conversations, `peerUserId` carries the OTHER member's user id. It is null for
+   * groups, in-flight solo conversations (peer not yet added via Welcome), and DMs whose peer row
+   * was GDPR-erased. The left-join condition scopes the peer join to isDirect rows only, so group
+   * conversations always return exactly one row with peerUserId = null.
    */
-  async listMyConversations(
-    auth: VerifiedAuth,
-  ): Promise<Array<{ conversationId: string; isDirect: boolean | null; createdAt: Date }>> {
+  async listMyConversations(auth: VerifiedAuth): Promise<
+    Array<{
+      conversationId: string;
+      isDirect: boolean | null;
+      createdAt: Date;
+      peerUserId: string | null;
+    }>
+  > {
     return withTenant(auth.tenantId, async (tx) => {
       const userId = await requireUser(tx, auth);
-      return tx
-        .select({
-          conversationId: schema.conversationMembers.conversationId,
-          isDirect: schema.conversations.isDirect,
-          createdAt: schema.conversations.createdAt,
-        })
-        .from(schema.conversationMembers)
-        .innerJoin(
-          schema.conversations,
-          and(
-            eq(schema.conversationMembers.conversationId, schema.conversations.id),
-            eq(schema.conversationMembers.tenantId, schema.conversations.tenantId),
-          ),
-        )
-        .where(eq(schema.conversationMembers.userId, userId));
+      const cmPeer = aliasedTable(schema.conversationMembers, 'cm_peer');
+      return (
+        tx
+          .select({
+            conversationId: schema.conversationMembers.conversationId,
+            isDirect: schema.conversations.isDirect,
+            createdAt: schema.conversations.createdAt,
+            peerUserId: cmPeer.userId,
+          })
+          .from(schema.conversationMembers)
+          .innerJoin(
+            schema.conversations,
+            and(
+              eq(schema.conversationMembers.conversationId, schema.conversations.id),
+              eq(schema.conversationMembers.tenantId, schema.conversations.tenantId),
+            ),
+          )
+          // Left-join the peer member row for DMs only. The join condition references the already-joined
+          // conversations table, so groups (isDirect != true) produce no cm_peer match and return null.
+          .leftJoin(
+            cmPeer,
+            and(
+              eq(cmPeer.conversationId, schema.conversationMembers.conversationId),
+              eq(cmPeer.tenantId, schema.conversationMembers.tenantId),
+              sql`${cmPeer.userId} != ${userId}::uuid`,
+              eq(schema.conversations.isDirect, true),
+            ),
+          )
+          .where(eq(schema.conversationMembers.userId, userId))
+      );
     });
   }
 }

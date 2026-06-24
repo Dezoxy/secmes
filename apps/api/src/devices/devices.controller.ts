@@ -115,6 +115,16 @@ class ConversationSummaryDto {
 
   @ApiProperty({ format: 'date-time', description: 'When the conversation was created' })
   createdAt!: string;
+
+  @ApiProperty({
+    type: 'string',
+    format: 'uuid',
+    nullable: true,
+    required: false,
+    description:
+      'Peer user ID for DMs; null for groups, in-flight solo convs, and GDPR-erased peers',
+  })
+  peerUserId!: string | null;
 }
 
 class ConversationListDto {
@@ -320,6 +330,7 @@ export class DevicesController {
       id: r.conversationId,
       isDirect: r.isDirect,
       createdAt: r.createdAt.toISOString(),
+      peerUserId: r.peerUserId ?? null,
     }));
     return {
       conversations,
