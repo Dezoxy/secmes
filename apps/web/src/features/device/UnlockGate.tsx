@@ -40,12 +40,12 @@ export function UnlockGate({ children }: { children: ReactNode }): ReactNode {
   }, []);
 
   useEffect(() => {
-    if (!mounted || prefersReducedMotion()) return;
+    if (!mounted || prefersReducedMotion() || status === 'ready') return;
     const interval = setInterval(() => {
       setActiveSlide((prev) => (prev + 1) % slides.length);
     }, 5000);
     return () => clearInterval(interval);
-  }, [mounted]);
+  }, [mounted, status]);
 
   const goToSlide = useCallback((index: number) => setActiveSlide(index), []);
 
