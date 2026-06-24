@@ -62,24 +62,24 @@ test('F1C mobile settings and profile QA flow stays navigable', async ({ page })
   const issues = collectPageIssues(page);
   await page.setViewportSize({ width: 390, height: 844 });
 
-  await page.goto('/chat');
-  await page.getByRole('button', { name: 'Open settings' }).click();
+  // Profile tab has its own route
+  await page.goto('/profile');
+  await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible();
+  await expect(page.getByText('Display name')).toBeVisible();
+  await expect(page.getByText('Upload photo')).toBeVisible();
 
-  const dialog = page.getByRole('dialog', { name: 'Settings' });
-  await expect(dialog.getByRole('heading', { name: 'Settings' })).toBeVisible();
+  // Settings tab — no Profile section, only sections nav
+  await page.goto('/settings');
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Profile' })).toHaveCount(0);
 
-  await expect(dialog.getByRole('button', { name: 'Profile' })).toHaveCount(0);
-  await expect(dialog.getByRole('heading', { name: 'Profile' })).toBeVisible();
-  await expect(dialog.getByText('Display name')).toBeVisible();
-  await expect(dialog.getByText('Upload photo')).toBeVisible();
-
-  const securitySection = dialog.getByRole('button', { name: 'Security', exact: true });
+  const securitySection = page.getByRole('button', { name: 'Security', exact: true });
   await securitySection.click();
-  await expect(dialog.getByRole('region', { name: 'Security settings' })).toBeFocused();
+  await expect(page.getByRole('region', { name: 'Security settings' })).toBeFocused();
 
-  await dialog.getByRole('button', { name: 'Back to settings menu' }).click();
+  await page.getByRole('button', { name: 'Back to settings menu' }).click();
   await expect(securitySection).toBeFocused();
-  await expect(dialog.getByRole('button', { name: 'Appearance' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Appearance' })).toBeVisible();
   expect(issues).toEqual([]);
 });
 

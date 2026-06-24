@@ -8,7 +8,7 @@ import { currentUser, type Conversation } from './seed';
 interface UseReceiptSendingOptions {
   conversations: Conversation[];
   /** Ids of LIVE (real server) conversations — demo/seed conversations never POST receipts. */
-  liveIds: Set<string>;
+  liveIds: ReadonlySet<string>;
   selectedId: string | null;
   selectedIsLive: boolean;
 }
