@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 interface ModalProps {
   ariaLabel: string;
@@ -64,7 +65,10 @@ export function Modal({
     }
   }, []);
 
-  return (
+  // Portal to <body> so the fixed-position overlay always covers the viewport, escaping any ancestor
+  // that establishes a containing block (e.g. the glassy headers now use backdrop-filter, which would
+  // otherwise re-anchor a nested fixed modal to that header and mis-position/clip it).
+  return createPortal(
     <div
       ref={dialogRef}
       className={joinClasses('fixed inset-0 z-50 flex', className)}
@@ -90,6 +94,7 @@ export function Modal({
       >
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

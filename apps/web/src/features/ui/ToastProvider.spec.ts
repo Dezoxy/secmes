@@ -32,23 +32,24 @@ describe('ToastProvider', () => {
       root.render(createElement(ToastProvider, null, createElement(Trigger)));
     });
 
-    // The aria-live region is always present; no toast text yet.
-    const region = container.querySelector('[role="status"]');
+    // The toast layer portals to <body> (so it stacks above body-level modals), so query the
+    // live region + toast text from document.body, not the render container.
+    const region = document.body.querySelector('[role="status"]');
     expect(region).not.toBeNull();
-    expect(container.textContent).not.toContain('Hello toast');
+    expect(document.body.textContent).not.toContain('Hello toast');
 
     // Trigger a toast.
     const btn = container.querySelector('button')!;
     await act(async () => {
       btn.click();
     });
-    expect(container.textContent).toContain('Hello toast');
+    expect(document.body.textContent).toContain('Hello toast');
 
     // Auto-dismiss: advance past the visible duration + the exit animation.
     await act(async () => {
       vi.advanceTimersByTime(DEFAULT_DURATION_MS + EXIT_MS + 10);
     });
-    expect(container.textContent).not.toContain('Hello toast');
+    expect(document.body.textContent).not.toContain('Hello toast');
 
     await act(async () => root.unmount());
   });

@@ -325,59 +325,65 @@ export function SettingsPanel({
       <aside
         className={`${
           mobileSectionOpen || mobileBackAnimating ? 'hidden' : 'flex'
-        } w-full flex-col overflow-y-auto bg-[#0f0f16] px-3 pt-[calc(env(safe-area-inset-top)_+_0.75rem)] pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)] sm:flex sm:w-80 sm:shrink-0 sm:border-r sm:border-white/5 sm:px-4 sm:pt-4 sm:pb-4 ${
+        } w-full flex-col bg-[#0f0f16] px-3 pt-[calc(env(safe-area-inset-top)_+_0.75rem)] sm:flex sm:w-80 sm:shrink-0 sm:border-r sm:border-white/5 sm:px-4 sm:pt-4 ${
           mobileMenuReturning ? paneBackEnterMotion : ''
         }`}
       >
-        <div className="mb-4 flex items-center justify-between">
+        {/* Fixed header — stays put while the profile + section list scroll below it. */}
+        <div className="mb-4 flex shrink-0 items-center justify-between">
           <h2 className="text-lg font-semibold text-white">Settings</h2>
           <IconButton onClick={closeSettings} size="sm" aria-label="Close settings">
             <X className="h-5 w-5" />
           </IconButton>
         </div>
 
-        <section
-          className="rounded-2xl border border-white/5 bg-white/[0.02] p-3"
-          aria-labelledby="settings-profile-heading"
-        >
-          <h3 id="settings-profile-heading" className="mb-4 text-base font-semibold text-white">
-            Profile
-          </h3>
-          <ProfileSettings
-            profile={profile}
-            displayName={serverHandle}
-            avatar={avatar}
-            profileError={profileError}
-          />
-        </section>
+        <div className="-mx-3 min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)] sm:-mx-4 sm:px-4 sm:pb-4">
+          <section
+            className="rounded-2xl border border-white/5 bg-white/[0.02] p-3"
+            aria-labelledby="settings-profile-heading"
+          >
+            <h3 id="settings-profile-heading" className="mb-4 text-base font-semibold text-white">
+              Profile
+            </h3>
+            <ProfileSettings
+              profile={profile}
+              displayName={serverHandle}
+              avatar={avatar}
+              profileError={profileError}
+            />
+          </section>
 
-        <nav className="mt-5 space-y-1 border-t border-white/5 pt-4" aria-label="Settings sections">
-          {sections.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              ref={(node) => {
-                if (node) sectionButtonRefs.current.set(id, node);
-                else sectionButtonRefs.current.delete(id);
-              }}
-              type="button"
-              onClick={() => openSection(id)}
-              aria-current={active === id ? 'page' : undefined}
-              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
-                active === id
-                  ? 'text-white'
-                  : 'text-white/55 hover:bg-white/[0.04] hover:text-white'
-              }`}
-              style={active === id ? { backgroundColor: accent.soft } : undefined}
-            >
-              <Icon className="h-4 w-4" />
-              <span>{label}</span>
-              <ChevronRight
-                aria-hidden="true"
-                className="ml-auto h-4 w-4 text-white/60 sm:hidden"
-              />
-            </button>
-          ))}
-        </nav>
+          <nav
+            className="mt-5 space-y-1 border-t border-white/5 pt-4"
+            aria-label="Settings sections"
+          >
+            {sections.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                ref={(node) => {
+                  if (node) sectionButtonRefs.current.set(id, node);
+                  else sectionButtonRefs.current.delete(id);
+                }}
+                type="button"
+                onClick={() => openSection(id)}
+                aria-current={active === id ? 'page' : undefined}
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${
+                  active === id
+                    ? 'text-white'
+                    : 'text-white/55 hover:bg-white/[0.04] hover:text-white'
+                }`}
+                style={active === id ? { backgroundColor: accent.soft } : undefined}
+              >
+                <Icon className="h-4 w-4" />
+                <span>{label}</span>
+                <ChevronRight
+                  aria-hidden="true"
+                  className="ml-auto h-4 w-4 text-white/60 sm:hidden"
+                />
+              </button>
+            ))}
+          </nav>
+        </div>
       </aside>
 
       <section
