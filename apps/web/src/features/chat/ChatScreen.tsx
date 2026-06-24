@@ -19,6 +19,7 @@ import { useChatState } from './useChatState';
 import { useMessageSending } from './useMessageSending';
 import { useReceiptSending } from './useReceiptSending';
 import { useChatContext } from './ChatContext';
+import { MUTES_CHANGED_EVENT, readMutedConversationIds } from '../settings/conversation-mute';
 import {
   ReconnectBanner,
   StateBlock,
@@ -91,6 +92,9 @@ export default function ChatScreen() {
   const mobileThreadBackTimerRef = useRef<number | undefined>(undefined);
   const mobileSidebarReturnTimerRef = useRef<number | undefined>(undefined);
   const mainPanelRef = useRef<HTMLDivElement>(null);
+  const [mutedConversationIds, setMutedConversationIds] = useState<ReadonlySet<string>>(() =>
+    readMutedConversationIds(),
+  );
 
   const { selectedConversation, isDirect, selectedIsLive, currentNumber, verified, isLive } =
     useChatState({ conversations, selectedId, liveIds, numbersByConv, verifiedByConv });
@@ -165,6 +169,12 @@ export default function ChatScreen() {
       if (mobileSidebarReturnTimerRef.current !== undefined)
         window.clearTimeout(mobileSidebarReturnTimerRef.current);
     };
+  }, []);
+
+  useEffect(() => {
+    const refreshMutedConversations = () => setMutedConversationIds(readMutedConversationIds());
+    window.addEventListener(MUTES_CHANGED_EVENT, refreshMutedConversations);
+    return () => window.removeEventListener(MUTES_CHANGED_EVENT, refreshMutedConversations);
   }, []);
 
   // Redirect selection away from a stale duplicate DM when the canonical replacement is present locally.
@@ -295,6 +305,7 @@ export default function ChatScreen() {
             conversations={dedupedConversations}
             selectedId={selectedId}
             onSelect={handleSelect}
+            mutedConversationIds={mutedConversationIds}
             updateReady={updateReady}
             onApplyUpdate={applyUpdate}
           />

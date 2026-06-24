@@ -20,6 +20,7 @@ import {
   type MeBound,
 } from '../../lib/api';
 import { stashUnlockKey, unlockKeyFromResponse, withPrfSalt } from '../../lib/prf';
+import { syncMuteStateToCache, unmuteAll } from '../settings/conversation-mute';
 
 export type { MeBound };
 
@@ -84,6 +85,9 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
     setToken(null);
     setAuthenticated(false);
     setProfile(null);
+    // Intentionally does NOT clear mutes here — clearSession is also called by
+    // the refresh timer's catch on transient errors (5xx, network). Mutes are
+    // cleared explicitly in logout() and in the boot-failure 401 branch below.
   }, []);
 
   // Boot: try to restore session from the argus_refresh cookie.
@@ -98,8 +102,17 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
       if (!active) return;
       applySession(token, me.bound ? me : null);
     })
-      .catch(() => {
-        // No valid cookie — start unauthenticated.
+      .catch((err: unknown) => {
+        // Distinguish a definitive "no session" (401) from transient failures
+        // (network errors, 5xx). Only wipe per-user state when the refresh
+        // cookie is genuinely gone — not when the server is briefly unavailable.
+        // 400 = cookie entirely absent (BadRequestException); 401 = cookie invalid/expired.
+        // Both are definitive no-session states; 5xx/network = transient, leave mutes.
+        const is401 = err instanceof Error && /status 40[01]/.test(err.message);
+        if (is401) {
+          unmuteAll();
+          void syncMuteStateToCache(new Set());
+        }
       })
       .finally(() => {
         if (active) setReady(true);
@@ -119,7 +132,18 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
         setToken(token);
         const me = await fetchMe();
         setProfile(me.bound ? me : null);
-      }).catch(() => clearSession());
+      }).catch((err: unknown) => {
+        clearSession();
+        // Mirror the boot-failure 401 logic: clear mutes only when the session is
+        // definitively revoked (401), not on transient 5xx/network errors.
+        // 400 = cookie entirely absent (BadRequestException); 401 = cookie invalid/expired.
+        // Both are definitive no-session states; 5xx/network = transient, leave mutes.
+        const is401 = err instanceof Error && /status 40[01]/.test(err.message);
+        if (is401) {
+          unmuteAll();
+          void syncMuteStateToCache(new Set());
+        }
+      });
     }, REFRESH_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [authenticated, clearSession]);
@@ -151,6 +175,10 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
       .catch(() => {});
     await logoutSession().catch(() => {});
     clearSession();
+    // Explicit logout: clear per-conversation mute state so a subsequent user
+    // on this device doesn't inherit stale mute data via localStorage or SW cache.
+    unmuteAll();
+    void syncMuteStateToCache(new Set());
   }, [clearSession]);
 
   const refreshProfile = useCallback(async (): Promise<void> => {

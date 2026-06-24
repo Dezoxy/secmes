@@ -14,6 +14,8 @@ interface ConversationListProps {
   conversations: Conversation[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** Conversation IDs with in-app notification badges suppressed. */
+  mutedConversationIds?: ReadonlySet<string>;
   updateReady?: boolean;
   onApplyUpdate?: () => void | Promise<void>;
 }
@@ -22,6 +24,7 @@ export function ConversationList({
   conversations,
   selectedId,
   onSelect,
+  mutedConversationIds,
   updateReady = false,
   onApplyUpdate,
 }: ConversationListProps) {
@@ -205,6 +208,7 @@ export function ConversationList({
           const lastMessage = conversation.messages[conversation.messages.length - 1];
           const isSelected = selectedId === conversation.id;
           const isOnline = conversation.type === 'direct' && otherUser?.isOnline;
+          const isMuted = mutedConversationIds?.has(conversation.id) ?? false;
 
           return (
             <button
@@ -260,8 +264,11 @@ export function ConversationList({
                         ? `Sent ${lastMessage.attachments[0]?.type === 'image' ? 'an image' : 'a file'}`
                         : lastMessage.content}
                     </p>
-                    {conversation.unreadCount > 0 && (
-                      <span className="shrink-0 w-5 h-5 bg-purple-500 rounded-full text-xs font-medium text-white flex items-center justify-center">
+                    {conversation.unreadCount > 0 && !isMuted && (
+                      <span
+                        aria-label={`${conversation.unreadCount} unread`}
+                        className="shrink-0 w-5 h-5 bg-purple-500 rounded-full text-xs font-medium text-white flex items-center justify-center"
+                      >
                         {conversation.unreadCount}
                       </span>
                     )}

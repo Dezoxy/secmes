@@ -40,9 +40,15 @@ import {
 import { AboutSettings } from './AboutSettings';
 import { AppearanceSettings, FONT_SIZE_LEVELS } from './AppearanceSettings';
 import { DataStorageSettings } from './DataStorageSettings';
-import { NotificationSettings } from './NotificationSettings';
+import { NotificationSettings, type NotificationSettingsRecord } from './NotificationSettings';
 import { PrivacySettings, type PrivacySettingsRecord } from './PrivacySettings';
 import { readStoredPrivacySettings, writeStoredPrivacySettings } from './privacy-settings';
+import {
+  readStoredNotificationSettings,
+  writeStoredNotificationSettings,
+  syncNotificationSettingsToCache,
+} from './notification-settings';
+import { readMutedConversationIds, syncMuteStateToCache } from './conversation-mute';
 import { ProfileSettings, type AnonymousProfile } from './ProfileSettings';
 import { SecuritySettings } from './SecuritySettings';
 import { AdminPanel } from './AdminPanel';
@@ -187,6 +193,9 @@ export function SettingsPanel({
   const [privacySettings, setPrivacySettings] = useState<PrivacySettingsRecord>(() =>
     readStoredPrivacySettings(),
   );
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettingsRecord>(
+    readStoredNotificationSettings,
+  );
   const [avatar, setAvatar] = useState(profile.avatar);
   const [profileError, setProfileError] = useState<string | null>(null);
   const sectionButtonRefs = useRef(new Map<SectionId, HTMLButtonElement>());
@@ -207,6 +216,15 @@ export function SettingsPanel({
   useEffect(() => {
     writeStoredPrivacySettings(privacySettings);
   }, [privacySettings]);
+
+  useEffect(() => {
+    writeStoredNotificationSettings(notificationSettings);
+    void syncNotificationSettingsToCache(notificationSettings);
+  }, [notificationSettings]);
+
+  useEffect(() => {
+    void syncMuteStateToCache(readMutedConversationIds());
+  }, []);
 
   const activeSection = sections.find((section) => section.id === active) ?? sections[0]!;
   const ActiveIcon = activeSection.icon;
@@ -438,7 +456,13 @@ export function SettingsPanel({
               <PrivacySettings settings={privacySettings} onSettingsChange={setPrivacySettings} />
             )}
 
-            {active === 'notifications' && <NotificationSettings deviceId={deviceId} />}
+            {active === 'notifications' && (
+              <NotificationSettings
+                deviceId={deviceId}
+                settings={notificationSettings}
+                onSettingsChange={setNotificationSettings}
+              />
+            )}
 
             {active === 'appearance' && (
               <AppearanceSettings
