@@ -27,6 +27,8 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
     incomingRequests: [],
     outgoingRequests: [],
     friendsError: false,
+    manager: {} as unknown,
+    refreshFriends: vi.fn().mockResolvedValue(undefined),
     handleSendFriendRequest: vi.fn(),
     handleAcceptRequest: vi.fn(),
     handleDeclineRequest: vi.fn(),
