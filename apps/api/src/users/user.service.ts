@@ -1,6 +1,11 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { and, eq, ne, sql } from 'drizzle-orm';
-import type { UpdateProfile, UserLookupResult } from '@argus/contracts';
+import type {
+  PrivacySettings,
+  UpdatePrivacySettings,
+  UpdateProfile,
+  UserLookupResult,
+} from '@argus/contracts';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
@@ -22,6 +27,19 @@ const ME_SELECTION = {
   avatarSeed: schema.users.avatarSeed,
   role: schema.users.role,
 } as const;
+
+// Privacy settings projection for GET /me/settings/privacy.
+const PRIVACY_SELECTION = {
+  privacyReadReceipts: schema.users.privacyReadReceipts,
+  privacyTypingIndicators: schema.users.privacyTypingIndicators,
+  privacyLinkPreviews: schema.users.privacyLinkPreviews,
+} as const;
+
+const DEFAULT_PRIVACY: PrivacySettings = {
+  readReceipts: true,
+  typingIndicators: true,
+  linkPreviews: true,
+};
 
 @Injectable()
 export class UserService {
@@ -124,5 +142,57 @@ export class UserService {
       if (isHandleCollision(err)) throw new ConflictException('display name is already taken');
       throw err;
     }
+  }
+
+  /** Read the caller's privacy preference settings. Returns defaults when the user is not found. */
+  async getPrivacySettings(auth: VerifiedAuth): Promise<PrivacySettings> {
+    const [row] = await withTenant(auth.tenantId, async (tx) =>
+      tx
+        .select(PRIVACY_SELECTION)
+        .from(schema.users)
+        .where(
+          and(
+            auth.userId
+              ? eq(schema.users.id, auth.userId)
+              : eq(schema.users.externalIdentityId, auth.sub),
+            eq(schema.users.tenantId, auth.tenantId),
+            eq(schema.users.status, 'active'),
+          ),
+        )
+        .limit(1),
+    );
+    if (!row) return DEFAULT_PRIVACY;
+    return {
+      readReceipts: row.privacyReadReceipts ?? true,
+      typingIndicators: row.privacyTypingIndicators ?? true,
+      linkPreviews: row.privacyLinkPreviews ?? true,
+    };
+  }
+
+  /**
+   * Persist the caller's privacy preference settings. Only supplied fields are written.
+   * Silent no-op when the user row is not found — consistent with updateProfile.
+   */
+  async updatePrivacySettings(
+    auth: { tenantId: string; userId: string },
+    dto: UpdatePrivacySettings,
+  ): Promise<void> {
+    const hasUpdate =
+      dto.readReceipts !== undefined ||
+      dto.typingIndicators !== undefined ||
+      dto.linkPreviews !== undefined;
+    if (!hasUpdate) return;
+
+    const set: Partial<typeof schema.users.$inferInsert> = {};
+    if (dto.readReceipts !== undefined) set.privacyReadReceipts = dto.readReceipts;
+    if (dto.typingIndicators !== undefined) set.privacyTypingIndicators = dto.typingIndicators;
+    if (dto.linkPreviews !== undefined) set.privacyLinkPreviews = dto.linkPreviews;
+
+    await withTenant(auth.tenantId, async (tx) =>
+      tx
+        .update(schema.users)
+        .set(set)
+        .where(and(eq(schema.users.id, auth.userId), eq(schema.users.tenantId, auth.tenantId))),
+    );
   }
 }

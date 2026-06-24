@@ -13,6 +13,7 @@ import type { Conversation as MlsGroup } from '@argus/crypto';
 import type { Friend, FriendRequest, MeBound, UserLookupResult } from '../../lib/api';
 import type { AnonymousProfile } from '../settings/ProfileSettings';
 import {
+  fetchPrivacySettings,
   listFriends,
   listFriendRequests,
   listMyConversationsWithMeta,
@@ -43,6 +44,7 @@ import {
 import { useLiveConversations } from './useLiveConversations';
 import { contactDisplayName } from './user-label';
 import { loadArgusProfile, saveArgusProfile } from '../settings/argus-profile';
+import { readPrivacySettingsRevision, syncFromServer } from '../settings/privacy-settings';
 import { loadPersistedPeerMapping, persistPeerMapping } from './peer-naming';
 import { useReceiptSending } from './useReceiptSending';
 import { dicebearAvatar, isCustomPhoto } from '../../lib/dicebear';
@@ -135,6 +137,8 @@ interface ChatContextValue {
   // PWA
   updateReady: boolean;
   applyUpdate: () => void | Promise<void>;
+  // Privacy settings
+  privacySettingsVersion: number;
   // Conversation creation helpers (shared core logic; screens wrap with local state)
   persistStartedConversation: (session: ConversationSession, peer: UserLookupResult) => void;
   persistGroupCreated: (session: GroupConversationSession) => void;
@@ -169,6 +173,7 @@ export function ChatProvider({ children }: ChatProviderProps) {
   const [peerToConvId, setPeerToConvId] = useState<Map<string, string>>(new Map());
   const [convToPeerId, setConvToPeerId] = useState<Map<string, string>>(new Map());
   const [peerMapsLoaded, setPeerMapsLoaded] = useState(false);
+  const [privacySettingsVersion, setPrivacySettingsVersion] = useState(0);
   const mappedDMConvsRef = useRef(new Set<string>());
 
   const { device, pool, deviceId, keystore, sessionKey } = useDevice();
@@ -247,44 +252,45 @@ export function ChatProvider({ children }: ChatProviderProps) {
     }
   }, [manager]);
 
-  const { liveIds, liveGroups, addLive, connectionStatus } = useLiveConversations({
-    device,
-    pool,
-    deviceId,
-    messagingDeps,
-    selfUserId: profile?.userId,
-    currentUserProfile,
-    mergeIncoming,
-    backfillInto,
-    setConversations,
-    onEnrollmentPending: useCallback((id: string) => setPendingEnrollmentId(id), []),
-    onPeerKeyChanged: useCallback(
-      (_peerUserId: string, conversationId: string, newNumbers: string[]) => {
-        setNumbersByConv((prev) => ({ ...prev, [conversationId]: newNumbers[0] ?? '' }));
-        setVerifiedByConv((prev) => {
-          const next = { ...prev };
-          delete next[conversationId];
-          return next;
-        });
-        setPeerKeyChangedConvId(conversationId);
-      },
-      [],
-    ),
-    onPeerVerified: useCallback((conversationId: string, safetyNumber: string) => {
-      setVerifiedByConv((prev) => ({ ...prev, [conversationId]: safetyNumber }));
-    }, []),
-    onSafetyNumberResolved: useCallback((conversationId: string, safetyNumber: string) => {
-      setNumbersByConv((prev) => ({ ...prev, [conversationId]: safetyNumber }));
-    }, []),
-    onSyncLost: useCallback((conversationId: string) => {
-      setConversations((prev) =>
-        prev.map((c) => (c.id === conversationId ? { ...c, recovery: 'sync-lost' as const } : c)),
-      );
-    }, []),
-    onFriendRequest: useCallback(() => {
-      void refreshFriends();
-    }, [refreshFriends]),
-  });
+  const { liveIds, liveGroups, addLive, connectionStatus, refoldPeerReceiptWatermarks } =
+    useLiveConversations({
+      device,
+      pool,
+      deviceId,
+      messagingDeps,
+      selfUserId: profile?.userId,
+      currentUserProfile,
+      mergeIncoming,
+      backfillInto,
+      setConversations,
+      onEnrollmentPending: useCallback((id: string) => setPendingEnrollmentId(id), []),
+      onPeerKeyChanged: useCallback(
+        (_peerUserId: string, conversationId: string, newNumbers: string[]) => {
+          setNumbersByConv((prev) => ({ ...prev, [conversationId]: newNumbers[0] ?? '' }));
+          setVerifiedByConv((prev) => {
+            const next = { ...prev };
+            delete next[conversationId];
+            return next;
+          });
+          setPeerKeyChangedConvId(conversationId);
+        },
+        [],
+      ),
+      onPeerVerified: useCallback((conversationId: string, safetyNumber: string) => {
+        setVerifiedByConv((prev) => ({ ...prev, [conversationId]: safetyNumber }));
+      }, []),
+      onSafetyNumberResolved: useCallback((conversationId: string, safetyNumber: string) => {
+        setNumbersByConv((prev) => ({ ...prev, [conversationId]: safetyNumber }));
+      }, []),
+      onSyncLost: useCallback((conversationId: string) => {
+        setConversations((prev) =>
+          prev.map((c) => (c.id === conversationId ? { ...c, recovery: 'sync-lost' as const } : c)),
+        );
+      }, []),
+      onFriendRequest: useCallback(() => {
+        void refreshFriends();
+      }, [refreshFriends]),
+    });
 
   useConversationHistoryRehydration({
     messagingDeps,
@@ -312,6 +318,24 @@ export function ChatProvider({ children }: ChatProviderProps) {
   useEffect(() => {
     if (manager) void refreshFriends();
   }, [refreshFriends, manager]);
+
+  // Seed the shared privacy cache from the server before read receipts are allowed on fresh devices.
+  useEffect(() => {
+    let cancelled = false;
+    const revisionBeforeFetch = readPrivacySettingsRevision();
+    void fetchPrivacySettings()
+      .then((settings) => {
+        if (cancelled) return;
+        if (readPrivacySettingsRevision() !== revisionBeforeFetch) return;
+        syncFromServer(settings);
+        refoldPeerReceiptWatermarks();
+        setPrivacySettingsVersion((version) => version + 1);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [refoldPeerReceiptWatermarks]);
 
   // Build peer↔conversation maps from the server-side enriched conversation list. Used for:
   // (a) dedup: hide stale DMs after peer reinstall, (b) friendship gate: resolve peer userId.
@@ -602,6 +626,7 @@ export function ChatProvider({ children }: ChatProviderProps) {
     setPendingEnrollmentId,
     updateReady,
     applyUpdate,
+    privacySettingsVersion,
     persistStartedConversation,
     persistGroupCreated,
   };

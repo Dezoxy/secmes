@@ -17,6 +17,8 @@ interface UseReceiptSendingOptions {
    * @default true
    */
   sendDelivered?: boolean;
+  /** Bumped after privacy settings hydrate so the read-receipt gate re-checks the local cache. */
+  privacySettingsVersion?: number;
 }
 
 /**
@@ -37,6 +39,7 @@ export function useReceiptSending({
   selectedId,
   selectedIsLive,
   sendDelivered = true,
+  privacySettingsVersion = 0,
 }: UseReceiptSendingOptions): void {
   const lastDelivered = useRef(new Map<string, string>());
   const lastRead = useRef(new Map<string, string>());
@@ -88,5 +91,5 @@ export function useReceiptSending({
     void recordReceipt(selectedId, 'read', target).catch(() => {
       if (lastRead.current.get(selectedId) === target) lastRead.current.delete(selectedId);
     });
-  }, [conversations, selectedId, selectedIsLive, focusTick]);
+  }, [conversations, selectedId, selectedIsLive, focusTick, privacySettingsVersion]);
 }

@@ -78,6 +78,8 @@ export const SENSITIVE_LIMITS = {
   lookupUser: 10,
   /** Profile update (displayName / avatarSeed) — prevents bulk display-name churn. */
   updateProfile: 20,
+  /** Privacy settings update — prevents bulk preference-churn. */
+  updatePrivacySettings: 20,
   /** Send a friend request — a STATE-CHANGING argus-id probe (R-friends-3). Tighter than lookupUser
    *  and applied per HOUR (perHour), distinct from the read budget so a normal add-burst can't exhaust
    *  lookups and vice versa. The uniform 202 is the real anti-oracle control; this caps bulk scanning. */

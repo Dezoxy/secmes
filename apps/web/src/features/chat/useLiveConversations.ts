@@ -156,6 +156,7 @@ interface UseLiveConversationsResult {
   liveGroups: { current: Map<string, MlsGroup> };
   addLive: (conversationId: string, conversation: MlsGroup) => void;
   connectionStatus: MessageSocketStatus;
+  refoldPeerReceiptWatermarks: () => void;
 }
 
 export function liveConversationShell(conversationId: string, selfUser: User): Conversation {
@@ -180,6 +181,27 @@ export function liveConversationShell(conversationId: string, selfUser: User): C
 
 export function addLiveId(previous: Set<string>, conversationId: string): Set<string> {
   return previous.has(conversationId) ? previous : new Set(previous).add(conversationId);
+}
+
+export function foldConversationsFromPeerWatermarks(
+  conversations: Conversation[],
+  selfUserId: string,
+  peerWatermarks: ReadonlyMap<string, PeerWatermarks>,
+  readReceiptsEnabled: boolean,
+): Conversation[] {
+  return conversations.map((conversation) => {
+    const watermarks = peerWatermarks.get(conversation.id);
+    if (!watermarks) return conversation;
+
+    const messages = foldOwnMessageStatuses(
+      conversation.messages,
+      selfUserId,
+      watermarks,
+      readReceiptsEnabled,
+    );
+    const changed = messages.some((message, index) => message !== conversation.messages[index]);
+    return changed ? { ...conversation, messages } : conversation;
+  });
 }
 
 export function prependConversationIfMissing(
@@ -291,6 +313,17 @@ export function useLiveConversations({
     },
     [setConversations],
   );
+
+  const refoldPeerReceiptWatermarks = useCallback((): void => {
+    setConversations((prev) =>
+      foldConversationsFromPeerWatermarks(
+        prev,
+        currentUser.id,
+        peerWatermarks.current,
+        isReadReceiptsEnabled(),
+      ),
+    );
+  }, [setConversations]);
 
   // A live receipt advance from the gateway. Ignore our OWN echo (the gateway fans a receipt to the whole
   // room, including the actor) — only the PEER's watermark moves our ticks.
@@ -772,5 +805,5 @@ export function useLiveConversations({
     selfUserId,
   ]);
 
-  return { liveIds, liveGroups, addLive, connectionStatus };
+  return { liveIds, liveGroups, addLive, connectionStatus, refoldPeerReceiptWatermarks };
 }

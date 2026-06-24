@@ -70,6 +70,7 @@ export default function ChatScreen() {
     peerToConvId,
     convToPeerId,
     peerMapsLoaded,
+    privacySettingsVersion,
   } = useChatContext();
 
   const [mounted, setMounted] = useState(false);
@@ -150,7 +151,14 @@ export default function ChatScreen() {
   });
 
   // Read receipts only — delivered receipts are handled globally by ChatProvider.
-  useReceiptSending({ conversations, liveIds, selectedId, selectedIsLive, sendDelivered: false });
+  useReceiptSending({
+    conversations,
+    liveIds,
+    selectedId,
+    selectedIsLive,
+    sendDelivered: false,
+    privacySettingsVersion,
+  });
 
   useEffect(() => {
     setMounted(true);

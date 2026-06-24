@@ -36,8 +36,23 @@ async function expectComposerAligned(page: Page): Promise<void> {
     .toBeLessThanOrEqual(4);
 }
 
+async function mockPrivacySettings(page: Page): Promise<void> {
+  await page.route('**/api/me/settings/privacy', (route) => {
+    if (route.request().method() === 'GET') {
+      void route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ readReceipts: true, typingIndicators: true, linkPreviews: true }),
+      });
+    } else {
+      void route.fulfill({ status: 204 });
+    }
+  });
+}
+
 test('F1C desktop chat and composer QA flow stays usable', async ({ page }) => {
   const issues = collectPageIssues(page);
+  await mockPrivacySettings(page);
 
   await page.goto('/chat');
 
@@ -60,6 +75,7 @@ test('F1C desktop chat and composer QA flow stays usable', async ({ page }) => {
 test('F1C mobile settings and profile QA flow stays navigable', async ({ page }) => {
   const issues = collectPageIssues(page);
   await page.setViewportSize({ width: 390, height: 844 });
+  await mockPrivacySettings(page);
 
   // Profile tab has its own route
   await page.goto('/profile');
@@ -84,6 +100,7 @@ test('F1C mobile settings and profile QA flow stays navigable', async ({ page })
 
 test('F1C route shells render on desktop and mobile widths', async ({ page }) => {
   const issues = collectPageIssues(page);
+  await mockPrivacySettings(page);
 
   for (const viewport of [
     { width: 1280, height: 720 },

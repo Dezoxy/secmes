@@ -34,7 +34,11 @@ import { AppearanceSettings } from './AppearanceSettings';
 import { DataStorageSettings } from './DataStorageSettings';
 import { NotificationSettings, type NotificationSettingsRecord } from './NotificationSettings';
 import { PrivacySettings, type PrivacySettingsRecord } from './PrivacySettings';
-import { readStoredPrivacySettings, writeStoredPrivacySettings } from './privacy-settings';
+import {
+  readStoredPrivacySettings,
+  syncFromServer,
+  writeStoredPrivacySettings,
+} from './privacy-settings';
 import {
   readStoredNotificationSettings,
   writeStoredNotificationSettings,
@@ -45,7 +49,12 @@ import { ProfileSettings, type AnonymousProfile } from './ProfileSettings';
 import { SecuritySettings } from './SecuritySettings';
 import { AdminPanel } from './AdminPanel';
 import { TeamSettings } from './TeamSettings';
-import type { MeBound } from '../../lib/api';
+import {
+  fetchPrivacySettings,
+  savePrivacySettings,
+  type MeBound,
+  type UpdatePrivacySettings,
+} from '../../lib/api';
 
 export type { AnonymousProfile } from './ProfileSettings';
 
@@ -60,6 +69,23 @@ interface SettingsPanelProps {
   /** When true: renders as a plain full-height div instead of a modal overlay,
    *  hides the profile section and close buttons. */
   standalone?: boolean;
+}
+
+function privacySettingsPatch(
+  previous: PrivacySettingsRecord,
+  next: PrivacySettingsRecord,
+): UpdatePrivacySettings {
+  const patch: UpdatePrivacySettings = {};
+  if (next.readReceipts !== previous.readReceipts) patch.readReceipts = next.readReceipts;
+  if (next.typingIndicators !== previous.typingIndicators) {
+    patch.typingIndicators = next.typingIndicators;
+  }
+  if (next.linkPreviews !== previous.linkPreviews) patch.linkPreviews = next.linkPreviews;
+  return patch;
+}
+
+function hasPrivacySettingsPatch(patch: UpdatePrivacySettings): boolean {
+  return Object.keys(patch).length > 0;
 }
 
 type SectionId =
@@ -138,6 +164,10 @@ export function SettingsPanel({
   const mobileBackTimerRef = useRef<number | undefined>(undefined);
   const mobileMenuTimerRef = useRef<number | undefined>(undefined);
   const closeTimerRef = useRef<number | undefined>(undefined);
+  // If the user toggles before the server fetch resolves, ignore the late server value.
+  const privacySettingsUserEdited = useRef(false);
+  const pendingPrivacySettingsRef = useRef<UpdatePrivacySettings | null>(null);
+  const privacySaveTimerRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     setAvatar(profile.avatar);
@@ -149,9 +179,69 @@ export function SettingsPanel({
     applyThemeToDocument(accentId, fontSizeLevel);
   }, [accentId, fontSizeLevel]);
 
+  const flushPendingPrivacySettings = useCallback(() => {
+    const pending = pendingPrivacySettingsRef.current;
+    pendingPrivacySettingsRef.current = null;
+    if (privacySaveTimerRef.current !== undefined) {
+      window.clearTimeout(privacySaveTimerRef.current);
+      privacySaveTimerRef.current = undefined;
+    }
+    if (pending && hasPrivacySettingsPatch(pending)) {
+      void savePrivacySettings(pending).catch(() => {});
+    }
+  }, []);
+
+  const queuePrivacySettingsSave = useCallback(
+    (patch: UpdatePrivacySettings) => {
+      if (!hasPrivacySettingsPatch(patch)) return;
+      pendingPrivacySettingsRef.current = {
+        ...(pendingPrivacySettingsRef.current ?? {}),
+        ...patch,
+      };
+      if (privacySaveTimerRef.current !== undefined) {
+        window.clearTimeout(privacySaveTimerRef.current);
+      }
+
+      privacySaveTimerRef.current = window.setTimeout(() => {
+        flushPendingPrivacySettings();
+      }, 500);
+    },
+    [flushPendingPrivacySettings],
+  );
+
+  const handlePrivacySettingsChange = useCallback(
+    (next: PrivacySettingsRecord) => {
+      setPrivacySettings((previous) => {
+        const patch = privacySettingsPatch(previous, next);
+        if (!hasPrivacySettingsPatch(patch)) return previous;
+
+        privacySettingsUserEdited.current = true;
+        writeStoredPrivacySettings(next);
+        queuePrivacySettingsSave(patch);
+        return next;
+      });
+    },
+    [queuePrivacySettingsSave],
+  );
+
   useEffect(() => {
-    writeStoredPrivacySettings(privacySettings);
-  }, [privacySettings]);
+    return () => {
+      flushPendingPrivacySettings();
+    };
+  }, [flushPendingPrivacySettings]);
+
+  // On mount, sync privacy settings from the server so preferences roam across devices.
+  useEffect(() => {
+    fetchPrivacySettings()
+      .then((serverSettings) => {
+        if (privacySettingsUserEdited.current) return;
+        syncFromServer(serverSettings);
+        setPrivacySettings(serverSettings);
+      })
+      .catch(() => {
+        // Network unavailable — keep the localStorage value already loaded by useState.
+      });
+  }, []);
 
   useEffect(() => {
     writeStoredNotificationSettings(notificationSettings);
@@ -389,7 +479,10 @@ export function SettingsPanel({
             {active === 'security' && <SecuritySettings />}
 
             {active === 'privacy' && (
-              <PrivacySettings settings={privacySettings} onSettingsChange={setPrivacySettings} />
+              <PrivacySettings
+                settings={privacySettings}
+                onSettingsChange={handlePrivacySettingsChange}
+              />
             )}
 
             {active === 'notifications' && (

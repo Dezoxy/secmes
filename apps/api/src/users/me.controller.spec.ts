@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ConflictException } from '@nestjs/common';
-import { UpdateProfileSchema } from '@argus/contracts';
+import { UpdatePrivacySettingsSchema, UpdateProfileSchema } from '@argus/contracts';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { reflectRouteMeta } from '../common/testing/route-meta.js';
@@ -33,6 +33,48 @@ describe('MeController route contract', () => {
       httpCode: 204,
       guards: [],
     });
+  });
+
+  it('getMyPrivacySettings is authenticated, NOT allow-unbound, 200 GET, no guards', () => {
+    expect(reflectRouteMeta(MeController, 'getMyPrivacySettings')).toEqual({
+      isPublic: false,
+      isAllowUnbound: false,
+      hasPublicRateLimit: false,
+      httpCode: 200,
+      guards: [],
+    });
+  });
+
+  it('updateMyPrivacySettings is authenticated, NOT allow-unbound, 204, no guards', () => {
+    expect(reflectRouteMeta(MeController, 'updateMyPrivacySettings')).toEqual({
+      isPublic: false,
+      isAllowUnbound: false,
+      hasPublicRateLimit: false,
+      httpCode: 204,
+      guards: [],
+    });
+  });
+});
+
+// Boundary behaviour (DB-free): PUT /me/settings/privacy body runs through ZodValidationPipe(UpdatePrivacySettingsSchema).
+describe('updateMyPrivacySettings body validation (boundary)', () => {
+  const pipe = new ZodValidationPipe(UpdatePrivacySettingsSchema);
+
+  it('rejects non-boolean values', () => {
+    expect(() => pipe.transform({ readReceipts: 'yes' })).toThrow();
+    expect(() => pipe.transform({ typingIndicators: 1 })).toThrow();
+  });
+
+  it('rejects unknown fields (.strict())', () => {
+    expect(() => pipe.transform({ readReceipts: true, unknown: 'field' })).toThrow();
+  });
+
+  it('accepts a partial update', () => {
+    expect(pipe.transform({ readReceipts: false })).toEqual({ readReceipts: false });
+  });
+
+  it('accepts an empty body', () => {
+    expect(pipe.transform({})).toEqual({});
   });
 });
 

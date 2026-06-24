@@ -12,12 +12,15 @@ import {
 } from '@nestjs/swagger';
 import {
   type Me,
+  type PrivacySettings,
+  type UpdatePrivacySettings,
   type UpdateProfile,
   DISPLAY_NAME_ALLOWED,
   DISPLAY_NAME_MAX,
   DISPLAY_NAME_MIN,
   DISPLAY_NAME_PATTERN,
   MeSchema,
+  UpdatePrivacySettingsSchema,
   UpdateProfileSchema,
 } from '@argus/contracts';
 
@@ -46,6 +49,17 @@ class UpdateProfileBody {
     maxLength: 64,
   })
   avatarSeed?: string;
+}
+
+class UpdatePrivacySettingsBody {
+  @ApiProperty({ required: false, description: 'Send and display read watermarks' })
+  readReceipts?: boolean;
+
+  @ApiProperty({ required: false, description: 'Send and display typing indicators' })
+  typingIndicators?: boolean;
+
+  @ApiProperty({ required: false, description: 'Generate link previews (client-side only)' })
+  linkPreviews?: boolean;
 }
 
 @ApiTags('users')
@@ -134,6 +148,57 @@ export class MeController {
     if (fieldsUpdated.length > 0) {
       await this.audit.record(auth.tenantId, {
         eventType: 'users.profile_updated',
+        actorSub: (auth as VerifiedAuth).sub,
+        metadata: { fieldsUpdated },
+      });
+    }
+  }
+
+  /** Get the caller's privacy preference settings. */
+  @Get('me/settings/privacy')
+  @ApiOperation({ summary: 'Get own privacy settings', operationId: 'getMyPrivacySettings' })
+  @ApiOkResponse({
+    description: 'current privacy settings',
+    schema: {
+      type: 'object',
+      properties: {
+        readReceipts: { type: 'boolean' },
+        typingIndicators: { type: 'boolean' },
+        linkPreviews: { type: 'boolean' },
+      },
+      required: ['readReceipts', 'typingIndicators', 'linkPreviews'],
+    },
+  })
+  @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
+  async getMyPrivacySettings(@CurrentAuth() auth: MaybeUnboundAuth): Promise<PrivacySettings> {
+    if (!auth.tenantId) return { readReceipts: true, typingIndicators: true, linkPreviews: true };
+    return this.users.getPrivacySettings(auth as VerifiedAuth);
+  }
+
+  /** Update the caller's privacy preference settings. */
+  @Put('me/settings/privacy')
+  @HttpCode(204)
+  @Throttle(perMinute(SENSITIVE_LIMITS.updatePrivacySettings))
+  @ApiOperation({ summary: 'Update own privacy settings', operationId: 'updateMyPrivacySettings' })
+  @ApiBody({ type: UpdatePrivacySettingsBody })
+  @ApiNoContentResponse({ description: 'privacy settings updated' })
+  @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
+  async updateMyPrivacySettings(
+    @CurrentAuth() auth: MaybeUnboundAuth,
+    @Body(new ZodValidationPipe(UpdatePrivacySettingsSchema)) dto: UpdatePrivacySettings,
+  ): Promise<void> {
+    if (!auth.tenantId) return;
+    const user = await this.users.getByAuth(auth as VerifiedAuth);
+    if (!user) return;
+    await this.users.updatePrivacySettings({ tenantId: auth.tenantId, userId: user.id }, dto);
+    const fieldsUpdated = [
+      ...(dto.readReceipts !== undefined ? (['readReceipts'] as const) : []),
+      ...(dto.typingIndicators !== undefined ? (['typingIndicators'] as const) : []),
+      ...(dto.linkPreviews !== undefined ? (['linkPreviews'] as const) : []),
+    ];
+    if (fieldsUpdated.length > 0) {
+      await this.audit.record(auth.tenantId, {
+        eventType: 'users.privacy_settings_updated',
         actorSub: (auth as VerifiedAuth).sub,
         metadata: { fieldsUpdated },
       });

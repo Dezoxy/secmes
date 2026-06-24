@@ -32,7 +32,19 @@ export interface FriendRequestMeta {
   targetArgusId: string;
 }
 
-export type AuditMetadata = LookupUserMeta | ProfileUpdateMeta | FriendRequestMeta;
+/**
+ * Metadata for the `users.privacy_settings_updated` audit event.
+ * Only field NAMES are recorded — never the boolean values.
+ */
+export interface PrivacySettingsUpdateMeta {
+  fieldsUpdated: ('readReceipts' | 'typingIndicators' | 'linkPreviews')[];
+}
+
+export type AuditMetadata =
+  | LookupUserMeta
+  | ProfileUpdateMeta
+  | FriendRequestMeta
+  | PrivacySettingsUpdateMeta;
 
 export interface AuditEventInput {
   eventType: string;
@@ -57,10 +69,16 @@ const FriendRequestMetaSchema = z.object({
   targetArgusId: z.string().max(128),
 });
 
+const PrivacySettingsUpdateMetaSchema = z.object({
+  fieldsUpdated: z.array(z.enum(['readReceipts', 'typingIndicators', 'linkPreviews'])).max(3),
+});
+
 function validateMetadata(eventType: string, metadata: AuditMetadata): AuditMetadata {
   if (eventType === 'users.lookup') return LookupUserMetaSchema.parse(metadata);
   if (eventType === 'users.profile_updated') return ProfileUpdateMetaSchema.parse(metadata);
   if (eventType === 'friends.request_created') return FriendRequestMetaSchema.parse(metadata);
+  if (eventType === 'users.privacy_settings_updated')
+    return PrivacySettingsUpdateMetaSchema.parse(metadata);
   throw new Error(`No metadata schema registered for eventType "${eventType}"`);
 }
 
