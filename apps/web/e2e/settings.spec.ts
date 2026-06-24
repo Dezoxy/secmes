@@ -163,7 +163,6 @@ test('about exposes manual PWA update status and platform install expectations',
   ).toBeVisible();
 
   const releaseNotes = page.getByRole('region', { name: 'Release notes' });
-  const releaseNotesScrollbar = page.getByTestId('release-notes-scrollbar');
   const firstRelease = releaseNotesData[0]!;
   await expect(releaseNotes.getByText(firstRelease.version, { exact: true })).toBeVisible();
 
@@ -175,27 +174,22 @@ test('about exposes manual PWA update status and platform install expectations',
     return {
       releaseCanScroll: node.scrollHeight > node.clientHeight,
       aboutCanScroll: aboutRegion ? aboutRegion.scrollHeight > aboutRegion.clientHeight : true,
-      bottomMargin: aboutRect ? Math.round(aboutRect.bottom - releaseRect.bottom) : null,
       leftMargin: aboutRect ? Math.round(releaseRect.left - aboutRect.left) : null,
       rightMargin: aboutRect ? Math.round(aboutRect.right - releaseRect.right) : null,
     };
   });
 
-  expect(layout.releaseCanScroll).toBe(true);
+  // Release notes render at natural height — no inner scroll box.
+  expect(layout.releaseCanScroll).toBe(false);
+  // Outer section clips overflow; the inner div scrolls. Section itself does not overflow.
   expect(layout.aboutCanScroll).toBe(false);
-  // Left/right gutters are exactly symmetric; the bottom gap is within a flex sub-pixel-rounding margin of the
-  // sides (the fixed rows above the flex-1 region accumulate fractional heights, so allow ~12px of drift).
+  // Left/right gutters are exactly symmetric.
   expect(layout.leftMargin).toBe(layout.rightMargin);
-  expect(Math.abs(layout.bottomMargin! - layout.leftMargin!)).toBeLessThanOrEqual(12);
-  expect(Math.abs(layout.bottomMargin! - layout.rightMargin!)).toBeLessThanOrEqual(12);
-  await expect(releaseNotesScrollbar).toHaveClass(/opacity-0/);
 
+  // Scrolling (wheel propagates to the parent overflow-y-auto div) reveals the bottom of the list.
+  // A truncated entry renders the neutral overflow note below its groups, so that's the true last line.
   await releaseNotes.hover();
   await page.mouse.wheel(0, 5_000);
-  await expect(releaseNotesScrollbar).toHaveClass(/opacity-100/);
-  await expect(releaseNotesScrollbar).toHaveClass(/opacity-0/, { timeout: 2_000 });
-  // Scrolling reveals the bottom of the list — assert the last line of the last release entry is now visible.
-  // A truncated entry renders the neutral overflow note below its groups, so that's the true last line.
   const lastRelease = releaseNotesData[releaseNotesData.length - 1]!;
   const lastGroup = lastRelease.groups[lastRelease.groups.length - 1]!;
   const lastLine = lastRelease.overflowNote ?? lastGroup.items[lastGroup.items.length - 1]!;

@@ -504,15 +504,9 @@ export function SettingsPanel({
 
         <div
           key={active}
-          className={`flex-1 px-3 pb-[calc(env(safe-area-inset-bottom)_+_6rem)] sm:px-6 lg:pb-6 ${
-            active === 'about' ? 'overflow-hidden' : 'overflow-y-auto'
-          }`}
+          className="flex-1 overflow-y-auto px-3 pb-[calc(env(safe-area-inset-bottom)_+_6rem)] sm:px-6 lg:pb-6"
         >
-          <div
-            className={`${mobileBackAnimating ? '' : surfaceEnterMotion} ${
-              active === 'about' ? 'flex h-full min-h-0 flex-col' : ''
-            }`}
-          >
+          <div className={mobileBackAnimating ? '' : surfaceEnterMotion}>
             {active === 'security' && <SecuritySettings />}
 
             {active === 'privacy' && (
