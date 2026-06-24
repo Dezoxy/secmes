@@ -123,7 +123,7 @@ function SettingsPanelFallback({ onClose }: SettingsPanelFallbackProps) {
       ariaLabel="Settings"
       onClose={onClose}
       className={`items-center justify-center bg-black/40 backdrop-blur-md sm:p-4 ${modalBackdropEnterMotion}`}
-      contentClassName={`relative flex h-[100dvh] w-full max-w-6xl items-center justify-center bg-[#12121a] text-sm text-white/45 shadow-2xl shadow-black/50 sm:h-[90dvh] sm:rounded-3xl sm:border sm:border-white/5 ${modalPanelEnterMotion}`}
+      contentClassName={`absolute inset-0 flex w-full items-center justify-center bg-[#12121a] text-sm text-white/45 shadow-2xl shadow-black/50 sm:static sm:h-[90dvh] sm:max-w-6xl sm:rounded-3xl sm:border sm:border-white/5 ${modalPanelEnterMotion}`}
     >
       <IconButton
         onClick={onClose}
@@ -680,7 +680,7 @@ export default function ChatScreen() {
   return (
     <div className="h-[100dvh] bg-[#1a1a24] flex sm:items-center sm:justify-center sm:p-4">
       <div
-        className={`w-full max-w-6xl h-[100dvh] sm:h-[90dvh] bg-[#12121a] sm:rounded-3xl overflow-hidden flex shadow-2xl shadow-black/50 transition-all duration-700 ease-out ${
+        className={`absolute inset-0 w-full sm:static sm:h-[90dvh] sm:max-w-6xl bg-[#12121a] sm:rounded-3xl overflow-hidden flex shadow-2xl shadow-black/50 transition-all duration-700 ease-out ${
           mounted ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
         }`}
       >

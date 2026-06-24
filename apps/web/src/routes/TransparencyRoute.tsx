@@ -54,7 +54,7 @@ export default function TransparencyRoute() {
   return (
     <main
       aria-label="Security and transparency"
-      className="flex h-[100dvh] flex-col bg-[#0c0c12] text-white"
+      className="absolute inset-0 flex flex-col bg-[#0c0c12] text-white"
     >
       <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col overflow-y-auto">
         {/* Glassy header — sticky + translucent + blurred so content scrolls under it (native iOS look). */}
