@@ -151,7 +151,7 @@ export default function GroupsScreen() {
             mounted ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-8'
           } ${mobileSidebarReturning ? paneBackEnterMotion : ''}`}
         >
-          <div className="bg-[#0f0f16] p-4 pt-[calc(env(safe-area-inset-top)_+_1rem)]">
+          <div className="bg-[#0f0f16] p-4 pt-[env(safe-area-inset-top)]">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-[#964cdc]/25" />

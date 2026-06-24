@@ -133,7 +133,7 @@ export default function FriendsScreen() {
   return (
     <div className="relative h-full lg:flex lg:items-center lg:justify-center lg:bg-[#1a1a24] lg:p-4">
       <div className="flex h-full flex-col overflow-hidden bg-[#0f0f16] lg:h-[calc(100%-2rem)] lg:w-full lg:max-w-2xl lg:rounded-3xl lg:bg-[#12121a] lg:shadow-2xl lg:shadow-black/50">
-        <div className="bg-[#0f0f16] p-4 pt-[calc(env(safe-area-inset-top)_+_1rem)] lg:bg-[#12121a]">
+        <div className="bg-[#0f0f16] p-4 pt-[env(safe-area-inset-top)] lg:bg-[#12121a]">
           <div className="relative flex flex-col items-center">
             <h1 className="flex items-center gap-2">
               <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />

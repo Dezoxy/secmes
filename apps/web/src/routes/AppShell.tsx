@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { BottomNav, TAB_PATHS } from '../features/ui/BottomNav';
 import { useSwipeTabs } from '../features/ui/useSwipeTabs';
+import { NavVisibilityContext } from './NavVisibilityContext';
 
 function getTabIndex(pathname: string): number {
   return TAB_PATHS.findIndex((p) => pathname === p || pathname.startsWith(p + '/'));
@@ -49,14 +50,18 @@ export default function AppShell() {
     prevIndexRef.current = currentIndex;
   });
 
+  const [navVisible, setNavVisible] = useState(true);
+
   return (
     <div className="flex h-[100dvh] flex-col bg-[#0f0f16] text-white">
       <div ref={contentRef} className="relative min-h-0 flex-1 overflow-hidden">
         <div key={location.pathname} className={`absolute inset-0 ${motionClass}`}>
-          <Outlet />
+          <NavVisibilityContext.Provider value={setNavVisible}>
+            <Outlet />
+          </NavVisibilityContext.Provider>
         </div>
       </div>
-      <BottomNav />
+      {navVisible && <BottomNav />}
     </div>
   );
 }
