@@ -17,6 +17,7 @@ import {
   ApiBody,
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
@@ -272,6 +273,9 @@ export class MessagingController {
   @ApiBadRequestResponse({
     description: 'invalid body, or a member id is not a user in this tenant',
   })
+  @ApiForbiddenResponse({
+    description: 'a direct conversation naming a peer directly requires an accepted friendship',
+  })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async createConversation(
     @CurrentAuth() auth: VerifiedAuth,
@@ -291,6 +295,7 @@ export class MessagingController {
   @ApiOkResponse({ type: SentMessageDto })
   @ApiBadRequestResponse({ description: 'invalid body, or user not provisioned' })
   @ApiNotFoundResponse({ description: 'conversation not found or caller is not a member' })
+  @ApiForbiddenResponse({ description: 'direct conversation requires an accepted friendship' })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async sendMessage(
     @CurrentAuth() auth: VerifiedAuth,
@@ -315,6 +320,9 @@ export class MessagingController {
   @ApiNotFoundResponse({ description: 'conversation not found or caller is not a member' })
   @ApiConflictResponse({
     description: 'epoch slot already occupied by another member (409 — rebase and retry)',
+  })
+  @ApiForbiddenResponse({
+    description: 'direct conversation requires an accepted friendship (DM only, defence-in-depth)',
   })
   @ApiUnauthorizedResponse({ description: 'missing or invalid bearer token' })
   async postCommit(

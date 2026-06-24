@@ -3,7 +3,12 @@ import { and, asc, eq, gt, inArray, max, min, sql } from 'drizzle-orm';
 
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
-import { requireMembership, requireUser } from './membership.js';
+import {
+  requireDirectFriendship,
+  requireDirectFriendshipForAdd,
+  requireMembership,
+  requireUser,
+} from './membership.js';
 import type { PushService } from '../push/push.service.js';
 import type {
   CommitCreatedEvent,
@@ -41,10 +46,9 @@ export class MessageDeliveryService {
       const sender = await requireUser(tx, auth);
       await requireMembership(tx, conversationId, sender);
 
-      // Idempotent-retry fast path: if this (conversation, sender, clientMessageId) was already
-      // stored, return it immediately BEFORE the stale-epoch check. This prevents a retry from
-      // being rejected with 409 simply because a commit advanced the epoch after the first send
-      // succeeded but before the client received the acknowledgement.
+      // Idempotent-retry fast path: check BEFORE the friendship gate so a retry of an already-stored
+      // message succeeds even if the sender has since been unfriended. The message is already durable;
+      // refusing the retry would leave the client stuck with no ACK for a message the server has stored.
       const [alreadyStored] = await tx
         .select({ id: schema.messages.id, createdAt: schema.messages.createdAt })
         .from(schema.messages)
@@ -66,6 +70,11 @@ export class MessageDeliveryService {
           event: null,
         };
       }
+
+      // Friendship gate for direct (1:1) conversations: if the conversation is a DM, the sender must
+      // still be an accepted friend of the peer. Groups are ungated — friendship is a 1:1 social-graph
+      // concept. The guard fails closed on a DM with anything other than exactly one peer.
+      await requireDirectFriendship(tx, conversationId, sender);
 
       // Epoch gate: reject messages at any epoch other than the current group epoch. A message
       // encrypted at an old epoch is undecryptable (MLS FS); one at a future epoch indicates the
@@ -198,6 +207,14 @@ export class MessageDeliveryService {
     const { result, event, removedSubs } = await withTenant(auth.tenantId, async (tx) => {
       const sender = await requireUser(tx, auth);
       await requireMembership(tx, conversationId, sender);
+
+      // Friendship gate at the DM peer-ADD point: a commit that adds members to a direct (1:1)
+      // conversation must add accepted friends only. This is the multi-device DM bootstrap path — the peer
+      // is added here via addedUserIds while only the creator is a member yet, so we check the declared
+      // added ids (not a member-derived peer). The whole set is checked at once so the DM two-member cap
+      // can't be slipped by adding two new friends in one commit. No-op for groups and for self-adds. Runs
+      // before the commit/member insert so a rejected commit writes nothing.
+      await requireDirectFriendshipForAdd(tx, conversationId, sender, body.addedUserIds);
 
       // Contiguity guard: reject commits that skip epochs. A gap commit would poison MAX(epoch) for
       // the sendMessage stale-epoch gate, cause peer drain loops to halt at a missing slot, and let

@@ -1,11 +1,26 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import {
+  BadRequestException,
+  ForbiddenException,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
+import { and, eq, ne } from 'drizzle-orm';
 
 import { schema, type Tx } from '../db/index.js';
 
 // Shared conversation authz — the SAME checks the messaging service and the attachment grants run, so there
 // is exactly one implementation of "who is this caller" and "are they a member" (no IDOR drift). Both take a
 // `Tx` so the check runs in the SAME RLS-scoped transaction as the write it guards.
+
+/**
+ * Canonical pair ordering for the friendships table (user_low_id < user_high_id). Lower-casing first
+ * ensures uppercase UUID input (valid per ParseUUIDPipe) sorts the same way as the stored lower-case rows.
+ */
+export function canonicalPair(a: string, b: string): { low: string; high: string } {
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  return x < y ? { low: x, high: y } : { low: y, high: x };
+}
 
 /**
  * Resolve the VERIFIED caller to an ACTIVE tenant user id. Never trusts a client-supplied id, and
@@ -52,4 +67,118 @@ export async function requireMembership(
     )
     .limit(1);
   if (!member) throw new NotFoundException('conversation not found');
+}
+
+/**
+ * Throw 403 unless `userA` and `userB` have an accepted friendship row. Looks up the canonical pair
+ * (lower-cased, sorted) so the direction of the arguments doesn't matter.
+ *
+ * Tenant scope is enforced by RLS (FORCE) on the connection — there is deliberately NO explicit
+ * `tenant_id` predicate here. The canonical pair is unique only WITHIN a tenant, so this MUST run
+ * inside a `withTenant` transaction; calling it on a non-tenant-scoped connection would let a same-id
+ * pair from another tenant match.
+ */
+export async function requireFriendship(tx: Tx, userA: string, userB: string): Promise<void> {
+  const { low, high } = canonicalPair(userA, userB);
+  const [row] = await tx
+    .select({ id: schema.friendships.id })
+    .from(schema.friendships)
+    .where(
+      and(
+        eq(schema.friendships.userLowId, low),
+        eq(schema.friendships.userHighId, high),
+        eq(schema.friendships.status, 'accepted'),
+      ),
+    )
+    .limit(1);
+  if (!row) throw new ForbiddenException('friendship required');
+}
+
+/**
+ * Friendship gate for direct (1:1) conversations. If `conversationId` is a DM, the caller must still be
+ * an accepted friend of the peer; otherwise this is a no-op (groups are ungated — friendship is a 1:1
+ * social-graph concept, and legacy rows where `isDirect IS NULL` are treated as non-DM).
+ *
+ * Fails CLOSED on anomalies: a DM is asserted to have exactly one peer besides the caller. Zero peers
+ * (a DM with no other member) or more than one (an `isDirect` row that somehow accumulated extra members
+ * via an invariant violation) both throw 500 rather than gating against an arbitrary member and letting
+ * the write through. Callers MUST have run `requireMembership` first (so the conversation is known to
+ * exist in this tenant under the active RLS context) and MUST be inside a `withTenant` transaction.
+ */
+export async function requireDirectFriendship(
+  tx: Tx,
+  conversationId: string,
+  callerUserId: string,
+): Promise<void> {
+  const [conv] = await tx
+    .select({ isDirect: schema.conversations.isDirect })
+    .from(schema.conversations)
+    .where(eq(schema.conversations.id, conversationId))
+    .limit(1);
+  // requireMembership (run by every caller) already confirmed existence; a missing row here means the
+  // precondition was violated — fail closed rather than silently skip the gate.
+  if (!conv) throw new InternalServerErrorException('conversation not found for friendship gate');
+  if (conv.isDirect !== true) return;
+
+  const peers = await tx
+    .select({ userId: schema.conversationMembers.userId })
+    .from(schema.conversationMembers)
+    .where(
+      and(
+        eq(schema.conversationMembers.conversationId, conversationId),
+        ne(schema.conversationMembers.userId, callerUserId),
+      ),
+    )
+    .limit(2);
+  if (peers.length !== 1) {
+    throw new InternalServerErrorException('DM conversation has unexpected membership');
+  }
+  await requireFriendship(tx, callerUserId, peers[0]!.userId);
+}
+
+/**
+ * Friendship gate for a DM write that adds members and/or touches an established DM (deliverWelcome adds
+ * one recipient; postCommit may add several via `addedUserIds`, or none). It gates the DM peer that will
+ * exist AFTER the operation, computed from the union of current members and the added ids — so it covers
+ * both the bootstrap add (peer not a member yet) AND an established DM whose commit adds nobody (the
+ * existing peer is still re-checked, closing the path where an unfriended peer keeps committing). No-op for
+ * groups/legacy. For a DM, every non-caller member of the resulting set must be an accepted friend.
+ *
+ * The resulting member set is evaluated AT ONCE: a DM holds exactly two members, so the union of existing
+ * members and added ids must not exceed two — otherwise 500 (an invariant breach, never a 403 oracle).
+ * Per-entry checking would be unsafe: a single commit adding two new friends would slip past, because each
+ * entry alone sees only the solo creator. Must run inside the SAME `withTenant` transaction as the
+ * member-add and BEFORE it, so a rejected write touches no row.
+ */
+export async function requireDirectFriendshipForAdd(
+  tx: Tx,
+  conversationId: string,
+  callerUserId: string,
+  addedUserIds: readonly string[],
+): Promise<void> {
+  const [conv] = await tx
+    .select({ isDirect: schema.conversations.isDirect })
+    .from(schema.conversations)
+    .where(eq(schema.conversations.id, conversationId))
+    .limit(1);
+  if (!conv) throw new InternalServerErrorException('conversation not found for friendship gate');
+  if (conv.isDirect !== true) return; // groups + legacy rows are ungated
+
+  // Resulting member set = current members ∪ added ids. `existing` already includes the caller
+  // (requireMembership ran), so this also re-checks the established peer when nothing new is added.
+  const existing = await tx
+    .select({ userId: schema.conversationMembers.userId })
+    .from(schema.conversationMembers)
+    .where(eq(schema.conversationMembers.conversationId, conversationId))
+    .limit(3);
+  const finalMembers = new Set<string>([...existing.map((m) => m.userId), ...addedUserIds]);
+  if (finalMembers.size > 2) {
+    throw new InternalServerErrorException('DM cannot exceed two members');
+  }
+
+  // Every member other than the caller must be an accepted friend (a DM has at most one such peer).
+  finalMembers.delete(callerUserId);
+  for (const peer of finalMembers) {
+    await requireFriendship(tx, callerUserId, peer);
+  }
 }

@@ -1,4 +1,5 @@
 import { OLDEST_RETAINED_EPOCH_HEADER } from '@argus/contracts';
+import { ForbiddenException } from '@nestjs/common';
 import type { Response } from 'express';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -65,6 +66,44 @@ describe('MessagingController delegation', () => {
     const body = { clientMessageId: 'cm1', ciphertext: 'b64==', alg: 'MLS_1.0', epoch: 2 };
     await controller.sendMessage(auth, CONV, body);
     expect(messaging.sendMessage).toHaveBeenCalledWith(auth, CONV, body);
+  });
+
+  it('createConversation propagates 403 from service for a direct create with a non-friend peer', async () => {
+    const { controller, messaging } = makeController();
+    messaging.createConversation.mockRejectedValueOnce(
+      new ForbiddenException('friendship required'),
+    );
+    await expect(
+      controller.createConversation(auth, { memberUserIds: ['u2'], isDirect: true }),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('sendMessage propagates 403 from service when parties are not friends', async () => {
+    const { controller, messaging } = makeController();
+    messaging.sendMessage.mockRejectedValueOnce(new ForbiddenException('friendship required'));
+    await expect(
+      controller.sendMessage(auth, CONV, {
+        clientMessageId: 'cm1',
+        ciphertext: 'b64==',
+        alg: 'MLS_1.0',
+        epoch: 1,
+      }),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('postCommit propagates 403 from service when DM parties are not friends', async () => {
+    const { controller, messaging } = makeController();
+    messaging.postCommit.mockRejectedValueOnce(new ForbiddenException('friendship required'));
+    await expect(
+      controller.postCommit(auth, CONV, {
+        clientCommitId: 'cc1',
+        epoch: 1,
+        commit: 'b64==',
+        welcomes: [],
+        addedUserIds: [],
+        removedUserIds: [],
+      }),
+    ).rejects.toThrow(ForbiddenException);
   });
 
   it('postCommit relays the opaque commit body to the service untouched', async () => {
