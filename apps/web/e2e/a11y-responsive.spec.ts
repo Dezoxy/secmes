@@ -31,7 +31,7 @@ test('settings is reachable via the bottom nav link and returns to chat', async 
   await expect(page.getByRole('navigation', { name: 'Settings sections' })).toBeVisible();
 
   await page.getByRole('link', { name: 'Chat' }).click();
-  await expect(page.getByText('ARGUS')).toBeVisible();
+  await expect(page.getByText('CHAT', { exact: true })).toBeVisible();
 });
 
 test('conversation actions expose expanded state and return focus after panel close', async ({
