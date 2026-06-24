@@ -60,6 +60,7 @@ export default function FriendsScreen() {
   const [lookupResult, setLookupResult] = useState<UserLookupResult | null>(null);
   const [sentDisplayName, setSentDisplayName] = useState<string | null>(null);
   const [confirmingUnfriendId, setConfirmingUnfriendId] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
   const infightLookupQuery = useRef<string | null>(null);
 
   const trimmedFriendQuery = friendQuery.trim();
@@ -131,12 +132,12 @@ export default function FriendsScreen() {
 
   return (
     <div className="flex h-full flex-col bg-[#0f0f16]">
-      <div className="border-b border-white/5 bg-[#0f0f16]/75 p-4 pt-[calc(env(safe-area-inset-top)_+_1rem)] backdrop-blur-xl">
-        <div className="mb-1">
+      <div className="bg-[#0f0f16] p-4 pt-[calc(env(safe-area-inset-top)_+_1rem)]">
+        <div className="relative flex flex-col items-center">
           <h1 className="flex items-center gap-2">
             <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />
             <span className="text-xl font-bold tracking-wider">
-              <span className="bg-gradient-to-r from-purple-400 to-purple-600 bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
                 FRIENDS
               </span>
             </span>
@@ -144,27 +145,48 @@ export default function FriendsScreen() {
           <p className="text-xs text-white/45">
             {friends.length} accepted {friends.length === 1 ? 'friend' : 'friends'}
           </p>
+          <button
+            type="button"
+            onClick={() => {
+              if (searchOpen) {
+                // Closing — reset the query so a hidden search can't keep driving the list / CTA.
+                setFriendQuery('');
+                setLookupResult(null);
+                setSendRequestError(null);
+                infightLookupQuery.current = null;
+              }
+              setSearchOpen((open) => !open);
+            }}
+            aria-label={searchOpen ? 'Close search' : 'Search friends'}
+            aria-expanded={searchOpen}
+            className="absolute right-0 top-1/2 inline-flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg border border-white/5 text-white/60 transition-colors hover:bg-white/[0.05] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60"
+          >
+            {searchOpen ? <X className="h-4 w-4" /> : <Search className="h-4 w-4" />}
+          </button>
         </div>
 
-        <div className="relative mt-3">
-          <Search
-            aria-hidden="true"
-            className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30"
-          />
-          <input
-            type="text"
-            value={friendQuery}
-            onChange={(event) => {
-              setFriendQuery(event.target.value);
-              setSendRequestError(null);
-              setLookupResult(null);
-              infightLookupQuery.current = null;
-            }}
-            aria-label="Search friends or enter Argus ID"
-            placeholder="Search friends or enter Argus ID..."
-            className="w-full rounded-xl border border-white/5 bg-[#1a1a26] py-2.5 pl-10 pr-4 text-sm text-white placeholder-white/30 transition-colors focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20"
-          />
-        </div>
+        {searchOpen && (
+          <div className="relative mt-3">
+            <Search
+              aria-hidden="true"
+              className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30"
+            />
+            <input
+              type="text"
+              value={friendQuery}
+              onChange={(event) => {
+                setFriendQuery(event.target.value);
+                setSendRequestError(null);
+                setLookupResult(null);
+                infightLookupQuery.current = null;
+              }}
+              aria-label="Search friends or enter Argus ID"
+              placeholder="Search friends or enter Argus ID..."
+              autoFocus
+              className="w-full rounded-xl border border-white/5 bg-[#1a1a26] py-2.5 pl-10 pr-4 text-sm text-white placeholder-white/30 transition-colors focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20"
+            />
+          </div>
+        )}
       </div>
 
       <div className="flex-1 space-y-2 overflow-y-auto px-2 pt-3 pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)]">
