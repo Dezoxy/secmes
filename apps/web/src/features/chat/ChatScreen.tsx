@@ -584,19 +584,25 @@ export default function ChatScreen() {
   // Sidebar dedup: when the server map is loaded, filter the conversation list so that only the
   // canonical (latest-createdAt) DM per peer is shown. Old duplicate rows (created before a
   // reinstall) are hidden without deleting server data. Non-DMs and peers absent from the server
-  // map pass through unchanged. When the map hasn't loaded yet (size === 0), show all conversations
-  // so there's no visible flash of content being removed on startup.
+  // map pass through unchanged. Before the snapshot loads, show all conversations so there's no
+  // flash of removed content. When the canonical row isn't in the local conversation list yet
+  // (e.g. this device had no key package and missed the Welcome), keep the older local DM visible
+  // so the user isn't left with a blank sidebar.
+  const localConvIds = useMemo(() => new Set(conversations.map((c) => c.id)), [conversations]);
   const dedupedConversations = useMemo(
     () =>
-      peerToConvId.size === 0
+      !peerMapsLoaded
         ? conversations
         : conversations.filter((c) => {
             if (c.type !== 'direct') return true;
             const peer = convToPeerId.get(c.id);
             if (!peer) return true; // peer not in server map → show as-is
-            return peerToConvId.get(peer) === c.id; // only the canonical conversation for this peer
+            const canonicalId = peerToConvId.get(peer);
+            // Hide this conv only if the canonical is a different conv AND it's locally present.
+            if (canonicalId && canonicalId !== c.id && localConvIds.has(canonicalId)) return false;
+            return true;
           }),
-    [conversations, peerToConvId, convToPeerId],
+    [conversations, peerMapsLoaded, peerToConvId, convToPeerId, localConvIds],
   );
 
   // instead of creating a duplicate). Checks the server-side peer map first (populated at startup from
