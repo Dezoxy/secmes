@@ -256,6 +256,14 @@ export default function ChatScreen() {
     )?.id ??
     null;
 
+  const conversationHasState = useCallback(
+    (conversationId: string): Promise<boolean> => {
+      if (!messagingDeps) return Promise.resolve(false);
+      return messagingDeps.keystore.hasConversationState(messagingDeps.device, conversationId);
+    },
+    [messagingDeps],
+  );
+
   const handleOpenExisting = (conversationId: string): void => {
     setSelectedId(conversationId);
     setStartOpen(false);
@@ -403,6 +411,7 @@ export default function ChatScreen() {
           onOpenExisting={handleOpenExisting}
           onStarted={handleStarted}
           prefillArgusId={startPrefillArgusId}
+          conversationHasState={conversationHasState}
           onClose={() => {
             setStartOpen(false);
             setStartPrefillArgusId(undefined);
