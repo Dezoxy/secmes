@@ -39,8 +39,6 @@ export default function GroupsScreen() {
     serverProfile: profile,
     numbersByConv,
     verifiedByConv,
-    updateReady,
-    applyUpdate,
     persistGroupCreated,
   } = useChatContext();
 
@@ -179,8 +177,6 @@ export default function GroupsScreen() {
             conversations={groupConversations}
             selectedId={selectedId}
             onSelect={handleSelect}
-            updateReady={updateReady}
-            onApplyUpdate={applyUpdate}
           />
         </aside>
 
@@ -211,8 +207,6 @@ export default function GroupsScreen() {
                     ? () => setAddMemberOpen(true)
                     : undefined
                 }
-                updateReady={updateReady}
-                onApplyUpdate={applyUpdate}
               />
               {effectiveSelectedIsLive && !selectedIsSyncLost && (
                 <ReconnectBanner status={connectionStatus} className="mx-4 mt-3" />

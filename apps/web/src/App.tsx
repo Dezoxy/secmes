@@ -274,9 +274,8 @@ function RouteUpdateAction() {
   const [applying, setApplying] = useState(false);
   const [closing, setClosing] = useState(false);
 
-  // Only chat and groups have in-page update affordances (the ConversationList update action).
-  const ROUTES_WITH_OWN_UPDATE_UI = new Set(['/chat', '/groups']);
-  if (!updateReady || ROUTES_WITH_OWN_UPDATE_UI.has(pathname)) return null;
+  const AUTH_ROUTES = new Set(['/', '/admin']);
+  if (!updateReady || AUTH_ROUTES.has(pathname)) return null;
 
   const handleClose = () => {
     if (closing) return;
@@ -289,7 +288,7 @@ function RouteUpdateAction() {
 
   if (!dialogOpen) {
     return (
-      <div className="fixed bottom-4 right-4 z-50 sm:bottom-6 sm:right-6">
+      <div className="fixed right-4 top-1/2 z-50 -translate-y-1/2 sm:right-6">
         <button
           type="button"
           onClick={openUpdateDialog}
@@ -313,7 +312,7 @@ function RouteUpdateAction() {
   };
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 sm:bottom-6 sm:right-6">
+    <div className="fixed right-4 top-1/2 z-50 -translate-y-1/2 sm:right-6">
       <div
         role="dialog"
         aria-label="Update available"
