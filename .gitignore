@@ -72,7 +72,7 @@ apps/web/test-results/
 
 # claude code — personal per-project overrides (settings.json IS committed)
 .claude/settings.local.json
-# lefthook local env overrides (e.g. skip unavailable tools in remote containers)
+# lefthook local overrides (environment-specific, e.g. missing tools in cloud containers)
 lefthook-local.yml
 
 # generated api spec (regenerated in CI)
