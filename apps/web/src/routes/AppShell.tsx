@@ -4,6 +4,8 @@ import { BottomNav, TAB_PATHS } from '../features/ui/BottomNav';
 import { useSwipeTabs } from '../features/ui/useSwipeTabs';
 import { NavVisibilityContext } from './NavVisibilityContext';
 
+const TAB_ANIM_MS = 280;
+
 function getTabIndex(pathname: string): number {
   return TAB_PATHS.findIndex((p) => pathname === p || pathname.startsWith(p + '/'));
 }
@@ -16,6 +18,7 @@ export default function AppShell() {
   const prevIndexRef = useRef<number>(currentIndex);
   const isFirstRef = useRef(true);
   const contentRef = useRef<HTMLDivElement>(null);
+  const navigatingRef = useRef(false);
 
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 1024);
   useEffect(() => {
@@ -25,16 +28,47 @@ export default function AppShell() {
     return () => mq.removeEventListener('change', update);
   }, []);
 
+  const animatedNavigateTo = useCallback(
+    (to: string) => {
+      if (navigatingRef.current) return;
+      const targetIndex = getTabIndex(to);
+      if (targetIndex === currentIndex) return;
+
+      const container = contentRef.current;
+      const inner = container?.firstElementChild as HTMLElement | null;
+
+      if (inner && container) {
+        navigatingRef.current = true;
+        const exitClass =
+          targetIndex > currentIndex ? 'argus-tab-exit-left' : 'argus-tab-exit-right';
+        const clone = inner.cloneNode(true) as HTMLElement;
+        // Strip any enter class that may be on the live node so the clone doesn't re-animate.
+        clone.classList.remove('argus-tab-enter-left', 'argus-tab-enter-right');
+        clone.classList.add(exitClass);
+        clone.style.pointerEvents = 'none';
+        container.appendChild(clone);
+        navigate(to);
+        setTimeout(() => {
+          clone.remove();
+          navigatingRef.current = false;
+        }, TAB_ANIM_MS);
+      } else {
+        navigate(to);
+      }
+    },
+    [currentIndex, navigate],
+  );
+
   // Swipe right (finger moves right) → previous tab; swipe left → next tab.
   const onSwipePrev = useCallback(() => {
     const prev = Math.max(currentIndex - 1, 0);
-    if (prev !== currentIndex) navigate(TAB_PATHS[prev]!);
-  }, [currentIndex, navigate]);
+    if (prev !== currentIndex) animatedNavigateTo(TAB_PATHS[prev]!);
+  }, [currentIndex, animatedNavigateTo]);
 
   const onSwipeNext = useCallback(() => {
     const next = Math.min(currentIndex + 1, TAB_PATHS.length - 1);
-    if (next !== currentIndex) navigate(TAB_PATHS[next]!);
-  }, [currentIndex, navigate]);
+    if (next !== currentIndex) animatedNavigateTo(TAB_PATHS[next]!);
+  }, [currentIndex, animatedNavigateTo]);
 
   useSwipeTabs(contentRef, onSwipePrev, onSwipeNext, isMobile);
 
@@ -61,7 +95,7 @@ export default function AppShell() {
           </NavVisibilityContext.Provider>
         </div>
       </div>
-      {navVisible && <BottomNav />}
+      {navVisible && <BottomNav onNavigate={animatedNavigateTo} />}
     </div>
   );
 }
