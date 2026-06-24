@@ -24,21 +24,14 @@ test('chat exposes landmarks and named composer controls', async ({ page }) => {
   await expect(page.getByRole('menuitem', { name: 'Conversation info' })).toBeVisible();
 });
 
-test('settings close button animates out and returns focus to the trigger', async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: 'no-preference' });
+test('settings is reachable via the bottom nav link and returns to chat', async ({ page }) => {
   await page.goto('/chat');
 
-  const settingsTrigger = page.getByRole('button', { name: 'Open settings' });
-  await settingsTrigger.click();
+  await page.getByRole('link', { name: 'Settings' }).click();
+  await expect(page.getByRole('navigation', { name: 'Settings sections' })).toBeVisible();
 
-  const dialog = page.getByRole('dialog', { name: 'Settings' });
-  await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole('navigation', { name: 'Settings sections' })).toBeVisible();
-
-  await dialog.getByRole('button', { name: 'Close settings' }).click();
-  await expect(await dialog.getAttribute('class')).toContain('argus-overlay-exit');
-  await expect(dialog).toHaveCount(0);
-  await expect(settingsTrigger).toBeFocused();
+  await page.getByRole('link', { name: 'Chat' }).click();
+  await expect(page.getByText('ARGUS')).toBeVisible();
 });
 
 test('conversation actions expose expanded state and return focus after panel close', async ({
@@ -68,34 +61,19 @@ test('mobile settings sections expose current state and focus section content', 
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/chat');
+  await page.goto('/settings');
 
-  await page.getByRole('button', { name: 'Open settings' }).click();
+  await expect(page.getByRole('navigation', { name: 'Settings sections' })).toBeVisible();
 
-  const dialog = page.getByRole('dialog', { name: 'Settings' });
-  await expect(dialog.getByRole('navigation', { name: 'Settings sections' })).toBeVisible();
-  const settingsPanel = dialog.locator(':scope > div');
-  // On mobile the settings modal is a full-screen sheet (flush to all four edges, filling the
-  // 390×844 viewport) — not the inset, centered card used at the sm breakpoint and above.
-  // Poll the WHOLE geometry so the panel's enter animation (scale/translate) has fully settled
-  // before asserting — a single read right after the x-poll can catch a mid-animation frame and
-  // flake under parallel load (now that the glassy headers add backdrop-blur render cost).
-  await expect
-    .poll(async () => {
-      const b = await settingsPanel.boundingBox();
-      return b ? b.x <= 1 && b.y <= 1 && b.width >= 388 && b.height >= 840 : false;
-    })
-    .toBe(true);
-
-  const securitySection = dialog.getByRole('button', { name: 'Security', exact: true });
+  const securitySection = page.getByRole('button', { name: 'Security', exact: true });
 
   await securitySection.click();
 
-  const securityContent = dialog.getByRole('region', { name: 'Security settings' });
+  const securityContent = page.getByRole('region', { name: 'Security settings' });
   await expect(securityContent).toBeVisible();
   await expect(securityContent).toBeFocused();
 
-  await dialog.getByRole('button', { name: 'Back to settings menu' }).click();
+  await page.getByRole('button', { name: 'Back to settings menu' }).click();
   await expect(securitySection).toBeVisible();
   await expect(securitySection).toHaveAttribute('aria-current', 'page');
   await expect(securitySection).toBeFocused();
@@ -154,7 +132,7 @@ test('mobile chat keeps the update action reachable in an open thread', async ({
 
 test('non-chat routes keep a reachable PWA update action', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/settings?previewPwaUpdate=1');
+  await page.goto('/security?previewPwaUpdate=1');
 
   // Pill button (aria-label="Update Argus") opens the update dialog.
   const updateButton = page.getByRole('button', { name: 'Update Argus' });

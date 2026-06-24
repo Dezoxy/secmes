@@ -22,31 +22,29 @@ import {
   modalPanelExitMotion,
   paneBackEnterMotion,
   paneBackExitMotion,
-  defaultAccentId,
   surfaceEnterMotion,
   getAccentById,
-  isAccentId,
+  applyThemeToDocument,
   type AccentId,
 } from '../ui';
 import { safeAvatarSrc } from '../chat/seed';
-import {
-  browserLocalStorage,
-  LEGACY_ACCENT_STORAGE_KEY,
-  LEGACY_FONT_SIZE_STORAGE_KEY,
-  readVersionedRecord,
-  versionedStorageKey,
-  writeVersionedRecord,
-} from '../../lib/persistence';
+import { readStoredDeviceSettings, writeStoredDeviceSettings } from './device-settings';
 import { AboutSettings } from './AboutSettings';
-import { AppearanceSettings, FONT_SIZE_LEVELS } from './AppearanceSettings';
+import { AppearanceSettings } from './AppearanceSettings';
 import { DataStorageSettings } from './DataStorageSettings';
-import { NotificationSettings } from './NotificationSettings';
+import { NotificationSettings, type NotificationSettingsRecord } from './NotificationSettings';
 import { PrivacySettings, type PrivacySettingsRecord } from './PrivacySettings';
 import {
   readStoredPrivacySettings,
   syncFromServer,
   writeStoredPrivacySettings,
 } from './privacy-settings';
+import {
+  readStoredNotificationSettings,
+  writeStoredNotificationSettings,
+  syncNotificationSettingsToCache,
+} from './notification-settings';
+import { readMutedConversationIds, syncMuteStateToCache } from './conversation-mute';
 import { ProfileSettings, type AnonymousProfile } from './ProfileSettings';
 import { SecuritySettings } from './SecuritySettings';
 import { AdminPanel } from './AdminPanel';
@@ -62,7 +60,10 @@ interface SettingsPanelProps {
   /** Full server profile — used to render admin-only sections. */
   serverProfile?: MeBound | null;
   onProfileChange: (profile: AnonymousProfile) => boolean;
-  onClose: () => void;
+  onClose?: () => void;
+  /** When true: renders as a plain full-height div instead of a modal overlay,
+   *  hides the profile section and close buttons. */
+  standalone?: boolean;
 }
 
 type SectionId =
@@ -96,58 +97,7 @@ const adminSection: { id: SectionId; label: string; icon: LucideIcon } = {
   icon: ShieldCheck,
 };
 
-const DEVICE_SETTINGS_STORAGE_KEY = versionedStorageKey('settings', 'device');
 const SETTINGS_CLOSE_ANIMATION_MS = 220;
-
-interface DeviceSettingsRecord {
-  accentId: AccentId;
-  fontSizeLevel: number;
-}
-
-function decodeDeviceSettingsRecord(value: unknown): DeviceSettingsRecord | null {
-  if (typeof value !== 'object' || value === null) return null;
-  const record = value as Record<string, unknown>;
-  const accentId = typeof record.accentId === 'string' ? record.accentId : defaultAccentId;
-  const fontSizeLevel = typeof record.fontSizeLevel === 'number' ? record.fontSizeLevel : 5;
-
-  return {
-    accentId: isAccentId(accentId) ? accentId : defaultAccentId,
-    fontSizeLevel: FONT_SIZE_LEVELS.includes(fontSizeLevel) ? fontSizeLevel : 5,
-  };
-}
-
-function readStoredDeviceSettings(): DeviceSettingsRecord {
-  if (typeof window === 'undefined') {
-    return { accentId: defaultAccentId, fontSizeLevel: 5 };
-  }
-
-  const storage = browserLocalStorage();
-  const stored = readVersionedRecord({
-    storage,
-    key: DEVICE_SETTINGS_STORAGE_KEY,
-    decode: decodeDeviceSettingsRecord,
-  });
-  if (stored.status === 'ok') return stored.value;
-
-  const legacyAccent = storage.getItem(LEGACY_ACCENT_STORAGE_KEY);
-  const legacyFontSize = Number.parseInt(storage.getItem(LEGACY_FONT_SIZE_STORAGE_KEY) ?? '', 10);
-  const migrated = {
-    accentId: isAccentId(legacyAccent) ? legacyAccent : defaultAccentId,
-    fontSizeLevel: FONT_SIZE_LEVELS.includes(legacyFontSize) ? legacyFontSize : 5,
-  };
-
-  writeVersionedRecord({ storage, key: DEVICE_SETTINGS_STORAGE_KEY, value: migrated });
-  return migrated;
-}
-
-function writeStoredDeviceSettings(settings: DeviceSettingsRecord): void {
-  if (typeof window === 'undefined') return;
-  writeVersionedRecord({
-    storage: browserLocalStorage(),
-    key: DEVICE_SETTINGS_STORAGE_KEY,
-    value: settings,
-  });
-}
 
 function isMobileSettingsViewport(): boolean {
   return typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches;
@@ -159,14 +109,6 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-function readStoredAccent(): AccentId {
-  return readStoredDeviceSettings().accentId;
-}
-
-function readStoredFontSize(): number {
-  return readStoredDeviceSettings().fontSizeLevel;
-}
-
 export function SettingsPanel({
   profile,
   deviceId,
@@ -174,6 +116,7 @@ export function SettingsPanel({
   serverProfile,
   onProfileChange,
   onClose,
+  standalone = false,
 }: SettingsPanelProps) {
   const isAdmin = serverProfile?.role === 'admin';
   const sections = isAdmin ? [...baseSections, teamSection, adminSection] : baseSections;
@@ -182,10 +125,15 @@ export function SettingsPanel({
   const [mobileSectionOpen, setMobileSectionOpen] = useState(false);
   const [mobileBackAnimating, setMobileBackAnimating] = useState(false);
   const [mobileMenuReturning, setMobileMenuReturning] = useState(false);
-  const [accentId, setAccentId] = useState<AccentId>(() => readStoredAccent());
-  const [fontSizeLevel, setFontSizeLevel] = useState(() => readStoredFontSize());
+  const [accentId, setAccentId] = useState<AccentId>(() => readStoredDeviceSettings().accentId);
+  const [fontSizeLevel, setFontSizeLevel] = useState(
+    () => readStoredDeviceSettings().fontSizeLevel,
+  );
   const [privacySettings, setPrivacySettings] = useState<PrivacySettingsRecord>(() =>
     readStoredPrivacySettings(),
+  );
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettingsRecord>(
+    readStoredNotificationSettings,
   );
   const [avatar, setAvatar] = useState(profile.avatar);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -201,9 +149,6 @@ export function SettingsPanel({
   const privacySettingsMounted = useRef(false);
   const privacySettingsFromServer = useRef(false);
   const privacySettingsUserEdited = useRef(false);
-  // Debounce timer: rapid consecutive toggles produce one PUT (the last state wins), preventing
-  // out-of-order server writes from overwriting the final user-intended value with a stale one.
-  const privacySaveTimerRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     setAvatar(profile.avatar);
@@ -212,6 +157,7 @@ export function SettingsPanel({
 
   useEffect(() => {
     writeStoredDeviceSettings({ accentId, fontSizeLevel });
+    applyThemeToDocument(accentId, fontSizeLevel);
   }, [accentId, fontSizeLevel]);
 
   useEffect(() => {
@@ -230,7 +176,6 @@ export function SettingsPanel({
         // Fire-and-forget: localStorage write already applied; server sync failure is non-blocking.
       });
     }, 500);
-    privacySaveTimerRef.current = timer;
     return () => {
       window.clearTimeout(timer);
     };
@@ -248,6 +193,15 @@ export function SettingsPanel({
       .catch(() => {
         // Network unavailable — keep the localStorage value already loaded by useState.
       });
+  }, []);
+
+  useEffect(() => {
+    writeStoredNotificationSettings(notificationSettings);
+    void syncNotificationSettingsToCache(notificationSettings);
+  }, [notificationSettings]);
+
+  useEffect(() => {
+    void syncMuteStateToCache(readMutedConversationIds());
   }, []);
 
   const activeSection = sections.find((section) => section.id === active) ?? sections[0]!;
@@ -281,14 +235,12 @@ export function SettingsPanel({
 
   const closeSettings = useCallback(() => {
     if (closing) return;
-
     saveProfileDraft(avatar);
-
+    if (!onClose) return;
     if (prefersReducedMotion()) {
       onClose();
       return;
     }
-
     setClosing(true);
     closeTimerRef.current = window.setTimeout(() => {
       onClose();
@@ -356,18 +308,8 @@ export function SettingsPanel({
     };
   }, []);
 
-  return (
-    <Modal
-      ariaLabel="Settings"
-      onClose={closeSettings}
-      className={`items-center justify-center bg-black/40 backdrop-blur-md sm:p-4 ${
-        closing ? modalBackdropExitMotion : modalBackdropEnterMotion
-      }`}
-      contentClassName={`absolute inset-0 flex w-full overflow-hidden bg-[#12121a] shadow-2xl shadow-black/50 sm:static sm:h-[90dvh] sm:max-w-6xl sm:rounded-3xl sm:border sm:border-white/5 ${
-        closing ? modalPanelExitMotion : modalPanelEnterMotion
-      }`}
-      style={accentVariables}
-    >
+  const settingsContent = (
+    <>
       <aside
         className={`${
           mobileSectionOpen || mobileBackAnimating ? 'hidden' : 'flex'
@@ -375,32 +317,36 @@ export function SettingsPanel({
           mobileMenuReturning ? paneBackEnterMotion : ''
         }`}
       >
-        {/* Fixed header — stays put while the profile + section list scroll below it. */}
+        {/* Fixed header */}
         <div className="mb-4 flex shrink-0 items-center justify-between">
           <h2 className="text-lg font-semibold text-white">Settings</h2>
-          <IconButton onClick={closeSettings} size="sm" aria-label="Close settings">
-            <X className="h-5 w-5" />
-          </IconButton>
+          {!standalone && (
+            <IconButton onClick={closeSettings} size="sm" aria-label="Close settings">
+              <X className="h-5 w-5" />
+            </IconButton>
+          )}
         </div>
 
         <div className="-mx-3 min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)] sm:-mx-4 sm:px-4 sm:pb-4">
-          <section
-            className="rounded-2xl border border-white/5 bg-white/[0.02] p-3"
-            aria-labelledby="settings-profile-heading"
-          >
-            <h3 id="settings-profile-heading" className="mb-4 text-base font-semibold text-white">
-              Profile
-            </h3>
-            <ProfileSettings
-              profile={profile}
-              displayName={serverHandle}
-              avatar={avatar}
-              profileError={profileError}
-            />
-          </section>
+          {!standalone && (
+            <section
+              className="rounded-2xl border border-white/5 bg-white/[0.02] p-3"
+              aria-labelledby="settings-profile-heading"
+            >
+              <h3 id="settings-profile-heading" className="mb-4 text-base font-semibold text-white">
+                Profile
+              </h3>
+              <ProfileSettings
+                profile={profile}
+                displayName={serverHandle}
+                avatar={avatar}
+                profileError={profileError}
+              />
+            </section>
+          )}
 
           <nav
-            className="mt-5 space-y-1 border-t border-white/5 pt-4"
+            className={`${standalone ? '' : 'mt-5 border-t border-white/5 pt-4'} space-y-1`}
             aria-label="Settings sections"
           >
             {sections.map(({ id, label, icon: Icon }) => (
@@ -460,13 +406,15 @@ export function SettingsPanel({
           <div className="min-w-0">
             <h3 className="text-xl font-semibold text-white">{activeSection.label}</h3>
           </div>
-          <IconButton
-            onClick={closeSettings}
-            className="ml-auto sm:hidden"
-            aria-label="Close settings"
-          >
-            <X className="h-5 w-5" />
-          </IconButton>
+          {!standalone && (
+            <IconButton
+              onClick={closeSettings}
+              className="ml-auto sm:hidden"
+              aria-label="Close settings"
+            >
+              <X className="h-5 w-5" />
+            </IconButton>
+          )}
         </div>
 
         <div
@@ -486,7 +434,13 @@ export function SettingsPanel({
               <PrivacySettings settings={privacySettings} onSettingsChange={setPrivacySettings} />
             )}
 
-            {active === 'notifications' && <NotificationSettings deviceId={deviceId} />}
+            {active === 'notifications' && (
+              <NotificationSettings
+                deviceId={deviceId}
+                settings={notificationSettings}
+                onSettingsChange={setNotificationSettings}
+              />
+            )}
 
             {active === 'appearance' && (
               <AppearanceSettings
@@ -509,6 +463,30 @@ export function SettingsPanel({
           </div>
         </div>
       </section>
+    </>
+  );
+
+  if (standalone) {
+    return (
+      <div className="flex h-full w-full overflow-hidden" style={accentVariables}>
+        {settingsContent}
+      </div>
+    );
+  }
+
+  return (
+    <Modal
+      ariaLabel="Settings"
+      onClose={closeSettings}
+      className={`items-center justify-center bg-black/40 backdrop-blur-md sm:p-4 ${
+        closing ? modalBackdropExitMotion : modalBackdropEnterMotion
+      }`}
+      contentClassName={`absolute inset-0 flex w-full overflow-hidden bg-[#12121a] shadow-2xl shadow-black/50 sm:static sm:h-[90dvh] sm:max-w-6xl sm:rounded-3xl sm:border sm:border-white/5 ${
+        closing ? modalPanelExitMotion : modalPanelEnterMotion
+      }`}
+      style={accentVariables}
+    >
+      {settingsContent}
     </Modal>
   );
 }

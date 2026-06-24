@@ -41,6 +41,13 @@ import {
   modalPanelEnterMotion,
   useToast,
 } from '../ui';
+import {
+  isConversationMuted,
+  muteConversation,
+  readMutedConversationIds,
+  syncMuteStateToCache,
+  unmuteConversation,
+} from '../settings/conversation-mute';
 
 interface ChatHeaderProps {
   conversation: Conversation;
@@ -123,7 +130,15 @@ export function ChatHeader({
 }: ChatHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [activePanel, setActivePanel] = useState<HeaderPanel | null>(null);
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(() => isConversationMuted(conversation.id));
+  useEffect(() => {
+    setMuted(isConversationMuted(conversation.id));
+  }, [conversation.id]);
+  useEffect(() => {
+    const onMutesCleared = () => setMuted(false);
+    window.addEventListener('argus:mutes-cleared', onMutesCleared);
+    return () => window.removeEventListener('argus:mutes-cleared', onMutesCleared);
+  }, []);
   const [searchQuery, setSearchQuery] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -350,10 +365,15 @@ export function ChatHeader({
             />
             <MenuItem
               icon={muted ? Bell : BellOff}
-              label={muted ? 'Unmute notifications' : 'Mute notifications'}
+              label={muted ? 'Unmute conversation' : 'Mute conversation'}
+              value={muted ? undefined : 'in-app only'}
               tabIndex={menuTabIndex}
               onClick={() => {
-                setMuted((value) => !value);
+                const next = !muted;
+                if (next) muteConversation(conversation.id);
+                else unmuteConversation(conversation.id);
+                void syncMuteStateToCache(readMutedConversationIds());
+                setMuted(next);
                 setMenuOpen(false);
               }}
             />
@@ -514,11 +534,21 @@ export function ChatHeader({
             {activePanel === 'notifications' && (
               <div className="space-y-3">
                 <PanelRow
-                  title="Notification state"
-                  value={muted ? 'Muted on this device' : 'Enabled on this device'}
+                  title="In-app alerts"
+                  value={muted ? 'Muted (push still delivered)' : 'Enabled'}
                 />
-                <Button size="lg" onClick={() => setMuted((value) => !value)} className="w-full">
-                  {muted ? 'Unmute notifications' : 'Mute notifications'}
+                <Button
+                  size="lg"
+                  onClick={() => {
+                    const next = !muted;
+                    if (next) muteConversation(conversation.id);
+                    else unmuteConversation(conversation.id);
+                    void syncMuteStateToCache(readMutedConversationIds());
+                    setMuted(next);
+                  }}
+                  className="w-full"
+                >
+                  {muted ? 'Unmute conversation' : 'Mute conversation'}
                 </Button>
               </div>
             )}

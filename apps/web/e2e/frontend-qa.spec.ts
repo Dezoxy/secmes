@@ -1,7 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
 const routeShells = [
-  { path: '/settings', heading: 'Account settings', marker: 'Manage your profile' },
   { path: '/security', heading: 'Security', marker: 'Unlocked by your passkey' },
   { path: '/devices', heading: 'Trusted devices', marker: 'Device management shell' },
   { path: '/storage', heading: 'Data & storage', marker: 'Encrypted local state only' },
@@ -37,9 +36,7 @@ async function expectComposerAligned(page: Page): Promise<void> {
     .toBeLessThanOrEqual(4);
 }
 
-test('F1C desktop chat and composer QA flow stays usable', async ({ page }) => {
-  const issues = collectPageIssues(page);
-
+async function mockPrivacySettings(page: Page): Promise<void> {
   await page.route('**/api/me/settings/privacy', (route) => {
     if (route.request().method() === 'GET') {
       void route.fulfill({
@@ -51,6 +48,11 @@ test('F1C desktop chat and composer QA flow stays usable', async ({ page }) => {
       void route.fulfill({ status: 204 });
     }
   });
+}
+
+test('F1C desktop chat and composer QA flow stays usable', async ({ page }) => {
+  const issues = collectPageIssues(page);
+  await mockPrivacySettings(page);
 
   await page.goto('/chat');
 
@@ -73,42 +75,32 @@ test('F1C desktop chat and composer QA flow stays usable', async ({ page }) => {
 test('F1C mobile settings and profile QA flow stays navigable', async ({ page }) => {
   const issues = collectPageIssues(page);
   await page.setViewportSize({ width: 390, height: 844 });
+  await mockPrivacySettings(page);
 
-  await page.route('**/api/me/settings/privacy', (route) => {
-    if (route.request().method() === 'GET') {
-      void route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ readReceipts: true, typingIndicators: true, linkPreviews: true }),
-      });
-    } else {
-      void route.fulfill({ status: 204 });
-    }
-  });
+  // Profile tab has its own route
+  await page.goto('/profile');
+  await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible();
+  await expect(page.getByText('Display name')).toBeVisible();
+  await expect(page.getByText('Upload photo')).toBeVisible();
 
-  await page.goto('/chat');
-  await page.getByRole('button', { name: 'Open settings' }).click();
+  // Settings tab — no Profile section, only sections nav
+  await page.goto('/settings');
+  await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Profile' })).toHaveCount(0);
 
-  const dialog = page.getByRole('dialog', { name: 'Settings' });
-  await expect(dialog.getByRole('heading', { name: 'Settings' })).toBeVisible();
-
-  await expect(dialog.getByRole('button', { name: 'Profile' })).toHaveCount(0);
-  await expect(dialog.getByRole('heading', { name: 'Profile' })).toBeVisible();
-  await expect(dialog.getByText('Display name')).toBeVisible();
-  await expect(dialog.getByText('Upload photo')).toBeVisible();
-
-  const securitySection = dialog.getByRole('button', { name: 'Security', exact: true });
+  const securitySection = page.getByRole('button', { name: 'Security', exact: true });
   await securitySection.click();
-  await expect(dialog.getByRole('region', { name: 'Security settings' })).toBeFocused();
+  await expect(page.getByRole('region', { name: 'Security settings' })).toBeFocused();
 
-  await dialog.getByRole('button', { name: 'Back to settings menu' }).click();
+  await page.getByRole('button', { name: 'Back to settings menu' }).click();
   await expect(securitySection).toBeFocused();
-  await expect(dialog.getByRole('button', { name: 'Appearance' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Appearance' })).toBeVisible();
   expect(issues).toEqual([]);
 });
 
 test('F1C route shells render on desktop and mobile widths', async ({ page }) => {
   const issues = collectPageIssues(page);
+  await mockPrivacySettings(page);
 
   for (const viewport of [
     { width: 1280, height: 720 },

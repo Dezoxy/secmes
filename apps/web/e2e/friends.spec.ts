@@ -75,9 +75,9 @@ test('friends panel shows accepted friends from API', async ({ page }) => {
   await stubFriendsApi(page, { friends: [ALICE] });
   await page.goto('/chat');
 
-  await page.getByRole('button', { name: 'Friends' }).click();
+  await page.getByRole('link', { name: 'Friends' }).click();
   await expect(page.getByRole('heading', { name: 'Friends' })).toBeVisible();
-  await expect(page.getByRole('button', { name: /Open friend Alice/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Open conversation with Alice/ })).toBeVisible();
   await expect(page.getByText('1 accepted')).toBeVisible();
 });
 
@@ -85,7 +85,7 @@ test('friends panel shows incoming requests with Accept and Decline buttons', as
   await stubFriendsApi(page, { incoming: [BOB] });
   await page.goto('/chat');
 
-  await page.getByRole('button', { name: 'Friends' }).click();
+  await page.getByRole('link', { name: 'Friends' }).click();
   await expect(page.getByText('Incoming requests')).toBeVisible();
   await expect(page.getByRole('button', { name: /Accept request from Bob/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /Decline request from Bob/ })).toBeVisible();
@@ -95,7 +95,7 @@ test('friends panel shows outgoing requests with Cancel button', async ({ page }
   await stubFriendsApi(page, { outgoing: [CAROL] });
   await page.goto('/chat');
 
-  await page.getByRole('button', { name: 'Friends' }).click();
+  await page.getByRole('link', { name: 'Friends' }).click();
   await expect(page.getByText('Outgoing requests')).toBeVisible();
   await expect(page.getByRole('button', { name: /Cancel request to Carol/ })).toBeVisible();
 });
@@ -104,12 +104,12 @@ test('friend search filters the accepted-friend list', async ({ page }) => {
   await stubFriendsApi(page, { friends: [ALICE] });
   await page.goto('/chat');
 
-  await page.getByRole('button', { name: 'Friends' }).click();
+  await page.getByRole('link', { name: 'Friends' }).click();
   const search = page.getByRole('textbox', { name: 'Search friends or enter Argus ID' });
 
   // query matches Alice
   await search.fill('ali');
-  await expect(page.getByRole('button', { name: /Open friend Alice/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Open conversation with Alice/ })).toBeVisible();
 
   // query matches no friend → show "send request" CTA (requires onSendFriendRequest, absent without manager)
   await search.fill('argus-nobody-xxxxxx-zzz');
@@ -131,8 +131,8 @@ test('accepted friend can be removed via the unfriend button', async ({ page }) 
   await stubFriendsApi(page, { friends: [ALICE] });
 
   await page.goto('/chat');
-  await page.getByRole('button', { name: 'Friends' }).click();
-  await expect(page.getByRole('button', { name: /Open friend Alice/ })).toBeVisible();
+  await page.getByRole('link', { name: 'Friends' }).click();
+  await expect(page.getByRole('button', { name: /Open conversation with Alice/ })).toBeVisible();
 
   const removeBtn = page.getByRole('button', { name: /Remove friend Alice/ });
   if (await removeBtn.isVisible()) {
@@ -142,7 +142,7 @@ test('accepted friend can be removed via the unfriend button', async ({ page }) 
     expect(deleteUrl).toContain('/friends/');
   } else {
     // Demo mode (onUnfriend is undefined) — verify the button is absent and no DELETE was sent.
-    // Interactive click→confirm→call coverage lives in ConversationList.unfriend.spec.ts.
+    // Interactive click→confirm→call coverage lives in ConversationList.unfriend.spec.ts (tests FriendsScreen).
     expect(deleteUrl).toBeNull();
   }
 });
@@ -188,7 +188,7 @@ test('send-friend-request flow: lookup-then-confirm (authenticated) / "no match"
   });
 
   await page.goto('/chat');
-  await page.getByRole('button', { name: 'Friends' }).click();
+  await page.getByRole('link', { name: 'Friends' }).click();
   const search = page.getByRole('textbox', { name: 'Search friends or enter Argus ID' });
   await search.fill(VALID_SEND_ID);
 
