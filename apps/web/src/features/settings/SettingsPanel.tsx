@@ -317,7 +317,7 @@ export function SettingsPanel({
       className={`items-center justify-center bg-black/40 backdrop-blur-md sm:p-4 ${
         closing ? modalBackdropExitMotion : modalBackdropEnterMotion
       }`}
-      contentClassName={`flex h-[100dvh] w-full max-w-6xl overflow-hidden bg-[#12121a] shadow-2xl shadow-black/50 sm:h-[90dvh] sm:rounded-3xl sm:border sm:border-white/5 ${
+      contentClassName={`absolute inset-0 flex w-full overflow-hidden bg-[#12121a] shadow-2xl shadow-black/50 sm:static sm:h-[90dvh] sm:max-w-6xl sm:rounded-3xl sm:border sm:border-white/5 ${
         closing ? modalPanelExitMotion : modalPanelEnterMotion
       }`}
       style={accentVariables}

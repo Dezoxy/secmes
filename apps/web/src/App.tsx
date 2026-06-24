@@ -73,7 +73,7 @@ function LandingRoute() {
     >
       <section
         aria-label="Passkey sign-in"
-        className={`flex h-[100dvh] w-full flex-col overflow-hidden bg-[#12121a] shadow-2xl shadow-black/50 transition-all duration-700 ease-out sm:h-[90dvh] sm:max-h-[900px] sm:max-w-[430px] sm:rounded-3xl ${
+        className={`absolute inset-0 flex w-full flex-col overflow-hidden bg-[#12121a] shadow-2xl shadow-black/50 transition-all duration-700 ease-out sm:static sm:h-[90dvh] sm:max-h-[900px] sm:max-w-[430px] sm:rounded-3xl ${
           mounted ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
         }`}
       >
