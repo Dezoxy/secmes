@@ -349,7 +349,8 @@ export function ChatHeader({
             />
             <MenuItem
               icon={muted ? Bell : BellOff}
-              label={muted ? 'Unmute notifications' : 'Mute notifications'}
+              label={muted ? 'Unmute conversation' : 'Mute conversation'}
+              value={muted ? undefined : 'in-app only'}
               tabIndex={menuTabIndex}
               onClick={() => {
                 const next = !muted;
@@ -517,8 +518,8 @@ export function ChatHeader({
             {activePanel === 'notifications' && (
               <div className="space-y-3">
                 <PanelRow
-                  title="Notification state"
-                  value={muted ? 'Muted on this device' : 'Enabled on this device'}
+                  title="In-app alerts"
+                  value={muted ? 'Muted (push still delivered)' : 'Enabled'}
                 />
                 <Button
                   size="lg"
@@ -531,7 +532,7 @@ export function ChatHeader({
                   }}
                   className="w-full"
                 >
-                  {muted ? 'Unmute notifications' : 'Mute notifications'}
+                  {muted ? 'Unmute conversation' : 'Mute conversation'}
                 </Button>
               </div>
             )}

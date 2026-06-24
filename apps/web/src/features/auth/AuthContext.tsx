@@ -85,10 +85,9 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
     setToken(null);
     setAuthenticated(false);
     setProfile(null);
-    // Clear per-conversation mute state so a subsequent user on this device
-    // doesn't inherit stale mute data via localStorage or the SW cache.
-    unmuteAll();
-    void syncMuteStateToCache(new Set());
+    // Intentionally does NOT clear mutes here — clearSession is also called by
+    // the refresh timer's catch on transient errors (5xx, network). Mutes are
+    // cleared explicitly in logout() and in the boot-failure 401 branch below.
   }, []);
 
   // Boot: try to restore session from the argus_refresh cookie.
@@ -163,6 +162,10 @@ export function AuthProvider({ children }: { children: ReactNode }): ReactNode {
       .catch(() => {});
     await logoutSession().catch(() => {});
     clearSession();
+    // Explicit logout: clear per-conversation mute state so a subsequent user
+    // on this device doesn't inherit stale mute data via localStorage or SW cache.
+    unmuteAll();
+    void syncMuteStateToCache(new Set());
   }, [clearSession]);
 
   const refreshProfile = useCallback(async (): Promise<void> => {
