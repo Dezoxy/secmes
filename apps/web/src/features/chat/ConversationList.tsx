@@ -282,7 +282,7 @@ export function ConversationList({
 
       {updateReady && onApplyUpdate && (
         <div
-          className="relative shrink-0 bg-[#0f0f16] px-4 pb-4 pt-3 before:absolute before:left-0 before:right-[-1px] before:top-0 before:h-px before:bg-white/5"
+          className="relative mb-[5.25rem] shrink-0 bg-[#0f0f16] px-4 pb-4 pt-3 before:absolute before:left-0 before:right-[-1px] before:top-0 before:h-px before:bg-white/5 lg:mb-0"
           role="status"
           aria-live="polite"
         >
