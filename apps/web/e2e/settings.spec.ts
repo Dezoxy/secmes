@@ -212,3 +212,85 @@ test('about exposes manual PWA update status and platform install expectations',
   const lastLine = lastRelease.overflowNote ?? lastGroup.items[lastGroup.items.length - 1]!;
   await expect(releaseNotes.getByText(lastLine, { exact: true })).toBeVisible();
 });
+
+test('notification settings: mentions-only toggle persists across close/reopen', async ({
+  page,
+}) => {
+  await page.goto('/chat');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Notifications' }).click();
+
+  const mentionsSwitch = dialog.getByRole('switch', { name: /Mentions only/ });
+  await expect(mentionsSwitch).not.toBeChecked();
+
+  await mentionsSwitch.click();
+  await expect(mentionsSwitch).toBeChecked();
+  await expect(dialog.getByText(/preference saved/)).toBeVisible();
+
+  // Persist across close and reopen
+  await dialog.getByRole('button', { name: 'Close settings' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const reopened = page.getByRole('dialog', { name: 'Settings' });
+  await reopened.getByRole('button', { name: 'Notifications' }).click();
+  await expect(reopened.getByRole('switch', { name: /Mentions only/ })).toBeChecked();
+});
+
+test('notification settings: quiet hours toggle shows time pickers', async ({ page }) => {
+  await page.goto('/chat');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Notifications' }).click();
+
+  const quietSwitch = dialog.getByRole('switch', { name: /Quiet hours/ });
+  await expect(quietSwitch).not.toBeChecked();
+  await expect(dialog.getByLabel('From', { exact: true })).toHaveCount(0);
+
+  await quietSwitch.click();
+  await expect(quietSwitch).toBeChecked();
+  await expect(dialog.getByLabel('From', { exact: true })).toBeVisible();
+  await expect(dialog.getByLabel('To', { exact: true })).toBeVisible();
+
+  // Toggle off removes the pickers
+  await quietSwitch.click();
+  await expect(quietSwitch).not.toBeChecked();
+  await expect(dialog.getByLabel('From', { exact: true })).toHaveCount(0);
+});
+
+test('notification settings: conversation mute controls show 0 muted by default', async ({
+  page,
+}) => {
+  await page.goto('/chat');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Notifications' }).click();
+
+  await expect(dialog.getByText('Conversation mute controls')).toBeVisible();
+  await expect(dialog.getByText('0 muted')).toBeVisible();
+});
+
+test('conversation mute: kebab menu mutes and unmutes a conversation', async ({ page }) => {
+  await page.goto('/chat');
+
+  // Open the first conversation's action menu
+  await page.getByRole('button', { name: 'Open conversation actions' }).click();
+  await expect(page.getByRole('menu', { name: 'Conversation actions' })).toBeVisible();
+
+  // Mute the conversation
+  await page.getByRole('menuitem', { name: /Mute conversation/ }).click();
+
+  // Re-open the menu — the item should now say "Unmute conversation"
+  await page.getByRole('button', { name: 'Open conversation actions' }).click();
+  await expect(page.getByRole('menuitem', { name: /Unmute conversation/ })).toBeVisible();
+
+  // Settings should reflect 1 muted
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Settings' });
+  await dialog.getByRole('button', { name: 'Notifications' }).click();
+  await expect(dialog.getByText(/1 conversation muted/)).toBeVisible();
+
+  // Unmute all from settings
+  await dialog.getByRole('button', { name: /Conversation mute controls/ }).click();
+  await expect(dialog.getByText('0 muted')).toBeVisible();
+});

@@ -133,6 +133,11 @@ export function ChatHeader({
   useEffect(() => {
     setMuted(isConversationMuted(conversation.id));
   }, [conversation.id]);
+  useEffect(() => {
+    const onMutesCleared = () => setMuted(false);
+    window.addEventListener('argus:mutes-cleared', onMutesCleared);
+    return () => window.removeEventListener('argus:mutes-cleared', onMutesCleared);
+  }, []);
   const [searchQuery, setSearchQuery] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);

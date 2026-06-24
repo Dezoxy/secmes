@@ -54,6 +54,9 @@ export function unmuteAll(): void {
     key: MUTED_CONVERSATIONS_KEY,
     value: [],
   });
+  // Notify mounted components (ChatHeader) that all mutes were cleared so they
+  // can refresh their local muted state without requiring a full re-render.
+  window.dispatchEvent(new CustomEvent('argus:mutes-cleared'));
 }
 
 export function isConversationMuted(id: string): boolean {
