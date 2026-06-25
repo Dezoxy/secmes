@@ -83,15 +83,19 @@ interface PushSubscriptionChangeEvent extends ExtendableEvent {
 }
 
 async function handlePushSubscriptionChange(event: PushSubscriptionChangeEvent): Promise<void> {
-  const applicationServerKey = event.oldSubscription?.options.applicationServerKey;
-  if (applicationServerKey) {
-    try {
-      await self.registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey,
-      });
-    } catch {
-      // best-effort — an open client's reconcile will recreate the subscription
+  // Prefer the browser-provided replacement (Firefox / newer Chrome populate newSubscription); only
+  // re-subscribe manually when it's absent, so we don't create a redundant second endpoint.
+  if (!event.newSubscription) {
+    const applicationServerKey = event.oldSubscription?.options.applicationServerKey;
+    if (applicationServerKey) {
+      try {
+        await self.registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey,
+        });
+      } catch {
+        // best-effort — an open client's reconcile will recreate the subscription
+      }
     }
   }
   const clients = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
