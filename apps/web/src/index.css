@@ -366,6 +366,12 @@ body {
   background: var(--argus-color-app-bg);
 }
 
+@media (max-width: 1023px) {
+  .argus-mobile-tab-header {
+    padding-top: calc(env(safe-area-inset-top) + 1rem);
+  }
+}
+
 /* iOS Safari zooms the page when a focused input's text is < 16px. The installed PWA pins
    maximum-scale=1 (honored in standalone) to prevent that while keeping the designed small
    text — but plain Safari IGNORES maximum-scale, so there the only fix is >= 16px text.
