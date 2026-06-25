@@ -400,7 +400,7 @@ export function SettingsPanel({
             </span>
           </h2>
           {standalone ? (
-            <div className="h-8 w-8" aria-hidden="true" />
+            <div className="h-8 w-8 shrink-0" aria-hidden="true" />
           ) : (
             <IconButton onClick={closeSettings} size="sm" aria-label="Close settings">
               <X className="h-5 w-5" />
