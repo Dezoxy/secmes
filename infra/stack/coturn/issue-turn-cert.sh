@@ -191,7 +191,7 @@ argus_turn_cert_deploy() {
       --parameters 'commands=["systemctl restart argus-secrets && docker kill -s HUP coturn 2>/dev/null || true"]' \
       --region "$REGION" \
       --comment "argus-turn-cert renewal: refresh secrets + reload coturn TLS" \
-      --only-show-errors >/dev/null \
+      >/dev/null \
       && printf 'argus_turn_cert: triggered VM secret refresh + coturn reload via SSM\n' \
       || printf 'WARN: argus_turn_cert: SSM command failed — run on VM manually:\n  systemctl restart argus-secrets && docker kill -s HUP coturn\n' >&2
   else
