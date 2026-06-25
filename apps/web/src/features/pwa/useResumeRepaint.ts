@@ -1,11 +1,11 @@
 import { useEffect } from 'react';
 
 /**
- * Work around an iOS standalone-PWA compositor bug: after the app is backgrounded and resumed,
- * WebKit can restore a *stale* composited snapshot of the top safe-area, leaving a 1px silver
- * seam under the status bar. The DOM is correct — any re-render (e.g. navigating away and back)
- * clears it — so the fix is simply to force a one-frame recomposite of the app subtree when the
- * PWA returns to the foreground.
+ * Work around an iOS standalone-PWA compositor bug: after the app is backgrounded/resumed, or when
+ * WebKit restores the installed PWA into an already-visible document, WebKit can keep a *stale*
+ * composited snapshot of the safe-area strips. The DOM is correct — any real route repaint clears
+ * it — so the fix is to force a one-frame recomposite of the app subtree on first foreground paint
+ * and whenever the PWA returns to the foreground.
  *
  * We nudge `#root`'s opacity to a value imperceptibly below 1 (forcing a fresh raster + stacking
  * context) and restore it on the next frames. Opacity is used rather than `transform` so we don't
@@ -37,14 +37,16 @@ export function useResumeRepaint(): void {
     const onVisibility = () => {
       if (document.visibilityState === 'visible') repaint();
     };
-    // pageshow fires on bfcache restore (a common iOS resume path that doesn't flip visibility).
-    // Guard on `persisted` so an ordinary cold load — which never shows the seam — doesn't repaint.
-    const onPageShow = (event: PageTransitionEvent) => {
-      if (event.persisted) repaint();
-    };
+    // pageshow fires on bfcache restore and on some installed-PWA foreground restores that don't
+    // flip visibility before React mounts. Repainting is visually imperceptible and avoids relying
+    // on a route change (e.g. visiting Transparency) to refresh the safe-area raster.
+    const onPageShow = () => repaint();
 
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('pageshow', onPageShow);
+    if (document.visibilityState === 'visible') {
+      frame1 = window.requestAnimationFrame(repaint);
+    }
 
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
