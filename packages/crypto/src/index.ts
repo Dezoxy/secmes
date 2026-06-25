@@ -723,9 +723,12 @@ export class Conversation {
    * ts-mls retains old-epoch receiver data in `historicalReceiverData` for in-flight messages
    * (P1: always use the epoch-matching secret, not blindly the current epoch's).
    */
-  private async decryptInner(
-    wire: Uint8Array,
-  ): Promise<{ plaintext: string; senderLeafIndex: number; newState: ClientState }> {
+  private async decryptInner(wire: Uint8Array): Promise<{
+    plaintext: string;
+    senderLeafIndex: number;
+    newState: ClientState;
+    msgEpoch: bigint;
+  }> {
     const decoded = decodeMlsMessage(wire, 0);
     if (!decoded) throw new Error('could not decode MLS message');
     const [msg, bytesRead] = decoded;
@@ -774,6 +777,7 @@ export class Conversation {
       plaintext: td.decode(result.message),
       senderLeafIndex: senderData.leafIndex,
       newState: result.newState,
+      msgEpoch,
     };
   }
 
@@ -799,11 +803,23 @@ export class Conversation {
    *   F1 malformed wire / trailing bytes, F2 wrong wire format, F3 wrong message kind,
    *   F4 invalid MLS signature (propagated from processMessage, incl. SenderData-leaf≠signed-leaf),
    *   F6 SenderData MAC failure, F7 sender leaf not a current group member,
-   *   F8 non-Basic credential type, F9 malformed UTF-8 in credential identity.
+   *   F8 non-Basic credential type, F9 malformed UTF-8 in credential identity,
+   *   F10 old-epoch message (sender identity cannot be resolved without the historical ratchet tree,
+   *       which ts-mls does not retain in historicalReceiverData; rejecting is fail-closed and
+   *       appropriate for call signaling — a delayed multi-epoch signal is not actionable).
    */
   async decryptAuthenticated(wire: Uint8Array): Promise<AuthenticatedMessage> {
     return this.run(async () => {
-      const { plaintext, senderLeafIndex, newState } = await this.decryptInner(wire);
+      const { plaintext, senderLeafIndex, newState, msgEpoch } = await this.decryptInner(wire);
+      // F10: ts-mls does not retain the historical ratchet tree, only historicalReceiverData
+      // (senderDataSecret only). Resolving the sender leaf against the current epoch's ratchetTree
+      // for an old-epoch message would risk mis-attribution if that leaf was removed and reused.
+      // Fail-closed: reject old-epoch messages rather than return a potentially wrong identity.
+      if (msgEpoch !== newState.groupContext.epoch) {
+        throw new Error(
+          `decryptAuthenticated: message epoch ${msgEpoch} does not match current epoch ${newState.groupContext.epoch} — cannot safely resolve sender identity without historical ratchet tree`,
+        );
+      }
       // Resolve leafIndex → identity from newState's roster (P2: state not yet advanced, so we
       // use newState directly; avoids F7/F8/F9 throw leaving this.state in a post-advance limbo).
       let senderIdentity: string | undefined;
