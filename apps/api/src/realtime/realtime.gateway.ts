@@ -401,12 +401,15 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     // callId authz — must be in the live map AND sender must be a registered participant.
     const entry = this.callsAuthz.validateAndRelay(callId, state.auth.sub, state.auth.tenantId);
     if (!entry) return; // unknown/expired/non-participant — silent drop
+    // Guard: client-supplied conversationId must match the invite-registered value. A participant
+    // in two conversations could otherwise inject a mismatched conversationId into the peer's frame.
+    if (conversationId !== entry.conversationId) return;
     // Emit onto the bus. Fire-and-forget: best-effort relay, no ack (the call fails if it drops).
     // alg/epoch are wire-protocol metadata (not content); forwarded so the peer can decrypt.
     this.bus.emitCallSignal({
       tenantId: state.auth.tenantId,
       callId,
-      conversationId,
+      conversationId: entry.conversationId, // authoritative — from the invite, not the client frame
       msgSeq,
       senderSub: state.auth.sub,
       senderUserId: state.auth.userId,
@@ -430,7 +433,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     const callId = (data as { callId?: unknown } | null)?.callId;
     const parsed = CallIdSchema.safeParse(callId);
     if (!parsed.success) return; // invalid UUID — silent drop
-    this.callsAuthz.release(parsed.data, state.auth.sub);
+    this.callsAuthz.release(parsed.data, state.auth.sub, state.auth.tenantId);
     // No bus event. No fan-out. The encrypted hang-up already went peer-to-peer via call.signal.
   }
 

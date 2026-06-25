@@ -103,9 +103,10 @@ export class CallsAuthzService {
    * Explicit client-driven release (call.release frame). Verifies sender is a participant before
    * clearing the entry. No-op (no throw) if the entry is already gone or sender is not a party.
    */
-  release(callId: string, senderSub: string): void {
+  release(callId: string, senderSub: string, senderTenantId: string): void {
     const entry = this.authzMap.get(callId);
     if (!entry) return;
+    if (entry.tenantId !== senderTenantId) return;
     if (entry.callerSub !== senderSub && entry.calleeSub !== senderSub) return;
     this.clearEntry(callId, entry);
   }
