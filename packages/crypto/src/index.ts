@@ -34,6 +34,12 @@ import { makeKeyPackageRef } from 'ts-mls/keyPackage.js';
 // drops `clientConfig` (behaviour/functions, no key material); we re-attach the default on deserialize, the
 // same config `createGroup`/`joinGroup` use.
 import { defaultClientConfig } from 'ts-mls/clientConfig.js';
+// `decryptSenderData` reads the sender leaf index from the SenderData blob inside a PrivateMessage.
+// Not on the ts-mls barrel — subpath import, same pattern as the two above. The returned
+// `SenderData.leafIndex` is authenticated: ts-mls messageProtection.js:120-123 verifies the
+// FramedContent signature against the credential key at exactly that leaf, so a successful
+// `processMessage` proves the holder of that leaf's key produced the content.
+import { decryptSenderData } from 'ts-mls/privateMessage.js';
 
 export {
   sealWithKey,
@@ -274,6 +280,22 @@ export interface GroupMember {
   leafIndex: number;
   identity: string;
   signaturePublicKey: Uint8Array;
+}
+
+/**
+ * Return type of {@link Conversation.decryptAuthenticated}. The sender is proven by the MLS group
+ * signature: `senderLeafIndex` is the leaf ts-mls verified the FramedContent signature against
+ * (messageProtection.js:120-123), so the holder of that leaf's credential key is the authenticated
+ * sender — not merely asserted.
+ *
+ * ⚠️ Scope: proves *intra-group* sender authenticity ("signed by the holder of leaf N's key").
+ * Whether leaf N belongs to the expected real-world user is the key-directory + out-of-band
+ * fingerprint job (`docs/threat-models/key-directory.md`).
+ */
+export interface AuthenticatedMessage {
+  plaintext: string;
+  senderLeafIndex: number;
+  senderIdentity: string;
 }
 
 /**
@@ -690,28 +712,157 @@ export class Conversation {
     });
   }
 
+  /**
+   * Shared decrypt core — called from within `this.run(...)`, never directly. Returns the
+   * post-decrypt `newState` without advancing `this.state` — callers advance it only after all
+   * their own checks pass (P2: prevents an in-memory state advance on a F7/F8/F9 throw, which
+   * would desync the ratchet from what callers expect on error/retry).
+   *
+   * Runs `processMessage` and `decryptSenderData` in parallel: both read the current state
+   * snapshot without modifying it. The `senderDataSecret` is resolved per the message epoch —
+   * ts-mls retains old-epoch receiver data in `historicalReceiverData` for in-flight messages
+   * (P1: always use the epoch-matching secret, not blindly the current epoch's).
+   * Also resolves the epoch-correct ratchet tree so `decryptAuthenticated` can attribute the sender
+   * even when a message races an epoch change (e.g. a call invite sent at epoch N arrives after a
+   * commit advances the group to epoch N+1).
+   */
+  private async decryptInner(wire: Uint8Array): Promise<{
+    plaintext: string;
+    senderLeafIndex: number;
+    ratchetTree: RatchetTree;
+    newState: ClientState;
+    msgEpoch: bigint;
+  }> {
+    const decoded = decodeMlsMessage(wire, 0);
+    if (!decoded) throw new Error('could not decode MLS message');
+    const [msg, bytesRead] = decoded;
+    // Strict: reject anything appended after the MLS message (transport-framing bug or a malicious
+    // client smuggling non-MLS — including accidental plaintext — alongside the ciphertext).
+    if (bytesRead !== wire.length) throw new Error('trailing bytes after MLS message');
+    if (msg.wireformat !== 'mls_private_message') {
+      throw new Error(`expected an application message, got "${msg.wireformat}"`);
+    }
+    // Resolve the senderDataSecret for the message's epoch. ts-mls stores old-epoch receiver data
+    // in `historicalReceiverData` and uses it in processMessage (processMessages.js:27-30) when
+    // pm.epoch < state.groupContext.epoch. We must use the same epoch's secret so that our
+    // parallel decryptSenderData call succeeds and decrypts the same leaf as processMessage.
+    const msgEpoch = msg.privateMessage.epoch;
+    let senderDataSecret: Uint8Array;
+    if (msgEpoch < this.state.groupContext.epoch) {
+      const historical = this.state.historicalReceiverData.get(msgEpoch);
+      if (historical === undefined) {
+        throw new Error(`no historical receiver data for epoch ${msgEpoch} — message too old`);
+      }
+      senderDataSecret = historical.senderDataSecret;
+    } else {
+      senderDataSecret = this.state.keySchedule.senderDataSecret;
+    }
+    // Resolve the epoch-correct ratchet tree upfront. For current-epoch messages this is
+    // newState.ratchetTree; for old-epoch messages (historical) we use historicalReceiverData
+    // which ts-mls stores with the full ratchetTree + groupContext (see epochReceiverData.ts).
+    // This lets decryptAuthenticated attribute the sender even when a message races an epoch change.
+    const epochRatchetTree =
+      msgEpoch < this.state.groupContext.epoch
+        ? // historicalReceiverData holds the full snapshot; already checked above (throws if absent)
+          this.state.historicalReceiverData.get(msgEpoch)!.ratchetTree
+        : null; // resolved after processMessage returns newState
+    const [result, senderData] = await Promise.all([
+      processMessage(msg, this.state, emptyPskIndex, acceptAll, this.cs),
+      // SECURITY: decryptSenderData returns the leaf that ts-mls messageProtection.js:120-123
+      // verifies the FramedContent signature against — the two calls agree on the signer because
+      // they both decrypt the same SenderData AEAD blob (same epoch secret, same ciphertext).
+      // An adversary cannot forge a different leafIndex without breaking the AEAD MAC.
+      decryptSenderData(msg.privateMessage, senderDataSecret, this.cs),
+    ]);
+    wipe(result.consumed); // spent ratchet secrets — unconditional, regardless of message kind
+    if (result.kind !== 'applicationMessage') {
+      // Do NOT advance state for a message this method doesn't handle (e.g. a handshake/commit).
+      // Application messages only; handshake processing is a separate path for group chat / PCS
+      // self-updates (see docs/threat-models/mls-integration.md §5–6).
+      throw new Error(`expected applicationMessage, got "${result.kind}"`);
+    }
+    // F6: decryptSenderData returns undefined when the SenderData AEAD MAC fails (wrong epoch
+    // secret or tampered blob). Fail-closed: never return a result without a verified sender.
+    if (senderData === undefined) {
+      throw new Error('SenderData authentication failed — cannot verify sender identity');
+    }
+    return {
+      plaintext: td.decode(result.message),
+      senderLeafIndex: senderData.leafIndex,
+      ratchetTree: epochRatchetTree ?? result.newState.ratchetTree,
+      newState: result.newState,
+      msgEpoch,
+    };
+  }
+
   /** Decrypt wire bytes → plaintext. Throws on anything that isn't an application message. */
   async decrypt(wire: Uint8Array): Promise<string> {
     return this.run(async () => {
-      const decoded = decodeMlsMessage(wire, 0);
-      if (!decoded) throw new Error('could not decode MLS message');
-      const [msg, bytesRead] = decoded;
-      // Strict: reject anything appended after the MLS message (transport-framing bug or a malicious
-      // client smuggling non-MLS — including accidental plaintext — alongside the ciphertext).
-      if (bytesRead !== wire.length) throw new Error('trailing bytes after MLS message');
-      if (msg.wireformat !== 'mls_private_message') {
-        throw new Error(`expected an application message, got "${msg.wireformat}"`);
+      const { plaintext, newState } = await this.decryptInner(wire);
+      this.state = newState;
+      return plaintext;
+    });
+  }
+
+  /**
+   * Decrypt wire bytes and authenticate the sender against the current group roster.
+   *
+   * Returns the plaintext together with the sender's MLS leaf index and identity string. The sender
+   * is authenticated by the MLS group signature: the leaf index is the one ts-mls verified the
+   * FramedContent signature against (messageProtection.js:120-123), not merely asserted by the
+   * sender. Used by the call-signaling path (P1-SIG) so SDP/ICE is only accepted from the
+   * authenticated conversation peer.
+   *
+   * Fail-closed: every failure path throws — no partial results, no silent downgrades:
+   *   F1 malformed wire / trailing bytes, F2 wrong wire format, F3 wrong message kind,
+   *   F4 invalid MLS signature (propagated from processMessage, incl. SenderData-leaf≠signed-leaf),
+   *   F6 SenderData MAC failure, F7 sender leaf not in the message-epoch roster,
+   *   F8 non-Basic credential type, F9 malformed UTF-8 in credential identity.
+   * F7/F8/F9 throw after state has advanced (the ratchet MUST advance after any successfully
+   * decrypted message — the consumed secrets are already wiped by decryptInner).
+   *
+   * Old-epoch messages (e.g. a call invite sent at epoch N arriving after a commit advances the
+   * group to epoch N+1) are handled correctly: `decryptInner` resolves the epoch-matching ratchet
+   * tree from `historicalReceiverData` (which ts-mls stores as a full snapshot — `epochReceiverData.ts`
+   * shows `ratchetTree` + `groupContext` + `senderDataSecret`), so the sender is resolved against the
+   * membership at the time the message was sent.
+   */
+  async decryptAuthenticated(wire: Uint8Array): Promise<AuthenticatedMessage> {
+    return this.run(async () => {
+      const { plaintext, senderLeafIndex, ratchetTree, newState } = await this.decryptInner(wire);
+      // Advance state immediately after successful MLS decryption. decryptInner's wipe() already
+      // zeroed the consumed ratchet-generation secrets in this.state.secretTree (ts-mls stores
+      // the same Uint8Array references in both result.consumed and this.state.secretTree — wiping
+      // in-place corrupts this.state's ratchet). Not advancing here leaves this.state with a
+      // zeroed generation, breaking all future decrypts from the same sender leaf. Advance now;
+      // F7/F8/F9 checks below throw after state is consistent.
+      this.state = newState;
+      // Resolve leafIndex → identity from the epoch-correct roster. For old-epoch messages
+      // `ratchetTree` is the historical snapshot; for current-epoch it is newState.ratchetTree.
+      // Either way the tree is the one ts-mls verified the signature against.
+      let senderIdentity: string | undefined;
+      for (let nodeIdx = 0; nodeIdx < ratchetTree.length; nodeIdx++) {
+        if (nodeIdx % 2 !== 0) continue; // parent node slot
+        const node = ratchetTree[nodeIdx];
+        if (!node || node.nodeType !== 'leaf') continue; // blank leaf
+        if (nodeIdx / 2 !== senderLeafIndex) continue;
+        const cred = node.leaf.credential;
+        // F8: non-Basic credential — v1 issues Basic only; anything else is unexpected.
+        if (cred.credentialType !== 'basic') {
+          throw new Error(
+            `sender leaf ${senderLeafIndex} has unsupported credential type: ${cred.credentialType}`,
+          );
+        }
+        // F9: tdStrict throws on malformed UTF-8 rather than replacing → U+FFFD; prevents two
+        // distinct byte strings from colliding after a lossy decode in an identity equality check.
+        senderIdentity = tdStrict.decode(cred.identity);
+        break;
       }
-      const result = await processMessage(msg, this.state, emptyPskIndex, acceptAll, this.cs);
-      wipe(result.consumed); // spent secrets — wipe regardless of message kind
-      if (result.kind !== 'applicationMessage') {
-        // Do NOT advance state for a message this method doesn't handle (e.g. a handshake/commit).
-        // decrypt() handles application messages only; handshake processing is a separate path
-        // required before group chat / PCS self-updates (see threat model §5–6).
-        throw new Error(`expected applicationMessage, got "${result.kind}"`);
+      // F7: leaf not found in the message-epoch roster — reject; never accept an unauthenticated sender.
+      if (senderIdentity === undefined) {
+        throw new Error(`sender leaf ${senderLeafIndex} is not in the message-epoch group roster`);
       }
-      this.state = result.newState; // commit state only after we confirm an application message
-      return td.decode(result.message);
+      return { plaintext, senderLeafIndex, senderIdentity };
     });
   }
 
