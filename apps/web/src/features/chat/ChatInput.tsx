@@ -105,7 +105,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
 
   if (disabled) {
     return (
-      <div className="pointer-events-none absolute inset-x-0 bottom-10 z-20 px-2 pb-2 pl-[calc(env(safe-area-inset-left)_+_0.5rem)] pr-[calc(env(safe-area-inset-right)_+_0.5rem)]">
+      <div className="argus-floating-mobile-bottom pointer-events-none absolute inset-x-0 z-20 px-2 pb-2 pl-[calc(env(safe-area-inset-left)_+_0.5rem)] pr-[calc(env(safe-area-inset-right)_+_0.5rem)]">
         <div className="pointer-events-auto rounded-2xl bg-[#12121a]/95 p-4 shadow-[0_-2px_24px_rgba(0,0,0,0.55)] ring-1 ring-white/[0.08] backdrop-blur-xl">
           <EmptyState title="Messaging unavailable" compact>
             {disabledNotice ?? 'Messaging is not available here yet.'}
@@ -116,7 +116,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
   }
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-10 z-20 px-2 pb-2 pl-[calc(env(safe-area-inset-left)_+_0.5rem)] pr-[calc(env(safe-area-inset-right)_+_0.5rem)]">
+    <div className="argus-floating-mobile-bottom pointer-events-none absolute inset-x-0 z-20 px-2 pb-2 pl-[calc(env(safe-area-inset-left)_+_0.5rem)] pr-[calc(env(safe-area-inset-right)_+_0.5rem)]">
       <div className="pointer-events-auto rounded-2xl bg-[#12121a]/95 p-3 shadow-[0_-2px_24px_rgba(0,0,0,0.55)] ring-1 ring-white/[0.08] backdrop-blur-xl">
         {/* Attachment previews */}
         {attachments.length > 0 && (

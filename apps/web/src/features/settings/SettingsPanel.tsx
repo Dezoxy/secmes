@@ -50,7 +50,6 @@ import { ProfileSettings, type AnonymousProfile } from './ProfileSettings';
 import { SecuritySettings } from './SecuritySettings';
 import { AdminPanel } from './AdminPanel';
 import { TeamSettings } from './TeamSettings';
-import { ArgusAppIcon } from '../brand/ArgusAppIcon';
 import {
   fetchPrivacySettings,
   savePrivacySettings,
@@ -392,16 +391,14 @@ export function SettingsPanel({
         }`}
       >
         {/* Fixed header */}
-        <div className="argus-mobile-tab-header relative -mx-3 flex shrink-0 items-center justify-between bg-[#0f0f16]/80 px-3 pb-4 backdrop-blur-xl sm:-mx-4 sm:px-4 sm:pt-4 sm:pb-4">
-          <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />
+        <div className="argus-mobile-tab-header argus-mobile-tab-title-header relative -mx-3 flex shrink-0 items-center justify-between bg-[#0f0f16]/80 px-3 pb-4 backdrop-blur-xl sm:-mx-4 sm:px-4 sm:pb-4">
+          {!standalone && <div className="h-8 w-8" aria-hidden="true" />}
           <h2 className="flex-1 text-center text-xl font-bold tracking-wider">
             <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
               SETTINGS
             </span>
           </h2>
-          {standalone ? (
-            <div className="h-8 w-8" aria-hidden="true" />
-          ) : (
+          {!standalone && (
             <IconButton onClick={closeSettings} size="sm" aria-label="Close settings">
               <X className="h-5 w-5" />
             </IconButton>
@@ -500,6 +497,7 @@ export function SettingsPanel({
 
         <div
           key={active}
+          data-settings-section-scroller="true"
           className="flex-1 overflow-y-auto px-3 pb-[calc(env(safe-area-inset-bottom)_+_6rem)] sm:px-6 lg:pb-6"
         >
           <div className={mobileBackAnimating ? '' : surfaceEnterMotion}>

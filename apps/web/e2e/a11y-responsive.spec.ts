@@ -31,7 +31,35 @@ test('settings is reachable via the bottom nav link and returns to chat', async 
   await expect(page.getByRole('navigation', { name: 'Settings sections' })).toBeVisible();
 
   await page.getByRole('link', { name: 'Chat' }).click();
-  await expect(page.getByText('CHAT', { exact: true })).toBeVisible();
+  await expect(page.getByRole('main', { name: 'Chat' })).toBeVisible();
+});
+
+test('mobile tab headers keep titles centered, lower, and logo-free', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+
+  for (const { route, title } of [
+    { route: '/chat', title: 'CHAT' },
+    { route: '/groups', title: 'GROUPS' },
+    { route: '/friends', title: 'FRIENDS' },
+    { route: '/settings', title: 'SETTINGS' },
+    { route: '/profile', title: 'PROFILE' },
+  ]) {
+    await page.goto(route);
+
+    await expect(page.locator('.argus-mobile-tab-header img[src="/icon.svg"]')).toHaveCount(0);
+
+    const titleBox = await page.getByText(title, { exact: true }).evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      return {
+        centerX: rect.left + rect.width / 2,
+        top: rect.top,
+        viewportCenterX: window.innerWidth / 2,
+      };
+    });
+
+    expect(Math.abs(titleBox.centerX - titleBox.viewportCenterX)).toBeLessThanOrEqual(1);
+    expect(titleBox.top).toBeGreaterThanOrEqual(72);
+  }
 });
 
 test('conversation actions expose expanded state and return focus after panel close', async ({
