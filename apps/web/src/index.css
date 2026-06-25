@@ -18,8 +18,6 @@
   --argus-brand-300: color-mix(in srgb, #a855f7 60%, white);
   --argus-brand-400: #9a53dd;
   --argus-brand-600: color-mix(in srgb, #964cdc 80%, black);
-  /* Current Dynamic Island Pro iPhones report up to a 62px portrait top safe area. */
-  --argus-dynamic-island-safe-top: 62px;
 }
 
 @keyframes argus-surface-enter {
@@ -86,7 +84,7 @@
 
   to {
     opacity: 1;
-    transform: translateX(0) scale(1);
+    transform: none;
   }
 }
 
@@ -98,7 +96,7 @@
 
   to {
     opacity: 1;
-    transform: translateX(0) scale(1);
+    transform: none;
   }
 }
 
@@ -132,36 +130,36 @@
 }
 
 .argus-surface-enter {
-  animation: argus-surface-enter 220ms ease-out both;
+  animation: argus-surface-enter 110ms ease-out both;
 }
 
 .argus-modal-enter {
-  animation: argus-modal-enter 240ms ease-out both;
+  animation: argus-modal-enter 120ms ease-out both;
 }
 
 .argus-modal-exit {
-  animation: argus-modal-exit 220ms ease-in both;
+  animation: argus-modal-exit 110ms ease-in both;
 }
 
 .argus-overlay-enter {
-  animation: argus-overlay-enter 180ms ease-out both;
+  animation: argus-overlay-enter 90ms ease-out both;
 }
 
 .argus-overlay-exit {
-  animation: argus-overlay-exit 220ms ease-in both;
+  animation: argus-overlay-exit 110ms ease-in both;
 }
 
 .argus-pane-enter {
-  animation: argus-pane-enter 240ms ease-out both;
+  animation: argus-pane-enter 120ms ease-out both;
 }
 
 .argus-pane-back-enter {
-  animation: argus-pane-back-enter 200ms ease-out both;
+  animation: argus-pane-back-enter 100ms ease-out both;
   will-change: opacity, transform;
 }
 
 .argus-pane-back-exit {
-  animation: argus-pane-back-exit 180ms ease-in both;
+  animation: argus-pane-back-exit 90ms ease-in both;
   will-change: opacity, transform;
 }
 
@@ -370,21 +368,21 @@ body {
 
 @media (max-width: 1023px) {
   .argus-mobile-tab-header {
-    padding-top: calc(env(safe-area-inset-top) + 2rem);
+    padding-top: calc(env(safe-area-inset-top, 0px) + 1rem);
     background: #0f0f16;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
 
   .argus-mobile-tab-title-header {
-    padding-top: calc(
-      max(env(safe-area-inset-top, 0px), var(--argus-dynamic-island-safe-top)) + 1rem
-    );
+    padding-top: calc(env(safe-area-inset-top, 0px) + 1rem);
   }
 }
 
 :root {
   --argus-floating-mobile-bottom: 2rem;
+  --argus-floating-mobile-nav-clearance: calc(var(--argus-floating-mobile-bottom) + 5.5rem);
+  --argus-floating-mobile-composer-clearance: calc(var(--argus-floating-mobile-bottom) + 5.75rem);
 }
 
 @media (display-mode: standalone) and (max-width: 1023px) {
@@ -395,6 +393,20 @@ body {
 
 .argus-floating-mobile-bottom {
   bottom: var(--argus-floating-mobile-bottom);
+}
+
+.argus-scroll-clear-floating-nav {
+  padding-bottom: var(--argus-floating-mobile-nav-clearance);
+}
+
+.argus-scroll-clear-composer {
+  padding-bottom: var(--argus-floating-mobile-composer-clearance);
+}
+
+@media (min-width: 1024px) {
+  .argus-scroll-clear-floating-nav {
+    padding-bottom: 1rem;
+  }
 }
 
 /* iOS Safari zooms the page when a focused input's text is < 16px. The installed PWA pins

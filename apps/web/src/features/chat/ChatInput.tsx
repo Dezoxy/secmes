@@ -17,7 +17,7 @@ interface ChatInputProps {
 }
 
 const COMPOSER_CONTROL =
-  'h-11 min-h-11 rounded-xl border border-white/5 transition-all duration-300';
+  'h-10 min-h-10 rounded-xl border border-white/5 transition-all duration-300';
 
 export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInputProps) {
   const [message, setMessage] = useState('');
@@ -116,8 +116,8 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
   }
 
   return (
-    <div className="argus-floating-mobile-bottom pointer-events-none absolute inset-x-0 z-20 px-2 pb-2 pl-[calc(env(safe-area-inset-left)_+_0.5rem)] pr-[calc(env(safe-area-inset-right)_+_0.5rem)]">
-      <div className="pointer-events-auto rounded-2xl bg-[#12121a]/95 p-3 shadow-[0_-2px_24px_rgba(0,0,0,0.55)] ring-1 ring-white/[0.08] backdrop-blur-xl">
+    <div className="argus-floating-mobile-bottom pointer-events-none fixed left-1/2 z-20 w-[min(21rem,calc(100vw-3rem))] -translate-x-1/2 pb-1 lg:absolute lg:w-[min(21rem,calc(100%-3rem))]">
+      <div className="pointer-events-auto w-full rounded-xl bg-[#12121a]/95 p-2 shadow-[0_-2px_24px_rgba(0,0,0,0.55)] ring-1 ring-white/[0.08] backdrop-blur-xl">
         {/* Attachment previews */}
         {attachments.length > 0 && (
           <div
@@ -158,7 +158,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
           </div>
         )}
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <div ref={actionsRef} className="relative shrink-0">
             <input
               ref={fileInputRef}
@@ -177,7 +177,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
             />
             <IconButton
               onClick={() => setActionMenuOpen((open) => !open)}
-              className={`${COMPOSER_CONTROL} flex w-11 items-center justify-center bg-[#1a1a26] text-white/45 hover:border-purple-500/30 hover:text-white/80`}
+              className={`${COMPOSER_CONTROL} flex w-10 items-center justify-center bg-[#1a1a26] text-white/45 hover:border-purple-500/30 hover:text-white/80`}
               aria-label="Open message actions"
               aria-expanded={actionMenuOpen}
               aria-haspopup="menu"
@@ -239,14 +239,14 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
               aria-label="Message"
               placeholder="Type a message..."
               rows={1}
-              className={`${COMPOSER_CONTROL} block w-full resize-none overflow-hidden bg-[#1a1a26] px-3.5 py-2.5 text-sm leading-5 text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20`}
+              className={`${COMPOSER_CONTROL} block w-full resize-none overflow-hidden bg-[#1a1a26] px-3 py-2 text-sm leading-5 text-white placeholder-white/30 focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20`}
             />
           </div>
 
           <IconButton
             onClick={handleSend}
             disabled={!message.trim() && attachments.length === 0}
-            className={`${COMPOSER_CONTROL} flex w-11 shrink-0 items-center justify-center bg-purple-500 shadow-lg shadow-purple-500/25 hover:-translate-y-0.5 hover:bg-purple-400 hover:shadow-purple-500/40 active:translate-y-0 disabled:cursor-not-allowed disabled:bg-purple-500/50 disabled:shadow-none disabled:translate-y-0`}
+            className={`${COMPOSER_CONTROL} flex w-10 shrink-0 items-center justify-center bg-purple-500 shadow-lg shadow-purple-500/25 hover:-translate-y-0.5 hover:bg-purple-400 hover:shadow-purple-500/40 active:translate-y-0 disabled:cursor-not-allowed disabled:bg-purple-500/50 disabled:shadow-none disabled:translate-y-0`}
             aria-label="Send message"
           >
             <Send className="w-5 h-5 text-white" />

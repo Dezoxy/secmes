@@ -26,6 +26,9 @@ import {
   paneBackExitMotion,
 } from '../ui';
 
+const MOBILE_PANE_BACK_EXIT_MS = 90;
+const MOBILE_PANE_BACK_ENTER_MS = 100;
+
 export default function GroupsScreen() {
   const setNavVisible = useSetNavVisible();
   const {
@@ -145,8 +148,8 @@ export default function GroupsScreen() {
       setMobileSidebarReturning(true);
       mobileSidebarReturnTimerRef.current = window.setTimeout(() => {
         setMobileSidebarReturning(false);
-      }, 220);
-    }, 180);
+      }, MOBILE_PANE_BACK_ENTER_MS);
+    }, MOBILE_PANE_BACK_EXIT_MS);
   };
 
   const revealSearch = () => setSearchOpen(true);
@@ -409,6 +412,7 @@ export default function GroupsScreen() {
                 conversation={selectedConversation}
                 onImageClick={setPreviewImage}
                 bottomNavClearance={false}
+                floatingBars
               />
               {effectiveSelectedIsLive && !selectedIsSyncLost && <ChatInput onSend={handleSend} />}
             </div>

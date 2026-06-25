@@ -16,7 +16,7 @@ export default function ProfileRoute() {
             </span>
           </h1>
         </div>
-        <div className="flex-1 overflow-y-auto p-4 pb-[calc(env(safe-area-inset-bottom)_+_6rem)] lg:pb-[calc(env(safe-area-inset-bottom)_+_1rem)]">
+        <div className="argus-scroll-clear-floating-nav flex-1 overflow-y-auto p-4">
           <div className="mx-auto max-w-lg">
             <ProfileSettings
               profile={anonymousProfile}

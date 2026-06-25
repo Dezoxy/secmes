@@ -34,7 +34,7 @@ test('settings is reachable via the bottom nav link and returns to chat', async 
   await expect(page.getByRole('main', { name: 'Chat' })).toBeVisible();
 });
 
-test('mobile tab headers keep titles centered, lower, and logo-free', async ({ page }) => {
+test('mobile tab headers keep titles centered, visible, and logo-free', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
 
   for (const { route, title } of [
@@ -52,13 +52,15 @@ test('mobile tab headers keep titles centered, lower, and logo-free', async ({ p
       const rect = node.getBoundingClientRect();
       return {
         centerX: rect.left + rect.width / 2,
+        bottom: rect.bottom,
         top: rect.top,
         viewportCenterX: window.innerWidth / 2,
       };
     });
 
     expect(Math.abs(titleBox.centerX - titleBox.viewportCenterX)).toBeLessThanOrEqual(1);
-    expect(titleBox.top).toBeGreaterThanOrEqual(72);
+    expect(titleBox.top).toBeGreaterThanOrEqual(16);
+    expect(titleBox.bottom).toBeLessThanOrEqual(80);
   }
 });
 
@@ -124,6 +126,49 @@ test('mobile chat switches between conversation list and active thread landmarks
   await page.getByRole('button', { name: 'Back to conversations' }).click();
   await expect(chatMain).toHaveClass(/argus-pane-back-exit/);
   await expect(page.getByRole('complementary', { name: 'Conversations' })).toBeVisible();
+});
+
+test('mobile chat thread scrolls fully above the floating composer', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/chat');
+
+  await page.getByRole('button', { name: /Open conversation with Sarah Chen/i }).click();
+
+  const thread = page.getByRole('region', { name: 'Message thread' });
+  await expect(thread).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Message' })).toBeVisible();
+  await page.waitForTimeout(150);
+
+  await thread.evaluate((node) => node.scrollTo({ top: node.scrollHeight }));
+  const lastMessage = thread.getByText('Let me know if that works for you!', { exact: true });
+  await expect(lastMessage).toBeVisible();
+
+  const clearance = await lastMessage.evaluate((node) => {
+    const composer = document
+      .querySelector('textarea[aria-label="Message"]')
+      ?.closest('.pointer-events-auto');
+    const thread = node.closest('[aria-label="Message thread"]');
+    const composerRect = composer?.getBoundingClientRect();
+    const threadElement = thread as HTMLElement | null;
+    const lineRect = node.getBoundingClientRect();
+
+    return composerRect && threadElement
+      ? {
+          canScroll: threadElement.scrollHeight > threadElement.clientHeight,
+          composerCenterX: Math.round(composerRect.left + composerRect.width / 2),
+          composerWidth: Math.round(composerRect.width),
+          lineBottom: Math.round(lineRect.bottom),
+          composerTop: Math.round(composerRect.top),
+          viewportCenterX: Math.round(window.innerWidth / 2),
+        }
+      : null;
+  });
+
+  expect(clearance).not.toBeNull();
+  expect(clearance!.canScroll).toBe(true);
+  expect(Math.abs(clearance!.composerCenterX - clearance!.viewportCenterX)).toBeLessThanOrEqual(1);
+  expect(clearance!.composerWidth).toBeLessThanOrEqual(336);
+  expect(clearance!.lineBottom).toBeLessThanOrEqual(clearance!.composerTop - 8);
 });
 
 test('chat shows the global update action in local preview mode only', async ({ page }) => {
