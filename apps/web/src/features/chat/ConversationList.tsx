@@ -169,21 +169,6 @@ export function ConversationList({
         </div>
       </div>
 
-      <div
-        className={`overflow-hidden px-4 transition-all duration-300 ${
-          searchVisible ? 'max-h-0 py-0 opacity-0' : 'max-h-9 py-1 opacity-100'
-        }`}
-      >
-        <button
-          type="button"
-          onClick={focusSearch}
-          className="group mx-auto flex h-7 w-12 items-center justify-center rounded-full transition-colors duration-300 hover:bg-white/[0.03]"
-          aria-label="Reveal conversation search"
-        >
-          <span className="block h-1 w-10 rounded-full bg-white/15 transition-colors duration-300 group-hover:bg-white/25" />
-        </button>
-      </div>
-
       {/* Conversation list */}
       <div
         ref={listRef}
