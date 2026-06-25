@@ -18,6 +18,7 @@
   --argus-brand-300: color-mix(in srgb, #a855f7 60%, white);
   --argus-brand-400: #9a53dd;
   --argus-brand-600: color-mix(in srgb, #964cdc 80%, black);
+  /* Current Dynamic Island Pro iPhones report up to a 62px portrait top safe area. */
   --argus-dynamic-island-safe-top: 62px;
 }
 
@@ -377,12 +378,7 @@ body {
 
   .argus-mobile-tab-title-header {
     padding-top: calc(
-      max(
-          env(safe-area-inset-top, 0px),
-          env(safe-area-max-inset-top, 0px),
-          var(--argus-dynamic-island-safe-top)
-        ) +
-        1rem
+      max(env(safe-area-inset-top, 0px), var(--argus-dynamic-island-safe-top)) + 1rem
     );
   }
 }
@@ -393,7 +389,7 @@ body {
 
 @media (display-mode: standalone) and (max-width: 1023px) {
   :root {
-    --argus-floating-mobile-bottom: max(0.75rem, calc(env(safe-area-inset-bottom) - 0.5rem));
+    --argus-floating-mobile-bottom: max(2rem, env(safe-area-inset-bottom, 0px));
   }
 }
 
