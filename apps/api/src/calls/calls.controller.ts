@@ -1,4 +1,14 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Put,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -6,6 +16,7 @@ import {
   ApiOkResponse,
   ApiOperation,
   ApiProperty,
+  ApiResponse,
   ApiTags,
   ApiTooManyRequestsResponse,
   ApiUnauthorizedResponse,
@@ -16,7 +27,14 @@ import { CurrentAuth } from '../auth/current-auth.decorator.js';
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { perMinute, SENSITIVE_LIMITS } from '../rate-limit/rate-limit.constants.js';
-import { TurnCredentialsRequestSchema, type TurnCredentialsRequest } from './calls.schemas.js';
+import {
+  CreateCallRequestSchema,
+  TurnCredentialsRequestSchema,
+  UpdateCallSettingsRequestSchema,
+  type CreateCallRequest,
+  type TurnCredentialsRequest,
+  type UpdateCallSettingsRequest,
+} from './calls.schemas.js';
 import { CallsService } from './calls.service.js';
 
 // --- Response DTOs (Swagger schema classes, not exported — controller-local) ---
@@ -67,6 +85,33 @@ class TurnCredentialsResponseDto {
   ttlSeconds!: number;
 }
 
+class CreateCallRequestDto {
+  @ApiProperty({ description: '1:1 conversation to relay the call through', format: 'uuid' })
+  conversationId!: string;
+
+  @ApiProperty({ enum: ['audio'], description: 'V1 audio-only; video lands in V1.1' })
+  media!: 'audio';
+}
+
+class CreateCallResponseDto {
+  @ApiProperty({
+    description:
+      'Server-minted call identifier. Always returned (uniform 202 — no friendship/presence oracle).',
+    format: 'uuid',
+  })
+  callId!: string;
+}
+
+class CallSettingsResponseDto {
+  @ApiProperty({ description: 'If true, force TURN relay (hide peer IP). Default: true.' })
+  relayOnly!: boolean;
+}
+
+class UpdateCallSettingsRequestDto {
+  @ApiProperty({ description: 'Set relay-only preference.' })
+  relayOnly!: boolean;
+}
+
 // --- Controller ---
 
 @ApiTags('calls')
@@ -105,5 +150,61 @@ export class CallsController {
   ) {
     void body;
     return this.calls.mintTurnCredentials(auth);
+  }
+
+  /**
+   * Invite a friend to a 1:1 audio call.
+   *
+   * Always returns 202 + `{ callId }` — the caller cannot distinguish "not a friend", "not in this
+   * conversation", or "call initiated" (no presence/friendship oracle). The callId is only
+   * registered in the live authz map when both friendship and membership gates pass, so only a
+   * genuine participant can reach the peer via `call.signal`.
+   */
+  @Post(':friendUserId/invite')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @Throttle(perMinute(SENSITIVE_LIMITS.turnCredentials)) // reuse the same sensitive-endpoint budget
+  @ApiOperation({
+    summary: 'Invite a friend to a 1:1 audio call (uniform 202 — no presence oracle)',
+  })
+  @ApiBody({ type: CreateCallRequestDto })
+  @ApiResponse({
+    status: 202,
+    type: CreateCallResponseDto,
+    description: 'Call initiated (or gates failed — uniform response, no oracle)',
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid bearer token' })
+  @ApiTooManyRequestsResponse({ description: 'Rate limit exceeded' })
+  invite(
+    @CurrentAuth() auth: VerifiedAuth,
+    @Param('friendUserId', ParseUUIDPipe) friendUserId: string,
+    @Body(new ZodValidationPipe(CreateCallRequestSchema)) body: CreateCallRequest,
+  ) {
+    return this.calls.invite(auth, friendUserId, body);
+  }
+
+  /** Return the authenticated user's relay-only call preference. */
+  @Get('settings')
+  @Throttle(perMinute(SENSITIVE_LIMITS.callSettings))
+  @ApiOperation({ summary: 'Get call relay-only preference' })
+  @ApiOkResponse({ type: CallSettingsResponseDto })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid bearer token' })
+  @ApiTooManyRequestsResponse({ description: 'Rate limit exceeded' })
+  getSettings(@CurrentAuth() auth: VerifiedAuth) {
+    return this.calls.getSettings(auth);
+  }
+
+  /** Update the authenticated user's relay-only call preference. */
+  @Put('settings')
+  @Throttle(perMinute(SENSITIVE_LIMITS.callSettings))
+  @ApiOperation({ summary: 'Update call relay-only preference' })
+  @ApiBody({ type: UpdateCallSettingsRequestDto })
+  @ApiOkResponse({ type: CallSettingsResponseDto })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid bearer token' })
+  @ApiTooManyRequestsResponse({ description: 'Rate limit exceeded' })
+  updateSettings(
+    @CurrentAuth() auth: VerifiedAuth,
+    @Body(new ZodValidationPipe(UpdateCallSettingsRequestSchema)) body: UpdateCallSettingsRequest,
+  ) {
+    return this.calls.updateSettings(auth, body);
   }
 }

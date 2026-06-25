@@ -224,7 +224,57 @@ Relay-only default means **coturn availability == calling availability** for eve
 
 ---
 
-## 12. Verification checklist (Definition of Done)
+## 12. Ephemeral relay implementation — security properties (P1-GW)
+
+This section records the precise security properties of the gateway signaling relay delivered in P1-GW so the `security-boundary-auditor` has a single ground-truth reference.
+
+### 12.1 Call-authorization map
+
+The gateway validates every `call.signal` frame against an in-memory call-authorization map (`callId → { tenantId, conversationId, callerSub, calleeSub, phase, timers }`). The map is populated by the REST invite (`POST /calls/:friendUserId/invite`) **after** both the friendship gate and the conversation-membership gate pass. Properties:
+
+- **Ephemeral**: the map lives in process memory only. A gateway restart drops all entries — live calls fail cleanly; there are no stale cross-restart entries.
+- **No DB writes**: V1 persists no `call_sessions` row (invariant 3 is not in scope; the table lands in V1.1). Signaling is emitted to the Redis bus only.
+- **Tenant-scoped**: every entry carries `tenantId`; `validateAndRelay` checks it against the socket's verified `auth.tenantId` (never client-supplied).
+
+### 12.2 Silent-drop policy (no oracle)
+
+All validation failures in the `call.signal` and `call.release` paths produce a **silent drop** — the frame is discarded and no error frame is sent to the client. This covers:
+
+| Condition | Why silent |
+|---|---|
+| Unknown or expired `callId` | Prevents callId-enumeration oracle |
+| Sender not in `callerSub` / `calleeSub` | Prevents non-participant presence oracle |
+| `conversationId` not a member | Mirrors the subscribe path (same posture) |
+| Malformed / invalid envelope shape | Prevents schema oracle |
+| Unauthenticated socket | Auth gate — not an error, silent return (not close) |
+
+Exception: **rate-limit exhaustion** sends `{ event:'error', data:{ message:'rate limited' } }` so the client can back off. This reveals no call state.
+
+### 12.3 Fire-and-forget relay (best-effort)
+
+Signaling frames are published to Redis and fanned to peer sockets with **no acknowledgement and no backfill**. If a frame is dropped (Redis down, peer socket gone), the call fails to connect — the **correct fail-closed mode**. The server never queues or retries frames. Rationale: queuing unboundedly would violate the ephemeral model and create a persistence surface; fail-fast is simpler and safer.
+
+### 12.4 Crypto-blind relay (invariant 1)
+
+The `envelope` field in a `call.signal` frame is an opaque base64 MLS ciphertext (`CallCipherEnvelopeSchema.ciphertext`). The gateway:
+
+- **Forwards it verbatim** — only the `ciphertext` string crosses the Redis bus; `alg` and `epoch` from the inbound envelope are NOT included in the relayed event (they are routing metadata only, not needed by the peer).
+- **Never parses the inner signal** (offer/answer/ICE/hangup type is an encrypted discriminant).
+- **Never logs the envelope** — only IDs and metadata are logged.
+
+### 12.5 Timers and lifecycle
+
+| Timer | Duration | Action |
+|---|---|---|
+| Ring timeout | 45 s | Callee never answered → `call.end{timeout}` fanned to conversation room |
+| Activity timeout | 90 s of silence | Both peers silent → `call.end{peer-gone}` |
+| Max duration | 90 min | Hard cap → `call.end{peer-gone}` |
+
+Server-issued `call.end` frames are fanned to the conversation room so both parties receive them. Client-initiated hangup travels **inside** the encrypted `call.signal` (a discriminant the server never reads); `call.release` carries only `{ callId }` and triggers only server-state cleanup — **no fan-out**.
+
+---
+
+## 14. Verification checklist (Definition of Done)
 
 - [x] *(shipped in this docs bundle)* This note lives at `docs/threat-models/voip-calling.md`; `docs/threat-models/vm-ingress.md` revised for the new ingress.
 - [x] *(shipped in this docs bundle)* **GDPR artifact bundle (Phase-0)**: `docs/gdpr/data-residency.md` (coturn relay row), `docs/gdpr/article-30-records.md` (new activity + peer-IP category + APNs/FCM sub-processor + 30-day retention row), `docs/threat-models/metadata-exposure.md` (call-graph / call-timing / relay-peer-IP rows), and **new** `docs/gdpr/dpia-voip-calling.md` (legal basis per activity).
