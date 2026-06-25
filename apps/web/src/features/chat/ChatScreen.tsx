@@ -397,9 +397,7 @@ export default function ChatScreen() {
 
   return (
     <div className="relative flex h-full bg-[#1a1a24] sm:items-center sm:justify-center sm:p-4">
-      <div
-        className="absolute inset-0 w-full sm:static sm:h-[calc(100%-2rem)] sm:max-w-6xl bg-[#12121a] sm:rounded-3xl overflow-hidden flex shadow-2xl shadow-black/50"
-      >
+      <div className="absolute inset-0 w-full sm:static sm:h-[calc(100%-2rem)] sm:max-w-6xl bg-[#12121a] sm:rounded-3xl overflow-hidden flex shadow-2xl shadow-black/50">
         {/* Sidebar */}
         <aside
           aria-label="Conversations"
