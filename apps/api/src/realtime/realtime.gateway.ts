@@ -82,6 +82,7 @@ const roomKey = (tenantId: string, conversationId: string): string =>
 export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit {
   private readonly conns = new Map<WebSocket, ConnState>();
   private readonly rooms = new Map<string, Set<WebSocket>>(); // roomKey → subscribed sockets
+  private deliverySeqCounter = 0; // monotonic counter for CallSignalFrameSchema.deliverySeq
 
   constructor(
     @InjectPinoLogger(RealtimeGateway.name) private readonly logger: PinoLogger,
@@ -384,6 +385,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   ): Promise<void> {
     const state = this.conns.get(client);
     if (!state?.authed || !state.auth) return; // unauthenticated — silent return, not close
+    if (!state.auth.userId) return; // missing DB UUID — can't attribute sender; silent drop
     if (!this.allowCallSignal(state)) {
       this.send(client, 'error', { message: 'rate limited' });
       return;
@@ -391,7 +393,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     // Parse failure → silent drop (prevents shape oracle; a malformed frame reveals nothing useful).
     const parsed = CallEnvelopeSchema.safeParse(data);
     if (!parsed.success) return;
-    const { conversationId, callId, envelope } = parsed.data;
+    const { conversationId, callId, envelope, msgSeq } = parsed.data;
     // Membership check — same authz as subscribe.
     const isMember = await this.messaging.isMember(state.auth, conversationId);
     if (this.conns.get(client) !== state) return; // disconnected during async lookup
@@ -400,13 +402,17 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     const entry = this.callsAuthz.validateAndRelay(callId, state.auth.sub, state.auth.tenantId);
     if (!entry) return; // unknown/expired/non-participant — silent drop
     // Emit onto the bus. Fire-and-forget: best-effort relay, no ack (the call fails if it drops).
+    // alg/epoch are wire-protocol metadata (not content); forwarded so the peer can decrypt.
     this.bus.emitCallSignal({
       tenantId: state.auth.tenantId,
       callId,
       conversationId,
+      msgSeq,
       senderSub: state.auth.sub,
+      senderUserId: state.auth.userId,
       peerSub: entry.callerSub === state.auth.sub ? entry.calleeSub : entry.callerSub,
-      envelope: envelope.ciphertext,
+      deliverySeq: ++this.deliverySeqCounter,
+      envelope: { ciphertext: envelope.ciphertext, alg: envelope.alg, epoch: envelope.epoch },
     });
   }
 
@@ -472,7 +478,10 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
         this.send(client, 'call.signal', {
           callId: event.callId,
           conversationId: event.conversationId,
-          envelope: event.envelope, // opaque MLS ciphertext — forwarded verbatim
+          msgSeq: event.msgSeq,
+          senderUserId: event.senderUserId,
+          deliverySeq: event.deliverySeq,
+          envelope: event.envelope, // full { ciphertext, alg, epoch } — forwarded verbatim
         });
       }
     }
