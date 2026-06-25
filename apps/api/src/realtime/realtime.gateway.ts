@@ -320,6 +320,10 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
    * as the commit lands. METADATA ONLY (ids, invariant #2).
    */
   private notifyRemoved(event: MemberRemovedEvent): void {
+    // Invalidate any active call entries where a removed member is a participant. Without this, a
+    // removed member could continue exchanging call signals via the stale authz entry until the
+    // 90-second inactivity or 90-minute max-duration timer fires.
+    this.callsAuthz.releaseByParticipants(event.tenantId, event.removedSubs);
     const room = roomKey(event.tenantId, event.conversationId);
     const removedSubSet = new Set(event.removedSubs);
     for (const [client, state] of this.conns) {
@@ -397,11 +401,15 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     // callId authz — must be in the live map AND sender must be a registered participant.
     // Membership is already established: the authz entry only exists because both participants
     // passed the membership + direct-conversation gate at invite time. No per-frame DB lookup.
-    const entry = this.callsAuthz.validateAndRelay(callId, state.auth.sub, state.auth.tenantId);
-    if (!entry) return; // unknown/expired/non-participant — silent drop
-    // Guard: client-supplied conversationId must match the invite-registered value. A participant
-    // in two conversations could otherwise inject a mismatched conversationId into the peer's frame.
-    if (conversationId !== entry.conversationId) return;
+    // conversationId is passed in so the service can check it BEFORE any phase mutation —
+    // a callee supplying a mismatched conversationId must not advance the call to `active`.
+    const entry = this.callsAuthz.validateAndRelay(
+      callId,
+      state.auth.sub,
+      state.auth.tenantId,
+      conversationId,
+    );
+    if (!entry) return; // unknown/expired/non-participant/conversationId mismatch — silent drop
     // Emit onto the bus. Fire-and-forget: best-effort relay, no ack (the call fails if it drops).
     // alg/epoch are wire-protocol metadata (not content); forwarded so the peer can decrypt.
     this.bus.emitCallSignal({
