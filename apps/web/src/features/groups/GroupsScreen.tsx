@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { UserPlus, Unplug } from 'lucide-react';
+import { Users, UserPlus, Unplug } from 'lucide-react';
 import { prefersReducedMotion } from '../../lib/pref';
 import { demoMode } from '../../lib/auth';
 import { ArgusAppIcon } from '../brand/ArgusAppIcon';
