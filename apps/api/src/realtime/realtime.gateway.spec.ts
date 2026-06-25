@@ -585,6 +585,41 @@ describe('RealtimeGateway', () => {
     });
   });
 
+  it('call.signal: mismatched conversationId (client vs authz map) → silent drop', async () => {
+    const CALL_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const OTHER_CONV = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    const payload = {
+      conversationId: OTHER_CONV, // different from the one registered in the authz map
+      callId: CALL_ID,
+      msgSeq: 0,
+      envelope: { ciphertext: 'b3BhcXVl', alg: 'MLS_1.0', epoch: 0 },
+    };
+    const entry = {
+      tenantId: 'T1',
+      conversationId: CONV, // authoritative — registered at invite time
+      callerSub: 'alice',
+      calleeSub: 'bob',
+      phase: 'active' as const,
+      armedAt: 0,
+      lastSignalAt: 0,
+      ringTimer: 0 as unknown as ReturnType<typeof setTimeout>,
+    };
+
+    const s = mkSocket();
+    await authed(s, 'alice', 'T1');
+    messaging.isMember.mockResolvedValue(true);
+    callsAuthz.validateAndRelay.mockReturnValue(entry);
+
+    const received: unknown[] = [];
+    bus.onCallSignal((e) => received.push(e));
+    s.send.mockClear();
+
+    await gw.onCallSignal(sock(s), payload);
+
+    expect(received).toHaveLength(0); // mismatch → silent drop
+    expect(lastSend(s)).toBeUndefined(); // no error frame (no oracle)
+  });
+
   it('call.release: valid participant → calls authz.release, no bus fan-out', async () => {
     const CALL_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
     const s = mkSocket();
@@ -595,7 +630,7 @@ describe('RealtimeGateway', () => {
 
     gw.onCallRelease(sock(s), { callId: CALL_ID });
 
-    expect(callsAuthz.release).toHaveBeenCalledWith(CALL_ID, 'alice');
+    expect(callsAuthz.release).toHaveBeenCalledWith(CALL_ID, 'alice', 'T1');
     expect(callEndReceived).toHaveLength(0); // no server fan-out on client-driven release
   });
 

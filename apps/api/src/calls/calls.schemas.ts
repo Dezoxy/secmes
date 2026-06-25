@@ -30,7 +30,8 @@ const CallCipherEnvelopeSchema = z
 
 // What the CLIENT sends INTO the gateway on `call.signal`. The server validates THIS (routing
 // metadata + opaque envelope) — never the inner signal. `callId`/`msgSeq` are cleartext opaque ids
-// used only to route and to enforce a per-(callId, sender) replay window without decrypting.
+// used only for routing; `msgSeq` is forwarded verbatim to the peer for client-side ordering —
+// per-(callId, sender) replay-window enforcement is deferred to V1.1.
 export const CallEnvelopeSchema = z
   .object({
     conversationId: z.string().uuid(),
