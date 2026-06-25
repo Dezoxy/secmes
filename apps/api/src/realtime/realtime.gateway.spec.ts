@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { CallsAuthzService } from '../calls/calls-authz.service.js';
 import type { AuthService } from '../auth/auth.service.js';
 import type { MessagingService } from '../messaging/messaging.service.js';
 import { InProcessRealtimeBus } from './in-process-realtime-bus.js';
@@ -28,6 +29,11 @@ describe('RealtimeGateway', () => {
   let bus: InProcessRealtimeBus;
   let auth: { verify: ReturnType<typeof vi.fn> };
   let messaging: { isMember: ReturnType<typeof vi.fn> };
+  let callsAuthz: {
+    validateAndRelay: ReturnType<typeof vi.fn>;
+    release: ReturnType<typeof vi.fn>;
+    register: ReturnType<typeof vi.fn>;
+  };
   let gw: RealtimeGateway;
 
   beforeEach(() => {
@@ -35,6 +41,7 @@ describe('RealtimeGateway', () => {
     bus = new InProcessRealtimeBus();
     auth = { verify: vi.fn() };
     messaging = { isMember: vi.fn() };
+    callsAuthz = { validateAndRelay: vi.fn(), release: vi.fn(), register: vi.fn() };
     const pinoMock = {
       info: vi.fn(),
       warn: vi.fn(),
@@ -48,6 +55,7 @@ describe('RealtimeGateway', () => {
       auth as unknown as AuthService,
       messaging as unknown as MessagingService,
       bus,
+      callsAuthz as unknown as CallsAuthzService,
     );
     gw.onModuleInit(); // wire bus → deliver
   });
@@ -453,5 +461,186 @@ describe('RealtimeGateway', () => {
     const frames = messageFrames(s);
     expect(frames.map((f) => f.deliverySeq)).toEqual([1, 2, 3]); // three distinct seqs…
     expect(frames.every((f) => f.message.epoch === 0)).toBe(true); // …all at the same epoch
+  });
+
+  // ── call.signal authz ─────────────────────────────────────────────────────────────────────────
+  // Constants are defined at the top of each test to avoid temporal dead-zone issues with
+  // Vitest's describe-block scoping when declared after afterEach.
+
+  it('call.signal: unknown callId → silent drop (no emitCallSignal, no error frame)', async () => {
+    const CALL_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const payload = {
+      conversationId: CONV,
+      callId: CALL_ID,
+      msgSeq: 0,
+      envelope: { ciphertext: 'b3BhcXVl', alg: 'MLS_1.0', epoch: 0 },
+    };
+
+    const s = mkSocket();
+    await authed(s, 'alice', 'T1');
+    messaging.isMember.mockResolvedValue(true);
+    callsAuthz.validateAndRelay.mockReturnValue(null); // callId not in map
+
+    // Use listener (not vi.spyOn) — InProcessRealtimeBus dispatches synchronously; a spy on the
+    // method can't intercept the emit reliably in this environment. The listener is the ground truth.
+    const received: unknown[] = [];
+    bus.onCallSignal((e) => received.push(e));
+    s.send.mockClear();
+
+    await gw.onCallSignal(sock(s), payload);
+
+    expect(received).toHaveLength(0); // no relay
+    expect(lastSend(s)).toBeUndefined(); // no error frame (no oracle)
+  });
+
+  it('call.signal: non-member conversation → silent drop', async () => {
+    const CALL_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const payload = {
+      conversationId: CONV,
+      callId: CALL_ID,
+      msgSeq: 0,
+      envelope: { ciphertext: 'b3BhcXVl', alg: 'MLS_1.0', epoch: 0 },
+    };
+
+    const s = mkSocket();
+    await authed(s, 'alice', 'T1');
+    messaging.isMember.mockResolvedValue(false); // not a member
+
+    const received: unknown[] = [];
+    bus.onCallSignal((e) => received.push(e));
+    s.send.mockClear();
+
+    await gw.onCallSignal(sock(s), payload);
+
+    expect(received).toHaveLength(0);
+    expect(lastSend(s)).toBeUndefined();
+    expect(callsAuthz.validateAndRelay).not.toHaveBeenCalled(); // gate fails before authz map lookup
+  });
+
+  it('call.signal: unauthenticated socket → silent drop (no close)', async () => {
+    const CALL_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const payload = {
+      conversationId: CONV,
+      callId: CALL_ID,
+      msgSeq: 0,
+      envelope: { ciphertext: 'b3BhcXVl', alg: 'MLS_1.0', epoch: 0 },
+    };
+
+    const s = mkSocket();
+    gw.handleConnection(sock(s)); // connected but never auth'd
+
+    const received: unknown[] = [];
+    bus.onCallSignal((e) => received.push(e));
+
+    await gw.onCallSignal(sock(s), payload);
+
+    expect(received).toHaveLength(0);
+    expect(s.close).not.toHaveBeenCalled(); // silent return, not close
+  });
+
+  it('call.signal: valid entry → relays opaque ciphertext verbatim', async () => {
+    const CALL_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const payload = {
+      conversationId: CONV,
+      callId: CALL_ID,
+      msgSeq: 0,
+      envelope: { ciphertext: 'b3BhcXVl', alg: 'MLS_1.0', epoch: 0 },
+    };
+    const entry = {
+      tenantId: 'T1',
+      conversationId: CONV,
+      callerSub: 'alice',
+      calleeSub: 'bob',
+      phase: 'active' as const,
+      armedAt: 0,
+      lastSignalAt: 0,
+      ringTimer: 0 as unknown as ReturnType<typeof setTimeout>,
+    };
+
+    const s = mkSocket();
+    await authed(s, 'alice', 'T1');
+    messaging.isMember.mockResolvedValue(true);
+    callsAuthz.validateAndRelay.mockReturnValue(entry);
+
+    const received: unknown[] = [];
+    bus.onCallSignal((e) => received.push(e));
+
+    await gw.onCallSignal(sock(s), payload);
+
+    expect(received).toHaveLength(1);
+    expect(received[0]).toMatchObject({
+      callId: CALL_ID,
+      conversationId: CONV,
+      senderSub: 'alice',
+      peerSub: 'bob', // alice is callerSub → peerSub = calleeSub = bob
+      envelope: 'b3BhcXVl', // ciphertext forwarded verbatim — alg/epoch NOT included (crypto-blind)
+    });
+  });
+
+  it('call.release: valid participant → calls authz.release, no bus fan-out', async () => {
+    const CALL_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const s = mkSocket();
+    await authed(s, 'alice', 'T1');
+
+    const callEndReceived: unknown[] = [];
+    bus.onCallEnd((e) => callEndReceived.push(e));
+
+    gw.onCallRelease(sock(s), { callId: CALL_ID });
+
+    expect(callsAuthz.release).toHaveBeenCalledWith(CALL_ID, 'alice');
+    expect(callEndReceived).toHaveLength(0); // no server fan-out on client-driven release
+  });
+
+  it('call.release: invalid callId UUID → silent drop', async () => {
+    const s = mkSocket();
+    await authed(s, 'alice', 'T1');
+    s.send.mockClear(); // clear the 'ready' auth frame
+
+    gw.onCallRelease(sock(s), { callId: 'not-a-uuid' });
+
+    expect(callsAuthz.release).not.toHaveBeenCalled();
+    expect(lastSend(s)).toBeUndefined(); // no error frame
+  });
+
+  it('call.signal: rate limit — error frame on 301st, no relay beyond limit', async () => {
+    const CALL_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const payload = {
+      conversationId: CONV,
+      callId: CALL_ID,
+      msgSeq: 0,
+      envelope: { ciphertext: 'b3BhcXVl', alg: 'MLS_1.0', epoch: 0 },
+    };
+    const entry = {
+      tenantId: 'T1',
+      conversationId: CONV,
+      callerSub: 'alice',
+      calleeSub: 'bob',
+      phase: 'active' as const,
+      armedAt: 0,
+      lastSignalAt: 0,
+      ringTimer: 0 as unknown as ReturnType<typeof setTimeout>,
+    };
+
+    const s = mkSocket();
+    await authed(s, 'alice', 'T1');
+    messaging.isMember.mockResolvedValue(true);
+    callsAuthz.validateAndRelay.mockReturnValue(entry);
+
+    const received: unknown[] = [];
+    bus.onCallSignal((e) => received.push(e));
+
+    // 300 frames should relay through without error...
+    for (let i = 0; i < 300; i++) {
+      await gw.onCallSignal(sock(s), { ...payload, msgSeq: i });
+    }
+    expect(received).toHaveLength(300);
+
+    // ...301st is rate-limited: error frame sent, no extra relay
+    s.send.mockClear();
+    received.length = 0;
+    await gw.onCallSignal(sock(s), { ...payload, msgSeq: 300 });
+
+    expect(lastSend(s)).toEqual({ event: 'error', data: { message: 'rate limited' } });
+    expect(received).toHaveLength(0);
   });
 });

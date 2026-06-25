@@ -12,10 +12,15 @@ import {
 import { WebSocket } from 'ws';
 
 import { AuthService, type MaybeUnboundAuth, type VerifiedAuth } from '../auth/auth.service.js';
+import { CallsAuthzService } from '../calls/calls-authz.service.js';
+import { CallEnvelopeSchema, CallIdSchema } from '../calls/calls.schemas.js';
 import { wsConnectionsActive } from '../observability/metrics.js';
 import { MessagingService } from '../messaging/messaging.service.js';
 import {
   RealtimeBus,
+  type CallEndEvent,
+  type CallRingEvent,
+  type CallSignalEvent,
   type CommitCreatedEvent,
   type DeviceEnrollmentApprovedEvent,
   type DeviceEnrollmentPendingEvent,
@@ -37,6 +42,12 @@ const AUTH_DEADLINE_MS = 10_000; // close a socket that doesn't authenticate (fi
 const SUBSCRIBE_WINDOW_MS = 60_000;
 const SUBSCRIBE_MAX_PER_WINDOW = 120;
 
+// Per-socket call-signal rate limit. Separate from the subscribe counter: call frames are higher
+// frequency (one per ICE candidate burst) and don't trigger DB lookups, so the cap is higher.
+// A signaling burst of 300/min is ~5/s sustained — well above any real ICE trickle yet bounds abuse.
+const CALL_SIGNAL_WINDOW_MS = 60_000;
+const CALL_SIGNAL_MAX_PER_WINDOW = 300;
+
 /** Per-socket state. A socket does nothing until it has authenticated. */
 interface ConnState {
   connId: string; // per-connection random UUID for structured log correlation
@@ -52,6 +63,9 @@ interface ConnState {
   // lifetime, dropped with the state on disconnect); never persisted; NOT the MLS epoch/generation; carries
   // no cryptographic guarantee. See @argus/contracts MessageEventSchema.
   outSeq: Map<string, number>;
+  // Per-socket call-signal rate limit (separate from subscribe — different cap, no DB lookup).
+  callWindowStart: number;
+  callCount: number;
 }
 
 const roomKey = (tenantId: string, conversationId: string): string =>
@@ -74,6 +88,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     private readonly auth: AuthService,
     private readonly messaging: MessagingService,
     private readonly bus: RealtimeBus,
+    private readonly callsAuthz: CallsAuthzService,
   ) {}
 
   onModuleInit(): void {
@@ -85,6 +100,9 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.bus.onDeviceEnrollmentPending((event) => this.notifyEnrollmentPending(event));
     this.bus.onDeviceEnrollmentApproved((event) => this.notifyEnrollmentApproved(event));
     this.bus.onFriendRequestCreated((event) => this.notifyFriendRequest(event));
+    this.bus.onCallRing((event) => this.deliverCallRing(event));
+    this.bus.onCallSignal((event) => this.relayCallSignal(event));
+    this.bus.onCallEnd((event) => this.deliverCallEnd(event));
   }
 
   handleConnection(client: WebSocket): void {
@@ -95,6 +113,8 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       subWindowStart: Date.now(),
       subCount: 0,
       outSeq: new Map(),
+      callWindowStart: Date.now(),
+      callCount: 0,
     };
     // Close sockets that connect but never authenticate (resource exhaustion / probing).
     state.authTimer = setTimeout(() => {
@@ -347,6 +367,132 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       if (client.readyState === WebSocket.OPEN) {
         this.send(client, 'friend_request', {});
       }
+    }
+  }
+
+  /**
+   * Inbound relay frame: client sends an encrypted `CallSignal` that the gateway forwards opaquely
+   * to the peer (invariant #1 — the server never parses the inner signal). Every signal type (offer,
+   * answer, ICE, hang-up) is an encrypted inner discriminant; the gateway only sees the routing
+   * envelope. Authorization is checked at three levels: membership, callId in the live authz map,
+   * and sender being one of the two registered participants. Any failure → silent drop (no oracle).
+   */
+  @SubscribeMessage('call.signal')
+  async onCallSignal(
+    @ConnectedSocket() client: WebSocket,
+    @MessageBody() data: unknown,
+  ): Promise<void> {
+    const state = this.conns.get(client);
+    if (!state?.authed || !state.auth) return; // unauthenticated — silent return, not close
+    if (!this.allowCallSignal(state)) {
+      this.send(client, 'error', { message: 'rate limited' });
+      return;
+    }
+    // Parse failure → silent drop (prevents shape oracle; a malformed frame reveals nothing useful).
+    const parsed = CallEnvelopeSchema.safeParse(data);
+    if (!parsed.success) return;
+    const { conversationId, callId, envelope } = parsed.data;
+    // Membership check — same authz as subscribe.
+    const isMember = await this.messaging.isMember(state.auth, conversationId);
+    if (this.conns.get(client) !== state) return; // disconnected during async lookup
+    if (!isMember) return; // silent drop — indistinguishable from unknown callId (no oracle)
+    // callId authz — must be in the live map AND sender must be a registered participant.
+    const entry = this.callsAuthz.validateAndRelay(callId, state.auth.sub, state.auth.tenantId);
+    if (!entry) return; // unknown/expired/non-participant — silent drop
+    // Emit onto the bus. Fire-and-forget: best-effort relay, no ack (the call fails if it drops).
+    this.bus.emitCallSignal({
+      tenantId: state.auth.tenantId,
+      callId,
+      conversationId,
+      senderSub: state.auth.sub,
+      peerSub: entry.callerSub === state.auth.sub ? entry.calleeSub : entry.callerSub,
+      envelope: envelope.ciphertext,
+    });
+  }
+
+  /**
+   * Minimal server-state cleanup frame: lets the client promptly release the call-authorization
+   * entry on hang-up/decline so the server doesn't have to wait for the inactivity timeout. Carries
+   * only `{callId}` — no reason, no SDP. Does NOT relay anything; client-initiated call termination
+   * travels peer-to-peer inside the encrypted `call.signal`. Idempotent (no-op if already gone).
+   */
+  @SubscribeMessage('call.release')
+  onCallRelease(@ConnectedSocket() client: WebSocket, @MessageBody() data: unknown): void {
+    const state = this.conns.get(client);
+    if (!state?.authed || !state.auth) return;
+    if (!this.allowCallSignal(state)) return; // rate limit — silent drop (release is best-effort)
+    const callId = (data as { callId?: unknown } | null)?.callId;
+    const parsed = CallIdSchema.safeParse(callId);
+    if (!parsed.success) return; // invalid UUID — silent drop
+    this.callsAuthz.release(parsed.data, state.auth.sub);
+    // No bus event. No fan-out. The encrypted hang-up already went peer-to-peer via call.signal.
+  }
+
+  /** Fixed-window rate check for call signal frames on one socket (same pattern as allowSubscribe). */
+  private allowCallSignal(state: ConnState): boolean {
+    const now = Date.now();
+    if (now - state.callWindowStart >= CALL_SIGNAL_WINDOW_MS) {
+      state.callWindowStart = now;
+      state.callCount = 0;
+    }
+    state.callCount += 1;
+    return state.callCount <= CALL_SIGNAL_MAX_PER_WINDOW;
+  }
+
+  /**
+   * Ring the callee's connected socket(s) — the call invite was gate-passing, so this is the real
+   * ring. Routed by (tenantId, calleeSub) on the VERIFIED socket binding, same as notifyWelcome.
+   * The frame carries only metadata (callId, conversationId, callerUserId, media) — no SDP, no keys.
+   */
+  private deliverCallRing(event: CallRingEvent): void {
+    for (const [client, state] of this.conns) {
+      if (!state.authed || !state.auth) continue;
+      if (state.auth.tenantId !== event.tenantId || state.auth.sub !== event.calleeSub) continue;
+      if (client.readyState === WebSocket.OPEN) {
+        this.send(client, 'call.ring', {
+          callId: event.callId,
+          conversationId: event.conversationId,
+          callerUserId: event.callerUserId,
+          media: event.media,
+        });
+      }
+    }
+  }
+
+  /**
+   * Deliver the opaque signal envelope to the peer's connected sockets. Routed by (tenantId,
+   * peerSub) identity — same pattern as deliverCallRing — so a group-conversation callId cannot
+   * fan signals to non-participants. The envelope is forwarded verbatim (invariant #1).
+   */
+  private relayCallSignal(event: CallSignalEvent): void {
+    for (const [client, state] of this.conns) {
+      if (!state.authed || !state.auth) continue;
+      if (state.auth.tenantId !== event.tenantId || state.auth.sub !== event.peerSub) continue;
+      if (client.readyState === WebSocket.OPEN) {
+        this.send(client, 'call.signal', {
+          callId: event.callId,
+          conversationId: event.conversationId,
+          envelope: event.envelope, // opaque MLS ciphertext — forwarded verbatim
+        });
+      }
+    }
+  }
+
+  /**
+   * Server-issued end-of-call notification for server-known lifecycle events (ring timeout,
+   * prolonged inactivity). Fan to the conversation room so both parties receive it.
+   */
+  private deliverCallEnd(event: CallEndEvent): void {
+    const room = roomKey(event.tenantId, event.conversationId);
+    const sockets = this.rooms.get(room);
+    if (!sockets) return;
+    const data = {
+      callId: event.callId,
+      conversationId: event.conversationId,
+      reason: event.reason,
+    };
+    for (const client of sockets) {
+      if (client.readyState === WebSocket.OPEN) this.send(client, 'call.end', data);
     }
   }
 

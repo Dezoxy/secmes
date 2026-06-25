@@ -2,6 +2,9 @@ import { type OnModuleDestroy } from '@nestjs/common';
 import { Redis } from 'ioredis';
 
 import {
+  CallEndEventSchema,
+  CallRingEventSchema,
+  CallSignalEventSchema,
   CommitCreatedEventSchema,
   DeviceEnrollmentApprovedEventSchema,
   DeviceEnrollmentPendingEventSchema,
@@ -11,6 +14,9 @@ import {
   ReceiptAdvancedEventSchema,
   RealtimeBus,
   WelcomeCreatedEventSchema,
+  type CallEndEvent,
+  type CallRingEvent,
+  type CallSignalEvent,
   type CommitCreatedEvent,
   type DeviceEnrollmentApprovedEvent,
   type DeviceEnrollmentPendingEvent,
@@ -29,6 +35,11 @@ export const MEMBER_REMOVED_CHANNEL = 'argus:realtime:member-removed';
 export const ENROLLMENT_PENDING_CHANNEL = 'argus:realtime:device-enrollment-pending';
 export const ENROLLMENT_APPROVED_CHANNEL = 'argus:realtime:device-enrollment-approved';
 export const FRIEND_REQUEST_CHANNEL = 'argus:realtime:friend-request-created';
+// VoIP signaling — fire-and-forget (best-effort); a dropped publish drops the call frame, which
+// is the correct fail-closed mode (the call simply fails to connect vs. queuing unboundedly).
+export const CALL_RING_CHANNEL = 'argus:realtime:call-ring';
+export const CALL_SIGNAL_CHANNEL = 'argus:realtime:call-signal';
+export const CALL_END_CHANNEL = 'argus:realtime:call-end';
 
 /**
  * Cross-pod bus (checkpoint 29): each send PUBLISHES the event to a Redis channel, and every gateway
@@ -53,6 +64,9 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
     (event: DeviceEnrollmentApprovedEvent) => void
   > = [];
   private readonly friendRequestListeners: Array<(event: FriendRequestCreatedEvent) => void> = [];
+  private readonly callRingListeners: Array<(event: CallRingEvent) => void> = [];
+  private readonly callSignalListeners: Array<(event: CallSignalEvent) => void> = [];
+  private readonly callEndListeners: Array<(event: CallEndEvent) => void> = [];
   /** Resolves once the subscriptions are active — await before relying on receipt (readiness/tests). */
   readonly ready: Promise<void>;
 
@@ -80,6 +94,9 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
         ENROLLMENT_PENDING_CHANNEL,
         ENROLLMENT_APPROVED_CHANNEL,
         FRIEND_REQUEST_CHANNEL,
+        CALL_RING_CHANNEL,
+        CALL_SIGNAL_CHANNEL,
+        CALL_END_CHANNEL,
       )
       .then(() => undefined);
   }
@@ -138,6 +155,24 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
       const parsed = FriendRequestCreatedEventSchema.safeParse(raw);
       if (!parsed.success) return;
       for (const listener of this.friendRequestListeners) listener(parsed.data);
+      return;
+    }
+    if (channel === CALL_RING_CHANNEL) {
+      const parsed = CallRingEventSchema.safeParse(raw);
+      if (!parsed.success) return;
+      for (const listener of this.callRingListeners) listener(parsed.data);
+      return;
+    }
+    if (channel === CALL_SIGNAL_CHANNEL) {
+      const parsed = CallSignalEventSchema.safeParse(raw);
+      if (!parsed.success) return;
+      for (const listener of this.callSignalListeners) listener(parsed.data);
+      return;
+    }
+    if (channel === CALL_END_CHANNEL) {
+      const parsed = CallEndEventSchema.safeParse(raw);
+      if (!parsed.success) return;
+      for (const listener of this.callEndListeners) listener(parsed.data);
     }
   }
 
@@ -208,6 +243,33 @@ export class RedisRealtimeBus extends RealtimeBus implements OnModuleDestroy {
 
   onFriendRequestCreated(listener: (event: FriendRequestCreatedEvent) => void): void {
     this.friendRequestListeners.push(listener);
+  }
+
+  emitCallRing(event: CallRingEvent): void {
+    this.pub.publish(CALL_RING_CHANNEL, JSON.stringify(event)).catch(() => {});
+  }
+
+  onCallRing(listener: (event: CallRingEvent) => void): void {
+    this.callRingListeners.push(listener);
+  }
+
+  // Call signal envelope is opaque ciphertext — same best-effort posture as message.ciphertext.
+  // A dropped publish (Redis down) drops the frame and fails the call, which is the correct
+  // fail-closed mode (vs. queuing unboundedly). Never parsed — forwarded verbatim (invariant #1).
+  emitCallSignal(event: CallSignalEvent): void {
+    this.pub.publish(CALL_SIGNAL_CHANNEL, JSON.stringify(event)).catch(() => {});
+  }
+
+  onCallSignal(listener: (event: CallSignalEvent) => void): void {
+    this.callSignalListeners.push(listener);
+  }
+
+  emitCallEnd(event: CallEndEvent): void {
+    this.pub.publish(CALL_END_CHANNEL, JSON.stringify(event)).catch(() => {});
+  }
+
+  onCallEnd(listener: (event: CallEndEvent) => void): void {
+    this.callEndListeners.push(listener);
   }
 
   async onModuleDestroy(): Promise<void> {

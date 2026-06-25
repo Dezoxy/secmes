@@ -1,12 +1,22 @@
 import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { mintTurnCredential } from '@argus/crypto';
+import { randomUUID } from 'node:crypto';
 import { and, count, eq, or } from 'drizzle-orm';
 
-import type { TurnCredentialsResponse } from './calls.schemas.js';
+import type {
+  CallSettingsResponse,
+  CreateCallRequest,
+  CreateCallResponse,
+  TurnCredentialsResponse,
+  UpdateCallSettingsRequest,
+} from './calls.schemas.js';
 import { TURN_SHARED_SECRET } from './calls.config.js';
+import { CallsAuthzService } from './calls-authz.service.js';
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
 import { requireUser } from '../messaging/membership.js';
+import { MessagingService } from '../messaging/messaging.service.js';
+import { RealtimeBus } from '../realtime/realtime-bus.js';
 
 /** TURN credential TTL: 600 s (10 min). Short enough that a leaked credential is near-useless;
  *  long enough to set up and complete a relay-only audio call. Clients re-fetch per call attempt. */
@@ -20,7 +30,12 @@ function turnUrls(): string[] {
 
 @Injectable()
 export class CallsService {
-  constructor(@Inject(TURN_SHARED_SECRET) private readonly hmacKey: string) {}
+  constructor(
+    @Inject(TURN_SHARED_SECRET) private readonly hmacKey: string,
+    private readonly callsAuthz: CallsAuthzService,
+    private readonly messaging: MessagingService,
+    private readonly bus: RealtimeBus,
+  ) {}
 
   /**
    * Mint ephemeral TURN credentials for a requester who has ≥1 accepted friend (coarse gate).
@@ -75,5 +90,115 @@ export class CallsService {
       iceTransportPolicy: 'relay',
       ttlSeconds: expiry - now,
     };
+  }
+
+  /**
+   * Initiate a 1:1 audio call. Gates: accepted friendship + conversation membership.
+   *
+   * Returns a uniform 202 + `{ callId }` regardless of gate outcome — the caller cannot tell whether
+   * the callee exists, is a friend, or is in the conversation (no presence/friendship oracle). A
+   * callId is always minted; it is only registered in the authz map when gates pass, so the callee
+   * can only be ringed if the caller is a legitimate participant.
+   */
+  async invite(
+    auth: VerifiedAuth,
+    friendUserId: string,
+    body: CreateCallRequest,
+  ): Promise<CreateCallResponse> {
+    const callId = randomUUID();
+
+    const result = await withTenant(auth.tenantId, async (tx) => {
+      const myId = await requireUser(tx, auth);
+
+      // Accepted-friendship gate: canonical pair order (low = least of the two UUIDs).
+      const [low, high] = [myId, friendUserId].sort() as [string, string];
+      const [friendship] = await tx
+        .select({ calleeExternalId: schema.users.externalIdentityId })
+        .from(schema.friendships)
+        .innerJoin(schema.users, eq(schema.users.id, friendUserId))
+        .where(
+          and(
+            eq(schema.friendships.userLowId, low),
+            eq(schema.friendships.userHighId, high),
+            eq(schema.friendships.status, 'accepted'),
+          ),
+        )
+        .limit(1);
+
+      // Callee membership gate: verify the callee's DB UUID is a member of this conversation.
+      // Must run inside the tx so RLS is active for the tenant-scoped lookup.
+      let calleeIsConvMember = false;
+      if (friendship) {
+        const [calleeMember] = await tx
+          .select({ userId: schema.conversationMembers.userId })
+          .from(schema.conversationMembers)
+          .where(
+            and(
+              eq(schema.conversationMembers.conversationId, body.conversationId),
+              eq(schema.conversationMembers.userId, friendUserId),
+            ),
+          )
+          .limit(1);
+        calleeIsConvMember = calleeMember !== undefined;
+      }
+
+      return {
+        calleeSub: friendship?.calleeExternalId ?? null,
+        calleeIsConvMember,
+        callerUserId: myId,
+      };
+    });
+
+    if (!result.calleeSub) return { callId }; // no friendship — uniform return, no oracle
+    if (!result.calleeIsConvMember) return { callId }; // callee not in conversation — uniform return, no oracle
+
+    // Caller membership check — out of tx (read-only, RLS-scoped via the service layer).
+    const isMember = await this.messaging.isMember(auth, body.conversationId);
+    if (!isMember) return { callId }; // no membership — uniform return, no oracle
+
+    // Both gates passed: register the call and ring the callee.
+    this.callsAuthz.register(callId, {
+      tenantId: auth.tenantId,
+      conversationId: body.conversationId,
+      callerSub: auth.sub,
+      calleeSub: result.calleeSub,
+    });
+    this.bus.emitCallRing({
+      tenantId: auth.tenantId,
+      callId,
+      conversationId: body.conversationId,
+      callerUserId: result.callerUserId,
+      calleeSub: result.calleeSub,
+      media: body.media,
+    });
+
+    return { callId };
+  }
+
+  /** Return the caller's relay-only preference. */
+  async getSettings(auth: VerifiedAuth): Promise<CallSettingsResponse> {
+    return withTenant(auth.tenantId, async (tx) => {
+      const [row] = await tx
+        .select({ relayOnly: schema.users.callRelayOnly })
+        .from(schema.users)
+        .where(eq(schema.users.id, auth.userId ?? ''))
+        .limit(1);
+      return { relayOnly: row?.relayOnly ?? true };
+    });
+  }
+
+  /** Persist the caller's relay-only preference and return the updated value. */
+  async updateSettings(
+    auth: VerifiedAuth,
+    body: UpdateCallSettingsRequest,
+  ): Promise<CallSettingsResponse> {
+    return withTenant(auth.tenantId, async (tx) => {
+      const myId = await requireUser(tx, auth);
+      await tx
+        .update(schema.users)
+        .set({ callRelayOnly: body.relayOnly })
+        .where(eq(schema.users.id, myId));
+      return { relayOnly: body.relayOnly };
+    });
   }
 }
