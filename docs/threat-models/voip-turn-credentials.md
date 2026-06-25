@@ -29,11 +29,11 @@ An authenticated user with no friends mints many short-lived credentials to abus
 
 ### T3 — Relay bandwidth exhaustion (authenticated, has friends)
 A legitimate user mints creds rapidly and opens many relay channels.
-**Mitigation**: per-user HTTP throttle (30/min, `UserThrottlerGuard`); coturn `user-quota=6` (max 6 simultaneous relay sessions per credential); coturn `max-bps=128000` (128 kbps cap per session); credential TTL 600 s limits how long each channel can run without re-auth.
+**Mitigation**: per-user HTTP throttle (30/min, `UserThrottlerGuard`); coturn `user-quota=6` (max 6 simultaneous relay sessions per user); coturn `max-bps=128000` (128 kbps cap per session); credential TTL 600–1200 s limits how long each channel can run without re-auth. Usernames are window-bucketed (`floor(now/600)*600 + 1200`) so all credentials minted within the same 10-minute window share the same `expiry:userId` string — coturn's `user-quota=6` therefore counts correctly against the stable user identity rather than against a unique per-second string.
 
 ### T4 — Credential interception / replay after expiry
 An attacker intercepts a TURN credential from a TLS-protected response.
-**Mitigation**: TTL 600 s. An intercepted credential is useless after 10 minutes. Clients re-fetch per call attempt — no persistent tokens. The credential grants only relay channel access, not API access.
+**Mitigation**: TTL 600–1200 s (windowed). An intercepted credential is useless after at most 20 minutes. Clients re-fetch per call attempt — no persistent tokens. The credential grants only relay channel access, not API access.
 
 ### T5 — HMAC key compromise (coturn side)
 The `static-auth-secret` leaks from the coturn host.
