@@ -116,11 +116,6 @@ export function ConversationList({
     searchTouchStartY.current = null;
   };
 
-  const focusSearch = () => {
-    revealSearch();
-    window.requestAnimationFrame(() => searchInputRef.current?.focus());
-  };
-
   return (
     <div
       className="flex h-full flex-col"
