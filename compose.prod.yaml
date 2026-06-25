@@ -287,6 +287,7 @@ services:
   # (unlike redis/api/cloudflared which have targeted secret-rotation force-recreates in deploy.sh).
   coturn:
     image: coturn/coturn:4.6.2
+    container_name: coturn # explicit: cert-renewal hook (docker kill -s HUP coturn) targets this name
     restart: unless-stopped
     network_mode: host
     entrypoint: ['/docker-entrypoint.sh']

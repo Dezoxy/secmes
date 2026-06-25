@@ -140,9 +140,24 @@ chmod a+rx "$APP_DIR/infra/stack/glitchtip/docker-entrypoint.sh"
 # coturn entrypoint + static conf — bind-mounted read-only into the coturn container.
 # The entrypoint resolves external-ip from IMDS at startup and injects the HMAC shared secret from
 # the Docker secret file. Contains NO hardcoded secrets; world-readable conf + world-executable wrapper.
+# Hash the existing files BEFORE overwriting so step 6 can detect a content-only change and force-recreate.
+# `up -d` does NOT recreate on bind-mounted FILE content changes — only on compose-definition changes
+# (image, env, ports). A config fix (e.g. turnserver.conf hardening) needs a real recreate to take effect.
+_coturn_old_hash=""
+if [ -f "$APP_DIR/infra/stack/coturn/turnserver.conf" ] && [ -f "$APP_DIR/infra/stack/coturn/docker-entrypoint.sh" ]; then
+  _coturn_old_hash="$(sha256sum "$APP_DIR/infra/stack/coturn/turnserver.conf" "$APP_DIR/infra/stack/coturn/docker-entrypoint.sh" | sha256sum | cut -d' ' -f1)"
+fi
 install -d -m 0755 "$APP_DIR/infra/stack/coturn"
 install -m 0755 "$REPO_ROOT/infra/stack/coturn/docker-entrypoint.sh" "$APP_DIR/infra/stack/coturn/docker-entrypoint.sh"
 install -m 0644 "$REPO_ROOT/infra/stack/coturn/turnserver.conf" "$APP_DIR/infra/stack/coturn/turnserver.conf"
+# COTURN_CONF_CHANGED=1 unless the new files byte-match the pre-stage ones. =1 on first deploy (old hash empty).
+COTURN_CONF_CHANGED=1
+_coturn_new_hash="$(sha256sum "$APP_DIR/infra/stack/coturn/turnserver.conf" "$APP_DIR/infra/stack/coturn/docker-entrypoint.sh" | sha256sum | cut -d' ' -f1)"
+if [ -n "$_coturn_old_hash" ] && [ "$_coturn_old_hash" = "$_coturn_new_hash" ]; then
+  COTURN_CONF_CHANGED=0
+fi
+_coturn_old_hash=""
+_coturn_new_hash=""
 install -m 0755 "$REPO_ROOT/infra/stack/secrets/fetch-keyvault-secrets.sh" "$APP_DIR/secrets/fetch-keyvault-secrets.sh"
 install -m 0644 "$REPO_ROOT/infra/stack/secrets/argus-secrets.service" /etc/systemd/system/argus-secrets.service
 # Point the unit at our fetch script + the real vault name (the repo ships a placeholder).
@@ -583,12 +598,16 @@ if [ "${TUNNEL_TOKEN_CHANGED:-1}" = 1 ]; then
   log "tunnel token is new/changed — force-recreating cloudflared so it picks up the current token"
   docker compose -f "$COMPOSE" up -d --force-recreate --no-deps cloudflared
 fi
-# coturn is intentionally NOT force-recreated here. A recreate drops every active relayed call —
-# audio V1 users on the relay-default path lose the call with no ICE-restart recovery. Standard
-# `up -d` (above) recreates coturn only when its image or config file changes, which is the correct
-# behavior. Secret rotation (turn_shared_secret / TURNS cert) must be done during a maintenance
-# window with an explicit `docker compose up -d --force-recreate coturn` and a warning to users.
+# coturn: force-recreate ONLY when the bind-mounted config files actually changed (step 1 above).
+# `up -d` does NOT recreate on file-content-only changes (only on image/env/port changes in the
+# compose definition). A config fix (e.g. turnserver.conf hardening) that isn't applied is more
+# dangerous than the brief call-drop a recreate causes. Secret rotation (turn_shared_secret / TURNS
+# cert) must still be done during a maintenance window with an explicit force-recreate + user warning.
 # See docs/planning/voip/03-infrastructure-turn-and-networking.md §9.
+if [ "${COTURN_CONF_CHANGED:-1}" = 1 ]; then
+  log "coturn config changed — force-recreating (active relay calls will be dropped briefly)"
+  docker compose -f "$COMPOSE" up -d --force-recreate --no-deps coturn
+fi
 
 # --- 6b. Gate on the new app containers becoming HEALTHY — `up -d` returns before they're ready, so without
 #         this a crash-looping rollout would report success. A timeout/unhealthy fails the deploy (set -e),
