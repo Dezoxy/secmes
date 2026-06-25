@@ -18,6 +18,49 @@ test('viewport lets iOS own the safe-area strips', async ({ page }) => {
   );
 });
 
+test('mobile root uses Radarr-style natural document scrolling', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/chat');
+
+  const shell = page.getByTestId('app-shell');
+  await expect(shell).toBeVisible();
+
+  const metrics = await page.evaluate(() => {
+    const root = document.getElementById('root');
+    const shell = document.querySelector('[data-testid="app-shell"]');
+
+    return {
+      bodyOverflowY: getComputedStyle(document.body).overflowY,
+      rootOverflow: root ? getComputedStyle(root).overflow : null,
+      shellMinHeight: shell ? getComputedStyle(shell).minHeight : null,
+    };
+  });
+
+  expect(metrics.bodyOverflowY).toBe('auto');
+  expect(metrics.rootOverflow).toBe('visible');
+  expect(metrics.shellMinHeight).toBe('844px');
+});
+
+test('mobile tab header remains in the controlled app pane', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/chat');
+
+  const header = page.locator('.argus-mobile-tab-header');
+  await expect(header).toBeVisible();
+
+  const before = await header.boundingBox();
+  expect(before).not.toBeNull();
+
+  await page.mouse.wheel(0, 600);
+  await page.waitForTimeout(100);
+
+  const after = await header.boundingBox();
+  expect(after).not.toBeNull();
+
+  expect(Math.round(after!.top)).toBe(Math.round(before!.top));
+  expect(Math.round(after!.height)).toBe(Math.round(before!.height));
+});
+
 // Guards the iOS PWA safe-area fixes: the bottom floating nav must reserve only its *measured*
 // height as scroll clearance (so the bottom safe-zone is reclaimed as edge-to-edge content rather
 // than a fixed dead band), and real content must scroll clear of the floating pills.
