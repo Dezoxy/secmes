@@ -101,7 +101,10 @@ export class CallsAuthzService {
 
   /**
    * Explicit client-driven release (call.release frame). Verifies sender is a participant before
-   * clearing the entry. No-op (no throw) if the entry is already gone or sender is not a party.
+   * clearing the entry. Always emits call.end{peer-gone} so the peer receives a server-side
+   * notification — the encrypted cancel/hangup signal may have been dropped, and during ringing
+   * the callee has no other way to dismiss the incoming call UI. No-op if entry is absent or
+   * sender is not a participant.
    */
   release(callId: string, senderSub: string, senderTenantId: string): void {
     const entry = this.authzMap.get(callId);
@@ -109,6 +112,14 @@ export class CallsAuthzService {
     if (entry.tenantId !== senderTenantId) return;
     if (entry.callerSub !== senderSub && entry.calleeSub !== senderSub) return;
     this.clearEntry(callId, entry);
+    this.bus.emitCallEnd({
+      tenantId: entry.tenantId,
+      callId,
+      conversationId: entry.conversationId,
+      reason: 'peer-gone',
+      callerSub: entry.callerSub,
+      calleeSub: entry.calleeSub,
+    });
   }
 
   private expireEntry(callId: string, reason: 'timeout' | 'peer-gone'): void {
