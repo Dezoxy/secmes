@@ -1,7 +1,7 @@
 #!/bin/sh
-# Resolve external-ip from IMDS (AWS IMDSv2 → Azure IMDS → env override) and inject the
-# HMAC shared secret from the Docker secret file before exec-ing turnserver.
+# Resolve external-ip and inject HMAC shared secret before exec-ing turnserver.
 # Runs as nobody (uid 65534). Fail closed if external-ip cannot be determined.
+# Resolution order: ARGUS_TURN_EXTERNAL_IP env → detect-external-ip (bundled) → curl IMDS.
 set -eu
 
 log() { printf '[coturn-entrypoint] %s\n' "$*"; }
@@ -9,14 +9,23 @@ log() { printf '[coturn-entrypoint] %s\n' "$*"; }
 if [ -n "${ARGUS_TURN_EXTERNAL_IP:-}" ]; then
   EXT_IP="$ARGUS_TURN_EXTERNAL_IP"
   log "external-ip set from ARGUS_TURN_EXTERNAL_IP env override"
+elif command -v detect-external-ip >/dev/null 2>&1; then
+  # detect-external-ip is bundled in the coturn/coturn image and resolves the external IP via
+  # AWS and Azure IMDS without requiring curl. Use it as the primary IMDS resolver.
+  EXT_IP=$(detect-external-ip 2>/dev/null) || EXT_IP=""
+  if [ -n "$EXT_IP" ]; then
+    log "external-ip resolved via detect-external-ip"
+  else
+    log "FATAL: detect-external-ip returned empty; set ARGUS_TURN_EXTERNAL_IP"
+    exit 1
+  fi
 else
   EXT_IP=""
 
-  # Guard: IMDS probing requires curl. Without this check, a missing curl binary silently
-  # suppresses "command not found" via the || guards and emits a misleading "could not resolve"
-  # error instead of the real cause.
+  # Fallback: manual IMDS probing via curl. Guard against images that ship neither tool so the
+  # error is actionable ("neither tool found") rather than a silent command-not-found swallow.
   if ! command -v curl >/dev/null 2>&1; then
-    log "FATAL: curl not found in this image; set ARGUS_TURN_EXTERNAL_IP to skip IMDS probing"
+    log "FATAL: neither detect-external-ip nor curl found; set ARGUS_TURN_EXTERNAL_IP to skip IMDS"
     exit 1
   fi
 

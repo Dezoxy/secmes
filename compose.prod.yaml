@@ -290,6 +290,8 @@ services:
     restart: unless-stopped
     network_mode: host
     entrypoint: ['/docker-entrypoint.sh']
+    environment:
+      - ARGUS_TURN_EXTERNAL_IP=${ARGUS_TURN_EXTERNAL_IP:-} # operator/deploy.sh override; bypasses IMDS probing
     user: '65534:65534' # nobody:nogroup — never root
     read_only: true
     tmpfs:
