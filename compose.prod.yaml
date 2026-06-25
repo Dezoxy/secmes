@@ -157,6 +157,11 @@ services:
       # in Key Vault and sets VAPID_PUBLIC_KEY. When unconfigured, PushService.notifyUser() is a no-op.
       VAPID_PRIVATE_KEY_FILE: /run/secrets/vapid_private_key
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      # VoIP TURN credentials (VoIP V1, P0-A). TURN_SHARED_SECRET_FILE reads the same Key Vault
+      # secret as coturn (argus-turn-shared-secret); both sides must use the same HMAC key.
+      # TURN_SERVER_HOST is non-secret (matches the NSG/DNS records from P0-IT/P0-IS).
+      TURN_SHARED_SECRET_FILE: /run/secrets/turn_shared_secret
+      TURN_SERVER_HOST: ${TURN_SERVER_HOST:-turn.4rgus.com}
       VAPID_SUBJECT: mailto:me@toomhorvath.com
       # Cloudflare Access for the admin/breakglass surface — NON-SECRET config (the team domain + the
       # Access app's AUD tag are public, like FRONTEND_ORIGIN). When BOTH are set, the API verifies the
@@ -184,6 +189,7 @@ services:
       - session_signing_key
       - admin_bootstrap_hash
       - vapid_private_key
+      - turn_shared_secret
     depends_on:
       postgres:
         condition: service_healthy

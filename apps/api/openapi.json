@@ -1523,6 +1523,125 @@
         ]
       }
     },
+    "/calls/turn-credentials": {
+      "post": {
+        "operationId": "CallsController_mintTurnCredentials",
+        "parameters": [],
+        "requestBody": {
+          "required": false,
+          "description": "Empty body — send {} or omit the body entirely",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Ephemeral ICE server config",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TurnCredentialsResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed — malformed or out-of-bounds request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid bearer token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Requester has no accepted friends (coarse gate)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found (or deliberately hidden to avoid an existence oracle).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "No acceptable representation for the requested `Accept` header.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded (30/min/user)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Mint ephemeral TURN relay credentials (relay-only, TTL 600–1200 s)",
+        "tags": [
+          "calls"
+        ]
+      }
+    },
     "/devices/me/enrollment": {
       "post": {
         "description": "D2 publishes its public fingerprint to signal it wants to be linked. D1 is nudged via WebSocket and must approve via POST /devices/enrollments/:id/approve. Expires in 15 minutes.",
@@ -7905,6 +8024,82 @@
         "required": [
           "currentPassword",
           "newPassword"
+        ],
+        "additionalProperties": false
+      },
+      "IceServerDto": {
+        "type": "object",
+        "properties": {
+          "urls": {
+            "description": "TURN/TURNS server URIs",
+            "minItems": 1,
+            "maxItems": 8,
+            "example": [
+              "turn:turn.4rgus.com:3478",
+              "turns:turn.4rgus.com:5349?transport=tcp"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "maxLength": 65536
+            }
+          },
+          "username": {
+            "type": "string",
+            "description": "Credential username: \"<expiry-unix-ts>:<userId>\"",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          },
+          "credential": {
+            "type": "string",
+            "description": "base64 HMAC-SHA1 credential. SECRET-EQUIVALENT — do not log, store, or cache across calls.",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+          }
+        },
+        "required": [
+          "urls",
+          "username",
+          "credential"
+        ],
+        "additionalProperties": false
+      },
+      "TurnCredentialsResponseDto": {
+        "type": "object",
+        "properties": {
+          "iceServers": {
+            "minItems": 1,
+            "maxItems": 8,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IceServerDto"
+            }
+          },
+          "iceTransportPolicy": {
+            "type": "string",
+            "enum": [
+              "relay",
+              "all"
+            ],
+            "description": "\"relay\" in V1 — forces TURN, peer IPs never disclosed",
+            "example": "relay"
+          },
+          "ttlSeconds": {
+            "type": "number",
+            "description": "Credential TTL in seconds. Client must re-fetch per call attempt.",
+            "minimum": 1,
+            "maximum": 3600,
+            "example": 600,
+            "format": "int64"
+          }
+        },
+        "required": [
+          "iceServers",
+          "iceTransportPolicy",
+          "ttlSeconds"
         ],
         "additionalProperties": false
       },
