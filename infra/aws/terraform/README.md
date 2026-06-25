@@ -115,6 +115,7 @@ Terraform outputs:
 | `AWS_REGION` | `terraform output aws_region` |
 | `AWS_INSTANCE_ID` | `terraform output instance_id` |
 | `AWS_KEY_VAULT_NAME` | `terraform output key_vault_name` |
+| `AWS_DEPLOY_ARTIFACTS_BUCKET` | `terraform output deploy_artifacts_bucket` |
 | `S3_*`, `OIDC_*`, `VITE_OIDC_*`, `GHCR_USER` | same non-secret config the live deploy uses |
 
 Then push an **`aws-vX.Y.Z`** tag (the experiment's own tag namespace — distinct from the prod `vX.Y.Z` tags so a production release never triggers it) → `cd-aws.yml` builds/signs the images, pauses on the `aws-experiment` approval, then
