@@ -197,7 +197,12 @@ jobs:
             echo 'set -eu'
             echo 'WORK="$(mktemp -d)"'
             printf "printf '%%s' '%s' | base64 -d >\"\$WORK/bundle.tar.xz\"\n" "$B64"
-            echo 'command -v xz >/dev/null || { echo "FATAL: xz is required to unpack the deploy bundle"; exit 1; }'
+            echo 'if ! command -v xz >/dev/null; then'
+            echo '  command -v apt-get >/dev/null || { echo "FATAL: xz is required to unpack the deploy bundle and apt-get is unavailable"; exit 1; }'
+            echo '  export DEBIAN_FRONTEND=noninteractive'
+            echo '  apt-get update'
+            echo '  apt-get install -y xz-utils'
+            echo 'fi'
             echo 'tar xJf "$WORK/bundle.tar.xz" -C "$WORK"'
             # Experiment knobs: Arc token source, skip the GlitchTip tier, verify THIS workflow's signature.
             echo 'export ARGUS_TOKEN_SOURCE=arc ARGUS_SKIP_GLITCHTIP=1 ARGUS_COSIGN_WORKFLOW=.github/workflows/cd-aws.yml'
