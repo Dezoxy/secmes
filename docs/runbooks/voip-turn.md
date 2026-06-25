@@ -89,9 +89,13 @@ Only do this if `docker compose up -d` (without `--force-recreate`) fails to rec
 docker compose -f /opt/argus/compose.prod.yaml ps coturn
 # Expected: coturn   ... healthy
 
-# Prometheus scrape should recover (check after ~1m)
-curl -s 'http://localhost:9090/api/v1/query?query=up%7Bjob%3D%22coturn%22%7D' | jq '.data.result[0].value[1]'
-# Expected: "1"
+# Prometheus scrape should recover (check after ~1m). Run from inside the container
+# because Prometheus has no published port (internal Docker network only).
+docker compose -f /opt/argus/compose.prod.yaml exec prometheus \
+  wget -qO- 'http://localhost:9090/api/v1/query?query=up%7Bjob%3D%22coturn%22%7D' \
+  | grep -o '"value":\[.*\]' | head -1
+# Expected: last element is "1" — e.g. "value":[1782403715,"1"]
+# Alternatively, open Grafana → Explore → Prometheus → run: up{job="coturn"}
 ```
 
 ---
