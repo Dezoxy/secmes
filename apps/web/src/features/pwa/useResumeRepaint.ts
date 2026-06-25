@@ -38,7 +38,10 @@ export function useResumeRepaint(): void {
       if (document.visibilityState === 'visible') repaint();
     };
     // pageshow fires on bfcache restore (a common iOS resume path that doesn't flip visibility).
-    const onPageShow = () => repaint();
+    // Guard on `persisted` so an ordinary cold load — which never shows the seam — doesn't repaint.
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) repaint();
+    };
 
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('pageshow', onPageShow);

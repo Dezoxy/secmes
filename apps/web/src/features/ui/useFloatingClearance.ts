@@ -16,11 +16,15 @@ export function useFloatingClearance(
   gapRem = 0.75,
 ): void {
   useEffect(() => {
-    const el = ref.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
+    const initial = ref.current;
+    if (!initial || typeof ResizeObserver === 'undefined') return;
 
     const root = document.documentElement;
+    // Read ref.current live (not a captured element) so the value stays correct even if the
+    // observed control's DOM node is swapped out from under us.
     const apply = () => {
+      const el = ref.current;
+      if (!el) return;
       root.style.setProperty(
         cssVar,
         `calc(${el.offsetHeight}px + var(--argus-floating-mobile-bottom) + ${gapRem}rem)`,
@@ -29,7 +33,7 @@ export function useFloatingClearance(
 
     apply();
     const observer = new ResizeObserver(apply);
-    observer.observe(el);
+    observer.observe(initial);
     window.addEventListener('resize', apply);
 
     return () => {
