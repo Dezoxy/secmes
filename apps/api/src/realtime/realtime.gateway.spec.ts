@@ -64,10 +64,15 @@ describe('RealtimeGateway', () => {
     vi.useRealTimers();
   });
 
-  /** Connect + authenticate a socket as `sub`/`tenantId`. */
-  async function authed(s: MockSocket, sub = 'alice', tenantId = 'T1'): Promise<void> {
+  /** Connect + authenticate a socket as `sub`/`tenantId`/`userId`. */
+  async function authed(
+    s: MockSocket,
+    sub = 'alice',
+    tenantId = 'T1',
+    userId = 'aaaa0000-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  ): Promise<void> {
     gw.handleConnection(sock(s));
-    auth.verify.mockResolvedValue({ sub, tenantId });
+    auth.verify.mockResolvedValue({ sub, tenantId, userId });
     await gw.onAuth(sock(s), { token: 'good-token' });
   }
 
@@ -571,9 +576,12 @@ describe('RealtimeGateway', () => {
     expect(received[0]).toMatchObject({
       callId: CALL_ID,
       conversationId: CONV,
+      msgSeq: 0,
       senderSub: 'alice',
+      senderUserId: 'aaaa0000-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       peerSub: 'bob', // alice is callerSub → peerSub = calleeSub = bob
-      envelope: 'b3BhcXVl', // ciphertext forwarded verbatim — alg/epoch NOT included (crypto-blind)
+      deliverySeq: 1,
+      envelope: { ciphertext: 'b3BhcXVl', alg: 'MLS_1.0', epoch: 0 },
     });
   });
 

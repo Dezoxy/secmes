@@ -200,22 +200,28 @@ export const CallRingEventSchema = z
   .strict();
 
 /**
- * A peer-to-peer signaling frame relayed through the gateway. The `envelope` is an opaque MLS
- * ciphertext blob — the server forwards it verbatim and never parses it (invariant #1). Every
- * signal type (offer, answer, ICE, and termination) is an encrypted inner discriminant; neither
- * the gateway nor the Redis backplane learns the call phase. Routed by (tenantId, peerSub)
- * identity — the signal is delivered only to the registered peer's sockets, not to the room.
+ * A peer-to-peer signaling frame relayed through the gateway. The `envelope.ciphertext` is an
+ * opaque MLS blob — the server forwards it verbatim and never parses it (invariant #1). `alg` and
+ * `epoch` are wire-protocol metadata the receiver needs to select the right group key; the server
+ * does not interpret them. Routed by (tenantId, peerSub) identity — delivered only to the
+ * registered peer's sockets, not to the conversation room.
  */
 export interface CallSignalEvent {
   tenantId: string;
   callId: string;
   conversationId: string;
+  /** Sender's client-scoped sequence number — passed through verbatim for the receiver's ordering. */
+  msgSeq: number;
   /** Sender's external identity subject. */
   senderSub: string;
+  /** Sender's verified DB UUID — used to attribute the frame per CallSignalFrameSchema. */
+  senderUserId: string;
   /** Peer's external identity subject — the delivery target (routing is by identity, not room). */
   peerSub: string;
-  /** Opaque MLS ciphertext blob. Forwarded verbatim — never parsed server-side (invariant #1). */
-  envelope: string;
+  /** Gateway-minted monotonic counter — lets the receiver detect out-of-order delivery. */
+  deliverySeq: number;
+  /** MLS envelope forwarded verbatim — ciphertext is opaque; alg/epoch are wire metadata only. */
+  envelope: { ciphertext: string; alg: string; epoch: number };
 }
 
 export const CallSignalEventSchema = z
@@ -223,9 +229,18 @@ export const CallSignalEventSchema = z
     tenantId: z.string().min(1),
     callId: z.string().uuid(),
     conversationId: z.string().uuid(),
+    msgSeq: z.number().int().nonnegative(),
     senderSub: z.string().min(1),
+    senderUserId: z.string(),
     peerSub: z.string().min(1),
-    envelope: z.string().min(1),
+    deliverySeq: z.number().int(),
+    envelope: z
+      .object({
+        ciphertext: z.string().min(1),
+        alg: z.string().min(1),
+        epoch: z.number().int().nonnegative(),
+      })
+      .strict(),
   })
   .strict();
 
