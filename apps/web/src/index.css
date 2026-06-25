@@ -365,6 +365,20 @@ body {
 }
 
 @media (max-width: 1023px) {
+  html,
+  body {
+    height: auto;
+    min-height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  #root {
+    min-height: 100%;
+    height: auto;
+    overflow: visible;
+  }
+
   .argus-mobile-tab-header {
     padding-top: calc(env(safe-area-inset-top, 0px) + 1rem);
     background: #0f0f16;
