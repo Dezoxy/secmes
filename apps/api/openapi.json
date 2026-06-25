@@ -1636,7 +1636,7 @@
             "bearer": []
           }
         ],
-        "summary": "Mint ephemeral TURN relay credentials (relay-only, TTL 600 s)",
+        "summary": "Mint ephemeral TURN relay credentials (relay-only, TTL 600–1200 s)",
         "tags": [
           "calls"
         ]

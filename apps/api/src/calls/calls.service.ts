@@ -60,14 +60,20 @@ export class CallsService {
       return id;
     });
 
-    const expiry = Math.floor(Date.now() / 1000) + TURN_TTL_SECONDS;
+    // Bucket expiry to the start of the current TTL window + 2×TTL.
+    // All requests within the same 600s window share the same `expiry:userId` username so
+    // coturn's user-quota=6 correctly counts simultaneous relay allocations per user
+    // rather than per ever-changing credential string. Valid for 600–1200 s.
+    const now = Math.floor(Date.now() / 1000);
+    const windowStart = Math.floor(now / TURN_TTL_SECONDS) * TURN_TTL_SECONDS;
+    const expiry = windowStart + 2 * TURN_TTL_SECONDS;
     const username = `${expiry}:${userId}`;
     const credential = await mintTurnCredential(username, this.hmacKey);
 
     return {
       iceServers: [{ urls: turnUrls(), username, credential }],
       iceTransportPolicy: 'relay',
-      ttlSeconds: TURN_TTL_SECONDS,
+      ttlSeconds: expiry - now,
     };
   }
 }

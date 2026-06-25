@@ -80,7 +80,7 @@ export class CallsController {
    *
    * Returns time-limited HMAC-SHA1 credentials for the coturn relay. The requester must have
    * ≥1 accepted friend (coarse abuse gate — docs/planning/voip/04 §2.2). Credentials are
-   * relay-only (iceTransportPolicy=relay), hiding peer IPs in V1. TTL is 600 s; clients must
+   * relay-only (iceTransportPolicy=relay), hiding peer IPs in V1. TTL is 600–1200 s (windowed); clients must
    * re-fetch per call attempt and must NOT cache across calls.
    *
    * The `credential` field is SECRET-EQUIVALENT — it must never be logged or stored.
@@ -88,7 +88,7 @@ export class CallsController {
   @Post('turn-credentials')
   @HttpCode(HttpStatus.OK)
   @Throttle(perMinute(SENSITIVE_LIMITS.turnCredentials))
-  @ApiOperation({ summary: 'Mint ephemeral TURN relay credentials (relay-only, TTL 600 s)' })
+  @ApiOperation({ summary: 'Mint ephemeral TURN relay credentials (relay-only, TTL 600–1200 s)' })
   @ApiBody({
     schema: { type: 'object', additionalProperties: false },
     required: false,
