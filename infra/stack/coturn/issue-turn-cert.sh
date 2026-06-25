@@ -223,7 +223,6 @@ RENEW_FLAGS=()
 [ "$FORCE_RENEW" -eq 1 ] && RENEW_FLAGS=(--force)
 
 log "running acme.sh --issue for ${DOMAIN} (dns_cf / Let's Encrypt)..."
-HOOK_UPLOADED=1  # deploy hook fires on exit 0 and uploads cert+key to KV; set 0 on skip.
 "$ACME" --issue --dns dns_cf -d "$DOMAIN" --server letsencrypt \
   --home "$ACME_HOME" \
   --fullchain-file "$CERT_FILE" \
@@ -233,13 +232,11 @@ HOOK_UPLOADED=1  # deploy hook fires on exit 0 and uploads cert+key to KV; set 0
   EXIT=$?
   # acme.sh exit 2 = cert already valid and not yet due for renewal (not an error in normal runs).
   if [ $EXIT -eq 2 ] && [ "$FORCE_RENEW" -eq 0 ]; then
-    HOOK_UPLOADED=0  # hook did NOT fire; main script must upload to KV below.
-    log "cert is still valid — use --renew to force. Uploading the existing cert from acme.sh store."
+    log "cert is still valid — use --renew to force. Will upload the existing cert to KV."
     # Retrieve from the acme.sh cert store (ECC preferred, RSA fallback).
     CERT_STORE_DIR="${ACME_HOME}/${DOMAIN}_ecc"
     [ -d "$CERT_STORE_DIR" ] || CERT_STORE_DIR="${ACME_HOME}/${DOMAIN}"
     cp "${CERT_STORE_DIR}/fullchain.cer" "$CERT_FILE"
-    cp "${CERT_STORE_DIR}/${DOMAIN}.key" "$KEY_FILE"
     # acme.sh exited before recording --fullchain-file/--key-file in domain.conf.
     # Patch Le_Real*Path directly so future cron renewals install to the stable 0700
     # dir, not any stale /tmp path left by a prior run of an older version of this script.
@@ -257,6 +254,13 @@ HOOK_UPLOADED=1  # deploy hook fires on exit 0 and uploads cert+key to KV; set 0
   fi
 }
 
+# Cert store directory (ECC preferred, RSA fallback). Set inside the or-block on exit 2;
+# determined here for exit 0 (--issue populated the store and returned success).
+if [ -z "${CERT_STORE_DIR:-}" ]; then
+  CERT_STORE_DIR="${ACME_HOME}/${DOMAIN}_ecc"
+  [ -d "$CERT_STORE_DIR" ] || CERT_STORE_DIR="${ACME_HOME}/${DOMAIN}"
+fi
+
 # Validate cert: check it covers the right domain and isn't already expired.
 openssl x509 -noout -checkend 0 -in "$CERT_FILE" || {
   log "FATAL: issued cert is expired or invalid"
@@ -267,17 +271,21 @@ openssl x509 -noout -text -in "$CERT_FILE" | grep -q "$DOMAIN" || {
   exit 1
 }
 
-if [ "$HOOK_UPLOADED" -eq 0 ]; then
-  # exit-2 path: deploy hook did not fire; upload cert + key to KV manually.
-  # (On exit-0, the hook already uploaded — KEY_FILE is wiped by the hook, so don't read it.)
-  log "uploading argus-turn-tls-cert → Key Vault ${KV}..."
-  az keyvault secret set --vault-name "$KV" --name "argus-turn-tls-cert" \
-    --file "$CERT_FILE" --encoding utf-8 --only-show-errors >/dev/null
-  log "uploading argus-turn-tls-key → Key Vault ${KV}..."
-  az keyvault secret set --vault-name "$KV" --name "argus-turn-tls-key" \
-    --file "$KEY_FILE" --encoding utf-8 --only-show-errors >/dev/null
-  : >"$KEY_FILE"
-fi
+# Upload cert + key to KV. The main script always handles this — acme.sh does not invoke
+# deploy hooks during --issue (only during --renew/--deploy), so relying on the hook for the
+# initial upload would leave KV empty on first provisioning.
+# - CERT_FILE: written by --issue (exit 0) or copied from cert store (exit 2); not wiped.
+# - Key: read directly from the cert store rather than KEY_FILE so the upload is correct
+#   regardless of whether a future acme.sh version fires the hook during --issue and zeroes
+#   the install-dir copy (Le_RealKeyPath) before --issue returns.
+log "uploading argus-turn-tls-cert → Key Vault ${KV}..."
+az keyvault secret set --vault-name "$KV" --name "argus-turn-tls-cert" \
+  --file "$CERT_FILE" --encoding utf-8 --only-show-errors >/dev/null
+log "uploading argus-turn-tls-key → Key Vault ${KV}..."
+az keyvault secret set --vault-name "$KV" --name "argus-turn-tls-key" \
+  --file "${CERT_STORE_DIR}/${DOMAIN}.key" --encoding utf-8 --only-show-errors >/dev/null
+# Wipe the install-dir key (written by --issue on exit 0; not present on exit 2).
+[ -f "$KEY_FILE" ] && : >"$KEY_FILE"
 
 log "cert + key in Key Vault. Verifying..."
 az keyvault secret show --vault-name "$KV" --name "argus-turn-tls-cert" \
@@ -295,11 +303,10 @@ log "Key Vault delivery verified."
   log "  Or set a calendar reminder to re-run this script with --renew every 60 days."
 }
 
-# Explicitly register the deploy hook in acme.sh's domain config for automatic renewals.
-# --issue --deploy-hook already saves Le_DeployHook to domain.conf, but --deploy makes it
-# unconditional and version-agnostic: even if --issue exits 2 (cert still valid, no renewal)
-# the hook is guaranteed to be recorded for future cron runs.
-# --deploy reads from acme.sh's internal cert store; no --fullchain-file/--key-file here.
+# Register + fire the deploy hook for cron renewals. --deploy reads from acme.sh's cert
+# store and saves Le_DeployHook to domain.conf unconditionally — ensuring the hook runs on
+# every future cron renewal regardless of how the cert was initially issued. This also
+# re-uploads cert+key to KV (idempotent after the main-script upload above).
 log "registering deploy hook for automatic renewals..."
 "$ACME" --deploy -d "$DOMAIN" --deploy-hook argus_turn_cert --home "$ACME_HOME" || {
   log "WARN: acme.sh --deploy returned non-zero — verify the hook is registered:"
