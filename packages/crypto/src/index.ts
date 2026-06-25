@@ -713,15 +713,19 @@ export class Conversation {
   }
 
   /**
-   * Shared decrypt core — called from within `this.run(...)`, never directly.
+   * Shared decrypt core — called from within `this.run(...)`, never directly. Returns the
+   * post-decrypt `newState` without advancing `this.state` — callers advance it only after all
+   * their own checks pass (P2: prevents an in-memory state advance on a F7/F8/F9 throw, which
+   * would desync the ratchet from what callers expect on error/retry).
+   *
    * Runs `processMessage` and `decryptSenderData` in parallel: both read the current state
-   * snapshot without modifying it. The `senderDataSecret` is epoch-stable across application
-   * messages (an application message never advances the epoch), so capturing it once before the
-   * parallel calls is safe and sufficient.
+   * snapshot without modifying it. The `senderDataSecret` is resolved per the message epoch —
+   * ts-mls retains old-epoch receiver data in `historicalReceiverData` for in-flight messages
+   * (P1: always use the epoch-matching secret, not blindly the current epoch's).
    */
   private async decryptInner(
     wire: Uint8Array,
-  ): Promise<{ plaintext: string; senderLeafIndex: number }> {
+  ): Promise<{ plaintext: string; senderLeafIndex: number; newState: ClientState }> {
     const decoded = decodeMlsMessage(wire, 0);
     if (!decoded) throw new Error('could not decode MLS message');
     const [msg, bytesRead] = decoded;
@@ -731,8 +735,21 @@ export class Conversation {
     if (msg.wireformat !== 'mls_private_message') {
       throw new Error(`expected an application message, got "${msg.wireformat}"`);
     }
-    // Capture before the parallel calls; senderDataSecret does not appear in result.consumed.
-    const senderDataSecret = this.state.keySchedule.senderDataSecret;
+    // Resolve the senderDataSecret for the message's epoch. ts-mls stores old-epoch receiver data
+    // in `historicalReceiverData` and uses it in processMessage (processMessages.js:27-30) when
+    // pm.epoch < state.groupContext.epoch. We must use the same epoch's secret so that our
+    // parallel decryptSenderData call succeeds and decrypts the same leaf as processMessage.
+    const msgEpoch = msg.privateMessage.epoch;
+    let senderDataSecret: Uint8Array;
+    if (msgEpoch < this.state.groupContext.epoch) {
+      const historical = this.state.historicalReceiverData.get(msgEpoch);
+      if (historical === undefined) {
+        throw new Error(`no historical receiver data for epoch ${msgEpoch} — message too old`);
+      }
+      senderDataSecret = historical.senderDataSecret;
+    } else {
+      senderDataSecret = this.state.keySchedule.senderDataSecret;
+    }
     const [result, senderData] = await Promise.all([
       processMessage(msg, this.state, emptyPskIndex, acceptAll, this.cs),
       // SECURITY: decryptSenderData returns the leaf that ts-mls messageProtection.js:120-123
@@ -753,13 +770,20 @@ export class Conversation {
     if (senderData === undefined) {
       throw new Error('SenderData authentication failed — cannot verify sender identity');
     }
-    this.state = result.newState;
-    return { plaintext: td.decode(result.message), senderLeafIndex: senderData.leafIndex };
+    return {
+      plaintext: td.decode(result.message),
+      senderLeafIndex: senderData.leafIndex,
+      newState: result.newState,
+    };
   }
 
   /** Decrypt wire bytes → plaintext. Throws on anything that isn't an application message. */
   async decrypt(wire: Uint8Array): Promise<string> {
-    return this.run(async () => (await this.decryptInner(wire)).plaintext);
+    return this.run(async () => {
+      const { plaintext, newState } = await this.decryptInner(wire);
+      this.state = newState;
+      return plaintext;
+    });
   }
 
   /**
@@ -779,14 +803,13 @@ export class Conversation {
    */
   async decryptAuthenticated(wire: Uint8Array): Promise<AuthenticatedMessage> {
     return this.run(async () => {
-      const { plaintext, senderLeafIndex } = await this.decryptInner(wire);
-      // Resolve leafIndex → identity in the current roster (same critical section, post-advance
-      // state). Application messages never change the epoch or ratchet tree (membership), so the
-      // roster is the same before and after the state advance in decryptInner.
+      const { plaintext, senderLeafIndex, newState } = await this.decryptInner(wire);
+      // Resolve leafIndex → identity from newState's roster (P2: state not yet advanced, so we
+      // use newState directly; avoids F7/F8/F9 throw leaving this.state in a post-advance limbo).
       let senderIdentity: string | undefined;
-      for (let nodeIdx = 0; nodeIdx < this.state.ratchetTree.length; nodeIdx++) {
+      for (let nodeIdx = 0; nodeIdx < newState.ratchetTree.length; nodeIdx++) {
         if (nodeIdx % 2 !== 0) continue; // parent node slot
-        const node = this.state.ratchetTree[nodeIdx];
+        const node = newState.ratchetTree[nodeIdx];
         if (!node || node.nodeType !== 'leaf') continue; // blank leaf
         if (nodeIdx / 2 !== senderLeafIndex) continue;
         const cred = node.leaf.credential;
@@ -805,6 +828,8 @@ export class Conversation {
       if (senderIdentity === undefined) {
         throw new Error(`sender leaf ${senderLeafIndex} is not a current group member`);
       }
+      // P2: advance state only after all membership/credential checks pass.
+      this.state = newState;
       return { plaintext, senderLeafIndex, senderIdentity };
     });
   }
