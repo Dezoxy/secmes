@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Users, UserPlus, Unplug } from 'lucide-react';
+import { Users, Unplug } from 'lucide-react';
 import { prefersReducedMotion } from '../../lib/pref';
 import { demoMode } from '../../lib/auth';
 import { ArgusAppIcon } from '../brand/ArgusAppIcon';
@@ -163,24 +163,24 @@ export default function GroupsScreen() {
           } ${mobileSidebarReturning ? paneBackEnterMotion : ''}`}
         >
           <div className="bg-[#0f0f16] p-4 pt-[env(safe-area-inset-top)] sm:pt-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-[#964cdc]/25" />
-                <span className="text-xl font-bold tracking-wider">
-                  <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
-                    GROUPS
-                  </span>
+            <div className="flex items-center gap-2">
+              <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-[#964cdc]/25" />
+              <span className="flex-1 text-center text-xl font-bold tracking-wider">
+                <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
+                  GROUPS
                 </span>
-              </div>
-              {groupManager && messagingDeps && (
+              </span>
+              {groupManager && messagingDeps ? (
                 <button
                   type="button"
                   onClick={() => setGroupCreateOpen(true)}
                   className="flex items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] p-2 text-white/70 transition-colors hover:border-purple-500/30 hover:bg-purple-500/10 hover:text-purple-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60"
                   aria-label="Create new group"
                 >
-                  <UserPlus className="h-4 w-4" />
+                  <Users className="h-4 w-4" />
                 </button>
+              ) : (
+                <div className="h-8 w-8 shrink-0" aria-hidden="true" />
               )}
             </div>
           </div>

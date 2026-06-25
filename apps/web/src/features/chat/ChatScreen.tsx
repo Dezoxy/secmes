@@ -325,6 +325,7 @@ export default function ChatScreen() {
                   CHAT
                 </span>
               </span>
+              <div className="h-8 w-8 shrink-0" aria-hidden="true" />
             </div>
           </div>
 
