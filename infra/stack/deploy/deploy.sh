@@ -546,7 +546,7 @@ done
 # (glitchtip + glitchtip-worker + glitchtip-db); the live default (empty list) brings up the whole stack. The
 # explicit list is experiment-only + must be kept in sync if the core/observability service set changes.
 if [ "$SKIP_GLITCHTIP" = 1 ]; then
-  STACK_SERVICES="postgres redis api caddy cloudflared prometheus alertmanager grafana loki alloy"
+  STACK_SERVICES="postgres redis api caddy cloudflared prometheus alertmanager grafana loki alloy tempo pyroscope postgres-exporter redis-exporter"
 else
   STACK_SERVICES=""
 fi

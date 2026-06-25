@@ -35,6 +35,12 @@ Environment=COMPOSE_PROJECT_NAME=argus-prod
 Environment=PGUSER=argus_prune
 Environment=PGDATABASE=argus
 
+# Docker Compose probes $HOME for CLI config/plugins. ProtectHome=true makes /home/argus inaccessible, so
+# give the Docker client a private empty tmpfs HOME like the backup/cleanup workers do.
+RuntimeDirectory=argus-audit-prune
+RuntimeDirectoryMode=0700
+Environment=HOME=%t/argus-audit-prune
+
 # `docker compose` needs the staged compose tree to resolve from; run from the app dir.
 WorkingDirectory=/opt/argus
 
