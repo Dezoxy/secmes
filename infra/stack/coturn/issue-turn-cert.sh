@@ -163,9 +163,13 @@ _CONF="${ACME_HOME}/deploy/argus_turn_cert.conf"
 
 argus_turn_cert_deploy() {
   # Called by acme.sh: $1=domain $2=keyfile $3=certfile $4=cafile $5=fullchainfile
-  local _keyfile _fullchainfile KV IID REGION WDIR CERT_TMP KEY_TMP
+  # Note: $2 is CERT_KEY_PATH (acme.sh's cert store key), NOT Le_RealKeyPath (install copy).
+  # Never wipe $2/_keyfile — acme.sh needs it for future renewals.
+  local _keyfile _fullchainfile KV IID REGION WDIR CERT_TMP KEY_TMP _install_key
   _keyfile="$2"
   _fullchainfile="$5"
+  # Install-dir copy written by acme.sh _installcert before invoking hooks (Le_RealKeyPath).
+  _install_key="${ACME_HOME}/install/${1}/privkey.pem"
   KV="${ARGUS_KEY_VAULT:?ARGUS_KEY_VAULT not set in argus_turn_cert.conf}"
   IID="${INSTANCE_ID:-}"
   REGION="${AWS_REGION:-}"
@@ -180,16 +184,16 @@ argus_turn_cert_deploy() {
   az keyvault secret set --vault-name "$KV" --name "argus-turn-tls-cert" \
     --file "$CERT_TMP" --encoding utf-8 --only-show-errors >/dev/null \
     || { printf 'FATAL: argus_turn_cert: failed to upload cert to KV %s\n' "$KV" >&2
-         rm -rf -- "$WDIR"; : >"$_keyfile"; return 1; }
+         rm -rf -- "$WDIR"; [ -f "$_install_key" ] && : >"$_install_key"; return 1; }
   az keyvault secret set --vault-name "$KV" --name "argus-turn-tls-key" \
     --file "$KEY_TMP" --encoding utf-8 --only-show-errors >/dev/null \
     || { printf 'FATAL: argus_turn_cert: failed to upload key to KV %s\n' "$KV" >&2
-         : >"$KEY_TMP"; rm -rf -- "$WDIR"; : >"$_keyfile"; return 1; }
+         : >"$KEY_TMP"; rm -rf -- "$WDIR"; [ -f "$_install_key" ] && : >"$_install_key"; return 1; }
   : >"$KEY_TMP"
   rm -rf -- "$WDIR"
   # Wipe the install-dir copy — acme.sh's cron writes the renewed key there (Le_RealKeyPath)
   # before invoking the hook; wipe it here so it doesn't persist after upload to KV.
-  : >"$_keyfile"
+  [ -f "$_install_key" ] && : >"$_install_key"
 
   # Trigger the VM to re-fetch the renewed secrets from KV (argus-secrets → /run/argus/secrets/)
   # and reload coturn TLS without dropping active relay allocations (SIGHUP = graceful reload).
