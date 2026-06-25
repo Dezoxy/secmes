@@ -117,10 +117,17 @@ if [ ! -x "$ACME" ]; then
   fi
 fi
 
-# Scratch dir — removed on any exit. umask 0077 applies to any files this script creates.
-WORKDIR="$(mktemp -d)"
-trap 'rm -rf -- "$WORKDIR"' EXIT
+# Stable install dir for cert + key within ACME_HOME. Pre-created at 0700 so that on cron
+# renewals acme.sh's mkdir -p finds the existing 0700 dir unchanged — no world-readable key
+# regardless of cron umask. Passing these as --fullchain-file/--key-file to --issue also
+# updates Le_RealFullChainPath/Le_RealKeyPath in the domain conf, migrating any stale /tmp
+# paths from a prior run of an older version of this script.
+INSTALL_DIR="${ACME_HOME}/install/${DOMAIN}"
+mkdir -p "$INSTALL_DIR"
+chmod 0700 "$INSTALL_DIR"
 umask 0077
+CERT_FILE="${INSTALL_DIR}/fullchain.pem"
+KEY_FILE="${INSTALL_DIR}/privkey.pem"
 
 # --- Write the deploy hook BEFORE issuing so acme.sh can invoke it on the first --issue. ---
 # Hook filename uses underscores: acme.sh derives the function name from the basename, and
@@ -208,24 +215,24 @@ RENEW_FLAGS=()
 log "running acme.sh --issue for ${DOMAIN} (dns_cf / Let's Encrypt)..."
 "$ACME" --issue --dns dns_cf -d "$DOMAIN" --server letsencrypt \
   --home "$ACME_HOME" \
+  --fullchain-file "$CERT_FILE" \
+  --key-file "$KEY_FILE" \
   --deploy-hook argus_turn_cert \
   "${RENEW_FLAGS[@]}" || {
   EXIT=$?
   # acme.sh exit 2 = cert already valid and not yet due for renewal (not an error in normal runs).
   if [ $EXIT -eq 2 ] && [ "$FORCE_RENEW" -eq 0 ]; then
     log "cert is still valid — use --renew to force. Uploading the existing cert from acme.sh store."
+    # Retrieve from the acme.sh cert store (ECC preferred, RSA fallback).
+    CERT_STORE_DIR="${ACME_HOME}/${DOMAIN}_ecc"
+    [ -d "$CERT_STORE_DIR" ] || CERT_STORE_DIR="${ACME_HOME}/${DOMAIN}"
+    cp "${CERT_STORE_DIR}/fullchain.cer" "$CERT_FILE"
+    cp "${CERT_STORE_DIR}/${DOMAIN}.key" "$KEY_FILE"
   else
     log "FATAL: acme.sh exited $EXIT"
     exit $EXIT
   fi
 }
-
-# Read cert + key from acme.sh's internal cert store — stable paths with secure permissions
-# that acme.sh maintains across cron renewals, avoiding world-readable temp directories.
-CERT_STORE_DIR="${ACME_HOME}/${DOMAIN}_ecc"
-[ -d "$CERT_STORE_DIR" ] || CERT_STORE_DIR="${ACME_HOME}/${DOMAIN}"
-CERT_FILE="${CERT_STORE_DIR}/fullchain.cer"
-KEY_FILE="${CERT_STORE_DIR}/${DOMAIN}.key"
 
 # Validate cert before uploading: check it covers the right domain and isn't already expired.
 openssl x509 -noout -checkend 0 -in "$CERT_FILE" || {
@@ -244,6 +251,9 @@ az keyvault secret set --vault-name "$KV" --name "argus-turn-tls-cert" \
 log "uploading argus-turn-tls-key → Key Vault ${KV}..."
 az keyvault secret set --vault-name "$KV" --name "argus-turn-tls-key" \
   --file "$KEY_FILE" --encoding utf-8 --only-show-errors >/dev/null
+
+# Wipe the install-dir copy of the private key (belt-and-suspenders; dir is already 0700).
+: >"$KEY_FILE"
 
 log "cert + key uploaded. Verifying..."
 az keyvault secret show --vault-name "$KV" --name "argus-turn-tls-cert" \
