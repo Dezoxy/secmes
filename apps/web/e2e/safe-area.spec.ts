@@ -1,5 +1,14 @@
 import { expect, test } from '@playwright/test';
 
+test('installed PWA status bar uses opaque mode', async ({ page }) => {
+  await page.goto('/chat');
+
+  await expect(page.locator('meta[name="apple-mobile-web-app-status-bar-style"]')).toHaveAttribute(
+    'content',
+    'black',
+  );
+});
+
 // Guards the iOS PWA safe-area fixes: the bottom floating nav must reserve only its *measured*
 // height as scroll clearance (so the bottom safe-zone is reclaimed as edge-to-edge content rather
 // than a fixed dead band), and real content must scroll clear of the floating pills.
@@ -39,13 +48,15 @@ test('bottom nav clearance is measured and content clears the floating pills', a
 
 // The resume-repaint workaround must never leave the app dimmed: after a background→resume cycle
 // (visibilitychange) the transient #root opacity nudge has to settle back to fully opaque.
-test('resume repaint leaves #root fully opaque', async ({ page }) => {
+test('foreground repaint leaves #root fully opaque', async ({ page }) => {
   await page.goto('/chat');
 
-  await page.evaluate(() => {
+  const pageshowOpacity = await page.evaluate(() => {
     document.dispatchEvent(new Event('visibilitychange'));
     window.dispatchEvent(new Event('pageshow'));
+    return document.getElementById('root')?.style.opacity ?? '';
   });
+  expect(pageshowOpacity).toBe('0.9999');
   // Allow the two requestAnimationFrame ticks that restore opacity to run.
   await page.waitForTimeout(100);
 
