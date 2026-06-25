@@ -381,13 +381,17 @@ body {
 
 :root {
   --argus-floating-mobile-bottom: 2rem;
+  /* Pre-measurement fallbacks; useFloatingClearance() overrides these with the control's real
+     height once mounted so content fills the bottom edge-to-edge with no reserved dead band. */
   --argus-floating-mobile-nav-clearance: calc(var(--argus-floating-mobile-bottom) + 5.5rem);
   --argus-floating-mobile-composer-clearance: calc(var(--argus-floating-mobile-bottom) + 5.75rem);
 }
 
 @media (display-mode: standalone) and (max-width: 1023px) {
   :root {
-    --argus-floating-mobile-bottom: max(2rem, env(safe-area-inset-bottom, 0px));
+    /* Hug the home-indicator safe inset (its own value already clears the home bar) instead of
+       lifting the pills by a fixed 2rem floor, which left a wide dead band below them. */
+    --argus-floating-mobile-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
   }
 }
 
