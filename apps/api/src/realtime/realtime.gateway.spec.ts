@@ -684,4 +684,81 @@ describe('RealtimeGateway', () => {
     expect(lastSend(s)).toEqual({ event: 'error', data: { message: 'rate limited' } });
     expect(received).toHaveLength(0);
   });
+
+  // ── call.end / call.ring identity routing ────────────────────────────────────────────────────
+
+  it('deliverCallEnd: reaches caller and callee sockets not subscribed to the room', async () => {
+    const CALL_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const callerSock = mkSocket();
+    const calleeSock = mkSocket();
+    const other = mkSocket();
+    await authed(callerSock, 'argusid:caller', 'T1');
+    await authed(calleeSock, 'argusid:callee', 'T1');
+    await authed(other, 'argusid:other', 'T1');
+    callerSock.send.mockClear();
+    calleeSock.send.mockClear();
+    other.send.mockClear();
+
+    bus.emitCallEnd({
+      tenantId: 'T1',
+      callId: CALL_ID,
+      conversationId: CONV,
+      reason: 'timeout',
+      callerSub: 'argusid:caller',
+      calleeSub: 'argusid:callee',
+    });
+
+    expect(lastSend(callerSock)?.event).toBe('call.end');
+    expect(lastSend(calleeSock)?.event).toBe('call.end');
+    expect(lastSend(other)).toBeUndefined(); // non-participant skipped
+  });
+
+  it('deliverCallEnd: tenant isolation — cross-tenant socket with matching sub skipped', async () => {
+    const CALL_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const t2Sock = mkSocket();
+    await authed(t2Sock, 'argusid:caller', 'T2'); // same sub, different tenant
+    t2Sock.send.mockClear();
+
+    bus.emitCallEnd({
+      tenantId: 'T1',
+      callId: CALL_ID,
+      conversationId: CONV,
+      reason: 'timeout',
+      callerSub: 'argusid:caller',
+      calleeSub: 'argusid:callee',
+    });
+
+    expect(lastSend(t2Sock)).toBeUndefined();
+  });
+
+  it('deliverCallRing: both sub families receive call.ring when bus emits for each', async () => {
+    const CALL_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+    const argusIdSock = mkSocket();
+    const legacySock = mkSocket();
+    await authed(argusIdSock, 'argusid:callee-uuid', 'T1');
+    await authed(legacySock, 'legacy-ext-sub', 'T1');
+    argusIdSock.send.mockClear();
+    legacySock.send.mockClear();
+
+    // calls.service emits ring for both sub families (Set-deduplicated at the service layer)
+    bus.emitCallRing({
+      tenantId: 'T1',
+      callId: CALL_ID,
+      conversationId: CONV,
+      callerUserId: 'caller-uuid',
+      calleeSub: 'argusid:callee-uuid',
+      media: 'audio',
+    });
+    bus.emitCallRing({
+      tenantId: 'T1',
+      callId: CALL_ID,
+      conversationId: CONV,
+      callerUserId: 'caller-uuid',
+      calleeSub: 'legacy-ext-sub',
+      media: 'audio',
+    });
+
+    expect(lastSend(argusIdSock)?.event).toBe('call.ring');
+    expect(lastSend(legacySock)?.event).toBe('call.ring');
+  });
 });
