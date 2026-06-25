@@ -33,6 +33,7 @@ describe('RealtimeGateway', () => {
     validateAndRelay: ReturnType<typeof vi.fn>;
     release: ReturnType<typeof vi.fn>;
     register: ReturnType<typeof vi.fn>;
+    releaseByParticipants: ReturnType<typeof vi.fn>;
   };
   let gw: RealtimeGateway;
 
@@ -41,7 +42,12 @@ describe('RealtimeGateway', () => {
     bus = new InProcessRealtimeBus();
     auth = { verify: vi.fn() };
     messaging = { isMember: vi.fn() };
-    callsAuthz = { validateAndRelay: vi.fn(), release: vi.fn(), register: vi.fn() };
+    callsAuthz = {
+      validateAndRelay: vi.fn(),
+      release: vi.fn(),
+      register: vi.fn(),
+      releaseByParticipants: vi.fn(),
+    };
     const pinoMock = {
       info: vi.fn(),
       warn: vi.fn(),
@@ -583,31 +589,27 @@ describe('RealtimeGateway', () => {
       deliverySeq: 1,
       envelope: { ciphertext: 'b3BhcXVl', alg: 'MLS_1.0', epoch: 0 },
     });
+    // Gateway passes conversationId as 4th arg so service can check it BEFORE phase mutation.
+    expect(callsAuthz.validateAndRelay).toHaveBeenCalledWith(CALL_ID, 'alice', 'T1', CONV);
   });
 
-  it('call.signal: mismatched conversationId (client vs authz map) → silent drop', async () => {
+  it('call.signal: mismatched conversationId (client vs authz map) → silent drop, no phase mutation', async () => {
+    // The conversationId check now lives inside validateAndRelay (before any phase mutation).
+    // When the service rejects the mismatch it returns null — the gateway treats it as an
+    // unknown callId and silently drops. The callee cannot advance the call to `active` by
+    // sending a valid callId with a wrong conversationId.
     const CALL_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
     const OTHER_CONV = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
     const payload = {
-      conversationId: OTHER_CONV, // different from the one registered in the authz map
+      conversationId: OTHER_CONV, // does not match the registered entry
       callId: CALL_ID,
       msgSeq: 0,
       envelope: { ciphertext: 'b3BhcXVl', alg: 'MLS_1.0', epoch: 0 },
     };
-    const entry = {
-      tenantId: 'T1',
-      conversationId: CONV, // authoritative — registered at invite time
-      callerSub: 'alice',
-      calleeSub: 'bob',
-      phase: 'active' as const,
-      armedAt: 0,
-      lastSignalAt: 0,
-      ringTimer: 0 as unknown as ReturnType<typeof setTimeout>,
-    };
 
     const s = mkSocket();
     await authed(s, 'alice', 'T1');
-    callsAuthz.validateAndRelay.mockReturnValue(entry);
+    callsAuthz.validateAndRelay.mockReturnValue(null); // service rejects the mismatch
 
     const received: unknown[] = [];
     bus.onCallSignal((e) => received.push(e));
@@ -617,6 +619,8 @@ describe('RealtimeGateway', () => {
 
     expect(received).toHaveLength(0); // mismatch → silent drop
     expect(lastSend(s)).toBeUndefined(); // no error frame (no oracle)
+    // Gateway passes the client-supplied conversationId so the service can guard it pre-mutation.
+    expect(callsAuthz.validateAndRelay).toHaveBeenCalledWith(CALL_ID, 'alice', 'T1', OTHER_CONV);
   });
 
   it('call.release: valid participant → calls authz.release, no bus fan-out', async () => {
@@ -760,5 +764,15 @@ describe('RealtimeGateway', () => {
 
     expect(lastSend(argusIdSock)?.event).toBe('call.ring');
     expect(lastSend(legacySock)?.event).toBe('call.ring');
+  });
+
+  it('notifyRemoved: calls releaseByParticipants with removed subs to invalidate stale call entries', async () => {
+    bus.emitMemberRemoved({
+      tenantId: 'T1',
+      conversationId: CONV,
+      removedSubs: ['argusid:removed-user'],
+    });
+
+    expect(callsAuthz.releaseByParticipants).toHaveBeenCalledWith('T1', ['argusid:removed-user']);
   });
 });

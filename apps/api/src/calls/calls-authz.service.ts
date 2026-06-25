@@ -66,14 +66,21 @@ export class CallsAuthzService {
 
   /**
    * Validate an inbound `call.signal` frame and return the authz entry if it passes, or null for
-   * a silent drop. Also advances the call phase on the first callee signal (ringing → active) and
-   * resets the activity timer on every valid active-phase signal.
+   * a silent drop. All checks run BEFORE any phase mutation — the conversationId guard is included
+   * here so a callee cannot advance the call to `active` (cancelling the ring timer) by sending a
+   * valid callId with a mismatched conversationId.
    */
-  validateAndRelay(callId: string, senderSub: string, tenantId: string): AuthzEntry | null {
+  validateAndRelay(
+    callId: string,
+    senderSub: string,
+    tenantId: string,
+    conversationId: string,
+  ): AuthzEntry | null {
     const entry = this.authzMap.get(callId);
     if (!entry) return null;
     if (entry.tenantId !== tenantId) return null;
     if (entry.callerSub !== senderSub && entry.calleeSub !== senderSub) return null;
+    if (entry.conversationId !== conversationId) return null; // must match invite-registered value
 
     // First callee signal flips the call to active and upgrades the timers.
     if (entry.phase === 'ringing' && senderSub === entry.calleeSub) {
@@ -120,6 +127,21 @@ export class CallsAuthzService {
       callerSub: entry.callerSub,
       calleeSub: entry.calleeSub,
     });
+  }
+
+  /**
+   * Release all call entries in a tenant where either participant sub is in `subs`. Called by the
+   * gateway when a `MemberRemovedEvent` arrives: a removed member must not continue exchanging
+   * call signals through a stale authz entry until the inactivity timer expires.
+   */
+  releaseByParticipants(tenantId: string, subs: string[]): void {
+    const subSet = new Set(subs);
+    const toRelease: string[] = [];
+    for (const [callId, entry] of this.authzMap) {
+      if (entry.tenantId !== tenantId) continue;
+      if (subSet.has(entry.callerSub) || subSet.has(entry.calleeSub)) toRelease.push(callId);
+    }
+    for (const callId of toRelease) this.expireEntry(callId, 'peer-gone');
   }
 
   private expireEntry(callId: string, reason: 'timeout' | 'peer-gone'): void {

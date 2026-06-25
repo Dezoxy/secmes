@@ -88,4 +88,44 @@ describe('CallsAuthzService', () => {
     expect(ends).toHaveLength(1);
     expect(ends[0]).toMatchObject({ callId: CALL_ID, reason: 'timeout' });
   });
+
+  it('validateAndRelay: rejects a mismatched conversationId before mutating phase', () => {
+    register();
+
+    const result = svc.validateAndRelay(
+      CALL_ID,
+      'caller',
+      'T1',
+      'cccccccc-cccc-4ccc-8ccc-cccccccccccc', // wrong conversation
+    );
+
+    expect(result).toBeNull();
+    // Entry still exists with original phase (no mutation occurred).
+    const correct = svc.validateAndRelay(CALL_ID, 'caller', 'T1', CONV);
+    expect(correct).not.toBeNull();
+    expect(correct?.phase).toBe('ringing'); // phase unchanged by the rejected call
+  });
+
+  it('releaseByParticipants: emits call.end{peer-gone} for entries matching caller sub', () => {
+    register();
+
+    const ends: unknown[] = [];
+    bus.onCallEnd((e) => ends.push(e));
+
+    svc.releaseByParticipants('T1', ['caller']);
+
+    expect(ends).toHaveLength(1);
+    expect(ends[0]).toMatchObject({ callId: CALL_ID, reason: 'peer-gone' });
+  });
+
+  it('releaseByParticipants: tenant isolation — does not release cross-tenant entries', () => {
+    register();
+
+    const ends: unknown[] = [];
+    bus.onCallEnd((e) => ends.push(e));
+
+    svc.releaseByParticipants('T2', ['caller']); // wrong tenant
+
+    expect(ends).toHaveLength(0);
+  });
 });
