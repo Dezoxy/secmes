@@ -120,6 +120,8 @@ export class CallsAuthzService {
       callId,
       conversationId: entry.conversationId,
       reason,
+      callerSub: entry.callerSub,
+      calleeSub: entry.calleeSub,
     });
   }
 

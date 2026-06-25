@@ -247,13 +247,19 @@ export const CallSignalEventSchema = z
 /**
  * A server-issued end-of-call notification for server-known lifecycle events only (ring timeout,
  * abrupt peer disconnect). Client-initiated decline/busy/cancel/hangup travel inside the encrypted
- * `call.signal` — the server never learns the call phase from those. Delivered to the conversation room.
+ * `call.signal` — the server never learns the call phase from those. Delivered by identity
+ * (callerSub + calleeSub) rather than room fan-out, so participants who are online but not
+ * subscribed to the conversation room (the common state during ringing) still receive the event.
  */
 export interface CallEndEvent {
   tenantId: string;
   callId: string;
   conversationId: string;
   reason: 'timeout' | 'peer-gone';
+  /** Caller's socket-auth subject — used for identity-routed delivery. */
+  callerSub: string;
+  /** Callee's canonical socket-auth subject — used for identity-routed delivery. */
+  calleeSub: string;
 }
 
 export const CallEndEventSchema = z
@@ -262,6 +268,8 @@ export const CallEndEventSchema = z
     callId: z.string().uuid(),
     conversationId: z.string().uuid(),
     reason: z.enum(['timeout', 'peer-gone']),
+    callerSub: z.string().min(1),
+    calleeSub: z.string().min(1),
   })
   .strict();
 
