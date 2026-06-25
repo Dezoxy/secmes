@@ -244,6 +244,7 @@ export default function FriendsScreen() {
                 {friends.length} accepted {friends.length === 1 ? 'friend' : 'friends'}
               </p>
             </div>
+            <div className="h-8 w-8 shrink-0" aria-hidden="true" />
           </div>
 
           {/* Search input — slides in when open */}
