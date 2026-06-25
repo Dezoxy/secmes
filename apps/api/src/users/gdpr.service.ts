@@ -46,6 +46,7 @@ export class GdprService {
             privacyReadReceipts: schema.users.privacyReadReceipts,
             privacyTypingIndicators: schema.users.privacyTypingIndicators,
             privacyLinkPreviews: schema.users.privacyLinkPreviews,
+            callRelayOnly: schema.users.callRelayOnly,
           })
           .from(schema.users)
           .where(
@@ -259,6 +260,9 @@ export class GdprService {
           readReceipts: profile.privacyReadReceipts ?? true,
           typingIndicators: profile.privacyTypingIndicators ?? true,
           linkPreviews: profile.privacyLinkPreviews ?? true,
+        },
+        callSettings: {
+          relayOnly: profile.callRelayOnly,
         },
       },
       devices: devices.map((d) => ({
