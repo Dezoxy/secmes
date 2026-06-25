@@ -162,7 +162,7 @@ export default function GroupsScreen() {
             mounted ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-8'
           } ${mobileSidebarReturning ? paneBackEnterMotion : ''}`}
         >
-          <div className="bg-[#0f0f16] p-4 pt-[env(safe-area-inset-top)] sm:pt-4">
+          <div className="relative bg-[#0f0f16]/80 backdrop-blur-xl p-4 pt-[env(safe-area-inset-top)] sm:pt-4 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-[-1px] after:h-px after:bg-inherit after:backdrop-blur-xl after:content-['']">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-[#964cdc]/25" />

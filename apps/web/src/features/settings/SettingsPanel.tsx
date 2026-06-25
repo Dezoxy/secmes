@@ -387,12 +387,12 @@ export function SettingsPanel({
       <aside
         className={`${
           mobileSectionOpen || mobileBackAnimating ? 'hidden' : 'flex'
-        } w-full flex-col bg-[#0f0f16] px-3 pt-[env(safe-area-inset-top)] sm:flex sm:w-80 sm:shrink-0 sm:border-r sm:border-white/5 sm:px-4 sm:pt-4 ${
+        } relative w-full flex-col overflow-hidden bg-[#0f0f16] px-3 sm:flex sm:w-80 sm:shrink-0 sm:border-r sm:border-white/5 sm:px-4 ${
           mobileMenuReturning ? paneBackEnterMotion : ''
         }`}
       >
         {/* Fixed header */}
-        <div className="mb-4 flex shrink-0 items-center justify-between">
+        <div className="relative -mx-3 sm:-mx-4 flex shrink-0 items-center justify-between bg-[#0f0f16]/80 backdrop-blur-xl px-3 pb-4 pt-[env(safe-area-inset-top)] sm:px-4 sm:pb-4 sm:pt-4 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-[-1px] after:h-px after:bg-inherit after:backdrop-blur-xl after:content-['']">
           <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />
           <h2 className="flex-1 text-center text-xl font-bold tracking-wider">
             <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
@@ -470,7 +470,7 @@ export function SettingsPanel({
           mobileBackAnimating ? paneBackExitMotion : ''
         }`}
       >
-        <div className="shrink-0 flex items-center gap-3 px-3 pt-[env(safe-area-inset-top)] pb-4 sm:px-6 sm:pt-6 sm:pb-4">
+        <div className="relative shrink-0 flex items-center gap-3 bg-[#0f0f16]/80 backdrop-blur-xl px-3 pt-[env(safe-area-inset-top)] pb-4 sm:px-6 sm:pt-6 sm:pb-4 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-[-1px] after:h-px after:bg-inherit after:backdrop-blur-xl after:content-['']">
           <IconButton
             onClick={returnToSettingsMenu}
             className="sm:hidden"

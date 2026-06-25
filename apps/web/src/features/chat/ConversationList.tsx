@@ -37,6 +37,11 @@ export function ConversationList({
 
   const revealSearch = () => setSearchVisible(true);
 
+  const focusSearch = () => {
+    revealSearch();
+    requestAnimationFrame(() => searchInputRef.current?.focus());
+  };
+
   const hideSearch = () => {
     searchInputRef.current?.blur();
     setSearchFocused(false);
@@ -124,6 +129,18 @@ export function ConversationList({
       onTouchMoveCapture={handleSidebarTouchMoveCapture}
       onTouchEndCapture={handleSidebarTouchEndCapture}
     >
+      {/* Search reveal pill */}
+      {!searchVisible && (
+        <button
+          type="button"
+          onClick={focusSearch}
+          aria-label="Reveal conversation search"
+          className="flex w-full justify-center py-2 focus:outline-none"
+        >
+          <span className="h-1 w-8 rounded-full bg-white/15" aria-hidden="true" />
+        </button>
+      )}
+
       {/* Pull-down Search */}
       <div
         onWheel={handleSearchWheel}
