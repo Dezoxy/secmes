@@ -420,8 +420,10 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   /**
    * Minimal server-state cleanup frame: lets the client promptly release the call-authorization
    * entry on hang-up/decline so the server doesn't have to wait for the inactivity timeout. Carries
-   * only `{callId}` — no reason, no SDP. Does NOT relay anything; client-initiated call termination
-   * travels peer-to-peer inside the encrypted `call.signal`. Idempotent (no-op if already gone).
+   * only `{callId}` — no reason, no SDP. Always triggers a server-issued `call.end{peer-gone}` to
+   * both participants (inside `callsAuthz.release`) so a callee who received `call.ring` can dismiss
+   * the incoming-call UI even if the encrypted cancel signal was dropped. Idempotent (no-op if
+   * already gone).
    */
   @SubscribeMessage('call.release')
   onCallRelease(@ConnectedSocket() client: WebSocket, @MessageBody() data: unknown): void {
@@ -431,8 +433,8 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     const callId = (data as { callId?: unknown } | null)?.callId;
     const parsed = CallIdSchema.safeParse(callId);
     if (!parsed.success) return; // invalid UUID — silent drop
+    // call.end{peer-gone} is emitted inside callsAuthz.release() for both participants.
     this.callsAuthz.release(parsed.data, state.auth.sub, state.auth.tenantId);
-    // No bus event. No fan-out. The encrypted hang-up already went peer-to-peer via call.signal.
   }
 
   /** Fixed-window rate check for call signal frames on one socket (same pattern as allowSubscribe). */
