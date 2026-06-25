@@ -121,6 +121,8 @@ const adminSection: { id: SectionId; label: string; icon: LucideIcon } = {
 };
 
 const SETTINGS_CLOSE_ANIMATION_MS = 220;
+const SETTINGS_MOBILE_BACK_EXIT_MS = 90;
+const SETTINGS_MOBILE_MENU_RETURN_MS = 100;
 
 function isMobileSettingsViewport(): boolean {
   return typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches;
@@ -329,8 +331,8 @@ export function SettingsPanel({
       });
       mobileMenuTimerRef.current = window.setTimeout(() => {
         setMobileMenuReturning(false);
-      }, 220);
-    }, 180);
+      }, SETTINGS_MOBILE_MENU_RETURN_MS);
+    }, SETTINGS_MOBILE_BACK_EXIT_MS);
   }, [active]);
 
   useEffect(() => {
@@ -405,7 +407,7 @@ export function SettingsPanel({
           )}
         </div>
 
-        <div className="-mx-3 min-h-0 flex-1 overflow-y-auto px-3 pb-[calc(env(safe-area-inset-bottom)_+_6rem)] sm:-mx-4 sm:px-4 lg:pb-4">
+        <div className="argus-scroll-clear-floating-nav -mx-3 min-h-0 flex-1 overflow-y-auto px-3 sm:-mx-4 sm:px-4">
           {!standalone && (
             <section
               className="rounded-2xl border border-white/5 bg-white/[0.02] p-3"
@@ -498,7 +500,7 @@ export function SettingsPanel({
         <div
           key={active}
           data-settings-section-scroller="true"
-          className="flex-1 overflow-y-auto px-3 pb-[calc(env(safe-area-inset-bottom)_+_6rem)] sm:px-6 lg:pb-6"
+          className="argus-scroll-clear-floating-nav flex-1 overflow-y-auto px-3 sm:px-6 lg:pb-6"
         >
           <div className={mobileBackAnimating ? '' : surfaceEnterMotion}>
             {active === 'security' && <SecuritySettings />}

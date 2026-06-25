@@ -35,6 +35,9 @@ import { safetyNumberFromMember } from '@argus/crypto';
 import { useLocation } from 'react-router-dom';
 import { useSetNavVisible } from '../../routes/NavVisibilityContext';
 
+const MOBILE_PANE_BACK_EXIT_MS = 90;
+const MOBILE_PANE_BACK_ENTER_MS = 100;
+
 export default function ChatScreen() {
   const setNavVisible = useSetNavVisible();
   const location = useLocation();
@@ -347,8 +350,8 @@ export default function ChatScreen() {
       setMobileSidebarReturning(true);
       mobileSidebarReturnTimerRef.current = window.setTimeout(() => {
         setMobileSidebarReturning(false);
-      }, 220);
-    }, 180);
+      }, MOBILE_PANE_BACK_ENTER_MS);
+    }, MOBILE_PANE_BACK_EXIT_MS);
   }, []);
 
   useSwipeBack(mainPanelRef, handleBackToConversations, !showSidebar);
@@ -553,6 +556,7 @@ export default function ChatScreen() {
                 conversation={selectedConversation}
                 onImageClick={setPreviewImage}
                 bottomNavClearance={false}
+                floatingBars
               />
               {effectiveSelectedIsLive && !selectedIsSyncLost && (
                 <ChatInput
