@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import { DEFAULT_PRIVACY_SETTINGS } from './PrivacySettings';
@@ -8,27 +10,13 @@ import {
   writeStoredPrivacySettings,
 } from './privacy-settings';
 
-// Back the module's browserLocalStorage() with an in-memory store + a stubbed window (node test env).
-function fakeLocalStorage(): Storage {
-  const map = new Map<string, string>();
-  return {
-    getItem: (k) => map.get(k) ?? null,
-    setItem: (k, v) => void map.set(k, v),
-    removeItem: (k) => void map.delete(k),
-    clear: () => map.clear(),
-    key: (i) => [...map.keys()][i] ?? null,
-    get length() {
-      return map.size;
-    },
-  } as Storage;
-}
-
 describe('privacy-settings', () => {
   beforeEach(() => {
-    vi.stubGlobal('window', { localStorage: fakeLocalStorage() });
+    window.localStorage.clear();
   });
   afterEach(() => {
-    vi.unstubAllGlobals();
+    window.localStorage.clear();
+    vi.restoreAllMocks();
   });
 
   it('defaults read receipts to off (safe default) when nothing is cached', () => {
