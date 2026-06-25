@@ -55,8 +55,20 @@ function setupReconcileWorker(
   return { subscribe, getSubscription };
 }
 
+/** In-memory localStorage stub — this spec runs in the node env where localStorage is absent. */
+function stubLocalStorage() {
+  const store = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+    setItem: (k: string, v: string) => void store.set(k, String(v)),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => store.clear(),
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  stubLocalStorage(); // fresh "user disabled push" intent flag store between tests
   save.mockResolvedValue(undefined);
   del.mockResolvedValue(undefined);
   requestPermissionMock.mockResolvedValue('granted');
@@ -160,6 +172,30 @@ describe('reconcilePushSubscription', () => {
     vi.unstubAllGlobals();
     await expect(reconcilePushSubscription(DEVICE_ID, VAPID_KEY)).resolves.toBeUndefined();
     expect(save).not.toHaveBeenCalled();
+  });
+
+  it('does NOT re-enable push the user explicitly disabled (permission granted, subscription gone)', async () => {
+    // Simulate an explicit disable: unsubscribeFromPush records intent even though permission stays granted.
+    await unsubscribeFromPush(DEVICE_ID);
+    vi.clearAllMocks();
+    const { subscribe } = setupReconcileWorker(null);
+
+    await reconcilePushSubscription(DEVICE_ID, VAPID_KEY);
+
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('resumes self-healing after the user re-enables push (intent flag cleared)', async () => {
+    await unsubscribeFromPush(DEVICE_ID); // sets the disabled flag
+    await subscribeToPush(DEVICE_ID, VAPID_KEY); // an explicit enable clears it
+    vi.clearAllMocks();
+    const { subscribe } = setupReconcileWorker(null);
+
+    await reconcilePushSubscription(DEVICE_ID, VAPID_KEY);
+
+    expect(subscribe).toHaveBeenCalledOnce();
+    expect(save).toHaveBeenCalledOnce();
   });
 });
 

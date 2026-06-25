@@ -1,5 +1,28 @@
 import { deletePushSubscription, savePushSubscription } from './api';
 
+// Records whether the user EXPLICITLY turned push off. Notification permission stays 'granted' after a
+// disable (browsers don't let JS revoke it), so permission alone can't tell "iOS dropped the subscription
+// on update" (restore it) apart from "the user tapped Disable" (leave it off). This flag carries that intent
+// across reloads so the silent reconcile never re-enables push the user deliberately disabled.
+const PUSH_USER_DISABLED_KEY = 'argus-push-user-disabled';
+
+function setPushUserDisabled(disabled: boolean): void {
+  try {
+    if (disabled) localStorage.setItem(PUSH_USER_DISABLED_KEY, '1');
+    else localStorage.removeItem(PUSH_USER_DISABLED_KEY);
+  } catch {
+    // localStorage unavailable (e.g. private mode) — best-effort intent tracking only.
+  }
+}
+
+function pushUserDisabled(): boolean {
+  try {
+    return localStorage.getItem(PUSH_USER_DISABLED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 /** Convert an ArrayBuffer to a base64url string (no padding). Loop-safe for any buffer size. */
 function toBase64Url(buf: ArrayBuffer): string {
   const bytes = new Uint8Array(buf);
@@ -87,6 +110,7 @@ export async function subscribeToPush(deviceId: string, vapidPublicKey: string):
 
   const reg = await navigator.serviceWorker.ready;
   await subscribeAndSave(reg, deviceId, vapidPublicKey);
+  setPushUserDisabled(false); // an explicit enable clears any prior "user disabled" intent
 }
 
 /**
@@ -108,6 +132,9 @@ export async function reconcilePushSubscription(
   // Permission stays 'granted' across updates (browsers don't auto-revoke it); only the subscription is lost.
   // If the user never granted it (or revoked it), do nothing — re-enabling stays an explicit, gesture-driven act.
   if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  // The user explicitly turned push off (permission is still 'granted' but the subscription was removed on
+  // purpose) — honour that intent rather than silently re-enabling it.
+  if (pushUserDisabled()) return;
 
   const reg = await navigator.serviceWorker.ready;
   const existing = await reg.pushManager.getSubscription();
@@ -132,6 +159,7 @@ export async function reconcilePushSubscription(
  * Silent no-op if no subscription exists.
  */
 export async function unsubscribeFromPush(deviceId: string): Promise<void> {
+  setPushUserDisabled(true); // record intent first so a concurrent reconcile can't race a re-enable
   const reg = await navigator.serviceWorker.ready;
   const sub = await reg.pushManager.getSubscription();
   if (sub) await sub.unsubscribe();
