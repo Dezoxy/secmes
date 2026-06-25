@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Users, Unplug } from 'lucide-react';
+import { Users, UserPlus, Unplug } from 'lucide-react';
 import { prefersReducedMotion } from '../../lib/pref';
 import { demoMode } from '../../lib/auth';
 import { ArgusAppIcon } from '../brand/ArgusAppIcon';
@@ -163,13 +163,25 @@ export default function GroupsScreen() {
           } ${mobileSidebarReturning ? paneBackEnterMotion : ''}`}
         >
           <div className="bg-[#0f0f16] p-4 pt-[env(safe-area-inset-top)] sm:pt-4">
-            <div className="flex items-center justify-center gap-2">
-              <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-[#964cdc]/25" />
-              <span className="text-xl font-bold tracking-wider">
-                <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
-                  GROUPS
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-[#964cdc]/25" />
+                <span className="text-xl font-bold tracking-wider">
+                  <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
+                    GROUPS
+                  </span>
                 </span>
-              </span>
+              </div>
+              {groupManager && messagingDeps && (
+                <button
+                  type="button"
+                  onClick={() => setGroupCreateOpen(true)}
+                  className="flex items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] p-2 text-white/70 transition-colors hover:border-purple-500/30 hover:bg-purple-500/10 hover:text-purple-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60"
+                  aria-label="Create new group"
+                >
+                  <UserPlus className="h-4 w-4" />
+                </button>
+              )}
             </div>
           </div>
 
@@ -177,24 +189,7 @@ export default function GroupsScreen() {
             conversations={groupConversations}
             selectedId={selectedId}
             onSelect={handleSelect}
-            listPb={
-              groupManager && messagingDeps
-                ? 'pb-[calc(env(safe-area-inset-bottom)_+_6rem)] lg:pb-14'
-                : undefined
-            }
           />
-
-          {groupManager && messagingDeps && (
-            <button
-              type="button"
-              onClick={() => setGroupCreateOpen(true)}
-              className="absolute bottom-[calc(env(safe-area-inset-bottom)_+_6.5rem)] right-4 z-10 flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-white/70 transition-colors hover:border-purple-500/30 hover:bg-purple-500/10 hover:text-purple-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60 lg:bottom-4"
-              aria-label="Create new group"
-            >
-              <Users className="h-3.5 w-3.5" />
-              New group
-            </button>
-          )}
         </aside>
 
         {/* Main */}
