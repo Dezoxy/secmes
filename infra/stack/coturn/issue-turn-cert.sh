@@ -180,13 +180,16 @@ argus_turn_cert_deploy() {
   az keyvault secret set --vault-name "$KV" --name "argus-turn-tls-cert" \
     --file "$CERT_TMP" --encoding utf-8 --only-show-errors >/dev/null \
     || { printf 'FATAL: argus_turn_cert: failed to upload cert to KV %s\n' "$KV" >&2
-         rm -rf -- "$WDIR"; return 1; }
+         rm -rf -- "$WDIR"; : >"$_keyfile"; return 1; }
   az keyvault secret set --vault-name "$KV" --name "argus-turn-tls-key" \
     --file "$KEY_TMP" --encoding utf-8 --only-show-errors >/dev/null \
     || { printf 'FATAL: argus_turn_cert: failed to upload key to KV %s\n' "$KV" >&2
-         : >"$KEY_TMP"; rm -rf -- "$WDIR"; return 1; }
+         : >"$KEY_TMP"; rm -rf -- "$WDIR"; : >"$_keyfile"; return 1; }
   : >"$KEY_TMP"
   rm -rf -- "$WDIR"
+  # Wipe the install-dir copy — acme.sh's cron writes the renewed key there (Le_RealKeyPath)
+  # before invoking the hook; wipe it here so it doesn't persist after upload to KV.
+  : >"$_keyfile"
 
   # Trigger the VM to re-fetch the renewed secrets from KV (argus-secrets → /run/argus/secrets/)
   # and reload coturn TLS without dropping active relay allocations (SIGHUP = graceful reload).
