@@ -73,7 +73,6 @@ export default function ChatScreen() {
     privacySettingsVersion,
   } = useChatContext();
 
-  const [mounted, setMounted] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(
     demoMode ? 'conv-1' : (locationState?.selectedId ?? tabSelectedId.get('/chat') ?? null),
   );
@@ -260,10 +259,6 @@ export default function ChatScreen() {
   });
 
   useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  useEffect(() => {
     const mq = window.matchMedia('(min-width: 1024px)');
     const update = () => setNavVisible(mq.matches || showSidebar);
     update();
@@ -403,9 +398,7 @@ export default function ChatScreen() {
   return (
     <div className="relative flex h-full bg-[#1a1a24] sm:items-center sm:justify-center sm:p-4">
       <div
-        className={`absolute inset-0 w-full sm:static sm:h-[calc(100%-2rem)] sm:max-w-6xl bg-[#12121a] sm:rounded-3xl overflow-hidden flex shadow-2xl shadow-black/50 transition-all duration-700 ease-out ${
-          mounted ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
-        }`}
+        className="absolute inset-0 w-full sm:static sm:h-[calc(100%-2rem)] sm:max-w-6xl bg-[#12121a] sm:rounded-3xl overflow-hidden flex shadow-2xl shadow-black/50"
       >
         {/* Sidebar */}
         <aside
@@ -416,9 +409,7 @@ export default function ChatScreen() {
           onTouchEndCapture={handleSidebarTouchEndCapture}
           className={`${
             showSidebar && !mobileThreadClosing ? 'flex' : 'hidden lg:flex'
-          } w-full lg:w-80 shrink-0 flex-col bg-[#0f0f16] border-r border-white/5 transition-all duration-500 ${
-            mounted ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-8'
-          } ${mobileSidebarReturning ? paneBackEnterMotion : ''}`}
+          } w-full lg:w-80 shrink-0 flex-col bg-[#0f0f16] border-r border-white/5 ${mobileSidebarReturning ? paneBackEnterMotion : ''}`}
         >
           <div className="relative bg-[#0f0f16]/80 backdrop-blur-xl p-4 pt-[env(safe-area-inset-top)] sm:pt-4 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-[-1px] after:h-px after:bg-inherit after:backdrop-blur-xl after:content-['']">
             <div className="flex items-center gap-2">
@@ -524,9 +515,7 @@ export default function ChatScreen() {
           aria-label="Chat"
           className={`${
             !showSidebar || mobileThreadClosing ? 'flex' : 'hidden lg:flex'
-          } flex-1 flex-col transition-all duration-500 delay-100 ${
-            mounted ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-8'
-          } ${mobileThreadClosing ? paneBackExitMotion : ''}`}
+          } flex-1 flex-col ${mobileThreadClosing ? paneBackExitMotion : ''}`}
         >
           {selectedConversation ? (
             <div
