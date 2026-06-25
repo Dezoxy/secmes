@@ -317,7 +317,7 @@ export default function ChatScreen() {
             mounted ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-8'
           } ${mobileSidebarReturning ? paneBackEnterMotion : ''}`}
         >
-          <div className="bg-[#0f0f16] p-4 pt-[env(safe-area-inset-top)] sm:pt-4">
+          <div className="relative bg-[#0f0f16]/80 backdrop-blur-xl p-4 pt-[env(safe-area-inset-top)] sm:pt-4 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-[-1px] after:h-px after:bg-inherit after:backdrop-blur-xl after:content-['']">
             <div className="flex items-center gap-2">
               <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-[#964cdc]/25" />
               <span className="flex-1 text-center text-xl font-bold tracking-wider">
@@ -325,7 +325,6 @@ export default function ChatScreen() {
                   CHAT
                 </span>
               </span>
-              <div className="h-8 w-8 shrink-0" aria-hidden="true" />
             </div>
           </div>
 
@@ -351,7 +350,7 @@ export default function ChatScreen() {
           {selectedConversation ? (
             <div
               key={selectedConversation.id}
-              className={`relative flex min-h-0 flex-1 flex-col ${conversationEnterMotion}`}
+              className={`flex min-h-0 flex-1 flex-col ${conversationEnterMotion}`}
             >
               <ChatHeader
                 conversation={selectedConversation}
@@ -367,33 +366,28 @@ export default function ChatScreen() {
                     : undefined
                 }
               />
+              {effectiveSelectedIsLive && !selectedIsSyncLost && (
+                <ReconnectBanner status={connectionStatus} className="mx-4 mt-3" />
+              )}
+              {selectedIsSyncLost && (
+                <StateBlock
+                  icon={Unplug}
+                  title="Conversation out of sync"
+                  variant="offline"
+                  compact
+                  role="status"
+                  ariaLive="polite"
+                  className="mx-4 mt-3"
+                >
+                  This conversation fell too far behind to sync. New messages may not appear and
+                  older ones may be unavailable.
+                </StateBlock>
+              )}
               <MessageList
                 conversation={selectedConversation}
                 onImageClick={setPreviewImage}
                 bottomNavClearance={false}
-                floatingBars
               />
-              {(effectiveSelectedIsLive || selectedIsSyncLost) && (
-                <div className="pointer-events-none absolute inset-x-0 top-[calc(env(safe-area-inset-top)_+_4.5rem)] z-10 flex flex-col gap-2 px-2 pl-[calc(env(safe-area-inset-left)_+_0.5rem)] pr-[calc(env(safe-area-inset-right)_+_0.5rem)]">
-                  {effectiveSelectedIsLive && !selectedIsSyncLost && (
-                    <ReconnectBanner status={connectionStatus} className="pointer-events-auto" />
-                  )}
-                  {selectedIsSyncLost && (
-                    <StateBlock
-                      icon={Unplug}
-                      title="Conversation out of sync"
-                      variant="offline"
-                      compact
-                      role="status"
-                      ariaLive="polite"
-                      className="pointer-events-auto"
-                    >
-                      This conversation fell too far behind to sync. New messages may not appear and
-                      older ones may be unavailable.
-                    </StateBlock>
-                  )}
-                </div>
-              )}
               {effectiveSelectedIsLive && !selectedIsSyncLost && (
                 <ChatInput
                   onSend={handleSend}
