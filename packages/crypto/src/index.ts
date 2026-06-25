@@ -71,6 +71,10 @@ export type { KeyPackage } from 'ts-mls';
 // Classic suite for v1 (single-device). Post-quantum (X-Wing) is available in ts-mls and a later option.
 export const CIPHERSUITE = 'MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519' as const;
 
+// TURN ephemeral credential minting (server-side Node.js helper). HMAC-SHA1 is mandated by the
+// coturn use-auth-secret wire protocol — see turn-credential.ts for the reference and rationale.
+export { mintTurnCredential } from './turn-credential.js';
+
 const te = new TextEncoder();
 const td = new TextDecoder();
 

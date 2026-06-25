@@ -5,6 +5,7 @@ import { AdminModule } from './admin/admin.module.js';
 import { AuditModule } from './audit/audit.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { DevicesModule } from './devices/devices.module.js';
+import { CallsModule } from './calls/calls.module.js';
 import { FriendsModule } from './friends/friends.module.js';
 import { KeyDirectoryModule } from './key-directory/key-directory.module.js';
 import { MessagingModule } from './messaging/messaging.module.js';
@@ -21,6 +22,7 @@ import { pinoHttpConfig } from './observability/logger.js';
     }),
     AdminModule,
     AuthModule,
+    CallsModule,
     DevicesModule,
     FriendsModule,
     UsersModule,
