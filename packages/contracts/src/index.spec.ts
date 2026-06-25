@@ -10,6 +10,16 @@ import {
   DISPLAY_NAME_MAX,
   DISPLAY_NAME_MIN,
   DISPLAY_NAME_PATTERN,
+  CallSignalSchema,
+  CallEnvelopeSchema,
+  CallMediaSchema,
+  SdpSchema,
+  IceCandidateSchema,
+  TurnCredentialsRequestSchema,
+  TurnCredentialsResponseSchema,
+  CreateCallRequestSchema,
+  CreateCallResponseSchema,
+  UpdateCallSettingsRequestSchema,
 } from './index.js';
 
 describe('contracts', () => {
@@ -145,5 +155,134 @@ describe('displayNameSchema', () => {
         `display name may use ${DISPLAY_NAME_ALLOWED} only`,
       );
     }
+  });
+});
+
+describe('voip call contracts', () => {
+  const UUID = '11111111-1111-4111-8111-111111111111';
+  const base = { callId: UUID, msgSeq: 0, nonce: 'a'.repeat(32), sentAt: 1 };
+  const offer = { type: 'offer' as const, sdp: 'v=0\r\n' };
+
+  it('accepts a well-formed audio call.invite signal', () => {
+    const ok = CallSignalSchema.safeParse({
+      ...base,
+      type: 'call.invite',
+      media: { audio: true, video: false },
+      sdp: offer,
+      relayOnly: true,
+    });
+    expect(ok.success).toBe(true);
+  });
+
+  it('routes the discriminated union by type (call.ice carries a candidate)', () => {
+    const ice = CallSignalSchema.safeParse({
+      ...base,
+      type: 'call.ice',
+      candidate: { candidate: 'candidate:1 1 udp ...' },
+    });
+    expect(ice.success).toBe(true);
+    // a call.ice without a candidate is rejected (wrong shape for that discriminant)
+    expect(CallSignalSchema.safeParse({ ...base, type: 'call.ice' }).success).toBe(false);
+  });
+
+  it('rejects an unknown signal type', () => {
+    expect(CallSignalSchema.safeParse({ ...base, type: 'call.bogus' }).success).toBe(false);
+  });
+
+  it('rejects a call.invite missing its sdp offer', () => {
+    const bad = CallSignalSchema.safeParse({
+      ...base,
+      type: 'call.invite',
+      media: { audio: true, video: false },
+      relayOnly: true,
+    });
+    expect(bad.success).toBe(false);
+  });
+
+  it('applies enum defaults on teardown/decline signals', () => {
+    const hangup = CallSignalSchema.parse({ ...base, type: 'call.hangup' });
+    expect(hangup).toMatchObject({ type: 'call.hangup', reason: 'hangup' });
+    const decline = CallSignalSchema.parse({ ...base, type: 'call.decline' });
+    expect(decline).toMatchObject({ type: 'call.decline', reason: 'declined' });
+  });
+
+  it('CallMediaSchema requires booleans; SdpSchema bounds the sdp', () => {
+    expect(CallMediaSchema.safeParse({ audio: true, video: false }).success).toBe(true);
+    expect(CallMediaSchema.safeParse({ audio: 'yes', video: false }).success).toBe(false);
+    expect(SdpSchema.safeParse({ type: 'answer', sdp: 'x' }).success).toBe(true);
+    expect(SdpSchema.safeParse({ type: 'pranswer', sdp: 'x' }).success).toBe(false);
+    expect(SdpSchema.safeParse({ type: 'offer', sdp: 'x'.repeat(64 * 1024 + 1) }).success).toBe(
+      false,
+    );
+  });
+
+  it('IceCandidateSchema accepts the empty end-of-candidates sentinel', () => {
+    expect(IceCandidateSchema.safeParse({ candidate: '' }).success).toBe(true);
+  });
+
+  it('CallEnvelopeSchema validates the outer routing wrapper and is strict', () => {
+    const envelope = { ciphertext: 'base64data', alg: 'MLS_1.0', epoch: 3 };
+    const ok = CallEnvelopeSchema.safeParse({
+      conversationId: UUID,
+      callId: UUID,
+      msgSeq: 0,
+      envelope,
+    });
+    expect(ok.success).toBe(true);
+    // unknown keys are rejected (fail-closed) ...
+    expect(
+      CallEnvelopeSchema.safeParse({
+        conversationId: UUID,
+        callId: UUID,
+        msgSeq: 0,
+        envelope,
+        sdp: offer,
+      }).success,
+    ).toBe(false);
+    // ... and callId must be a uuid
+    expect(
+      CallEnvelopeSchema.safeParse({ conversationId: UUID, callId: 'nope', msgSeq: 0, envelope })
+        .success,
+    ).toBe(false);
+  });
+
+  it('TURN credential request is a strict empty object; response carries relay policy + ttl', () => {
+    expect(TurnCredentialsRequestSchema.safeParse({}).success).toBe(true);
+    expect(TurnCredentialsRequestSchema.safeParse({ callId: UUID }).success).toBe(false);
+    const resp = TurnCredentialsResponseSchema.safeParse({
+      iceServers: [
+        { urls: ['turns:turn.4rgus.com:5349?transport=tcp'], username: 'u', credential: 'c' },
+      ],
+      iceTransportPolicy: 'relay',
+      ttlSeconds: 600,
+    });
+    expect(resp.success).toBe(true);
+  });
+
+  it('CreateCallRequest is audio-only in V1 and strict', () => {
+    expect(
+      CreateCallRequestSchema.safeParse({ conversationId: UUID, media: 'audio' }).success,
+    ).toBe(true);
+    // video is a V1.1 widening — rejected by the V1 literal
+    expect(
+      CreateCallRequestSchema.safeParse({ conversationId: UUID, media: 'video' }).success,
+    ).toBe(false);
+    // unknown keys rejected
+    expect(
+      CreateCallRequestSchema.safeParse({ conversationId: UUID, media: 'audio', extra: 1 }).success,
+    ).toBe(false);
+  });
+
+  it('CreateCallResponse is strict (rejects unknown keys)', () => {
+    expect(CreateCallResponseSchema.safeParse({ callId: UUID }).success).toBe(true);
+    expect(CreateCallResponseSchema.safeParse({ callId: UUID, extra: 1 }).success).toBe(false);
+  });
+
+  it('UpdateCallSettingsRequest accepts a relayOnly boolean and rejects extras', () => {
+    expect(UpdateCallSettingsRequestSchema.safeParse({ relayOnly: false }).success).toBe(true);
+    expect(UpdateCallSettingsRequestSchema.safeParse({ relayOnly: 'no' }).success).toBe(false);
+    expect(UpdateCallSettingsRequestSchema.safeParse({ relayOnly: true, other: 1 }).success).toBe(
+      false,
+    );
   });
 });

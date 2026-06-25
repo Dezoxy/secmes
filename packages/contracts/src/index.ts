@@ -771,3 +771,170 @@ export const MeExportSchema = z.object({
   ),
 });
 export type MeExport = z.infer<typeof MeExportSchema>;
+
+// ── VoIP / 1:1 calling (Phase 0 contracts) ──────────────────────────────────────────────────────
+//
+// Wire format for 1:1 E2EE calling. Specified ONCE, COMPLETE — including the V1.1 variants
+// (`call.renegotiate`, `media.video`, ICE-restart) — so the V1→V1.1 transition needs no contract
+// migration. In V1 (audio-only) clients never EMIT the V1.1 shapes; a V1 client that RECEIVES one
+// ignores it (forward-compatible). See docs/threat-models/voip-calling.md and
+// docs/planning/voip/{02,04}.
+//
+// INVARIANT: the inner CallSignal (SDP/ICE/type) is E2EE and travels INSIDE
+// `CipherEnvelope.ciphertext`. The server validates only the OUTER CallEnvelope + routing metadata
+// — it never parses CallSignal (it is crypto-blind to call content exactly as it is to messages).
+
+/**
+ * A call is identified by a UUID minted server-side by `POST /calls/:friendUserId/invite` (after
+ * the friendship gate). Clients never invent it; the gateway silently drops any `callId` not in the
+ * live call-authorization map, so a fabricated id cannot bypass the invite/friendship gate.
+ */
+export const CallIdSchema = z.string().uuid();
+export type CallId = z.infer<typeof CallIdSchema>;
+
+/** Per-call monotonic counter for ordering + replay protection. Scoped to (callId, sender); from 0. */
+export const MsgSeqSchema = z.number().int().nonnegative();
+export type MsgSeq = z.infer<typeof MsgSeqSchema>;
+
+/** SDP — opaque to the server; only the two endpoints ever read it. We do not split m-lines. */
+export const SdpSchema = z.object({
+  type: z.enum(['offer', 'answer']),
+  sdp: z
+    .string()
+    .min(1)
+    .max(64 * 1024),
+});
+export type Sdp = z.infer<typeof SdpSchema>;
+
+/**
+ * A single trickled ICE candidate (RTCIceCandidateInit shape). `candidate: ''` is the valid
+ * end-of-candidates sentinel and must be allowed through.
+ */
+export const IceCandidateSchema = z.object({
+  candidate: z.string().max(1024),
+  sdpMid: z.string().max(256).nullable().optional(),
+  sdpMLineIndex: z.number().int().nonnegative().nullable().optional(),
+  usernameFragment: z.string().max(256).nullable().optional(),
+});
+export type IceCandidate = z.infer<typeof IceCandidateSchema>;
+
+/** Media kinds for a call. V1 emits `{ audio: true, video: false }`; V1.1 enables `video: true`. */
+export const CallMediaSchema = z.object({
+  audio: z.boolean(),
+  video: z.boolean(),
+});
+export type CallMedia = z.infer<typeof CallMediaSchema>;
+
+// Fields every inner signal carries (replay defence: a CSPRNG nonce + the per-call seq + callId).
+const callSignalBase = {
+  callId: CallIdSchema,
+  msgSeq: MsgSeqSchema,
+  nonce: z.string().length(32), // base64url of 24 random bytes (CSPRNG)
+  sentAt: z.number().int().positive(), // client clock, ms; advisory only (timeouts use local clock)
+};
+
+/**
+ * The inner, E2EE signal — CLIENT-ONLY. The server NEVER parses this (it rides inside
+ * `CipherEnvelope.ciphertext`). Complete incl. the V1.1 variants; a V1 client never emits
+ * `call.renegotiate` and never sets `media.video: true`.
+ */
+export const CallSignalSchema = z.discriminatedUnion('type', [
+  // ── Setup ──
+  z.object({
+    ...callSignalBase,
+    type: z.literal('call.invite'),
+    media: CallMediaSchema, // V1: { audio: true, video: false }
+    sdp: SdpSchema, // the SDP offer (caller is impolite under perfect negotiation)
+    relayOnly: z.boolean(), // mirrors caller's IP-privacy pref; V1 default = true
+  }),
+  z.object({ ...callSignalBase, type: z.literal('call.accept'), sdp: SdpSchema }),
+  z.object({
+    ...callSignalBase,
+    type: z.literal('call.decline'),
+    reason: z.enum(['declined', 'busy', 'unsupported']).default('declined'),
+  }),
+  z.object({ ...callSignalBase, type: z.literal('call.busy') }),
+  z.object({ ...callSignalBase, type: z.literal('call.cancel') }),
+  // ── In-call ──
+  z.object({ ...callSignalBase, type: z.literal('call.ice'), candidate: IceCandidateSchema }),
+  z.object({
+    ...callSignalBase,
+    type: z.literal('call.renegotiate'), // V1.1: video on/off, ICE-restart
+    sdp: SdpSchema,
+    media: CallMediaSchema,
+    iceRestart: z.boolean().default(false),
+  }),
+  // ── Teardown ──
+  z.object({
+    ...callSignalBase,
+    type: z.literal('call.hangup'),
+    reason: z.enum(['hangup', 'timeout', 'error', 'failed']).default('hangup'),
+  }),
+]);
+export type CallSignal = z.infer<typeof CallSignalSchema>;
+
+/**
+ * The OUTER envelope the client sends INTO the gateway — this is what the SERVER validates.
+ * `callId` + `msgSeq` are cleartext routing/replay metadata only (opaque ids; invariant 2 holds —
+ * the server cannot tell an invite from a hangup). `.strict()` rejects unknown keys (fail-closed).
+ */
+export const CallEnvelopeSchema = z
+  .object({
+    conversationId: z.string().uuid(),
+    callId: CallIdSchema,
+    msgSeq: MsgSeqSchema,
+    envelope: CipherEnvelopeSchema, // the encrypted CallSignal
+  })
+  .strict();
+export type CallEnvelope = z.infer<typeof CallEnvelopeSchema>;
+
+/**
+ * What the gateway FANS OUT to the callee (frame type `call.signal`): the envelope plus
+ * server-verified attribution. `senderUserId` is the verified sub, never client-supplied.
+ */
+export const CallSignalFrameSchema = CallEnvelopeSchema.extend({
+  senderUserId: z.string().uuid(),
+  deliverySeq: z.number().int(),
+});
+export type CallSignalFrame = z.infer<typeof CallSignalFrameSchema>;
+
+// ── REST: ephemeral TURN credentials (POST /calls/turn-credentials) ──
+export const TurnCredentialsRequestSchema = z.object({}).strict();
+export type TurnCredentialsRequest = z.infer<typeof TurnCredentialsRequestSchema>;
+
+export const IceServerSchema = z.object({
+  urls: z.array(z.string().min(1)).min(1), // e.g. ["turns:turn.4rgus.com:5349?transport=tcp"]
+  username: z.string().min(1).optional(), // "<expiry>:<sub>" — present for TURN, absent for STUN
+  credential: z.string().min(1).optional(), // SECRET-equivalent (HMAC); never log or cache
+});
+export type IceServer = z.infer<typeof IceServerSchema>;
+
+export const TurnCredentialsResponseSchema = z.object({
+  iceServers: z.array(IceServerSchema).min(1),
+  iceTransportPolicy: z.enum(['relay', 'all']), // 'relay' in V1 → forces TURN, hides peer IP
+  ttlSeconds: z.number().int().positive(), // mirrors credential expiry; client re-fetches per call
+});
+export type TurnCredentialsResponse = z.infer<typeof TurnCredentialsResponseSchema>;
+
+// ── REST: invite (POST /calls/:friendUserId/invite) ──
+export const CreateCallRequestSchema = z
+  .object({
+    conversationId: z.string().uuid(), // the existing 1:1 MLS group for these two
+    media: z.literal('audio'), // V1 audio-only; widens to z.enum(['audio','video']) in V1.1
+  })
+  .strict();
+export type CreateCallRequest = z.infer<typeof CreateCallRequestSchema>;
+
+export const CreateCallResponseSchema = z.object({ callId: z.string().uuid() }).strict();
+export type CreateCallResponse = z.infer<typeof CreateCallResponseSchema>;
+
+// ── REST: relay-only preference (GET/PUT /calls/settings) ──
+// The API field is camelCase `relayOnly`; the backing DB column is `users.call_relay_only`
+// (boolean not null default true) — added in a later slice (P0-SET).
+export const CallSettingsResponseSchema = z.object({
+  relayOnly: z.boolean(),
+});
+export type CallSettingsResponse = z.infer<typeof CallSettingsResponseSchema>;
+
+export const UpdateCallSettingsRequestSchema = z.object({ relayOnly: z.boolean() }).strict();
+export type UpdateCallSettingsRequest = z.infer<typeof UpdateCallSettingsRequestSchema>;
