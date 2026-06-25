@@ -14,7 +14,7 @@ import { TURN_SHARED_SECRET } from './calls.config.js';
 import { CallsAuthzService } from './calls-authz.service.js';
 import type { VerifiedAuth } from '../auth/auth.service.js';
 import { schema, withTenant } from '../db/index.js';
-import { requireUser } from '../messaging/membership.js';
+import { canonicalPair, requireUser } from '../messaging/membership.js';
 import { MessagingService } from '../messaging/messaging.service.js';
 import { RealtimeBus } from '../realtime/realtime-bus.js';
 
@@ -110,8 +110,9 @@ export class CallsService {
     const result = await withTenant(auth.tenantId, async (tx) => {
       const myId = await requireUser(tx, auth);
 
-      // Accepted-friendship gate: canonical pair order (low = least of the two UUIDs).
-      const [low, high] = [myId, friendUserId].sort() as [string, string];
+      // Accepted-friendship gate: canonicalPair lowercases both UUIDs before sorting so an
+      // uppercase path param (accepted by ParseUUIDPipe) maps to the same stored row.
+      const { low, high } = canonicalPair(myId, friendUserId);
       const [friendship] = await tx
         .select({ calleeExternalId: schema.users.externalIdentityId })
         .from(schema.friendships)
@@ -125,9 +126,11 @@ export class CallsService {
         )
         .limit(1);
 
-      // Callee membership gate: verify the callee's DB UUID is a member of this conversation.
-      // Must run inside the tx so RLS is active for the tenant-scoped lookup.
+      // Callee membership + direct-conversation gate. Both checks run inside the tx so RLS is
+      // active. `isDirect` guards against group-conversation callIds leaking call timing to
+      // non-participant room members via the server-issued call.end fan-out.
       let calleeIsConvMember = false;
+      let isDirectConversation = false;
       if (friendship) {
         const [calleeMember] = await tx
           .select({ userId: schema.conversationMembers.userId })
@@ -140,17 +143,28 @@ export class CallsService {
           )
           .limit(1);
         calleeIsConvMember = calleeMember !== undefined;
+
+        if (calleeIsConvMember) {
+          const [conv] = await tx
+            .select({ isDirect: schema.conversations.isDirect })
+            .from(schema.conversations)
+            .where(eq(schema.conversations.id, body.conversationId))
+            .limit(1);
+          isDirectConversation = conv?.isDirect === true;
+        }
       }
 
       return {
         calleeSub: friendship?.calleeExternalId ?? null,
         calleeIsConvMember,
+        isDirectConversation,
         callerUserId: myId,
       };
     });
 
     if (!result.calleeSub) return { callId }; // no friendship — uniform return, no oracle
     if (!result.calleeIsConvMember) return { callId }; // callee not in conversation — uniform return, no oracle
+    if (!result.isDirectConversation) return { callId }; // group conversation — V1 requires a 1:1 DM
 
     // Caller membership check — out of tx (read-only, RLS-scoped via the service layer).
     const isMember = await this.messaging.isMember(auth, body.conversationId);
