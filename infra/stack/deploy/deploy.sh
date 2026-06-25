@@ -635,10 +635,13 @@ wait_running() { # $1 = compose service without a healthcheck
     return 1
   }
 }
-log "waiting for the rollout to become healthy (api, caddy, glitchtip) + the tunnel"
+log "waiting for the rollout to become healthy (api, caddy, coturn, glitchtip) + the tunnel"
 wait_healthy api
 wait_healthy caddy
 wait_running cloudflared
+# coturn has a STUN-binding healthcheck (turnutils_stunclient) — gate on healthy so a
+# misconfigured cert path or IMDS failure surfaces at deploy time, not on the first call.
+wait_healthy coturn
 # Observability (checkpoint 47): the Prometheus/Grafana/Alertmanager images have no shell for a CMD
 # healthcheck, so gate on running + not-crash-looping — catches a bad config mount / image without depending
 # on an in-container probe. (Their own /-/healthy + /api/health endpoints are visible once up.)

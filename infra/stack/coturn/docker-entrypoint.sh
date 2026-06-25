@@ -46,13 +46,14 @@ else
   fi
 fi
 
-# turnserver has no *_FILE env support — read the secret from the Docker secret file and pass
-# it as a CLI flag (overrides any value in turnserver.conf). Visible to root in /proc on the
-# host; accepted risk for a single-tenant VM.
+# turnserver has no *_FILE env support. Write the secret to a 0600 tmpfs config fragment so it
+# never appears in argv (/proc/<pid>/cmdline). /var/tmp is a tmpfs mounted by compose.
 SECRET=$(cat /run/secrets/turn_shared_secret)
+(umask 077 && printf 'static-auth-secret=%s\n' "$SECRET" > /var/tmp/coturn-auth.conf)
+SECRET=""
 
 log "launching turnserver"
 exec turnserver \
   -c /etc/coturn/turnserver.conf \
-  --external-ip="${EXT_IP}" \
-  --static-auth-secret="${SECRET}"
+  -c /var/tmp/coturn-auth.conf \
+  --external-ip="${EXT_IP}"
