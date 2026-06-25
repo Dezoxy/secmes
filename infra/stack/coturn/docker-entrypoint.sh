@@ -63,14 +63,17 @@ else
   fi
 fi
 
-# turnserver has no *_FILE env support. Write the secret to a 0600 tmpfs config fragment so it
-# never appears in argv (/proc/<pid>/cmdline). /var/tmp is a tmpfs mounted by compose.
+# turnserver does not merge repeated -c flags — the last one wins. Build a single combined
+# config on tmpfs: the bind-mounted main config + the secret appended at the end.
+# The secret never appears in argv (/proc/<pid>/cmdline). /var/tmp is a tmpfs mounted by compose.
 SECRET=$(cat /run/secrets/turn_shared_secret)
-(umask 077 && printf 'static-auth-secret=%s\n' "$SECRET" > /var/tmp/coturn-auth.conf)
+(umask 077 && {
+  cat /etc/coturn/turnserver.conf
+  printf 'static-auth-secret=%s\n' "$SECRET"
+} > /var/tmp/turnserver-combined.conf)
 SECRET=""
 
 log "launching turnserver"
 exec turnserver \
-  -c /etc/coturn/turnserver.conf \
-  -c /var/tmp/coturn-auth.conf \
+  -c /var/tmp/turnserver-combined.conf \
   --external-ip="${EXT_IP}"
