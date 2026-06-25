@@ -34,6 +34,12 @@ import { makeKeyPackageRef } from 'ts-mls/keyPackage.js';
 // drops `clientConfig` (behaviour/functions, no key material); we re-attach the default on deserialize, the
 // same config `createGroup`/`joinGroup` use.
 import { defaultClientConfig } from 'ts-mls/clientConfig.js';
+// `decryptSenderData` reads the sender leaf index from the SenderData blob inside a PrivateMessage.
+// Not on the ts-mls barrel — subpath import, same pattern as the two above. The returned
+// `SenderData.leafIndex` is authenticated: ts-mls messageProtection.js:120-123 verifies the
+// FramedContent signature against the credential key at exactly that leaf, so a successful
+// `processMessage` proves the holder of that leaf's key produced the content.
+import { decryptSenderData } from 'ts-mls/privateMessage.js';
 
 export {
   sealWithKey,
@@ -274,6 +280,22 @@ export interface GroupMember {
   leafIndex: number;
   identity: string;
   signaturePublicKey: Uint8Array;
+}
+
+/**
+ * Return type of {@link Conversation.decryptAuthenticated}. The sender is proven by the MLS group
+ * signature: `senderLeafIndex` is the leaf ts-mls verified the FramedContent signature against
+ * (messageProtection.js:120-123), so the holder of that leaf's credential key is the authenticated
+ * sender — not merely asserted.
+ *
+ * ⚠️ Scope: proves *intra-group* sender authenticity ("signed by the holder of leaf N's key").
+ * Whether leaf N belongs to the expected real-world user is the key-directory + out-of-band
+ * fingerprint job (`docs/threat-models/key-directory.md`).
+ */
+export interface AuthenticatedMessage {
+  plaintext: string;
+  senderLeafIndex: number;
+  senderIdentity: string;
 }
 
 /**
@@ -690,28 +712,100 @@ export class Conversation {
     });
   }
 
+  /**
+   * Shared decrypt core — called from within `this.run(...)`, never directly.
+   * Runs `processMessage` and `decryptSenderData` in parallel: both read the current state
+   * snapshot without modifying it. The `senderDataSecret` is epoch-stable across application
+   * messages (an application message never advances the epoch), so capturing it once before the
+   * parallel calls is safe and sufficient.
+   */
+  private async decryptInner(
+    wire: Uint8Array,
+  ): Promise<{ plaintext: string; senderLeafIndex: number }> {
+    const decoded = decodeMlsMessage(wire, 0);
+    if (!decoded) throw new Error('could not decode MLS message');
+    const [msg, bytesRead] = decoded;
+    // Strict: reject anything appended after the MLS message (transport-framing bug or a malicious
+    // client smuggling non-MLS — including accidental plaintext — alongside the ciphertext).
+    if (bytesRead !== wire.length) throw new Error('trailing bytes after MLS message');
+    if (msg.wireformat !== 'mls_private_message') {
+      throw new Error(`expected an application message, got "${msg.wireformat}"`);
+    }
+    // Capture before the parallel calls; senderDataSecret does not appear in result.consumed.
+    const senderDataSecret = this.state.keySchedule.senderDataSecret;
+    const [result, senderData] = await Promise.all([
+      processMessage(msg, this.state, emptyPskIndex, acceptAll, this.cs),
+      // SECURITY: decryptSenderData returns the leaf that ts-mls messageProtection.js:120-123
+      // verifies the FramedContent signature against — the two calls agree on the signer because
+      // they both decrypt the same SenderData AEAD blob (same epoch secret, same ciphertext).
+      // An adversary cannot forge a different leafIndex without breaking the AEAD MAC.
+      decryptSenderData(msg.privateMessage, senderDataSecret, this.cs),
+    ]);
+    wipe(result.consumed); // spent ratchet secrets — unconditional, regardless of message kind
+    if (result.kind !== 'applicationMessage') {
+      // Do NOT advance state for a message this method doesn't handle (e.g. a handshake/commit).
+      // Application messages only; handshake processing is a separate path for group chat / PCS
+      // self-updates (see docs/threat-models/mls-integration.md §5–6).
+      throw new Error(`expected applicationMessage, got "${result.kind}"`);
+    }
+    // F6: decryptSenderData returns undefined when the SenderData AEAD MAC fails (wrong epoch
+    // secret or tampered blob). Fail-closed: never return a result without a verified sender.
+    if (senderData === undefined) {
+      throw new Error('SenderData authentication failed — cannot verify sender identity');
+    }
+    this.state = result.newState;
+    return { plaintext: td.decode(result.message), senderLeafIndex: senderData.leafIndex };
+  }
+
   /** Decrypt wire bytes → plaintext. Throws on anything that isn't an application message. */
   async decrypt(wire: Uint8Array): Promise<string> {
+    return this.run(async () => (await this.decryptInner(wire)).plaintext);
+  }
+
+  /**
+   * Decrypt wire bytes and authenticate the sender against the current group roster.
+   *
+   * Returns the plaintext together with the sender's MLS leaf index and identity string. The sender
+   * is authenticated by the MLS group signature: the leaf index is the one ts-mls verified the
+   * FramedContent signature against (messageProtection.js:120-123), not merely asserted by the
+   * sender. Used by the call-signaling path (P1-SIG) so SDP/ICE is only accepted from the
+   * authenticated conversation peer.
+   *
+   * Fail-closed: every failure path throws — no partial results, no silent downgrades:
+   *   F1 malformed wire / trailing bytes, F2 wrong wire format, F3 wrong message kind,
+   *   F4 invalid MLS signature (propagated from processMessage, incl. SenderData-leaf≠signed-leaf),
+   *   F6 SenderData MAC failure, F7 sender leaf not a current group member,
+   *   F8 non-Basic credential type, F9 malformed UTF-8 in credential identity.
+   */
+  async decryptAuthenticated(wire: Uint8Array): Promise<AuthenticatedMessage> {
     return this.run(async () => {
-      const decoded = decodeMlsMessage(wire, 0);
-      if (!decoded) throw new Error('could not decode MLS message');
-      const [msg, bytesRead] = decoded;
-      // Strict: reject anything appended after the MLS message (transport-framing bug or a malicious
-      // client smuggling non-MLS — including accidental plaintext — alongside the ciphertext).
-      if (bytesRead !== wire.length) throw new Error('trailing bytes after MLS message');
-      if (msg.wireformat !== 'mls_private_message') {
-        throw new Error(`expected an application message, got "${msg.wireformat}"`);
+      const { plaintext, senderLeafIndex } = await this.decryptInner(wire);
+      // Resolve leafIndex → identity in the current roster (same critical section, post-advance
+      // state). Application messages never change the epoch or ratchet tree (membership), so the
+      // roster is the same before and after the state advance in decryptInner.
+      let senderIdentity: string | undefined;
+      for (let nodeIdx = 0; nodeIdx < this.state.ratchetTree.length; nodeIdx++) {
+        if (nodeIdx % 2 !== 0) continue; // parent node slot
+        const node = this.state.ratchetTree[nodeIdx];
+        if (!node || node.nodeType !== 'leaf') continue; // blank leaf
+        if (nodeIdx / 2 !== senderLeafIndex) continue;
+        const cred = node.leaf.credential;
+        // F8: non-Basic credential — v1 issues Basic only; anything else is unexpected.
+        if (cred.credentialType !== 'basic') {
+          throw new Error(
+            `sender leaf ${senderLeafIndex} has unsupported credential type: ${cred.credentialType}`,
+          );
+        }
+        // F9: tdStrict throws on malformed UTF-8 rather than replacing → U+FFFD; prevents two
+        // distinct byte strings from colliding after a lossy decode in an identity equality check.
+        senderIdentity = tdStrict.decode(cred.identity);
+        break;
       }
-      const result = await processMessage(msg, this.state, emptyPskIndex, acceptAll, this.cs);
-      wipe(result.consumed); // spent secrets — wipe regardless of message kind
-      if (result.kind !== 'applicationMessage') {
-        // Do NOT advance state for a message this method doesn't handle (e.g. a handshake/commit).
-        // decrypt() handles application messages only; handshake processing is a separate path
-        // required before group chat / PCS self-updates (see threat model §5–6).
-        throw new Error(`expected applicationMessage, got "${result.kind}"`);
+      // F7: leaf not found in the current roster — reject; never accept an unauthenticated sender.
+      if (senderIdentity === undefined) {
+        throw new Error(`sender leaf ${senderLeafIndex} is not a current group member`);
       }
-      this.state = result.newState; // commit state only after we confirm an application message
-      return td.decode(result.message);
+      return { plaintext, senderLeafIndex, senderIdentity };
     });
   }
 
