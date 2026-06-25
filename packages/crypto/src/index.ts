@@ -818,6 +818,8 @@ export class Conversation {
    *   F4 invalid MLS signature (propagated from processMessage, incl. SenderData-leaf≠signed-leaf),
    *   F6 SenderData MAC failure, F7 sender leaf not in the message-epoch roster,
    *   F8 non-Basic credential type, F9 malformed UTF-8 in credential identity.
+   * F7/F8/F9 throw after state has advanced (the ratchet MUST advance after any successfully
+   * decrypted message — the consumed secrets are already wiped by decryptInner).
    *
    * Old-epoch messages (e.g. a call invite sent at epoch N arriving after a commit advances the
    * group to epoch N+1) are handled correctly: `decryptInner` resolves the epoch-matching ratchet
@@ -828,6 +830,13 @@ export class Conversation {
   async decryptAuthenticated(wire: Uint8Array): Promise<AuthenticatedMessage> {
     return this.run(async () => {
       const { plaintext, senderLeafIndex, ratchetTree, newState } = await this.decryptInner(wire);
+      // Advance state immediately after successful MLS decryption. decryptInner's wipe() already
+      // zeroed the consumed ratchet-generation secrets in this.state.secretTree (ts-mls stores
+      // the same Uint8Array references in both result.consumed and this.state.secretTree — wiping
+      // in-place corrupts this.state's ratchet). Not advancing here leaves this.state with a
+      // zeroed generation, breaking all future decrypts from the same sender leaf. Advance now;
+      // F7/F8/F9 checks below throw after state is consistent.
+      this.state = newState;
       // Resolve leafIndex → identity from the epoch-correct roster. For old-epoch messages
       // `ratchetTree` is the historical snapshot; for current-epoch it is newState.ratchetTree.
       // Either way the tree is the one ts-mls verified the signature against.
@@ -853,8 +862,6 @@ export class Conversation {
       if (senderIdentity === undefined) {
         throw new Error(`sender leaf ${senderLeafIndex} is not in the message-epoch group roster`);
       }
-      // P2: advance state only after all membership/credential checks pass.
-      this.state = newState;
       return { plaintext, senderLeafIndex, senderIdentity };
     });
   }
