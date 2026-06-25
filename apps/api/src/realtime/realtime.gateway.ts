@@ -490,18 +490,20 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
   /**
    * Server-issued end-of-call notification for server-known lifecycle events (ring timeout,
-   * prolonged inactivity). Fan to the conversation room so both parties receive it.
+   * prolonged inactivity). Routed by identity (callerSub + calleeSub) rather than room fan-out
+   * so participants who are online but not subscribed to the conversation room — the common state
+   * during ringing — still receive the event.
    */
   private deliverCallEnd(event: CallEndEvent): void {
-    const room = roomKey(event.tenantId, event.conversationId);
-    const sockets = this.rooms.get(room);
-    if (!sockets) return;
     const data = {
       callId: event.callId,
       conversationId: event.conversationId,
       reason: event.reason,
     };
-    for (const client of sockets) {
+    for (const [client, state] of this.conns) {
+      if (!state.authed || !state.auth) continue;
+      if (state.auth.tenantId !== event.tenantId) continue;
+      if (state.auth.sub !== event.callerSub && state.auth.sub !== event.calleeSub) continue;
       if (client.readyState === WebSocket.OPEN) this.send(client, 'call.end', data);
     }
   }

@@ -114,7 +114,10 @@ export class CallsService {
       // uppercase path param (accepted by ParseUUIDPipe) maps to the same stored row.
       const { low, high } = canonicalPair(myId, friendUserId);
       const [friendship] = await tx
-        .select({ calleeExternalId: schema.users.externalIdentityId })
+        .select({
+          calleeExternalId: schema.users.externalIdentityId,
+          calleeArgusId: schema.users.argusId,
+        })
         .from(schema.friendships)
         .innerJoin(schema.users, eq(schema.users.id, friendUserId))
         .where(
@@ -154,15 +157,21 @@ export class CallsService {
         }
       }
 
+      // Both sub families for the callee — same pattern as friends.service / message-delivery so
+      // sockets authenticated under either token family (legacy externalId vs argusid:) receive the ring.
+      const calleeSubs = friendship
+        ? [...new Set([friendship.calleeExternalId, `argusid:${friendship.calleeArgusId}`])]
+        : null;
       return {
-        calleeSub: friendship?.calleeExternalId ?? null,
+        calleeSubs,
+        calleeArgusId: friendship?.calleeArgusId ?? null,
         calleeIsConvMember,
         isDirectConversation,
         callerUserId: myId,
       };
     });
 
-    if (!result.calleeSub) return { callId }; // no friendship — uniform return, no oracle
+    if (!result.calleeSubs) return { callId }; // no friendship — uniform return, no oracle
     if (!result.calleeIsConvMember) return { callId }; // callee not in conversation — uniform return, no oracle
     if (!result.isDirectConversation) return { callId }; // group conversation — V1 requires a 1:1 DM
 
@@ -171,20 +180,26 @@ export class CallsService {
     if (!isMember) return { callId }; // no membership — uniform return, no oracle
 
     // Both gates passed: register the call and ring the callee.
+    // Store the canonical argusid: form as calleeSub in the authz map — all passkey-authed sockets
+    // present this subject. Ring events are emitted for both sub families so legacy-externalId sockets
+    // also receive the ring (belt + suspenders; Set deduplication avoids double-ring for new users).
+    const canonicalCalleeSub = `argusid:${result.calleeArgusId}`;
     this.callsAuthz.register(callId, {
       tenantId: auth.tenantId,
       conversationId: body.conversationId,
       callerSub: auth.sub,
-      calleeSub: result.calleeSub,
+      calleeSub: canonicalCalleeSub,
     });
-    this.bus.emitCallRing({
-      tenantId: auth.tenantId,
-      callId,
-      conversationId: body.conversationId,
-      callerUserId: result.callerUserId,
-      calleeSub: result.calleeSub,
-      media: body.media,
-    });
+    for (const calleeSub of result.calleeSubs) {
+      this.bus.emitCallRing({
+        tenantId: auth.tenantId,
+        callId,
+        conversationId: body.conversationId,
+        callerUserId: result.callerUserId,
+        calleeSub,
+        media: body.media,
+      });
+    }
 
     return { callId };
   }
