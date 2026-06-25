@@ -318,9 +318,9 @@ export default function ChatScreen() {
           } ${mobileSidebarReturning ? paneBackEnterMotion : ''}`}
         >
           <div className="bg-[#0f0f16] p-4 pt-[env(safe-area-inset-top)] sm:pt-4">
-            <div className="flex items-center justify-center gap-2">
+            <div className="flex items-center gap-2">
               <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-[#964cdc]/25" />
-              <span className="text-xl font-bold tracking-wider">
+              <span className="flex-1 text-center text-xl font-bold tracking-wider">
                 <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
                   CHAT
                 </span>

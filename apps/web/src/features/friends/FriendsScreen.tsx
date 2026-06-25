@@ -232,18 +232,18 @@ export default function FriendsScreen() {
         onTouchEndCapture={handleSidebarTouchEndCapture}
       >
         <div className="bg-[#0f0f16] p-4 pt-[env(safe-area-inset-top)] lg:pt-4 lg:bg-[#12121a]">
-          <div className="flex flex-col items-center gap-0.5">
-            <h1 className="flex items-center gap-2">
-              <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />
-              <span className="text-xl font-bold tracking-wider">
+          <div className="flex items-center gap-2">
+            <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />
+            <div className="flex-1 text-center">
+              <h1 className="text-xl font-bold tracking-wider">
                 <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
                   FRIENDS
                 </span>
-              </span>
-            </h1>
-            <p className="text-xs text-white/45">
-              {friends.length} accepted {friends.length === 1 ? 'friend' : 'friends'}
-            </p>
+              </h1>
+              <p className="text-xs text-white/45">
+                {friends.length} accepted {friends.length === 1 ? 'friend' : 'friends'}
+              </p>
+            </div>
           </div>
 
           {/* Search input — slides in when open */}

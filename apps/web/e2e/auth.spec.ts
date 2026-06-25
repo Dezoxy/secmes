@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 test('auth entry stays passkey-first without app-owned password fields', async ({ page }) => {
   await page.goto('/');
 
-  await expect(page.getByRole('heading', { name: 'Welcome to Argus' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Continue with passkey' })).toBeVisible();
   await expect(page.locator('input[type="password"]')).toHaveCount(0);
   await expect(page.getByRole('textbox')).toHaveCount(0);
@@ -50,7 +50,7 @@ test('auth entry stays portrait and centered on wide screens', async ({ page }) 
   const main = page.getByRole('main', { name: 'Argus sign-in' });
   const card = page.getByRole('region', { name: 'Passkey sign-in' });
   const brand = main.getByRole('group', { name: 'Argus brand' });
-  const heading = page.getByRole('heading', { name: 'Welcome to Argus' });
+  const heading = page.getByRole('heading', { name: 'Welcome back' });
 
   await expect(card).toBeVisible();
   await expect(brand).toBeVisible();

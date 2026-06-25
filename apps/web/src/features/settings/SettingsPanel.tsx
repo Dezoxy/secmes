@@ -392,20 +392,16 @@ export function SettingsPanel({
         }`}
       >
         {/* Fixed header */}
-        <div
-          className={`mb-4 flex shrink-0 items-center ${
-            standalone ? 'justify-center' : 'justify-between'
-          }`}
-        >
-          <h2 className="flex items-center gap-2">
-            <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />
-            <span className="text-xl font-bold tracking-wider">
-              <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
-                SETTINGS
-              </span>
+        <div className="mb-4 flex shrink-0 items-center justify-between">
+          <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />
+          <h2 className="flex-1 text-center text-xl font-bold tracking-wider">
+            <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
+              SETTINGS
             </span>
           </h2>
-          {!standalone && (
+          {standalone ? (
+            <div className="h-8 w-8" aria-hidden="true" />
+          ) : (
             <IconButton onClick={closeSettings} size="sm" aria-label="Close settings">
               <X className="h-5 w-5" />
             </IconButton>
