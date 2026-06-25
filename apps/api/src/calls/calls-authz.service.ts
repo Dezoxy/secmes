@@ -130,15 +130,17 @@ export class CallsAuthzService {
   }
 
   /**
-   * Release all call entries in a tenant where either participant sub is in `subs`. Called by the
-   * gateway when a `MemberRemovedEvent` arrives: a removed member must not continue exchanging
-   * call signals through a stale authz entry until the inactivity timer expires.
+   * Release call entries in a specific conversation where either participant sub is in `subs`.
+   * Called by the gateway when a `MemberRemovedEvent` arrives: a removed member must not continue
+   * exchanging call signals via a stale authz entry. Scoped to the conversation so that a user
+   * removed from one conversation does not have an unrelated 1:1 call torn down.
    */
-  releaseByParticipants(tenantId: string, subs: string[]): void {
+  releaseByParticipants(tenantId: string, conversationId: string, subs: string[]): void {
     const subSet = new Set(subs);
     const toRelease: string[] = [];
     for (const [callId, entry] of this.authzMap) {
       if (entry.tenantId !== tenantId) continue;
+      if (entry.conversationId !== conversationId) continue;
       if (subSet.has(entry.callerSub) || subSet.has(entry.calleeSub)) toRelease.push(callId);
     }
     for (const callId of toRelease) this.expireEntry(callId, 'peer-gone');
