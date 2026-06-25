@@ -61,7 +61,7 @@ export function RoutePageShell({
     <AuthenticatedRouteBoundary>
       <div className="absolute inset-0 flex flex-col bg-[#0c0c12] text-white">
         <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col overflow-y-auto">
-          <header className="sticky top-0 z-20 flex flex-col gap-4 bg-[#0c0c12]/70 px-4 pt-[calc(env(safe-area-inset-top)_+_1.25rem)] pb-5 backdrop-blur-xl sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+          <header className="relative sticky top-0 z-20 flex flex-col gap-4 bg-[#0c0c12] px-4 pt-[calc(env(safe-area-inset-top)_+_1.25rem)] pb-5 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-[-1px] after:h-px after:bg-inherit after:content-['']">
             <div className="flex items-center gap-3">
               <button
                 type="button"
