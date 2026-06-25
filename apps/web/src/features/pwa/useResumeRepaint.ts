@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 
 /**
- * Work around an iOS standalone-PWA compositor bug: after the app is backgrounded/resumed, or when
+ * Work around an iOS installed-PWA compositor bug: after the app is backgrounded/resumed, or when
  * WebKit restores the installed PWA into an already-visible document, WebKit can keep a *stale*
  * composited snapshot of the safe-area strips. The DOM is correct — any real route repaint clears
  * it — so the fix is to force a one-frame recomposite of the app subtree on first foreground paint
