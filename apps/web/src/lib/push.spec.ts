@@ -6,7 +6,12 @@ vi.mock('./api', () => ({
 }));
 
 import { savePushSubscription, deletePushSubscription } from './api';
-import { reconcilePushSubscription, subscribeToPush, unsubscribeFromPush } from './push';
+import {
+  pushNeedsReenable,
+  reconcilePushSubscription,
+  subscribeToPush,
+  unsubscribeFromPush,
+} from './push';
 
 const save = vi.mocked(savePushSubscription);
 const del = vi.mocked(deletePushSubscription);
@@ -196,6 +201,45 @@ describe('reconcilePushSubscription', () => {
 
     expect(subscribe).toHaveBeenCalledOnce();
     expect(save).toHaveBeenCalledOnce();
+  });
+});
+
+describe('pushNeedsReenable', () => {
+  it('is true when push should be on but the subscription is gone (the iOS dropped-on-update case)', async () => {
+    setupReconcileWorker(null); // permission granted (beforeEach), no subscription, not user-disabled
+    await expect(pushNeedsReenable(VAPID_KEY)).resolves.toBe(true);
+  });
+
+  it('is true when a stale subscription remains under a now-rotated VAPID key', async () => {
+    const stale = makeSubObject();
+    stale.options = { applicationServerKey: new Uint8Array([9, 9, 9]).buffer };
+    setupReconcileWorker(stale);
+    await expect(pushNeedsReenable(VAPID_KEY)).resolves.toBe(true);
+  });
+
+  it('is false when an active subscription already exists under the current key', async () => {
+    setupReconcileWorker(makeSubObject());
+    await expect(pushNeedsReenable(VAPID_KEY)).resolves.toBe(false);
+  });
+
+  it('is false when the user explicitly disabled push', async () => {
+    await unsubscribeFromPush(DEVICE_ID); // sets the disabled intent flag
+    setupReconcileWorker(null);
+    await expect(pushNeedsReenable(VAPID_KEY)).resolves.toBe(false);
+  });
+
+  it('is false when notification permission was never granted', async () => {
+    vi.stubGlobal('Notification', {
+      permission: 'default',
+      requestPermission: requestPermissionMock,
+    });
+    setupReconcileWorker(null);
+    await expect(pushNeedsReenable(VAPID_KEY)).resolves.toBe(false);
+  });
+
+  it('is false when push is unsupported', async () => {
+    vi.unstubAllGlobals();
+    await expect(pushNeedsReenable(VAPID_KEY)).resolves.toBe(false);
   });
 });
 
