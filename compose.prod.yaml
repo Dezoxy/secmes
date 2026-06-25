@@ -306,6 +306,8 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    cap_add:
+      - NET_BIND_SERVICE # turnserver checks for this capability at startup even on ports >1024
     healthcheck:
       # turnutils_stunclient issues a real STUN binding request (no auth required for STUN) — a stronger
       # liveness check than a bare TCP port probe, which wouldn't catch a misconfigured listener.
