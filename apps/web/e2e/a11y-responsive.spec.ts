@@ -157,13 +157,17 @@ test('mobile conversation search collapses when scrolling back down', async ({ p
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/chat');
 
-  const revealSearch = page.getByRole('button', { name: 'Reveal conversation search' });
-  await revealSearch.click();
-
   const searchInput = page.getByRole('textbox', { name: 'Search conversations' });
   const searchField = page.locator('input[aria-label="Search conversations"]');
+
+  // Reveal search via pull-down wheel gesture on the conversation list
+  const listLocator = page.getByRole('complementary', { name: 'Conversations' });
+  const listBox = await listLocator.boundingBox();
+  expect(listBox).not.toBeNull();
+  await page.mouse.move(listBox!.x + listBox!.width / 2, listBox!.y + 200);
+  await page.mouse.wheel(0, -80);
+
   await expect(searchInput).toBeVisible();
-  await expect(searchInput).toBeFocused();
   await page.waitForTimeout(350);
 
   const searchBox = await searchInput.boundingBox();
@@ -176,5 +180,5 @@ test('mobile conversation search collapses when scrolling back down', async ({ p
 
   await expect(searchField).toHaveAttribute('tabindex', '-1');
   await expect(searchField).not.toBeFocused();
-  await expect(revealSearch).toBeVisible();
+  await expect(searchInput).not.toBeVisible();
 });
