@@ -236,6 +236,40 @@
   will-change: opacity, transform;
 }
 
+@keyframes argus-tab-exit-left {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  to {
+    opacity: 0.6;
+    transform: translateX(-100%);
+  }
+}
+
+@keyframes argus-tab-exit-right {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  to {
+    opacity: 0.6;
+    transform: translateX(100%);
+  }
+}
+
+.argus-tab-exit-left {
+  animation: argus-tab-exit-left 280ms ease-in both;
+  will-change: opacity, transform;
+}
+
+.argus-tab-exit-right {
+  animation: argus-tab-exit-right 280ms ease-in both;
+  will-change: opacity, transform;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .argus-surface-enter,
   .argus-modal-enter,
@@ -249,7 +283,9 @@
   .argus-toast-enter,
   .argus-toast-exit,
   .argus-tab-enter-right,
-  .argus-tab-enter-left {
+  .argus-tab-enter-left,
+  .argus-tab-exit-left,
+  .argus-tab-exit-right {
     animation: none;
   }
 }
