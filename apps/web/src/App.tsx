@@ -6,6 +6,7 @@ import { RegisterScreen } from './features/auth/RegisterScreen';
 import { prefersReducedMotion } from './lib/pref';
 import { ArgusAppIcon } from './features/brand/ArgusAppIcon';
 import { usePwaUpdate } from './features/pwa/PwaUpdateContext';
+import { PushReconciler } from './features/pwa/PushReconciler';
 import { APP_VERSION_TAG } from './lib/app-version';
 import { conversationEnterMotion, modalPanelExitMotion, paneBackEnterMotion } from './features/ui';
 import { ChatProvider } from './features/chat/ChatContext';
@@ -258,6 +259,7 @@ function AuthenticatedShell() {
     <AuthenticatedRouteBoundary>
       <DeviceProvider>
         <UnlockGate>
+          <PushReconciler />
           <ChatProvider>
             <AppShell />
           </ChatProvider>
