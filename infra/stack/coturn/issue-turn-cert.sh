@@ -256,8 +256,16 @@ az keyvault secret show --vault-name "$KV" --name "argus-turn-tls-cert" \
   --query "value" -o tsv --only-show-errors | openssl x509 -noout -subject -dates
 log "Key Vault delivery verified."
 
-# Install acme.sh's renewal cron.
-"$ACME" --install-cronjob --home "$ACME_HOME" 2>/dev/null || true
+# Install acme.sh's renewal cron. Failure is non-fatal (some platforms use launchd/systemd
+# instead of cron), but we emit an explicit warning so the operator knows to act.
+"$ACME" --install-cronjob --home "$ACME_HOME" || {
+  log "WARN: acme.sh --install-cronjob failed — automatic renewal IS NOT configured."
+  log "  The TURNS cert will expire in ~90 days if you take no action."
+  log "  To add renewal manually, run:"
+  log "    crontab -e"
+  log "    # Add: 0 0 * * * \"$ACME\" --cron --home \"$ACME_HOME\" > /dev/null"
+  log "  Or set a calendar reminder to re-run this script with --renew every 60 days."
+}
 
 # Explicitly register the deploy hook in acme.sh's domain config for automatic renewals.
 # --issue --deploy-hook already saves Le_DeployHook to domain.conf, but --deploy makes it
