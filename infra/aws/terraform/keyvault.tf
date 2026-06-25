@@ -64,6 +64,8 @@ locals {
     "argus-cleanup-db-password"     = 32
     "argus-glitchtip-db-password"   = 32
     "argus-glitchtip-secret-key"    = 50
+    # VoIP TURN relay (VoIP V1, PR 6/14): HMAC-SHA1 shared secret for coturn use-auth-secret + cred minting.
+    "argus-turn-shared-secret" = 32
   }
   # External credentials and non-generatable keys — a dummy here is non-functional; replace with real values
   # before expecting the full stack to reach healthy. See the README and populate-keyvault.sh for how to
@@ -82,6 +84,12 @@ locals {
     # presence gate; an invalid PEM correctly fails CLOSED at sign time (slice 2). populate-keyvault.sh
     # generates the real key.
     "argus-backup-signing-key" = "REPLACE-with-Ed25519-PKCS8-PEM-from-openssl-genpkey"
+    # VoIP TURN relay (VoIP V1, PR 6/14): TLS cert + key for TURNS/5349 are DNS-01 issued, not auto-generated.
+    # Dummy values satisfy the fetch presence gate; coturn (PR 7) fails CLOSED at TLS-load time with a dummy —
+    # correct behavior for an experiment stack before issue-turn-cert.sh is run. Provision the real values with:
+    #   infra/stack/coturn/issue-turn-cert.sh  (see infra/stack/coturn/README.md)
+    "argus-turn-tls-cert" = "REPLACE-with-TURNS-fullchain-PEM-from-issue-turn-cert.sh"
+    "argus-turn-tls-key"  = "REPLACE-with-TURNS-private-key-PEM-from-issue-turn-cert.sh"
   }
 }
 

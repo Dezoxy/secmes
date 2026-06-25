@@ -151,6 +151,11 @@ put argus-redis-password "$(gen_alnum 32)"   # redis requirepass — re-read fro
 put argus-backup-db-password "$(gen_alnum 32)"  # argus_backup login — deploy.sh re-applies via ALTER ROLE
 put argus-cleanup-db-password "$(gen_alnum 32)" # argus_cleanup login — deploy.sh re-applies via ALTER ROLE
 put argus-glitchtip-secret-key "$(gen_alnum 50)" # Django SECRET_KEY — env each boot (only logs sessions out)
+# VoIP TURN relay (VoIP V1, PR 6/14). HMAC-SHA1 shared secret for coturn use-auth-secret mode + ephemeral
+# credential minting in the API (PR 9). Rotatable: coturn picks it up on restart; active calls are unaffected.
+# TLS cert + key for TURNS/5349 are NOT generated here — they require a real DNS-01 ACME challenge.
+# Issue them BEFORE deploying PR 6 with: infra/stack/coturn/issue-turn-cert.sh (see infra/stack/coturn/README.md).
+put argus-turn-shared-secret "$(gen_alnum 32)"
 # Set-once (consumed at a component's first init / verifier pinned out-of-band, NOT reconciled — rotating is a DR step):
 put_ed25519_key argus-backup-signing-key once  # DB-backup signing key (PKCS8 PEM) — SET-ONCE: its verifier is
 #   pinned in infra/backup/backup-verify.pub (not runtime-derived), so a blind --rotate would orphan verification

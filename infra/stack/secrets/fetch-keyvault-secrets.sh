@@ -68,6 +68,14 @@ SECRETS=(
   # BEFORE deploying this change (idempotent skip-if-exists — no --rotate needed).
   # Precedent for Ed25519-signing-outside-packages/crypto: docs/threat-models/session-tokens.md §invariant-4.
   "argus-backup-signing-key=backup-signing-key"
+  # VoIP TURN relay (VoIP V1, PR 6/14 — P0-IS). All three MUST be in Key Vault before deploying this change:
+  #   argus-turn-shared-secret — provisioned by populate-keyvault.sh (generated HMAC secret, 32 chars).
+  #   argus-turn-tls-cert      — fullchain PEM for turn.4rgus.com; issue with infra/stack/coturn/issue-turn-cert.sh.
+  #   argus-turn-tls-key       — private key PEM matching the cert above.
+  # See infra/stack/coturn/README.md for the full operator sequence (issue cert → populate KV → deploy).
+  "argus-turn-shared-secret=turn_shared_secret"
+  "argus-turn-tls-cert=turn_tls_cert"
+  "argus-turn-tls-key=turn_tls_key"
 )
 
 # OPTIONAL secrets — may be ABSENT on a first boot (provisioned later). Unlike the mandatory set, an absent
