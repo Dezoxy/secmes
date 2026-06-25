@@ -12,6 +12,14 @@ if [ -n "${ARGUS_TURN_EXTERNAL_IP:-}" ]; then
 else
   EXT_IP=""
 
+  # Guard: IMDS probing requires curl. Without this check, a missing curl binary silently
+  # suppresses "command not found" via the || guards and emits a misleading "could not resolve"
+  # error instead of the real cause.
+  if ! command -v curl >/dev/null 2>&1; then
+    log "FATAL: curl not found in this image; set ARGUS_TURN_EXTERNAL_IP to skip IMDS probing"
+    exit 1
+  fi
+
   # AWS IMDSv2: fetch token first, then public + private IPs.
   TOKEN=$(curl -sf -X PUT -H "X-aws-ec2-metadata-token-ttl-seconds: 60" \
     http://169.254.169.254/latest/api/token 2>/dev/null) || TOKEN=""
