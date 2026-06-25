@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { Users, Unplug } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Search, Unplug, Users, X } from 'lucide-react';
 import { prefersReducedMotion } from '../../lib/pref';
 import { demoMode } from '../../lib/auth';
 import { ArgusAppIcon } from '../brand/ArgusAppIcon';
@@ -11,6 +11,7 @@ import { GroupCreateDialog } from '../chat/GroupCreateDialog';
 import { ImagePreviewModal } from '../chat/ImagePreviewModal';
 import { contactDisplayName } from '../chat/user-label';
 import { dicebearAvatar } from '../../lib/dicebear';
+import { currentUser, getConversationDisplayName } from '../chat/seed';
 import { useSelectedConversationBackfill } from '../chat/useConversationBackfill';
 import { useChatState } from '../chat/useChatState';
 import { useMessageSending } from '../chat/useMessageSending';
@@ -59,6 +60,14 @@ export default function GroupsScreen() {
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   const mobileThreadBackTimerRef = useRef<number | undefined>(undefined);
   const mobileSidebarReturnTimerRef = useRef<number | undefined>(undefined);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const touchStartY = useRef<number | null>(null);
+  const sidebarTouchStartY = useRef<number | null>(null);
+  const searchTouchStartY = useRef<number | null>(null);
 
   const { selectedConversation, selectedIsLive, isLive } = useChatState({
     conversations: groupConversations,
@@ -146,6 +155,97 @@ export default function GroupsScreen() {
     }, 180);
   };
 
+  const revealSearch = () => setSearchOpen(true);
+
+  const hideSearch = () => {
+    searchInputRef.current?.blur();
+    setSearchFocused(false);
+    setSearchOpen(false);
+    setSearchQuery('');
+  };
+
+  const hideSearchIfIdle = () => {
+    if (!searchFocused) setSearchOpen(false);
+  };
+
+  const focusSearch = () => {
+    revealSearch();
+    window.requestAnimationFrame(() => searchInputRef.current?.focus());
+  };
+
+  const handleSearchWheel = (event: React.WheelEvent<HTMLElement>) => {
+    if (event.deltaY > 12) hideSearch();
+  };
+
+  const handleSearchTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    searchTouchStartY.current = event.touches[0]?.clientY ?? null;
+  };
+
+  const handleSearchTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    const startY = searchTouchStartY.current;
+    const currentY = event.touches[0]?.clientY;
+    if (startY === null || currentY === undefined) return;
+    if (currentY - startY < -28) hideSearch();
+  };
+
+  const handleSearchTouchEnd = () => {
+    searchTouchStartY.current = null;
+  };
+
+  const handleSidebarWheelCapture = (event: React.WheelEvent<HTMLDivElement>) => {
+    if (searchOpen && event.deltaY > 12) hideSearch();
+  };
+
+  const handleSidebarTouchStartCapture = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (searchOpen) sidebarTouchStartY.current = event.touches[0]?.clientY ?? null;
+  };
+
+  const handleSidebarTouchMoveCapture = (event: React.TouchEvent<HTMLDivElement>) => {
+    const startY = sidebarTouchStartY.current;
+    const currentY = event.touches[0]?.clientY;
+    if (startY === null || currentY === undefined) return;
+    if (currentY - startY < -28) hideSearch();
+  };
+
+  const handleSidebarTouchEndCapture = () => {
+    sidebarTouchStartY.current = null;
+  };
+
+  const handleListWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    const scrollTop = listRef.current?.scrollTop ?? 0;
+    if (event.deltaY < -12 && scrollTop <= 2) revealSearch();
+    if (event.deltaY > 12) {
+      if (searchOpen) hideSearch();
+      else if (scrollTop > 12) hideSearchIfIdle();
+    }
+  };
+
+  const handleListTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (searchOpen || (listRef.current?.scrollTop ?? 0) <= 2) {
+      touchStartY.current = event.touches[0]?.clientY ?? null;
+    }
+  };
+
+  const handleListTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    const startY = touchStartY.current;
+    const currentY = event.touches[0]?.clientY;
+    if (startY === null || currentY === undefined) return;
+    if (currentY - startY > 28 && (listRef.current?.scrollTop ?? 0) <= 2) revealSearch();
+    if (currentY - startY < -28 && searchOpen) hideSearch();
+  };
+
+  const handleListTouchEnd = () => {
+    touchStartY.current = null;
+  };
+
+  const filteredGroupConversations = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return groupConversations;
+    return groupConversations.filter((c) =>
+      getConversationDisplayName(c, currentUser.id).toLowerCase().includes(q),
+    );
+  }, [groupConversations, searchQuery]);
+
   return (
     <div className="relative flex h-full bg-[#1a1a24] sm:items-center sm:justify-center sm:p-4">
       <div
@@ -156,6 +256,10 @@ export default function GroupsScreen() {
         {/* Sidebar */}
         <aside
           aria-label="Group conversations"
+          onWheelCapture={handleSidebarWheelCapture}
+          onTouchStartCapture={handleSidebarTouchStartCapture}
+          onTouchMoveCapture={handleSidebarTouchMoveCapture}
+          onTouchEndCapture={handleSidebarTouchEndCapture}
           className={`${
             showSidebar && !mobileThreadClosing ? 'flex' : 'hidden lg:flex'
           } relative w-full lg:w-80 shrink-0 flex-col bg-[#0f0f16] border-r border-white/5 transition-all duration-500 ${
@@ -183,13 +287,91 @@ export default function GroupsScreen() {
                 <div className="h-8 w-8 shrink-0" aria-hidden="true" />
               )}
             </div>
+
+            {/* Search input — slides in when open */}
+            <div
+              id="groups-search-panel"
+              onWheel={handleSearchWheel}
+              onTouchStart={handleSearchTouchStart}
+              onTouchMove={handleSearchTouchMove}
+              onTouchEnd={handleSearchTouchEnd}
+              className={`overflow-hidden transition-all duration-300 ease-out ${
+                searchOpen ? 'mt-3 max-h-20 opacity-100' : 'pointer-events-none max-h-0 opacity-0'
+              }`}
+              aria-hidden={!searchOpen}
+            >
+              <div className="relative">
+                <Search
+                  aria-hidden="true"
+                  className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30"
+                />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onWheel={handleSearchWheel}
+                  onTouchStart={handleSearchTouchStart}
+                  onTouchMove={handleSearchTouchMove}
+                  onTouchEnd={handleSearchTouchEnd}
+                  onFocus={() => {
+                    setSearchFocused(true);
+                    revealSearch();
+                  }}
+                  onBlur={() => setSearchFocused(false)}
+                  aria-label="Search groups"
+                  placeholder="Search groups..."
+                  ref={searchInputRef}
+                  tabIndex={searchOpen ? undefined : -1}
+                  className="w-full rounded-xl border border-white/5 bg-[#1a1a26] py-2.5 pl-10 pr-9 text-sm text-white placeholder-white/30 transition-colors focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20"
+                />
+                <button
+                  type="button"
+                  tabIndex={searchOpen ? undefined : -1}
+                  onClick={hideSearch}
+                  aria-label="Close search"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Pill handle — tap to reveal search */}
+            <div
+              aria-hidden={searchOpen}
+              className={`overflow-hidden transition-all duration-300 ${
+                searchOpen ? 'max-h-0 py-0 opacity-0' : 'max-h-9 py-1 opacity-100'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={focusSearch}
+                aria-label="Reveal group search"
+                aria-expanded={searchOpen}
+                aria-controls="groups-search-panel"
+                tabIndex={searchOpen ? -1 : 0}
+                className="group mx-auto flex h-7 w-12 items-center justify-center rounded-full transition-colors hover:bg-white/[0.03]"
+              >
+                <span className="block h-1 w-10 rounded-full bg-white/15 transition-colors group-hover:bg-white/25" />
+              </button>
+            </div>
           </div>
 
-          <ConversationList
-            conversations={groupConversations}
-            selectedId={selectedId}
-            onSelect={handleSelect}
-          />
+          <div
+            ref={listRef}
+            onWheel={handleListWheel}
+            onScroll={hideSearchIfIdle}
+            onTouchStart={handleListTouchStart}
+            onTouchMove={handleListTouchMove}
+            onTouchEnd={handleListTouchEnd}
+            className="flex-1 min-h-0 overflow-y-auto"
+          >
+            <ConversationList
+              conversations={filteredGroupConversations}
+              selectedId={selectedId}
+              onSelect={handleSelect}
+            />
+          </div>
         </aside>
 
         {/* Main */}

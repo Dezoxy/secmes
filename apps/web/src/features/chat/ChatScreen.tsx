@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MessageCircle, Unplug } from 'lucide-react';
+import { MessageCircle, Search, Unplug, X } from 'lucide-react';
 import { getMlsSession } from '../../lib/mls';
 import { prefersReducedMotion } from '../../lib/pref';
 import { demoMode } from '../../lib/auth';
@@ -96,6 +96,14 @@ export default function ChatScreen() {
   const [mutedConversationIds, setMutedConversationIds] = useState<ReadonlySet<string>>(() =>
     readMutedConversationIds(),
   );
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const touchStartY = useRef<number | null>(null);
+  const sidebarTouchStartY = useRef<number | null>(null);
+  const searchTouchStartY = useRef<number | null>(null);
 
   const { selectedConversation, isDirect, selectedIsLive, currentNumber, verified, isLive } =
     useChatState({ conversations, selectedId, liveIds, numbersByConv, verifiedByConv });
@@ -140,6 +148,97 @@ export default function ChatScreen() {
           }),
     [conversations, peerMapsLoaded, peerToConvId, convToPeerId, localConvIds],
   );
+
+  const revealSearch = () => setSearchOpen(true);
+
+  const hideSearch = () => {
+    searchInputRef.current?.blur();
+    setSearchFocused(false);
+    setSearchOpen(false);
+    setSearchQuery('');
+  };
+
+  const hideSearchIfIdle = () => {
+    if (!searchFocused) setSearchOpen(false);
+  };
+
+  const focusSearch = () => {
+    revealSearch();
+    window.requestAnimationFrame(() => searchInputRef.current?.focus());
+  };
+
+  const handleSearchWheel = (event: React.WheelEvent<HTMLElement>) => {
+    if (event.deltaY > 12) hideSearch();
+  };
+
+  const handleSearchTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    searchTouchStartY.current = event.touches[0]?.clientY ?? null;
+  };
+
+  const handleSearchTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    const startY = searchTouchStartY.current;
+    const currentY = event.touches[0]?.clientY;
+    if (startY === null || currentY === undefined) return;
+    if (currentY - startY < -28) hideSearch();
+  };
+
+  const handleSearchTouchEnd = () => {
+    searchTouchStartY.current = null;
+  };
+
+  const handleSidebarWheelCapture = (event: React.WheelEvent<HTMLDivElement>) => {
+    if (searchOpen && event.deltaY > 12) hideSearch();
+  };
+
+  const handleSidebarTouchStartCapture = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (searchOpen) sidebarTouchStartY.current = event.touches[0]?.clientY ?? null;
+  };
+
+  const handleSidebarTouchMoveCapture = (event: React.TouchEvent<HTMLDivElement>) => {
+    const startY = sidebarTouchStartY.current;
+    const currentY = event.touches[0]?.clientY;
+    if (startY === null || currentY === undefined) return;
+    if (currentY - startY < -28) hideSearch();
+  };
+
+  const handleSidebarTouchEndCapture = () => {
+    sidebarTouchStartY.current = null;
+  };
+
+  const handleListWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    const scrollTop = listRef.current?.scrollTop ?? 0;
+    if (event.deltaY < -12 && scrollTop <= 2) revealSearch();
+    if (event.deltaY > 12) {
+      if (searchOpen) hideSearch();
+      else if (scrollTop > 12) hideSearchIfIdle();
+    }
+  };
+
+  const handleListTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (searchOpen || (listRef.current?.scrollTop ?? 0) <= 2) {
+      touchStartY.current = event.touches[0]?.clientY ?? null;
+    }
+  };
+
+  const handleListTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    const startY = touchStartY.current;
+    const currentY = event.touches[0]?.clientY;
+    if (startY === null || currentY === undefined) return;
+    if (currentY - startY > 28 && (listRef.current?.scrollTop ?? 0) <= 2) revealSearch();
+    if (currentY - startY < -28 && searchOpen) hideSearch();
+  };
+
+  const handleListTouchEnd = () => {
+    touchStartY.current = null;
+  };
+
+  const filteredConversations = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return dedupedConversations;
+    return dedupedConversations.filter((c) =>
+      getConversationDisplayName(c, currentUser.id).toLowerCase().includes(q),
+    );
+  }, [dedupedConversations, searchQuery]);
 
   const handleSend = useMessageSending({
     selectedId,
@@ -311,6 +410,10 @@ export default function ChatScreen() {
         {/* Sidebar */}
         <aside
           aria-label="Conversations"
+          onWheelCapture={handleSidebarWheelCapture}
+          onTouchStartCapture={handleSidebarTouchStartCapture}
+          onTouchMoveCapture={handleSidebarTouchMoveCapture}
+          onTouchEndCapture={handleSidebarTouchEndCapture}
           className={`${
             showSidebar && !mobileThreadClosing ? 'flex' : 'hidden lg:flex'
           } w-full lg:w-80 shrink-0 flex-col bg-[#0f0f16] border-r border-white/5 transition-all duration-500 ${
@@ -326,14 +429,92 @@ export default function ChatScreen() {
                 </span>
               </span>
             </div>
+
+            {/* Search input — slides in when open */}
+            <div
+              id="chat-search-panel"
+              onWheel={handleSearchWheel}
+              onTouchStart={handleSearchTouchStart}
+              onTouchMove={handleSearchTouchMove}
+              onTouchEnd={handleSearchTouchEnd}
+              className={`overflow-hidden transition-all duration-300 ease-out ${
+                searchOpen ? 'mt-3 max-h-20 opacity-100' : 'pointer-events-none max-h-0 opacity-0'
+              }`}
+              aria-hidden={!searchOpen}
+            >
+              <div className="relative">
+                <Search
+                  aria-hidden="true"
+                  className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/30"
+                />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onWheel={handleSearchWheel}
+                  onTouchStart={handleSearchTouchStart}
+                  onTouchMove={handleSearchTouchMove}
+                  onTouchEnd={handleSearchTouchEnd}
+                  onFocus={() => {
+                    setSearchFocused(true);
+                    revealSearch();
+                  }}
+                  onBlur={() => setSearchFocused(false)}
+                  aria-label="Search conversations"
+                  placeholder="Search conversations..."
+                  ref={searchInputRef}
+                  tabIndex={searchOpen ? undefined : -1}
+                  className="w-full rounded-xl border border-white/5 bg-[#1a1a26] py-2.5 pl-10 pr-9 text-sm text-white placeholder-white/30 transition-colors focus:border-purple-500/50 focus:outline-none focus:ring-1 focus:ring-purple-500/20"
+                />
+                <button
+                  type="button"
+                  tabIndex={searchOpen ? undefined : -1}
+                  onClick={hideSearch}
+                  aria-label="Close search"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Pill handle — tap to reveal search */}
+            <div
+              aria-hidden={searchOpen}
+              className={`overflow-hidden transition-all duration-300 ${
+                searchOpen ? 'max-h-0 py-0 opacity-0' : 'max-h-9 py-1 opacity-100'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={focusSearch}
+                aria-label="Reveal conversation search"
+                aria-expanded={searchOpen}
+                aria-controls="chat-search-panel"
+                tabIndex={searchOpen ? -1 : 0}
+                className="group mx-auto flex h-7 w-12 items-center justify-center rounded-full transition-colors hover:bg-white/[0.03]"
+              >
+                <span className="block h-1 w-10 rounded-full bg-white/15 transition-colors group-hover:bg-white/25" />
+              </button>
+            </div>
           </div>
 
-          <ConversationList
-            conversations={dedupedConversations}
-            selectedId={selectedId}
-            onSelect={handleSelect}
-            mutedConversationIds={mutedConversationIds}
-          />
+          <div
+            ref={listRef}
+            onWheel={handleListWheel}
+            onScroll={hideSearchIfIdle}
+            onTouchStart={handleListTouchStart}
+            onTouchMove={handleListTouchMove}
+            onTouchEnd={handleListTouchEnd}
+            className="flex-1 min-h-0 overflow-y-auto"
+          >
+            <ConversationList
+              conversations={filteredConversations}
+              selectedId={selectedId}
+              onSelect={handleSelect}
+              mutedConversationIds={mutedConversationIds}
+            />
+          </div>
         </aside>
 
         {/* Main */}
