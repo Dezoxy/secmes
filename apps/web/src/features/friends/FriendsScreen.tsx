@@ -231,7 +231,7 @@ export default function FriendsScreen() {
         onTouchMoveCapture={handleSidebarTouchMoveCapture}
         onTouchEndCapture={handleSidebarTouchEndCapture}
       >
-        <div className="relative bg-[#0f0f16]/80 backdrop-blur-xl p-4 pt-[env(safe-area-inset-top)] lg:pt-4 lg:bg-[#12121a]/80 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-[-1px] after:h-px after:bg-inherit after:backdrop-blur-xl after:content-['']">
+        <div className="argus-mobile-tab-header relative bg-[#0f0f16]/80 backdrop-blur-xl p-4 lg:bg-[#12121a]/80">
           <div className="flex items-center gap-2">
             <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />
             <div className="flex-1 text-center">

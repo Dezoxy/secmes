@@ -392,7 +392,7 @@ export function SettingsPanel({
         }`}
       >
         {/* Fixed header */}
-        <div className="relative -mx-3 sm:-mx-4 flex shrink-0 items-center justify-between bg-[#0f0f16]/80 backdrop-blur-xl px-3 pb-4 pt-[env(safe-area-inset-top)] sm:px-4 sm:pb-4 sm:pt-4 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-[-1px] after:h-px after:bg-inherit after:backdrop-blur-xl after:content-['']">
+        <div className="argus-mobile-tab-header relative -mx-3 flex shrink-0 items-center justify-between bg-[#0f0f16]/80 px-3 pb-4 backdrop-blur-xl sm:-mx-4 sm:px-4 sm:pt-4 sm:pb-4">
           <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />
           <h2 className="flex-1 text-center text-xl font-bold tracking-wider">
             <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
@@ -470,7 +470,7 @@ export function SettingsPanel({
           mobileBackAnimating ? paneBackExitMotion : ''
         }`}
       >
-        <div className="relative shrink-0 flex items-center gap-3 bg-[#0f0f16]/80 backdrop-blur-xl px-3 pt-[env(safe-area-inset-top)] pb-4 sm:px-6 sm:pt-6 sm:pb-4 after:pointer-events-none after:absolute after:inset-x-0 after:bottom-[-1px] after:h-px after:bg-inherit after:backdrop-blur-xl after:content-['']">
+        <div className="argus-mobile-tab-header relative flex shrink-0 items-center gap-3 bg-[#0f0f16]/80 px-3 pb-4 backdrop-blur-xl sm:px-6 sm:pt-6 sm:pb-4">
           <IconButton
             onClick={returnToSettingsMenu}
             className="sm:hidden"
