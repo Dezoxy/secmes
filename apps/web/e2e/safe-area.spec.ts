@@ -9,6 +9,15 @@ test('installed PWA status bar uses opaque mode', async ({ page }) => {
   );
 });
 
+test('viewport lets iOS own the safe-area strips', async ({ page }) => {
+  await page.goto('/chat');
+
+  await expect(page.locator('meta[name="viewport"]')).not.toHaveAttribute(
+    'content',
+    /viewport-fit=cover/,
+  );
+});
+
 // Guards the iOS PWA safe-area fixes: the bottom floating nav must reserve only its *measured*
 // height as scroll clearance (so the bottom safe-zone is reclaimed as edge-to-edge content rather
 // than a fixed dead band), and real content must scroll clear of the floating pills.

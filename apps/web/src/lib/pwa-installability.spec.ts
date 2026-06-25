@@ -9,7 +9,7 @@ describe('PWA installability policy', () => {
     expect(argusPwaManifest.scope).toBe('/');
     expect(argusPwaManifest.id).toBe('/');
     expect(argusPwaManifest.lang).toBe('en');
-    expect(argusPwaManifest.display).toBe('fullscreen');
+    expect(argusPwaManifest.display).toBe('standalone');
     expect(argusPwaManifest.orientation).toBe('portrait');
     expect(argusPwaManifest.icons).toEqual([
       { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
