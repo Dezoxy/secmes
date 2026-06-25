@@ -65,9 +65,9 @@ export function MessageList({
     senderId === currentUser.id ? currentUser : users.find((u) => u.id === senderId);
   const topPadding = floatingBars ? 'pt-[calc(env(safe-area-inset-top)_+_5rem)]' : 'pt-4';
   const bottomPadding = floatingBars
-    ? 'pb-[calc(env(safe-area-inset-bottom)_+_7.75rem)]'
+    ? 'argus-scroll-clear-composer'
     : bottomNavClearance
-      ? 'pb-[calc(env(safe-area-inset-bottom)_+_6rem)] lg:pb-4'
+      ? 'argus-scroll-clear-floating-nav'
       : 'pb-4';
 
   return (

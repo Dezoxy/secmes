@@ -553,6 +553,7 @@ export default function ChatScreen() {
                 conversation={selectedConversation}
                 onImageClick={setPreviewImage}
                 bottomNavClearance={false}
+                floatingBars
               />
               {effectiveSelectedIsLive && !selectedIsSyncLost && (
                 <ChatInput

@@ -324,7 +324,7 @@ export default function FriendsScreen() {
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
-          className="flex-1 space-y-2 overflow-y-auto px-2 pt-3 pb-[calc(env(safe-area-inset-bottom)_+_6rem)] lg:pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)]"
+          className="argus-scroll-clear-floating-nav flex-1 space-y-2 overflow-y-auto px-2 pt-3"
         >
           {friendsError && (
             <p className="mx-2 text-xs text-amber-400/70">

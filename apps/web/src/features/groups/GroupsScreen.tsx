@@ -409,6 +409,7 @@ export default function GroupsScreen() {
                 conversation={selectedConversation}
                 onImageClick={setPreviewImage}
                 bottomNavClearance={false}
+                floatingBars
               />
               {effectiveSelectedIsLive && !selectedIsSyncLost && <ChatInput onSend={handleSend} />}
             </div>

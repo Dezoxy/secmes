@@ -27,9 +27,7 @@ export function ConversationList({
   listPb,
 }: ConversationListProps) {
   return (
-    <div
-      className={`px-2 space-y-1 ${listPb ?? 'pb-[calc(env(safe-area-inset-bottom)_+_6rem)] lg:pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)]'}`}
-    >
+    <div className={`px-2 space-y-1 ${listPb ?? 'argus-scroll-clear-floating-nav'}`}>
       {conversations.length === 0 && (
         <EmptyState title="No conversations yet" icon={Users} compact className="mx-2 mt-4">
           Start a secure conversation when another member is available.
