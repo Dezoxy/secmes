@@ -214,179 +214,185 @@ export function ChatHeader({
               : 'Security details';
 
   return (
-    <div className="relative z-20 flex items-center justify-between border-b border-white/5 bg-[#0f0f16]/75 px-4 pb-3 pt-[env(safe-area-inset-top)] sm:pt-3 pl-[calc(env(safe-area-inset-left)_+_1rem)] pr-[calc(env(safe-area-inset-right)_+_1rem)] backdrop-blur-xl">
-      <div className="flex items-center gap-3">
-        {onBack && (
-          <IconButton
-            onClick={onBack}
-            className="-ml-2 rounded-xl text-white/60 hover:bg-[#1a1a26] hover:text-white lg:hidden"
-            aria-label="Back to conversations"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </IconButton>
-        )}
-
-        <div className="relative">
-          <Avatar
-            src={avatar}
-            name={displayName}
-            size="md"
-            shape="circle"
-            className="ring-2 ring-white/5"
-          />
-          {isOnline && (
-            <div className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-green-500 ring-2 ring-[#0f0f16]" />
-          )}
-          {conversation.type === 'group' && (
-            <div className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-purple-500 ring-2 ring-[#0f0f16]">
-              <Users className="h-2.5 w-2.5 text-white" />
-            </div>
-          )}
-        </div>
-
-        <div className="min-w-0">
-          <div className="flex items-center gap-1.5">
-            <h2 className="truncate font-semibold text-white">{displayName}</h2>
-            {onVerify && (
+    <>
+      <div className="pointer-events-none absolute inset-x-0 top-[calc(env(safe-area-inset-top)_+_0.75rem)] z-20 px-2 pl-[calc(env(safe-area-inset-left)_+_0.5rem)] pr-[calc(env(safe-area-inset-right)_+_0.5rem)]">
+        <div className="pointer-events-auto flex items-center justify-between gap-2 rounded-2xl bg-[#12121a]/95 px-3 py-2 shadow-[0_2px_24px_rgba(0,0,0,0.55)] ring-1 ring-white/[0.08] backdrop-blur-xl">
+          <div className="flex items-center gap-3">
+            {onBack && (
               <IconButton
-                onClick={onVerify}
-                title={verified ? 'Verified — review security' : 'Verify security'}
-                size="xs"
-                className="rounded-md"
-                aria-label={verified ? 'Verified — review security' : 'Verify security'}
+                onClick={onBack}
+                className="-ml-2 rounded-xl text-white/60 hover:bg-[#1a1a26] hover:text-white lg:hidden"
+                aria-label="Back to conversations"
               >
-                {verified ? (
-                  <ShieldCheck className="h-4 w-4 text-green-400" />
-                ) : (
-                  <Shield className="h-3.5 w-3.5 text-white/60" />
-                )}
+                <ArrowLeft className="h-5 w-5" />
               </IconButton>
             )}
+
+            <div className="relative">
+              <Avatar
+                src={avatar}
+                name={displayName}
+                size="md"
+                shape="circle"
+                className="ring-2 ring-white/5"
+              />
+              {isOnline && (
+                <div className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-green-500 ring-2 ring-[#0f0f16]" />
+              )}
+              {conversation.type === 'group' && (
+                <div className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-purple-500 ring-2 ring-[#0f0f16]">
+                  <Users className="h-2.5 w-2.5 text-white" />
+                </div>
+              )}
+            </div>
+
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <h2 className="truncate font-semibold text-white">{displayName}</h2>
+                {onVerify && (
+                  <IconButton
+                    onClick={onVerify}
+                    title={verified ? 'Verified — review security' : 'Verify security'}
+                    size="xs"
+                    className="rounded-md"
+                    aria-label={verified ? 'Verified — review security' : 'Verify security'}
+                  >
+                    {verified ? (
+                      <ShieldCheck className="h-4 w-4 text-green-400" />
+                    ) : (
+                      <Shield className="h-3.5 w-3.5 text-white/60" />
+                    )}
+                  </IconButton>
+                )}
+              </div>
+              <p className={`text-xs ${isOnline ? 'text-green-400' : 'text-white/60'}`}>
+                {statusText}
+              </p>
+            </div>
           </div>
-          <p className={`text-xs ${isOnline ? 'text-green-400' : 'text-white/60'}`}>{statusText}</p>
-        </div>
-      </div>
 
-      <div className="flex items-center gap-1">
-        <IconButton
-          onClick={handleComingSoon}
-          size="lg"
-          className="rounded-xl text-white/40 hover:bg-[#1a1a26] hover:text-white/70"
-          aria-label="Start voice call"
-        >
-          <Phone className="h-5 w-5" />
-        </IconButton>
-        <IconButton
-          onClick={handleComingSoon}
-          size="lg"
-          className="rounded-xl text-white/40 hover:bg-[#1a1a26] hover:text-white/70"
-          aria-label="Start video call"
-        >
-          <Video className="h-5 w-5" />
-        </IconButton>
-        <div ref={menuRef} className="relative">
-          <IconButton
-            onClick={(event) => {
-              menuButtonRef.current = event.currentTarget;
-              setMenuOpen((open) => !open);
-            }}
-            size="lg"
-            className={`rounded-xl text-white/40 hover:bg-[#1a1a26] hover:text-white/70 ${
-              menuOpen ? 'bg-[#1a1a26] text-white/80' : ''
-            }`}
-            aria-label="Open conversation actions"
-            aria-expanded={menuOpen}
-            aria-haspopup="menu"
-          >
-            <MoreVertical className="h-5 w-5" />
-          </IconButton>
+          <div className="flex items-center gap-1">
+            <IconButton
+              onClick={handleComingSoon}
+              size="lg"
+              className="rounded-xl text-white/40 hover:bg-[#1a1a26] hover:text-white/70"
+              aria-label="Start voice call"
+            >
+              <Phone className="h-5 w-5" />
+            </IconButton>
+            <IconButton
+              onClick={handleComingSoon}
+              size="lg"
+              className="rounded-xl text-white/40 hover:bg-[#1a1a26] hover:text-white/70"
+              aria-label="Start video call"
+            >
+              <Video className="h-5 w-5" />
+            </IconButton>
+            <div ref={menuRef} className="relative">
+              <IconButton
+                onClick={(event) => {
+                  menuButtonRef.current = event.currentTarget;
+                  setMenuOpen((open) => !open);
+                }}
+                size="lg"
+                className={`rounded-xl text-white/40 hover:bg-[#1a1a26] hover:text-white/70 ${
+                  menuOpen ? 'bg-[#1a1a26] text-white/80' : ''
+                }`}
+                aria-label="Open conversation actions"
+                aria-expanded={menuOpen}
+                aria-haspopup="menu"
+              >
+                <MoreVertical className="h-5 w-5" />
+              </IconButton>
 
-          <div
-            className={`absolute right-0 top-full z-30 mt-3 w-72 origin-top-right ${floatingMenuSurfaceClass} ${floatingMenuMotion(
-              menuOpen,
-              'top',
-            )}`}
-            role="menu"
-            aria-label="Conversation actions"
-            aria-hidden={!menuOpen}
-          >
-            <MenuItem
-              icon={Info}
-              label="Conversation info"
-              tabIndex={menuTabIndex}
-              onClick={() => openPanel('info')}
-            />
-            <MenuItem
-              icon={Users}
-              label={conversation.type === 'group' ? 'Members' : 'Contact details'}
-              value={`${conversation.participants.length}`}
-              tabIndex={menuTabIndex}
-              onClick={() => openPanel('members')}
-            />
-            {conversation.type === 'group' && onAddMember && (
-              <MenuItem
-                icon={UserPlus}
-                label="Add member"
-                tabIndex={menuTabIndex}
-                onClick={() => {
-                  setMenuOpen(false);
-                  onAddMember();
-                }}
-              />
-            )}
-            <MenuItem
-              icon={Search}
-              label="Search in conversation"
-              tabIndex={menuTabIndex}
-              onClick={() => openPanel('search')}
-            />
-            <MenuItem
-              icon={ImageIcon}
-              label="Media, files, links"
-              value={`${attachments.length}`}
-              tabIndex={menuTabIndex}
-              onClick={() => openPanel('media')}
-            />
-            <MenuItem
-              icon={muted ? Bell : BellOff}
-              label={muted ? 'Unmute conversation' : 'Mute conversation'}
-              value={muted ? undefined : 'in-app only'}
-              tabIndex={menuTabIndex}
-              onClick={() => {
-                const next = !muted;
-                if (next) muteConversation(conversation.id);
-                else unmuteConversation(conversation.id);
-                void syncMuteStateToCache(readMutedConversationIds());
-                setMuted(next);
-                setMenuOpen(false);
-              }}
-            />
-            <MenuItem
-              icon={LockKeyhole}
-              label="Security details"
-              tabIndex={menuTabIndex}
-              onClick={() => openPanel('security')}
-            />
-            {onVerify && (
-              <MenuItem
-                icon={verified ? ShieldCheck : Shield}
-                label={verified ? 'Review safety number' : 'Verify safety number'}
-                tabIndex={menuTabIndex}
-                onClick={() => {
-                  setMenuOpen(false);
-                  onVerify();
-                }}
-              />
-            )}
-            <div className="my-1 h-px bg-white/5" />
-            <MenuItem icon={Trash2} label="Clear local cache" value="Later" disabled />
-            <MenuItem
-              icon={UserMinus}
-              label={conversation.type === 'group' ? 'Leave group' : 'Block user'}
-              value="Later"
-              danger
-              disabled
-            />
+              <div
+                className={`absolute right-0 top-full z-30 mt-3 w-72 origin-top-right ${floatingMenuSurfaceClass} ${floatingMenuMotion(
+                  menuOpen,
+                  'top',
+                )}`}
+                role="menu"
+                aria-label="Conversation actions"
+                aria-hidden={!menuOpen}
+              >
+                <MenuItem
+                  icon={Info}
+                  label="Conversation info"
+                  tabIndex={menuTabIndex}
+                  onClick={() => openPanel('info')}
+                />
+                <MenuItem
+                  icon={Users}
+                  label={conversation.type === 'group' ? 'Members' : 'Contact details'}
+                  value={`${conversation.participants.length}`}
+                  tabIndex={menuTabIndex}
+                  onClick={() => openPanel('members')}
+                />
+                {conversation.type === 'group' && onAddMember && (
+                  <MenuItem
+                    icon={UserPlus}
+                    label="Add member"
+                    tabIndex={menuTabIndex}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onAddMember();
+                    }}
+                  />
+                )}
+                <MenuItem
+                  icon={Search}
+                  label="Search in conversation"
+                  tabIndex={menuTabIndex}
+                  onClick={() => openPanel('search')}
+                />
+                <MenuItem
+                  icon={ImageIcon}
+                  label="Media, files, links"
+                  value={`${attachments.length}`}
+                  tabIndex={menuTabIndex}
+                  onClick={() => openPanel('media')}
+                />
+                <MenuItem
+                  icon={muted ? Bell : BellOff}
+                  label={muted ? 'Unmute conversation' : 'Mute conversation'}
+                  value={muted ? undefined : 'in-app only'}
+                  tabIndex={menuTabIndex}
+                  onClick={() => {
+                    const next = !muted;
+                    if (next) muteConversation(conversation.id);
+                    else unmuteConversation(conversation.id);
+                    void syncMuteStateToCache(readMutedConversationIds());
+                    setMuted(next);
+                    setMenuOpen(false);
+                  }}
+                />
+                <MenuItem
+                  icon={LockKeyhole}
+                  label="Security details"
+                  tabIndex={menuTabIndex}
+                  onClick={() => openPanel('security')}
+                />
+                {onVerify && (
+                  <MenuItem
+                    icon={verified ? ShieldCheck : Shield}
+                    label={verified ? 'Review safety number' : 'Verify safety number'}
+                    tabIndex={menuTabIndex}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onVerify();
+                    }}
+                  />
+                )}
+                <div className="my-1 h-px bg-white/5" />
+                <MenuItem icon={Trash2} label="Clear local cache" value="Later" disabled />
+                <MenuItem
+                  icon={UserMinus}
+                  label={conversation.type === 'group' ? 'Leave group' : 'Block user'}
+                  value="Later"
+                  danger
+                  disabled
+                />
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -570,6 +576,6 @@ export function ChatHeader({
           </div>
         </Modal>
       )}
-    </div>
+    </>
   );
 }
