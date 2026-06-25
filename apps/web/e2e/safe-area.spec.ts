@@ -1,5 +1,14 @@
 import { expect, test } from '@playwright/test';
 
+test('installed PWA status bar uses opaque mode', async ({ page }) => {
+  await page.goto('/chat');
+
+  await expect(page.locator('meta[name="apple-mobile-web-app-status-bar-style"]')).toHaveAttribute(
+    'content',
+    'black',
+  );
+});
+
 // Guards the iOS PWA safe-area fixes: the bottom floating nav must reserve only its *measured*
 // height as scroll clearance (so the bottom safe-zone is reclaimed as edge-to-edge content rather
 // than a fixed dead band), and real content must scroll clear of the floating pills.
