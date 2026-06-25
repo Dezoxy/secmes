@@ -49,6 +49,18 @@ resource "aws_iam_role_policy" "instance_onboarding_read" {
         Condition = {
           StringEquals = { "kms:ViaService" = "ssm.${data.aws_region.current.name}.amazonaws.com" }
         }
+      },
+      {
+        Sid      = "LocateDeployArtifactsBucket"
+        Effect   = "Allow"
+        Action   = ["s3:GetBucketLocation"]
+        Resource = aws_s3_bucket.deploy_artifacts.arn
+      },
+      {
+        Sid      = "ReadDeployBundlesOnly"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "${aws_s3_bucket.deploy_artifacts.arn}/deploy-bundles/*"
       }
     ]
   })
@@ -145,6 +157,22 @@ resource "aws_iam_role_policy" "github_deploy" {
           "ssm:ListCommandInvocations",
         ]
         Resource = "*"
+      },
+      {
+        Sid      = "LocateDeployArtifactsBucket"
+        Effect   = "Allow"
+        Action   = ["s3:GetBucketLocation"]
+        Resource = aws_s3_bucket.deploy_artifacts.arn
+      },
+      {
+        # Upload the exact-SHA infra bundle for the instance to fetch, then delete it after the SSM rollout.
+        Sid    = "WriteDeployBundlesOnly"
+        Effect = "Allow"
+        Action = [
+          "s3:DeleteObject",
+          "s3:PutObject",
+        ]
+        Resource = "${aws_s3_bucket.deploy_artifacts.arn}/deploy-bundles/*"
       }
     ]
   })

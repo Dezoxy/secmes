@@ -36,7 +36,8 @@ ROLE_ARN="$(tfout github_deploy_role_arn)"
 AWS_REGION="$(tfout aws_region)"
 INSTANCE_ID="$(tfout instance_id)"
 KEY_VAULT_NAME="$(tfout key_vault_name)"
-[ -n "$ROLE_ARN" ] && [ -n "$INSTANCE_ID" ] && [ -n "$KEY_VAULT_NAME" ] || {
+DEPLOY_ARTIFACTS_BUCKET="$(tfout deploy_artifacts_bucket)"
+[ -n "$ROLE_ARN" ] && [ -n "$INSTANCE_ID" ] && [ -n "$KEY_VAULT_NAME" ] && [ -n "$DEPLOY_ARTIFACTS_BUCKET" ] || {
   log "FATAL: missing Terraform outputs — run 'terraform -chdir=$TF_DIR apply' first"
   exit 1
 }
@@ -78,6 +79,7 @@ setvar AWS_DEPLOY_ROLE_ARN "$ROLE_ARN"
 setvar AWS_REGION "$AWS_REGION"
 setvar AWS_INSTANCE_ID "$INSTANCE_ID"
 setvar AWS_KEY_VAULT_NAME "$KEY_VAULT_NAME"
+setvar AWS_DEPLOY_ARTIFACTS_BUCKET "$DEPLOY_ARTIFACTS_BUCKET"
 setvar GHCR_USER "$GHCR_USER"
 setvar S3_ENDPOINT "$S3_ENDPOINT"
 setvar S3_REGION "$S3_REGION"

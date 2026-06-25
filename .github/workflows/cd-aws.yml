@@ -130,7 +130,8 @@ jobs:
   # Roll out to the single EC2 box through the AWS control plane (SSM send-command — no SSH, no inbound port).
   # CD starts the instance if it's stopped (you stop it by hand to save cost), waits for the SSM agent, then
   # runs deploy.sh as root with the experiment knobs (Arc token source, skip GlitchTip, verify cd-aws.yml's
-  # signature). The exact-SHA infra files are bundled INTO the command so the box's role stays pull-only.
+  # signature). The exact-SHA infra bundle is handed off through a private S3 artifact bucket because SSM
+  # documents include runtime parameters in their 64 KiB document-size limit.
   deploy:
     needs: images
     if: ${{ vars.ENABLE_DEPLOY_AWS == 'true' }}
@@ -176,27 +177,31 @@ jobs:
           BACKUP_S3_BUCKET: ${{ vars.BACKUP_S3_BUCKET }}
           # Non-secret VAPID public key — mirrors cd.yml (see rationale there). Absent = push disabled.
           VAPID_PUBLIC_KEY: ${{ vars.VITE_VAPID_PUBLIC_KEY }}
+          DEPLOY_ARTIFACTS_BUCKET: ${{ vars.AWS_DEPLOY_ARTIFACTS_BUCKET }}
         run: |
           set -euo pipefail
+          : "${DEPLOY_ARTIFACTS_BUCKET:?AWS_DEPLOY_ARTIFACTS_BUCKET repo variable is required}"
           # Bundle what deploy.sh reads from the unpacked tree: compose + the secret-fetch unit + deploy.sh, PLUS
           # the observability config tree + the glitchtip entrypoint (deploy.sh step 1 cp's both even when the
           # GlitchTip tier is skipped at runtime) + the B2 CORS source-of-truth (deploy.sh step 6c reads it).
-          # Exclude docs/images (*.md/*.png): deploy.sh reads none of them, and bundling them pushed the base64
-          # payload past SSM SendCommand's 97KB document+parameters limit (MaxDocumentSizeExceeded).
-          # Use xz instead of gzip here: AWS SSM SendCommand has a hard 97KB document+parameter limit, and the
-          # same bundle now exceeds it when gzip+base64 encoded. xz keeps the exact same file set below the SSM
-          # ceiling without dropping runtime inputs (dashboards, backup/cleanup units, coturn config, etc.).
+          # Exclude docs/images (*.md/*.png): deploy.sh reads none of them. Keep xz so the private S3 artifact is
+          # small; the SSM command carries only its S3 URI, not the bundle bytes.
           tar cJf deploy-bundle.tar.xz --exclude='*.md' --exclude='*.png' compose.prod.yaml infra/stack/secrets infra/stack/deploy infra/stack/observability infra/stack/glitchtip infra/stack/coturn/docker-entrypoint.sh infra/stack/coturn/turnserver.conf infra/b2 infra/backup infra/cleanup infra/audit-prune infra/retention infra/notify
-          B64="$(base64 -w0 deploy-bundle.tar.xz)"
+          BUNDLE_KEY="deploy-bundles/${GITHUB_SHA}/${IMAGE_TAG}/deploy-bundle.tar.xz"
+          DEPLOY_BUNDLE_S3_URI="s3://${DEPLOY_ARTIFACTS_BUCKET}/${BUNDLE_KEY}"
+          aws s3 cp deploy-bundle.tar.xz "$DEPLOY_BUNDLE_S3_URI" --only-show-errors
+          echo "DEPLOY_BUNDLE_S3_URI=$DEPLOY_BUNDLE_S3_URI" >>"$GITHUB_ENV"
           GHCR_REGISTRY="ghcr.io/$(echo "$GHCR_OWNER" | tr '[:upper:]' '[:lower:]')"
           # single-quoted echos write LITERAL shell to runcmd.sh ($WORK expands on the box, not in the runner).
-          # POSIX-safe wrapper (set -eu, no pipefail; two-step decode): the SSM AWS-RunShellScript shell isn't
-          # guaranteed to be bash. deploy.sh itself is invoked under an explicit `bash` and keeps full strictness.
+          # POSIX-safe wrapper (set -eu, no pipefail): the SSM AWS-RunShellScript shell isn't guaranteed to be
+          # bash. deploy.sh itself is invoked under an explicit `bash` and keeps full strictness.
           # shellcheck disable=SC2016
           {
             echo 'set -eu'
             echo 'WORK="$(mktemp -d)"'
-            printf "printf '%%s' '%s' | base64 -d >\"\$WORK/bundle.tar.xz\"\n" "$B64"
+            printf 'DEPLOY_BUNDLE_S3_URI=%q\n' "$DEPLOY_BUNDLE_S3_URI"
+            echo 'command -v aws >/dev/null || { echo "FATAL: aws CLI is required to download the deploy bundle"; exit 1; }'
+            echo 'aws s3 cp "$DEPLOY_BUNDLE_S3_URI" "$WORK/bundle.tar.xz" --only-show-errors'
             echo 'if ! command -v xz >/dev/null; then'
             echo '  command -v apt-get >/dev/null || { echo "FATAL: xz is required to unpack the deploy bundle and apt-get is unavailable"; exit 1; }'
             echo '  export DEBIAN_FRONTEND=noninteractive'
@@ -218,8 +223,8 @@ jobs:
           jq -Rs '{commands: [.]}' <runcmd.sh >ssm-params.json
           PARAM_BYTES="$(wc -c <ssm-params.json | tr -d ' ')"
           echo "SSM parameter payload bytes: ${PARAM_BYTES}"
-          if [ "$PARAM_BYTES" -gt 94000 ]; then
-            echo "::error::AWS SSM command payload is ${PARAM_BYTES} bytes; keep it below 94KB to leave headroom under the 97KB SendCommand document+parameters limit."
+          if [ "$PARAM_BYTES" -gt 60000 ]; then
+            echo "::error::AWS SSM command payload is ${PARAM_BYTES} bytes; keep it below 60KB to leave headroom under the 64KB SendCommand document+parameters limit."
             exit 1
           fi
 
@@ -275,3 +280,11 @@ jobs:
           # deploy.sh is set -e and prints its success sentinel only after the rollout is healthy, so a Success
           # status == a healthy deploy. Anything else fails the job.
           [ "$STATUS" = "Success" ] || { echo "::error::SSM rollout status=$STATUS"; exit 1; }
+
+      - name: Delete deploy bundle artifact
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          if [ -n "${DEPLOY_BUNDLE_S3_URI:-}" ]; then
+            aws s3 rm "$DEPLOY_BUNDLE_S3_URI" --only-show-errors || true
+          fi

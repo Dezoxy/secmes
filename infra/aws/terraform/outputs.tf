@@ -18,6 +18,11 @@ output "github_deploy_role_arn" {
   description = "Set as the AWS_DEPLOY_ROLE_ARN var in GitHub Actions — cd-aws.yml assumes it via OIDC (configure-aws-credentials)."
 }
 
+output "deploy_artifacts_bucket" {
+  value       = aws_s3_bucket.deploy_artifacts.id
+  description = "Set as AWS_DEPLOY_ARTIFACTS_BUCKET in GitHub Actions — cd-aws.yml uploads the SSM deploy bundle here."
+}
+
 output "aws_region" {
   value       = var.aws_region
   description = "Set as the AWS_REGION var in GitHub Actions."
