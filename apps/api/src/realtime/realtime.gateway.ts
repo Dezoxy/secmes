@@ -320,10 +320,9 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
    * as the commit lands. METADATA ONLY (ids, invariant #2).
    */
   private notifyRemoved(event: MemberRemovedEvent): void {
-    // Invalidate any active call entries where a removed member is a participant. Without this, a
-    // removed member could continue exchanging call signals via the stale authz entry until the
-    // 90-second inactivity or 90-minute max-duration timer fires.
-    this.callsAuthz.releaseByParticipants(event.tenantId, event.removedSubs);
+    // Invalidate call entries for the affected conversation only. Scoping by conversationId
+    // prevents tearing down an unrelated 1:1 call the same user has in another conversation.
+    this.callsAuthz.releaseByParticipants(event.tenantId, event.conversationId, event.removedSubs);
     const room = roomKey(event.tenantId, event.conversationId);
     const removedSubSet = new Set(event.removedSubs);
     for (const [client, state] of this.conns) {

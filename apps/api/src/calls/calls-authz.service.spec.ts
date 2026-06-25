@@ -112,7 +112,7 @@ describe('CallsAuthzService', () => {
     const ends: unknown[] = [];
     bus.onCallEnd((e) => ends.push(e));
 
-    svc.releaseByParticipants('T1', ['caller']);
+    svc.releaseByParticipants('T1', CONV, ['caller']);
 
     expect(ends).toHaveLength(1);
     expect(ends[0]).toMatchObject({ callId: CALL_ID, reason: 'peer-gone' });
@@ -124,7 +124,18 @@ describe('CallsAuthzService', () => {
     const ends: unknown[] = [];
     bus.onCallEnd((e) => ends.push(e));
 
-    svc.releaseByParticipants('T2', ['caller']); // wrong tenant
+    svc.releaseByParticipants('T2', CONV, ['caller']); // wrong tenant
+
+    expect(ends).toHaveLength(0);
+  });
+
+  it('releaseByParticipants: does not release entries for a different conversation', () => {
+    register();
+
+    const ends: unknown[] = [];
+    bus.onCallEnd((e) => ends.push(e));
+
+    svc.releaseByParticipants('T1', '11111111-1111-4111-8111-111111111111', ['caller']);
 
     expect(ends).toHaveLength(0);
   });

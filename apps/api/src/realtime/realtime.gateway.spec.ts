@@ -766,13 +766,16 @@ describe('RealtimeGateway', () => {
     expect(lastSend(legacySock)?.event).toBe('call.ring');
   });
 
-  it('notifyRemoved: calls releaseByParticipants with removed subs to invalidate stale call entries', async () => {
+  it('notifyRemoved: calls releaseByParticipants scoped to the removed conversation', async () => {
     bus.emitMemberRemoved({
       tenantId: 'T1',
       conversationId: CONV,
       removedSubs: ['argusid:removed-user'],
     });
 
-    expect(callsAuthz.releaseByParticipants).toHaveBeenCalledWith('T1', ['argusid:removed-user']);
+    // conversationId is passed so an unrelated call in another conversation is not torn down.
+    expect(callsAuthz.releaseByParticipants).toHaveBeenCalledWith('T1', CONV, [
+      'argusid:removed-user',
+    ]);
   });
 });

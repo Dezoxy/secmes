@@ -49,7 +49,7 @@ export class CallsService {
    * The credential is SECRET-EQUIVALENT — never passed to any logger, never returned in errors.
    */
   async mintTurnCredentials(auth: VerifiedAuth): Promise<TurnCredentialsResponse> {
-    const userId = await withTenant(auth.tenantId, async (tx) => {
+    const { userId, relayOnly } = await withTenant(auth.tenantId, async (tx) => {
       // requireUser returns users.id (string) directly — throws 404 if the user row is gone.
       const id = await requireUser(tx, auth);
 
@@ -72,7 +72,15 @@ export class CallsService {
         );
       }
 
-      return id;
+      // Read the relay preference in the same transaction so the credential response is consistent
+      // with what GET /calls/settings returns. Default true (relay-only) if the row is absent.
+      const [prefRow] = await tx
+        .select({ relayOnly: schema.users.callRelayOnly })
+        .from(schema.users)
+        .where(eq(schema.users.id, id))
+        .limit(1);
+
+      return { userId: id, relayOnly: prefRow?.relayOnly ?? true };
     });
 
     // Bucket expiry to the start of the current TTL window + 2×TTL.
@@ -87,7 +95,7 @@ export class CallsService {
 
     return {
       iceServers: [{ urls: turnUrls(), username, credential }],
-      iceTransportPolicy: 'relay',
+      iceTransportPolicy: relayOnly ? 'relay' : 'all',
       ttlSeconds: expiry - now,
     };
   }
