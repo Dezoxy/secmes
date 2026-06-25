@@ -73,6 +73,8 @@ export const SENSITIVE_LIMITS = {
   /** Breakglass admin login — @Public(), IP-keyed. Lockout (N=5/15 min) is the real security
    *  control; this cap is a heavy-path DoS guard (64 MiB Argon2id per attempt). */
   breakglassLogin: 10,
+  /** Credential minting is cheap but a leaked-creds farm shouldn't be free; generous for retry. */
+  turnCredentials: 30,
   /** Exact argus-id lookup — anti-enumeration guard. Exact-match-only is the real control;
    *  this cap makes bulk scanning visible in logs and expensive. */
   lookupUser: 10,
