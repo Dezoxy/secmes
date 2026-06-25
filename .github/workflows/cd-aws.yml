@@ -183,8 +183,11 @@ jobs:
           # GlitchTip tier is skipped at runtime) + the B2 CORS source-of-truth (deploy.sh step 6c reads it).
           # Exclude docs/images (*.md/*.png): deploy.sh reads none of them, and bundling them pushed the base64
           # payload past SSM SendCommand's 97KB document+parameters limit (MaxDocumentSizeExceeded).
-          tar czf deploy-bundle.tgz --exclude='*.md' --exclude='*.png' compose.prod.yaml infra/stack/secrets infra/stack/deploy infra/stack/observability infra/stack/glitchtip infra/stack/coturn/docker-entrypoint.sh infra/stack/coturn/turnserver.conf infra/b2 infra/backup infra/cleanup infra/audit-prune infra/retention infra/notify
-          B64="$(base64 -w0 deploy-bundle.tgz)"
+          # Use xz instead of gzip here: AWS SSM SendCommand has a hard 97KB document+parameter limit, and the
+          # same bundle now exceeds it when gzip+base64 encoded. xz keeps the exact same file set below the SSM
+          # ceiling without dropping runtime inputs (dashboards, backup/cleanup units, coturn config, etc.).
+          tar cJf deploy-bundle.tar.xz --exclude='*.md' --exclude='*.png' compose.prod.yaml infra/stack/secrets infra/stack/deploy infra/stack/observability infra/stack/glitchtip infra/stack/coturn/docker-entrypoint.sh infra/stack/coturn/turnserver.conf infra/b2 infra/backup infra/cleanup infra/audit-prune infra/retention infra/notify
+          B64="$(base64 -w0 deploy-bundle.tar.xz)"
           GHCR_REGISTRY="ghcr.io/$(echo "$GHCR_OWNER" | tr '[:upper:]' '[:lower:]')"
           # single-quoted echos write LITERAL shell to runcmd.sh ($WORK expands on the box, not in the runner).
           # POSIX-safe wrapper (set -eu, no pipefail; two-step decode): the SSM AWS-RunShellScript shell isn't
@@ -193,8 +196,9 @@ jobs:
           {
             echo 'set -eu'
             echo 'WORK="$(mktemp -d)"'
-            printf "printf '%%s' '%s' | base64 -d >\"\$WORK/bundle.tgz\"\n" "$B64"
-            echo 'tar xzf "$WORK/bundle.tgz" -C "$WORK"'
+            printf "printf '%%s' '%s' | base64 -d >\"\$WORK/bundle.tar.xz\"\n" "$B64"
+            echo 'command -v xz >/dev/null || { echo "FATAL: xz is required to unpack the deploy bundle"; exit 1; }'
+            echo 'tar xJf "$WORK/bundle.tar.xz" -C "$WORK"'
             # Experiment knobs: Arc token source, skip the GlitchTip tier, verify THIS workflow's signature.
             echo 'export ARGUS_TOKEN_SOURCE=arc ARGUS_SKIP_GLITCHTIP=1 ARGUS_COSIGN_WORKFLOW=.github/workflows/cd-aws.yml'
             printf 'export ARGUS_KEY_VAULT=%q IMAGE_TAG=%q GHCR_REGISTRY=%q GHCR_USER=%q GH_REPO=%q\n' \
@@ -207,6 +211,12 @@ jobs:
           # SSM AWS-RunShellScript takes a `commands` array; pass the whole script as one element (jq -Rs reads
           # the file as a single JSON string). Avoids any shell-quoting of the script into the CLI.
           jq -Rs '{commands: [.]}' <runcmd.sh >ssm-params.json
+          PARAM_BYTES="$(wc -c <ssm-params.json | tr -d ' ')"
+          echo "SSM parameter payload bytes: ${PARAM_BYTES}"
+          if [ "$PARAM_BYTES" -gt 94000 ]; then
+            echo "::error::AWS SSM command payload is ${PARAM_BYTES} bytes; keep it below 94KB to leave headroom under the 97KB SendCommand document+parameters limit."
+            exit 1
+          fi
 
       - name: Start the instance if stopped, wait for SSM
         env:
