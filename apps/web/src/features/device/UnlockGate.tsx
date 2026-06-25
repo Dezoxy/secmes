@@ -239,11 +239,17 @@ export function UnlockGate({ children }: { children: ReactNode }): ReactNode {
             >
               <p className="text-xs text-white/60">
                 By continuing, you agree to our{' '}
-                <span aria-disabled="true" className="text-[var(--argus-brand-300)] underline underline-offset-2">
+                <span
+                  aria-disabled="true"
+                  className="text-[var(--argus-brand-300)] underline underline-offset-2"
+                >
                   Terms of Service
                 </span>{' '}
                 and{' '}
-                <span aria-disabled="true" className="text-[var(--argus-brand-300)] underline underline-offset-2">
+                <span
+                  aria-disabled="true"
+                  className="text-[var(--argus-brand-300)] underline underline-offset-2"
+                >
                   Privacy Policy
                 </span>
               </p>
