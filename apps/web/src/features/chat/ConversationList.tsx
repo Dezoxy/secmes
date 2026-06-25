@@ -28,7 +28,7 @@ export function ConversationList({
 }: ConversationListProps) {
   return (
     <div
-      className={`flex-1 overflow-y-auto px-2 space-y-1 ${listPb ?? 'pb-[calc(env(safe-area-inset-bottom)_+_6rem)] lg:pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)]'}`}
+      className={`px-2 space-y-1 ${listPb ?? 'pb-[calc(env(safe-area-inset-bottom)_+_6rem)] lg:pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)]'}`}
     >
       {conversations.length === 0 && (
         <EmptyState title="No conversations yet" icon={Users} compact className="mx-2 mt-4">

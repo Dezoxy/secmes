@@ -363,7 +363,7 @@ export default function GroupsScreen() {
             onTouchStart={handleListTouchStart}
             onTouchMove={handleListTouchMove}
             onTouchEnd={handleListTouchEnd}
-            className="flex min-h-0 flex-1 flex-col"
+            className="flex-1 min-h-0 overflow-y-auto"
           >
             <ConversationList
               conversations={filteredGroupConversations}
