@@ -128,6 +128,9 @@ chmod 0700 "$INSTALL_DIR"
 umask 0077
 CERT_FILE="${INSTALL_DIR}/fullchain.pem"
 KEY_FILE="${INSTALL_DIR}/privkey.pem"
+# Wipe the install-dir key on any exit — covers failure paths (set -e early exit on az login
+# expiry, validation error, etc.) that bypass the explicit wipe further below.
+trap '[ -f "$KEY_FILE" ] && : >"$KEY_FILE"' EXIT
 
 # --- Write the deploy hook BEFORE issuing so acme.sh can invoke it on the first --issue. ---
 # Hook filename uses underscores: acme.sh derives the function name from the basename, and
