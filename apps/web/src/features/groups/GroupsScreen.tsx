@@ -174,7 +174,7 @@ export default function GroupsScreen() {
                 <button
                   type="button"
                   onClick={() => setGroupCreateOpen(true)}
-                  className="flex items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] p-2 text-white/70 transition-colors hover:border-purple-500/30 hover:bg-purple-500/10 hover:text-purple-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60"
+                  className="flex shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] p-2 text-white/70 transition-colors hover:border-purple-500/30 hover:bg-purple-500/10 hover:text-purple-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60"
                   aria-label="Create new group"
                 >
                   <Users className="h-4 w-4" />
