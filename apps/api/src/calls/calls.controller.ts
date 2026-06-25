@@ -100,9 +100,10 @@ export class CallsController {
   @ApiTooManyRequestsResponse({ description: 'Rate limit exceeded (30/min/user)' })
   mintTurnCredentials(
     @CurrentAuth() auth: VerifiedAuth,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required for ZodValidationPipe to run
-    @Body(new ZodValidationPipe(TurnCredentialsRequestSchema)) _body: TurnCredentialsRequest,
+    @Body(new ZodValidationPipe(TurnCredentialsRequestSchema.optional()))
+    body: TurnCredentialsRequest | undefined,
   ) {
+    void body;
     return this.calls.mintTurnCredentials(auth);
   }
 }
