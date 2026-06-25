@@ -140,6 +140,19 @@ jobs:
             exit 1
           fi
           echo "compose.prod.yaml: no published host ports OK"
+      - name: Assert exactly one host-network service (coturn)
+        # coturn uses network_mode:host (required for correct src-IP visibility — see compose.prod.yaml
+        # and docs/threat-models/vm-ingress.md). Any other host-network service is an unreviewed
+        # deviation from the zero-published-ports invariant and must fail CI.
+        run: |
+          set -euo pipefail
+          host_svcs=$(docker compose -f compose.prod.yaml config --format json \
+            | jq -r '[.services | to_entries[] | select(.value.network_mode == "host") | .key] | sort | join(",")')
+          if [ "$host_svcs" != "coturn" ]; then
+            echo "::error::Expected exactly one host-network service 'coturn', got: '${host_svcs}' — any additional host-network service requires an explicit security review and compose-guard update."
+            exit 1
+          fi
+          echo "compose.prod.yaml: exactly one host-network service (coturn) OK"
       - name: Assert CSP connect-src pins the prod B2 bucket (CSP-1)
         run: bash scripts/check-csp-connect-src.sh
 

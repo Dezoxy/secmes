@@ -194,7 +194,7 @@ jobs:
           set -euo pipefail
           # Exclude docs/images (*.md/*.png): deploy.sh reads none of them, and bundling them bloats the base64
           # payload embedded in the run-command (keep it small — mirrors the cd-aws SSM 97KB-limit fix).
-          tar czf deploy-bundle.tgz --exclude='*.md' --exclude='*.png' compose.prod.yaml infra/stack/secrets infra/stack/deploy infra/stack/observability infra/stack/glitchtip infra/b2 infra/backup infra/cleanup infra/audit-prune infra/retention infra/notify
+          tar czf deploy-bundle.tgz --exclude='*.md' --exclude='*.png' compose.prod.yaml infra/stack/secrets infra/stack/deploy infra/stack/observability infra/stack/glitchtip infra/stack/coturn/docker-entrypoint.sh infra/stack/coturn/turnserver.conf infra/b2 infra/backup infra/cleanup infra/audit-prune infra/retention infra/notify
           B64="$(base64 -w0 deploy-bundle.tgz)"
           GHCR_REGISTRY="ghcr.io/$(echo "$GHCR_OWNER" | tr '[:upper:]' '[:lower:]')"
           # The script runs as root on the VM: unpack the bundle, then run deploy.sh with non-secret params.
