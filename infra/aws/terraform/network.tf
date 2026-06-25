@@ -73,6 +73,101 @@ resource "aws_vpc_security_group_ingress_rule" "ssh" {
   ip_protocol       = "tcp"
 }
 
+# --- TURN relay ingress (VoIP V1, PR 5/14) ---
+# coturn needs direct internet access on three port bands. Source is 0.0.0.0/0 / ::/0: TURN peers are
+# arbitrary internet clients (including IPv6-only mobile carriers); no source restriction is possible.
+# The HTTP/WS origin (Caddy/api) remains tunnel-only — no HTTP/HTTPS inbound rule is added here.
+# See docs/threat-models/voip-turn.md §Threat — Spoofing the origin.
+resource "aws_vpc_security_group_ingress_rule" "turn_3478_udp" {
+  security_group_id = aws_security_group.instance.id
+  description       = "STUN/TURN UDP 3478 (coturn)"
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 3478
+  to_port           = 3478
+  ip_protocol       = "udp"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "turn_3478_udp_v6" {
+  security_group_id = aws_security_group.instance.id
+  description       = "STUN/TURN UDP 3478 (coturn, IPv6)"
+  cidr_ipv6         = "::/0"
+  from_port         = 3478
+  to_port           = 3478
+  ip_protocol       = "udp"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "turn_3478_tcp" {
+  security_group_id = aws_security_group.instance.id
+  description       = "STUN/TURN TCP 3478 (coturn — TCP fallback)"
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 3478
+  to_port           = 3478
+  ip_protocol       = "tcp"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "turn_3478_tcp_v6" {
+  security_group_id = aws_security_group.instance.id
+  description       = "STUN/TURN TCP 3478 (coturn — TCP fallback, IPv6)"
+  cidr_ipv6         = "::/0"
+  from_port         = 3478
+  to_port           = 3478
+  ip_protocol       = "tcp"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "turns_5349_udp" {
+  security_group_id = aws_security_group.instance.id
+  description       = "TURNS UDP 5349 (coturn TLS — captive-portal path)"
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 5349
+  to_port           = 5349
+  ip_protocol       = "udp"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "turns_5349_udp_v6" {
+  security_group_id = aws_security_group.instance.id
+  description       = "TURNS UDP 5349 (coturn TLS — captive-portal path, IPv6)"
+  cidr_ipv6         = "::/0"
+  from_port         = 5349
+  to_port           = 5349
+  ip_protocol       = "udp"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "turns_5349_tcp" {
+  security_group_id = aws_security_group.instance.id
+  description       = "TURNS TCP 5349 (coturn TLS)"
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 5349
+  to_port           = 5349
+  ip_protocol       = "tcp"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "turns_5349_tcp_v6" {
+  security_group_id = aws_security_group.instance.id
+  description       = "TURNS TCP 5349 (coturn TLS, IPv6)"
+  cidr_ipv6         = "::/0"
+  from_port         = 5349
+  to_port           = 5349
+  ip_protocol       = "tcp"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "turn_relay_udp" {
+  security_group_id = aws_security_group.instance.id
+  description       = "TURN relay range UDP 49160-49260 (coturn media relay allocation)"
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 49160
+  to_port           = 49260
+  ip_protocol       = "udp"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "turn_relay_udp_v6" {
+  security_group_id = aws_security_group.instance.id
+  description       = "TURN relay range UDP 49160-49260 (coturn media relay allocation, IPv6)"
+  cidr_ipv6         = "::/0"
+  from_port         = 49160
+  to_port           = 49260
+  ip_protocol       = "udp"
+}
+
 # Egress open: cloudflared, Key Vault (vault.azure.net), the Arc endpoints (*.arc.azure.com,
 # login.microsoftonline.com, management.azure.com), B2, GHCR, apt all dial out. Tightening egress to prefix
 # lists / a firewall is an enterprise follow-up; inbound is denied either way.

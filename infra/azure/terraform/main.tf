@@ -33,9 +33,72 @@ resource "azurerm_network_security_group" "this" {
   resource_group_name = azurerm_resource_group.this.name
   tags                = var.tags
 
-  # No inbound allow rules. Azure's default DenyAllInBound already blocks the internet; this explicit rule
-  # documents the intent and guarantees it even if defaults change. Ingress is Cloudflare Tunnel (outbound)
-  # + `az vm run-command` (control plane) — neither needs an inbound port. NO 22/80/443 from the internet.
+  # --- TURN relay ingress (VoIP V1, PR 5/14) ---
+  # These are the ONLY intentional inbound paths. coturn handles STUN/TURN on 3478 (cleartext + DTLS),
+  # TURNS on 5349 (TLS), and allocates relay ports from the narrow 49160-49260/udp range.
+  # The HTTP/WS origin (Caddy/api) has NO inbound rule and remains tunnel-only.
+  # Source is 0.0.0.0/0: TURN peers are arbitrary internet clients; no source restriction is possible.
+  # See docs/threat-models/voip-turn.md §Threat — Spoofing the origin.
+  security_rule {
+    name                       = "allow-turn-3478-udp"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Udp"
+    source_port_range          = "*"
+    destination_port_range     = "3478"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+  security_rule {
+    name                       = "allow-turn-3478-tcp"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "3478"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+  security_rule {
+    name                       = "allow-turns-5349-udp"
+    priority                   = 120
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Udp"
+    source_port_range          = "*"
+    destination_port_range     = "5349"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+  security_rule {
+    name                       = "allow-turns-5349-tcp"
+    priority                   = 130
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "5349"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+  security_rule {
+    name                       = "allow-turn-relay-udp"
+    priority                   = 140
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Udp"
+    source_port_range          = "*"
+    destination_port_range     = "49160-49260"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  # All other inbound traffic is denied. Azure's default DenyAllInBound already blocks the internet;
+  # this explicit rule documents the intent and guarantees it even if defaults change.
+  # Ingress is Cloudflare Tunnel (outbound) + `az vm run-command` (control plane) — neither needs a port.
+  # NO 22/80/443 from the internet.
   security_rule {
     name                       = "deny-all-inbound"
     priority                   = 4096
