@@ -16,6 +16,7 @@ export default function ProfileRoute() {
                 PROFILE
               </span>
             </span>
+            <div className="h-8 w-8 shrink-0" aria-hidden="true" />
           </h1>
         </div>
         <div className="flex-1 overflow-y-auto p-4 pb-[calc(env(safe-area-inset-bottom)_+_6rem)] lg:pb-[calc(env(safe-area-inset-bottom)_+_1rem)]">
