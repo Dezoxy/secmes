@@ -228,6 +228,17 @@ log "running acme.sh --issue for ${DOMAIN} (dns_cf / Let's Encrypt)..."
     [ -d "$CERT_STORE_DIR" ] || CERT_STORE_DIR="${ACME_HOME}/${DOMAIN}"
     cp "${CERT_STORE_DIR}/fullchain.cer" "$CERT_FILE"
     cp "${CERT_STORE_DIR}/${DOMAIN}.key" "$KEY_FILE"
+    # acme.sh exited before recording --fullchain-file/--key-file in domain.conf.
+    # Patch Le_Real*Path directly so future cron renewals install to the stable 0700
+    # dir, not any stale /tmp path left by a prior run of an older version of this script.
+    DOMAIN_CONF="${CERT_STORE_DIR}/${DOMAIN}.conf"
+    if [ -f "$DOMAIN_CONF" ]; then
+      sed -i.bak \
+        -e "s|^Le_RealFullChainPath=.*|Le_RealFullChainPath='${CERT_FILE}'|" \
+        -e "s|^Le_RealKeyPath=.*|Le_RealKeyPath='${KEY_FILE}'|" \
+        "$DOMAIN_CONF" && rm -f "${DOMAIN_CONF}.bak"
+      log "patched Le_Real*Path in domain.conf → ${INSTALL_DIR}"
+    fi
   else
     log "FATAL: acme.sh exited $EXIT"
     exit $EXIT
