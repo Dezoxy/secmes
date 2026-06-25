@@ -349,6 +349,10 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # coturn runs network_mode:host; host.docker.internal resolves to the VM's internal IP so
+    # Prometheus can scrape coturn's metrics endpoint (9641) without a published port.
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     deploy:
       resources:
         limits:
