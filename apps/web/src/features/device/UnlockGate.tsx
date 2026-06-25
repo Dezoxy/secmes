@@ -16,7 +16,7 @@ import { useDevice } from './DeviceContext';
 
 const CARD = 'm-auto w-full max-w-sm rounded-3xl bg-[#12121a] p-8 shadow-2xl shadow-black/50';
 const PRIMARY =
-  'flex w-full items-center justify-center gap-2 rounded-xl bg-purple-500 py-3 text-sm font-medium text-white shadow-lg shadow-purple-500/25 transition-all hover:bg-purple-400 disabled:cursor-not-allowed disabled:opacity-40';
+  'flex w-full items-center justify-center gap-2 rounded-xl bg-[var(--argus-brand-400)] py-3 text-sm font-medium text-white shadow-lg shadow-[#783db0]/25 transition-all hover:bg-[var(--argus-brand-300)] disabled:cursor-not-allowed disabled:opacity-40';
 
 const slides = [
   { image: '/images/login-slide-1.png', title: 'Connect Instantly,', subtitle: 'Message Securely' },
@@ -70,7 +70,7 @@ export function UnlockGate({ children }: { children: ReactNode }): ReactNode {
     <div className="flex h-[100dvh] flex-col overflow-y-auto bg-[#1a1a24] px-4 pt-4 pb-[calc(env(safe-area-inset-bottom)_+_1rem)]">
       <div className={CARD}>
         <div className="mb-6 flex flex-col items-center text-center">
-          <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-500/20">
+          <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--argus-brand-400)]/20">
             {icon}
           </div>
           <h1 className="text-lg font-semibold text-white">{title}</h1>
@@ -84,7 +84,7 @@ export function UnlockGate({ children }: { children: ReactNode }): ReactNode {
   // No PRF on this authenticator (or the keystore can't be opened) — there is no recovery path.
   if (status === 'error') {
     return cardShell(
-      <Lock className="h-6 w-6 text-purple-400" />,
+      <Lock className="h-6 w-6 text-[var(--argus-brand-300)]" />,
       "This device can't be used",
       "Your passkey can't unlock secure messaging on this device. Ask your admin for a new registration code to start fresh.",
       <>{error && <p className="text-center text-xs text-red-400/80">{error}</p>}</>,
@@ -93,7 +93,7 @@ export function UnlockGate({ children }: { children: ReactNode }): ReactNode {
 
   if (status === 'needs-switch') {
     return cardShell(
-      <UserCog className="h-6 w-6 text-purple-400" />,
+      <UserCog className="h-6 w-6 text-[var(--argus-brand-300)]" />,
       'Different account on this device',
       "This browser is set up for another Argus account. Set up your account here — this replaces the other account's device, and there is no way to restore it (lost access means a new registration code from your admin).",
       <div className="space-y-3">
@@ -134,8 +134,8 @@ export function UnlockGate({ children }: { children: ReactNode }): ReactNode {
               aria-label="Argus brand"
               className="flex items-center justify-center gap-3 text-3xl font-bold tracking-[0.12em] text-white"
             >
-              <ArgusAppIcon className="h-12 w-12 rounded-2xl shadow-lg shadow-purple-500/25" />
-              <span className="bg-gradient-to-r from-purple-300 to-purple-600 bg-clip-text text-transparent">
+              <ArgusAppIcon className="h-12 w-12 rounded-2xl shadow-lg shadow-[#783db0]/25" />
+              <span className="bg-gradient-to-r from-[var(--argus-brand-300)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
                 ARGUS
               </span>
             </div>
@@ -200,7 +200,7 @@ export function UnlockGate({ children }: { children: ReactNode }): ReactNode {
                 mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
               }`}
             >
-              Welcome to Argus
+              Welcome back
             </h1>
             <p
               className={`mx-auto mb-8 max-w-[18rem] text-base leading-relaxed text-white/60 transition-all duration-500 delay-[350ms] ${
@@ -219,7 +219,7 @@ export function UnlockGate({ children }: { children: ReactNode }): ReactNode {
                 type="button"
                 disabled={busy}
                 onClick={() => void unlock()}
-                className="w-full flex items-center justify-center gap-3 bg-purple-500 hover:bg-purple-400 text-white font-medium py-3 rounded-xl transition-all duration-300 text-sm shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 hover:-translate-y-0.5 active:translate-y-0 active:shadow-purple-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                className="w-full flex items-center justify-center gap-3 bg-[var(--argus-brand-400)] hover:bg-[var(--argus-brand-300)] text-white font-medium py-3 rounded-xl transition-all duration-300 text-sm shadow-lg shadow-[#783db0]/25 hover:shadow-[#783db0]/40 hover:-translate-y-0.5 active:translate-y-0 active:shadow-[#783db0]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {busy ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -239,11 +239,11 @@ export function UnlockGate({ children }: { children: ReactNode }): ReactNode {
             >
               <p className="text-xs text-white/60">
                 By continuing, you agree to our{' '}
-                <span aria-disabled="true" className="text-purple-400 underline underline-offset-2">
+                <span aria-disabled="true" className="text-[var(--argus-brand-300)] underline underline-offset-2">
                   Terms of Service
                 </span>{' '}
                 and{' '}
-                <span aria-disabled="true" className="text-purple-400 underline underline-offset-2">
+                <span aria-disabled="true" className="text-[var(--argus-brand-300)] underline underline-offset-2">
                   Privacy Policy
                 </span>
               </p>
