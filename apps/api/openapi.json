@@ -8861,6 +8861,18 @@
                   "linkPreviews"
                 ],
                 "additionalProperties": false
+              },
+              "callSettings": {
+                "type": "object",
+                "properties": {
+                  "relayOnly": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "relayOnly"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -8872,7 +8884,8 @@
               "role",
               "status",
               "createdAt",
-              "privacySettings"
+              "privacySettings",
+              "callSettings"
             ],
             "additionalProperties": false
           },

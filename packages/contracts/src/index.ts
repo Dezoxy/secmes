@@ -694,6 +694,9 @@ export const MeExportSchema = z.object({
       status: z.string().max(32),
       createdAt: z.string().datetime(),
       privacySettings: PrivacySettingsSchema,
+      callSettings: z.object({
+        relayOnly: z.boolean(),
+      }),
     })
     .nullable(),
   devices: z.array(

@@ -38,6 +38,11 @@ class ExportPrivacySettingsDto {
   @ApiProperty() linkPreviews!: boolean;
 }
 
+class ExportCallSettingsDto {
+  @ApiProperty({ description: 'true = relay-only (default); false = direct P2P allowed' })
+  relayOnly!: boolean;
+}
+
 class ExportProfileDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty({ format: 'uuid' }) tenantId!: string;
@@ -48,6 +53,7 @@ class ExportProfileDto {
   @ApiProperty() status!: string;
   @ApiProperty({ format: 'date-time' }) createdAt!: string;
   @ApiProperty({ type: ExportPrivacySettingsDto }) privacySettings!: ExportPrivacySettingsDto;
+  @ApiProperty({ type: ExportCallSettingsDto }) callSettings!: ExportCallSettingsDto;
 }
 
 class ExportDeviceDto {
@@ -160,6 +166,14 @@ class MeExportDto {
         required: ['readReceipts', 'typingIndicators', 'linkPreviews'],
         additionalProperties: false,
       },
+      callSettings: {
+        type: 'object',
+        properties: {
+          relayOnly: { type: 'boolean' },
+        },
+        required: ['relayOnly'],
+        additionalProperties: false,
+      },
     },
     required: [
       'id',
@@ -171,6 +185,7 @@ class MeExportDto {
       'status',
       'createdAt',
       'privacySettings',
+      'callSettings',
     ],
     additionalProperties: false,
   })
