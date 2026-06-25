@@ -151,6 +151,7 @@ test('appearance font size preview follows the slider', async ({ page }) => {
 test('about exposes manual PWA update status and platform install expectations', async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/settings');
 
   await page.getByRole('button', { name: 'About' }).click();
@@ -168,12 +169,16 @@ test('about exposes manual PWA update status and platform install expectations',
 
   const layout = await releaseNotes.evaluate((node) => {
     const aboutRegion = node.closest('[aria-label="About settings"]');
+    const pageScroller = node.closest('[data-settings-section-scroller="true"]');
     const aboutRect = aboutRegion?.getBoundingClientRect();
     const releaseRect = node.getBoundingClientRect();
 
     return {
       releaseCanScroll: node.scrollHeight > node.clientHeight,
       aboutCanScroll: aboutRegion ? aboutRegion.scrollHeight > aboutRegion.clientHeight : true,
+      pageScrollerCanScroll: pageScroller
+        ? pageScroller.scrollHeight > pageScroller.clientHeight
+        : false,
       leftMargin: aboutRect ? Math.round(releaseRect.left - aboutRect.left) : null,
       rightMargin: aboutRect ? Math.round(aboutRect.right - releaseRect.right) : null,
     };
@@ -181,19 +186,39 @@ test('about exposes manual PWA update status and platform install expectations',
 
   // Release notes render at natural height — no inner scroll box.
   expect(layout.releaseCanScroll).toBe(false);
-  // Outer section clips overflow; the inner div scrolls. Section itself does not overflow.
+  // The region itself does not become a nested scroll box.
   expect(layout.aboutCanScroll).toBe(false);
+  // The full settings page content owns scrolling, so the whole About page moves behind the nav.
+  expect(layout.pageScrollerCanScroll).toBe(true);
   // Left/right gutters are exactly symmetric.
   expect(layout.leftMargin).toBe(layout.rightMargin);
 
-  // Scrolling (wheel propagates to the parent overflow-y-auto div) reveals the bottom of the list.
+  // Scrolling the full settings page content reveals the bottom of the list.
   // A truncated entry renders the neutral overflow note below its groups, so that's the true last line.
-  await releaseNotes.hover();
-  await page.mouse.wheel(0, 5_000);
+  await page
+    .locator('[data-settings-section-scroller="true"]')
+    .evaluate((node) => node.scrollTo({ top: node.scrollHeight }));
   const lastRelease = releaseNotesData[releaseNotesData.length - 1]!;
   const lastGroup = lastRelease.groups[lastRelease.groups.length - 1]!;
   const lastLine = lastRelease.overflowNote ?? lastGroup.items[lastGroup.items.length - 1]!;
-  await expect(releaseNotes.getByText(lastLine, { exact: true })).toBeVisible();
+  const lastLineLocator = releaseNotes.getByText(lastLine, { exact: true });
+  await expect(lastLineLocator).toBeVisible();
+
+  const bottomClearance = await lastLineLocator.evaluate((node) => {
+    const nav = document.querySelector('nav[aria-label="Main navigation"]');
+    const navRect = nav?.getBoundingClientRect();
+    const lineRect = node.getBoundingClientRect();
+
+    return navRect
+      ? {
+          lineBottom: Math.round(lineRect.bottom),
+          navTop: Math.round(navRect.top),
+        }
+      : null;
+  });
+
+  expect(bottomClearance).not.toBeNull();
+  expect(bottomClearance!.lineBottom).toBeLessThanOrEqual(bottomClearance!.navTop - 8);
 });
 
 test('notification settings: mentions-only toggle persists across route changes', async ({

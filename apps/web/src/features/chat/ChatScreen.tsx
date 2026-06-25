@@ -3,7 +3,6 @@ import { MessageCircle, Search, Unplug, X } from 'lucide-react';
 import { getMlsSession } from '../../lib/mls';
 import { prefersReducedMotion } from '../../lib/pref';
 import { demoMode } from '../../lib/auth';
-import { ArgusAppIcon } from '../brand/ArgusAppIcon';
 import { ConversationList } from './ConversationList';
 import { ChatHeader } from './ChatHeader';
 import { MessageList } from './MessageList';
@@ -409,10 +408,9 @@ export default function ChatScreen() {
             showSidebar && !mobileThreadClosing ? 'flex' : 'hidden lg:flex'
           } w-full lg:w-80 shrink-0 flex-col bg-[#0f0f16] border-r border-white/5 ${mobileSidebarReturning ? paneBackEnterMotion : ''}`}
         >
-          <div className="argus-mobile-tab-header relative bg-[#0f0f16]/80 backdrop-blur-xl p-4">
-            <div className="flex items-center gap-2">
-              <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-[#964cdc]/25" />
-              <span className="flex-1 text-center text-xl font-bold tracking-wider">
+          <div className="argus-mobile-tab-header argus-mobile-tab-title-header relative bg-[#0f0f16]/80 backdrop-blur-xl p-4">
+            <div className="text-center">
+              <span className="text-xl font-bold tracking-wider">
                 <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
                   CHAT
                 </span>
