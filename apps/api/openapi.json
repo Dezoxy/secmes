@@ -1527,6 +1527,18 @@
       "post": {
         "operationId": "CallsController_mintTurnCredentials",
         "parameters": [],
+        "requestBody": {
+          "required": false,
+          "description": "Empty body — send {} or omit the body entirely",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Ephemeral ICE server config",

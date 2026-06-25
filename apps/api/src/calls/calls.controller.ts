@@ -1,6 +1,7 @@
-import { Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
@@ -13,7 +14,9 @@ import { Throttle } from '@nestjs/throttler';
 
 import { CurrentAuth } from '../auth/current-auth.decorator.js';
 import type { VerifiedAuth } from '../auth/auth.service.js';
+import { ZodValidationPipe } from '../common/zod-validation.pipe.js';
 import { perMinute, SENSITIVE_LIMITS } from '../rate-limit/rate-limit.constants.js';
+import { TurnCredentialsRequestSchema, type TurnCredentialsRequest } from './calls.schemas.js';
 import { CallsService } from './calls.service.js';
 
 // --- Response DTOs (Swagger schema classes, not exported — controller-local) ---
@@ -86,11 +89,20 @@ export class CallsController {
   @HttpCode(HttpStatus.OK)
   @Throttle(perMinute(SENSITIVE_LIMITS.turnCredentials))
   @ApiOperation({ summary: 'Mint ephemeral TURN relay credentials (relay-only, TTL 600 s)' })
+  @ApiBody({
+    schema: { type: 'object', additionalProperties: false },
+    required: false,
+    description: 'Empty body — send {} or omit the body entirely',
+  })
   @ApiOkResponse({ type: TurnCredentialsResponseDto, description: 'Ephemeral ICE server config' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid bearer token' })
   @ApiForbiddenResponse({ description: 'Requester has no accepted friends (coarse gate)' })
   @ApiTooManyRequestsResponse({ description: 'Rate limit exceeded (30/min/user)' })
-  mintTurnCredentials(@CurrentAuth() auth: VerifiedAuth) {
+  mintTurnCredentials(
+    @CurrentAuth() auth: VerifiedAuth,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required for ZodValidationPipe to run
+    @Body(new ZodValidationPipe(TurnCredentialsRequestSchema)) _body: TurnCredentialsRequest,
+  ) {
     return this.calls.mintTurnCredentials(auth);
   }
 }
