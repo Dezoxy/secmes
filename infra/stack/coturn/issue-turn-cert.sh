@@ -139,44 +139,51 @@ chmod 0600 "${ACME_HOME}/deploy/argus_turn_cert.conf"
 log "baked vault + instance info into ${ACME_HOME}/deploy/argus_turn_cert.conf"
 
 cat >"$HOOK_SCRIPT" <<'HOOK'
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 # acme.sh deploy hook for turn.4rgus.com — sourced by acme.sh after each successful renewal.
-# Must define argus_turn_cert_deploy(): acme.sh sources this file then calls that function.
+# Must define argus_turn_cert_deploy(): acme.sh sources this file and calls that function.
+# Written in POSIX sh — acme.sh itself runs under /usr/bin/env sh, so the shebang above is
+# ignored when sourced; bash-specific syntax (${BASH_SOURCE[0]}, source, trap RETURN) would
+# break on dash or any non-bash sh.
 
 # Source vault name + EC2 instance info baked in at issue time (not present in cron environment).
+# acme.sh exports ACME_HOME to the hook environment; the conf lives in the same deploy/ directory.
 # shellcheck source=deploy/argus_turn_cert.conf
-_CONF="$(dirname "${BASH_SOURCE[0]}")/argus_turn_cert.conf"
+_CONF="${ACME_HOME}/deploy/argus_turn_cert.conf"
 [ -r "$_CONF" ] || { printf 'FATAL: argus_turn_cert.conf missing at %s\n' "$_CONF" >&2; return 1; }
 # shellcheck disable=SC1090
-source "$_CONF"
+. "$_CONF"
 
 argus_turn_cert_deploy() {
   # Called by acme.sh: $1=domain $2=keyfile $3=certfile $4=cafile $5=fullchainfile
-  local _domain="$1" _keyfile="$2" _fullchainfile="$5"
-  local KV="${ARGUS_KEY_VAULT:?ARGUS_KEY_VAULT not set in argus_turn_cert.conf}"
-  local IID="${INSTANCE_ID:-}" REGION="${AWS_REGION:-}"
+  local _keyfile _fullchainfile KV IID REGION WDIR CERT_TMP KEY_TMP
+  _keyfile="$2"
+  _fullchainfile="$5"
+  KV="${ARGUS_KEY_VAULT:?ARGUS_KEY_VAULT not set in argus_turn_cert.conf}"
+  IID="${INSTANCE_ID:-}"
+  REGION="${AWS_REGION:-}"
 
-  local WDIR
-  WDIR="$(mktemp -d)"
-  trap 'rm -rf -- "$WDIR"' RETURN
-  umask 0077
-  local CERT_TMP="${WDIR}/fullchain.pem"
-  local KEY_TMP="${WDIR}/privkey.pem"
+  WDIR="$(mktemp -d)" || return 1
+  CERT_TMP="${WDIR}/fullchain.pem"
+  KEY_TMP="${WDIR}/privkey.pem"
 
-  cp "$_fullchainfile" "$CERT_TMP"
-  cp "$_keyfile" "$KEY_TMP"
+  cp "$_fullchainfile" "$CERT_TMP" || { rm -rf -- "$WDIR"; return 1; }
+  cp "$_keyfile"       "$KEY_TMP"  || { rm -rf -- "$WDIR"; return 1; }
 
   az keyvault secret set --vault-name "$KV" --name "argus-turn-tls-cert" \
     --file "$CERT_TMP" --encoding utf-8 --only-show-errors >/dev/null \
-    || { printf 'FATAL: argus_turn_cert: failed to upload cert to KV %s\n' "$KV" >&2; return 1; }
+    || { printf 'FATAL: argus_turn_cert: failed to upload cert to KV %s\n' "$KV" >&2
+         rm -rf -- "$WDIR"; return 1; }
   az keyvault secret set --vault-name "$KV" --name "argus-turn-tls-key" \
     --file "$KEY_TMP" --encoding utf-8 --only-show-errors >/dev/null \
-    || { printf 'FATAL: argus_turn_cert: failed to upload key to KV %s\n' "$KV" >&2; return 1; }
+    || { printf 'FATAL: argus_turn_cert: failed to upload key to KV %s\n' "$KV" >&2
+         : >"$KEY_TMP"; rm -rf -- "$WDIR"; return 1; }
   : >"$KEY_TMP"
+  rm -rf -- "$WDIR"
 
   # Trigger the VM to re-fetch the renewed secrets from KV (argus-secrets → /run/argus/secrets/)
   # and reload coturn TLS without dropping active relay allocations (SIGHUP = graceful reload).
-  # acme.sh cron runs on the workstation; the `docker kill` that was here did nothing — SSM fixes that.
+  # acme.sh cron runs on the workstation; SSM fires the restart command on the EC2 VM.
   if [ -n "$IID" ] && [ -n "$REGION" ]; then
     aws ssm send-command \
       --instance-ids "$IID" \
@@ -251,6 +258,17 @@ log "Key Vault delivery verified."
 
 # Install acme.sh's renewal cron.
 "$ACME" --install-cronjob --home "$ACME_HOME" 2>/dev/null || true
+
+# Explicitly register the deploy hook in acme.sh's domain config for automatic renewals.
+# --issue --deploy-hook already saves Le_DeployHook to domain.conf, but --deploy makes it
+# unconditional and version-agnostic: even if --issue exits 2 (cert still valid, no renewal)
+# the hook is guaranteed to be recorded for future cron runs.
+# --deploy reads from acme.sh's internal cert store; no --fullchain-file/--key-file here.
+log "registering deploy hook for automatic renewals..."
+"$ACME" --deploy -d "$DOMAIN" --deploy-hook argus_turn_cert --home "$ACME_HOME" || {
+  log "WARN: acme.sh --deploy returned non-zero — verify the hook is registered:"
+  log "  acme.sh --info -d ${DOMAIN} | grep DeployHook"
+}
 
 log ""
 log "Done. Next steps:"
