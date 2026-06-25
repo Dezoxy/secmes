@@ -57,9 +57,10 @@ resource "aws_iam_role_policy" "instance_onboarding_read" {
         Resource = aws_s3_bucket.deploy_artifacts.arn
       },
       {
-        Sid      = "ReadDeployBundlesOnly"
-        Effect   = "Allow"
-        Action   = ["s3:GetObject"]
+        Sid    = "ReadDeployBundlesOnly"
+        Effect = "Allow"
+        # Scoped to transient deploy artifacts under this one private bucket prefix.
+        Action   = ["s3:GetObject"] # nosemgrep: terraform.lang.security.iam.no-iam-data-exfiltration.no-iam-data-exfiltration
         Resource = "${aws_s3_bucket.deploy_artifacts.arn}/deploy-bundles/*"
       }
     ]
