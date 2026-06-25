@@ -137,6 +137,12 @@ chmod -R a+rX "$APP_DIR/infra/stack/observability"
 install -d -m 0755 "$APP_DIR/infra/stack/glitchtip"
 install -m 0755 "$REPO_ROOT/infra/stack/glitchtip/docker-entrypoint.sh" "$APP_DIR/infra/stack/glitchtip/docker-entrypoint.sh"
 chmod a+rx "$APP_DIR/infra/stack/glitchtip/docker-entrypoint.sh"
+# coturn entrypoint + static conf — bind-mounted read-only into the coturn container.
+# The entrypoint resolves external-ip from IMDS at startup and injects the HMAC shared secret from
+# the Docker secret file. Contains NO hardcoded secrets; world-readable conf + world-executable wrapper.
+install -d -m 0755 "$APP_DIR/infra/stack/coturn"
+install -m 0755 "$REPO_ROOT/infra/stack/coturn/docker-entrypoint.sh" "$APP_DIR/infra/stack/coturn/docker-entrypoint.sh"
+install -m 0644 "$REPO_ROOT/infra/stack/coturn/turnserver.conf" "$APP_DIR/infra/stack/coturn/turnserver.conf"
 install -m 0755 "$REPO_ROOT/infra/stack/secrets/fetch-keyvault-secrets.sh" "$APP_DIR/secrets/fetch-keyvault-secrets.sh"
 install -m 0644 "$REPO_ROOT/infra/stack/secrets/argus-secrets.service" /etc/systemd/system/argus-secrets.service
 # Point the unit at our fetch script + the real vault name (the repo ships a placeholder).
@@ -577,6 +583,12 @@ if [ "${TUNNEL_TOKEN_CHANGED:-1}" = 1 ]; then
   log "tunnel token is new/changed — force-recreating cloudflared so it picks up the current token"
   docker compose -f "$COMPOSE" up -d --force-recreate --no-deps cloudflared
 fi
+# coturn is intentionally NOT force-recreated here. A recreate drops every active relayed call —
+# audio V1 users on the relay-default path lose the call with no ICE-restart recovery. Standard
+# `up -d` (above) recreates coturn only when its image or config file changes, which is the correct
+# behavior. Secret rotation (turn_shared_secret / TURNS cert) must be done during a maintenance
+# window with an explicit `docker compose up -d --force-recreate coturn` and a warning to users.
+# See docs/planning/voip/03-infrastructure-turn-and-networking.md §9.
 
 # --- 6b. Gate on the new app containers becoming HEALTHY — `up -d` returns before they're ready, so without
 #         this a crash-looping rollout would report success. A timeout/unhealthy fails the deploy (set -e),
