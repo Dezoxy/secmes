@@ -28,8 +28,11 @@ export function BottomNav({ onNavigate }: BottomNavProps) {
   const navRef = useRef<HTMLElement>(null);
 
   // Reserve only the floating pills' real height (+ offset + gap) as scroll clearance, so content
-  // fills the bottom edge-to-edge instead of leaving a reserved dead band below the bar.
-  useFloatingClearance(navRef, '--argus-floating-mobile-nav-clearance');
+  // fills the bottom edge-to-edge instead of leaving a reserved dead band below the bar. The nav is
+  // fixed-height and only hides transiently (conversation view), so keep the last value on unmount.
+  useFloatingClearance(navRef, '--argus-floating-mobile-nav-clearance', {
+    keepLastOnUnmount: true,
+  });
 
   return (
     <nav
