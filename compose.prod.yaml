@@ -321,7 +321,7 @@ services:
       - ./infra/stack/coturn/docker-entrypoint.sh:/docker-entrypoint.sh:ro
       - ./infra/stack/coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
     logging:
-      driver: json-file
+      driver: local # local driver: binary format not tailed by Alloy's *-json.log glob; relay metadata stays off Loki
       options:
         max-size: '10m'
         max-file: '3' # metadata-only, short retention (see docs/planning/voip/03-infrastructure-turn-and-networking.md §8)
