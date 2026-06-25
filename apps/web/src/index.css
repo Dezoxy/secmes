@@ -366,7 +366,7 @@ body {
   background: var(--argus-color-app-bg);
 }
 
-@media (max-width: 639px) {
+@media (max-width: 1023px) {
   .argus-mobile-tab-header {
     padding-top: calc(env(safe-area-inset-top) + 1rem);
   }
