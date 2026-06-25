@@ -39,7 +39,9 @@ The script:
 - Issues a Let's Encrypt cert for `turn.4rgus.com` via Cloudflare DNS-01.
 - Validates the cert (expiry + domain match).
 - Uploads `argus-turn-tls-cert` and `argus-turn-tls-key` to Key Vault via `--file` (not argv).
-- Installs an acme.sh renewal cron + a deploy hook that re-uploads to KV and sends SIGHUP to coturn on each renewal.
+- Bakes vault name + EC2 instance ID + region into `/opt/acme.sh/deploy/argus_turn_cert.conf` (mode 0600).
+- Installs an acme.sh renewal cron + a deploy hook (`argus_turn_cert_deploy()`) that re-uploads to KV and
+  triggers `systemctl restart argus-secrets && docker kill -s HUP coturn` on the VM via SSM on each renewal.
 
 For the Cloudflare API token: Dashboard → Profile → API Tokens → Create Token → "Edit zone DNS" template → scope to zone `4rgus.com`.
 

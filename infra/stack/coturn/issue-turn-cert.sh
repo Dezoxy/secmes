@@ -55,15 +55,21 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TF_DIR="${SCRIPT_DIR}/../../aws/terraform"
+
 # Prefer terraform output if KV not set.
 if [ -z "$KV" ]; then
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  KV="$(terraform -chdir="${SCRIPT_DIR}/../../aws/terraform" output -raw key_vault_name 2>/dev/null || true)"
+  KV="$(terraform -chdir="$TF_DIR" output -raw key_vault_name 2>/dev/null || true)"
 fi
 [ -n "$KV" ] || {
   echo "FATAL: no vault name — set ARGUS_KEY_VAULT, pass --vault, or run after 'terraform apply'" >&2
   exit 1
 }
+
+# Bake instance info for the renewal hook's SSM VM-refresh step.
+INSTANCE_ID="$(terraform -chdir="$TF_DIR" output -raw instance_id 2>/dev/null || true)"
+AWS_REGION="$(terraform -chdir="$TF_DIR" output -raw aws_region 2>/dev/null || true)"
 
 log() { printf 'issue-turn-cert: %s\n' "$*"; }
 
@@ -73,6 +79,10 @@ command -v az >/dev/null || {
 }
 command -v curl >/dev/null || {
   log "FATAL: curl not found"
+  exit 1
+}
+command -v aws >/dev/null || {
+  log "FATAL: aws CLI not found — needed by the renewal hook to trigger 'systemctl restart argus-secrets' via SSM"
   exit 1
 }
 
@@ -116,51 +126,73 @@ CERT_FILE="${WORKDIR}/fullchain.pem"
 KEY_FILE="${WORKDIR}/privkey.pem"
 
 # --- Write the deploy hook BEFORE issuing so acme.sh can invoke it on the first --issue. ---
-# The hook is stored in ACME_HOME/deploy/ (acme.sh's built-in deploy-hook location).
-# KV name is baked in at write time — ARGUS_KEY_VAULT won't exist in acme.sh's cron environment.
-HOOK_SCRIPT="${ACME_HOME}/deploy/argus-turn-cert.sh"
+# Hook filename uses underscores: acme.sh derives the function name from the basename, and
+# bash allows hyphens in function names but acme.sh normalizes to underscores in some versions.
+# Conf file bakes vault name + EC2 instance info so the hook works from acme.sh's cron environment
+# (ARGUS_KEY_VAULT + AWS env vars won't exist there).
+HOOK_SCRIPT="${ACME_HOME}/deploy/argus_turn_cert.sh"
 mkdir -p "${ACME_HOME}/deploy"
-# Conf file holds the vault name for the hook. Mode 0600: world-unreadable, not in env.
-printf 'ARGUS_KEY_VAULT=%s\n' "$KV" >"${ACME_HOME}/deploy/argus-turn.conf"
-chmod 0600 "${ACME_HOME}/deploy/argus-turn.conf"
-log "baked vault name into ${ACME_HOME}/deploy/argus-turn.conf"
+# Conf file: mode 0600, world-unreadable, never in env.
+printf 'ARGUS_KEY_VAULT=%s\nINSTANCE_ID=%s\nAWS_REGION=%s\n' \
+  "$KV" "$INSTANCE_ID" "$AWS_REGION" >"${ACME_HOME}/deploy/argus_turn_cert.conf"
+chmod 0600 "${ACME_HOME}/deploy/argus_turn_cert.conf"
+log "baked vault + instance info into ${ACME_HOME}/deploy/argus_turn_cert.conf"
 
 cat >"$HOOK_SCRIPT" <<'HOOK'
 #!/usr/bin/env bash
-# acme.sh deploy hook — called after each successful renewal of turn.4rgus.com.
-# Re-uploads the fresh cert + key to Key Vault and sends coturn SIGHUP (graceful reload).
-# acme.sh passes: $Le_Domain $CERT_PATH $CERT_KEY_PATH $CERT_FULLCHAIN_PATH $CERT_PFLS_PATH
-set -euo pipefail
+# acme.sh deploy hook for turn.4rgus.com — sourced by acme.sh after each successful renewal.
+# Must define argus_turn_cert_deploy(): acme.sh sources this file then calls that function.
 
-# Source the vault name baked in at issue time — not present in acme.sh's cron environment.
-# shellcheck source=deploy/argus-turn.conf
-CONF="$(dirname "${BASH_SOURCE[0]}")/argus-turn.conf"
-[ -r "$CONF" ] || { printf 'FATAL: argus-turn.conf missing at %s\n' "$CONF" >&2; exit 1; }
+# Source vault name + EC2 instance info baked in at issue time (not present in cron environment).
+# shellcheck source=deploy/argus_turn_cert.conf
+_CONF="$(dirname "${BASH_SOURCE[0]}")/argus_turn_cert.conf"
+[ -r "$_CONF" ] || { printf 'FATAL: argus_turn_cert.conf missing at %s\n' "$_CONF" >&2; return 1; }
 # shellcheck disable=SC1090
-source "$CONF"
-KV="${ARGUS_KEY_VAULT:?ARGUS_KEY_VAULT not set in argus-turn.conf}"
+source "$_CONF"
 
-WORKDIR="$(mktemp -d)"
-trap 'rm -rf -- "$WORKDIR"' EXIT
-umask 0077
-CERT_TMP="${WORKDIR}/fullchain.pem"
-KEY_TMP="${WORKDIR}/privkey.pem"
+argus_turn_cert_deploy() {
+  # Called by acme.sh: $1=domain $2=keyfile $3=certfile $4=cafile $5=fullchainfile
+  local _domain="$1" _keyfile="$2" _fullchainfile="$5"
+  local KV="${ARGUS_KEY_VAULT:?ARGUS_KEY_VAULT not set in argus_turn_cert.conf}"
+  local IID="${INSTANCE_ID:-}" REGION="${AWS_REGION:-}"
 
-# acme.sh deploy-hook variables: $CERT_FULLCHAIN_PATH (fullchain), $CERT_KEY_PATH (private key).
-cp "$CERT_FULLCHAIN_PATH" "$CERT_TMP"
-cp "$CERT_KEY_PATH" "$KEY_TMP"
+  local WDIR
+  WDIR="$(mktemp -d)"
+  trap 'rm -rf -- "$WDIR"' RETURN
+  umask 0077
+  local CERT_TMP="${WDIR}/fullchain.pem"
+  local KEY_TMP="${WDIR}/privkey.pem"
 
-az keyvault secret set --vault-name "$KV" --name "argus-turn-tls-cert" \
-  --file "$CERT_TMP" --encoding utf-8 --only-show-errors >/dev/null
-az keyvault secret set --vault-name "$KV" --name "argus-turn-tls-key" \
-  --file "$KEY_TMP" --encoding utf-8 --only-show-errors >/dev/null
-: >"$KEY_TMP"
+  cp "$_fullchainfile" "$CERT_TMP"
+  cp "$_keyfile" "$KEY_TMP"
 
-# Signal coturn to gracefully reload TLS credentials without dropping active relay allocations.
-# PR 7 adds the coturn Compose service; || true is correct — coturn may not be deployed yet.
-docker kill -s HUP coturn 2>/dev/null || true
+  az keyvault secret set --vault-name "$KV" --name "argus-turn-tls-cert" \
+    --file "$CERT_TMP" --encoding utf-8 --only-show-errors >/dev/null \
+    || { printf 'FATAL: argus_turn_cert: failed to upload cert to KV %s\n' "$KV" >&2; return 1; }
+  az keyvault secret set --vault-name "$KV" --name "argus-turn-tls-key" \
+    --file "$KEY_TMP" --encoding utf-8 --only-show-errors >/dev/null \
+    || { printf 'FATAL: argus_turn_cert: failed to upload key to KV %s\n' "$KV" >&2; return 1; }
+  : >"$KEY_TMP"
 
-printf 'argus-turn-cert deploy hook: cert renewed and uploaded to Key Vault %s\n' "$KV"
+  # Trigger the VM to re-fetch the renewed secrets from KV (argus-secrets → /run/argus/secrets/)
+  # and reload coturn TLS without dropping active relay allocations (SIGHUP = graceful reload).
+  # acme.sh cron runs on the workstation; the `docker kill` that was here did nothing — SSM fixes that.
+  if [ -n "$IID" ] && [ -n "$REGION" ]; then
+    aws ssm send-command \
+      --instance-ids "$IID" \
+      --document-name "AWS-RunShellScript" \
+      --parameters 'commands=["systemctl restart argus-secrets && docker kill -s HUP coturn 2>/dev/null || true"]' \
+      --region "$REGION" \
+      --comment "argus-turn-cert renewal: refresh secrets + reload coturn TLS" \
+      --only-show-errors >/dev/null \
+      && printf 'argus_turn_cert: triggered VM secret refresh + coturn reload via SSM\n' \
+      || printf 'WARN: argus_turn_cert: SSM command failed — run on VM manually:\n  systemctl restart argus-secrets && docker kill -s HUP coturn\n' >&2
+  else
+    printf 'WARN: argus_turn_cert: INSTANCE_ID/AWS_REGION missing — run on VM manually:\n  systemctl restart argus-secrets && docker kill -s HUP coturn\n' >&2
+  fi
+
+  printf 'argus_turn_cert: cert renewed and uploaded to Key Vault %s\n' "$KV"
+}
 HOOK
 chmod 0750 "$HOOK_SCRIPT"
 log "deploy hook written to ${HOOK_SCRIPT}"
@@ -174,7 +206,7 @@ log "running acme.sh --issue for ${DOMAIN} (dns_cf / Let's Encrypt)..."
   --home "$ACME_HOME" \
   --fullchain-file "$CERT_FILE" \
   --key-file "$KEY_FILE" \
-  --deploy-hook argus-turn-cert \
+  --deploy-hook argus_turn_cert \
   "${RENEW_FLAGS[@]}" || {
   EXIT=$?
   # acme.sh exit 2 = cert already valid and not yet due for renewal (not an error in normal runs).
