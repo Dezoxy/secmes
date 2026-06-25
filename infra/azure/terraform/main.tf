@@ -28,6 +28,7 @@ resource "azurerm_subnet" "this" {
 }
 
 resource "azurerm_network_security_group" "this" {
+  # checkov:skip=CKV_AZURE_77: TURN relay requires UDP from the internet (0.0.0.0/0 on 3478, 5349, 49160-49260). coturn is a dumb DTLS-SRTP forwarder — it never sees plaintext or keys. Source restriction is not possible for a public relay. See docs/threat-models/voip-turn.md §Threat — Spoofing the origin.
   name                = "${var.prefix}-nsg"
   location            = azurerm_resource_group.this.location
   resource_group_name = azurerm_resource_group.this.name
