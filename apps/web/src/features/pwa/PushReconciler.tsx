@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Bell, X } from 'lucide-react';
 
 import { pushNeedsReenable, reconcilePushSubscription, subscribeToPush } from '../../lib/push';
@@ -25,6 +25,16 @@ export function PushReconciler() {
   const [dismissed, setDismissed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Guards the gesture-driven restore path: if the shell unmounts (e.g. logout) while subscribeToPush is
+  // in flight, its continuations must not touch state or fire a stale "restored" toast on the dead instance.
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!deviceId || !VAPID_KEY) return;
@@ -68,12 +78,15 @@ export function PushReconciler() {
     setError(null);
     try {
       await subscribeToPush(deviceId, VAPID_KEY); // gesture-driven re-subscribe — the tap iOS requires
+      if (!mounted.current) return;
       setNeedsReenable(false);
       toast('Notifications turned back on', { variant: 'success' });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not turn notifications back on.');
+      if (mounted.current) {
+        setError(err instanceof Error ? err.message : 'Could not turn notifications back on.');
+      }
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }, [deviceId, toast]);
 
