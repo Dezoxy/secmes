@@ -349,6 +349,7 @@ export default function GroupsScreen() {
                 aria-label="Reveal group search"
                 aria-expanded={searchOpen}
                 aria-controls="groups-search-panel"
+                tabIndex={searchOpen ? -1 : 0}
                 className="group mx-auto flex h-7 w-12 items-center justify-center rounded-full transition-colors hover:bg-white/[0.03]"
               >
                 <span className="block h-1 w-10 rounded-full bg-white/15 transition-colors group-hover:bg-white/25" />
