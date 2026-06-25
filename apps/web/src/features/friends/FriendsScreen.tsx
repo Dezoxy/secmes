@@ -5,7 +5,6 @@ import { lookupUserByArgusId, type Friend, type UserLookupResult } from '../../l
 import { useChatContext } from '../chat/ChatContext';
 import { Avatar, Button, EmptyState } from '../ui';
 import { dicebearAvatar } from '../../lib/dicebear';
-import { ArgusAppIcon } from '../brand/ArgusAppIcon';
 
 const ARGUS_ID_RE = /^argus-[abcdefghjkmnpqrstuvwxyz23456789]{16}-[a-z]+$/;
 
@@ -231,10 +230,9 @@ export default function FriendsScreen() {
         onTouchMoveCapture={handleSidebarTouchMoveCapture}
         onTouchEndCapture={handleSidebarTouchEndCapture}
       >
-        <div className="argus-mobile-tab-header relative bg-[#0f0f16]/80 backdrop-blur-xl p-4 lg:bg-[#12121a]/80">
-          <div className="flex items-center gap-2">
-            <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />
-            <div className="flex-1 text-center">
+        <div className="argus-mobile-tab-header argus-mobile-tab-title-header relative bg-[#0f0f16]/80 backdrop-blur-xl p-4 lg:bg-[#12121a]/80">
+          <div className="text-center">
+            <div>
               <h1 className="text-xl font-bold tracking-wider">
                 <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
                   FRIENDS

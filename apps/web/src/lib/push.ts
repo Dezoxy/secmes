@@ -154,6 +154,33 @@ export async function reconcilePushSubscription(
 }
 
 /**
+ * Whether the app should show a one-tap "restore notifications" prompt: the user wants push on
+ * (permission is granted and they didn't explicitly disable it) but there is no active subscription.
+ *
+ * This is the iOS case the silent reconcile can't fix: iOS WebKit drops the subscription when the
+ * service worker is replaced on an app update AND refuses to recreate it without a user gesture (even
+ * with permission already granted), so `reconcilePushSubscription`'s silent `subscribe()` throws. The
+ * UI uses this to offer a gesture-driven re-subscribe instead of leaving the user stuck. Read-only;
+ * never prompts. Returns false on platforms where the silent reconcile already restored the subscription.
+ */
+export async function pushNeedsReenable(vapidPublicKey: string): Promise<boolean> {
+  if (typeof PushManager === 'undefined') return false;
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false;
+  if (pushUserDisabled()) return false;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    // No subscription (iOS dropped it on update), or one left over under a now-rotated VAPID key that the
+    // silent reconcile couldn't replace without a gesture — both need the user's one tap to restore.
+    return (
+      sub === null || !applicationServerKeyMatches(sub.options.applicationServerKey, vapidPublicKey)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Unsubscribe the current device from push notifications and remove the server-side record.
  * Scoped to the specific device — other devices' subscriptions are unaffected.
  * Silent no-op if no subscription exists.

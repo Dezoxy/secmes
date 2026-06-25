@@ -18,6 +18,8 @@
   --argus-brand-300: color-mix(in srgb, #a855f7 60%, white);
   --argus-brand-400: #9a53dd;
   --argus-brand-600: color-mix(in srgb, #964cdc 80%, black);
+  /* Current Dynamic Island Pro iPhones report up to a 62px portrait top safe area. */
+  --argus-dynamic-island-safe-top: 62px;
 }
 
 @keyframes argus-surface-enter {
@@ -368,8 +370,31 @@ body {
 
 @media (max-width: 1023px) {
   .argus-mobile-tab-header {
-    padding-top: calc(env(safe-area-inset-top) + 1rem);
+    padding-top: calc(env(safe-area-inset-top) + 2rem);
+    background: #0f0f16;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
+
+  .argus-mobile-tab-title-header {
+    padding-top: calc(
+      max(env(safe-area-inset-top, 0px), var(--argus-dynamic-island-safe-top)) + 1rem
+    );
+  }
+}
+
+:root {
+  --argus-floating-mobile-bottom: 2rem;
+}
+
+@media (display-mode: standalone) and (max-width: 1023px) {
+  :root {
+    --argus-floating-mobile-bottom: max(2rem, env(safe-area-inset-bottom, 0px));
+  }
+}
+
+.argus-floating-mobile-bottom {
+  bottom: var(--argus-floating-mobile-bottom);
 }
 
 /* iOS Safari zooms the page when a focused input's text is < 16px. The installed PWA pins
