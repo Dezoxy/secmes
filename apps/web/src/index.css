@@ -365,6 +365,20 @@ body {
 }
 
 @media (max-width: 1023px) {
+  html,
+  body {
+    height: auto;
+    min-height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  #root {
+    min-height: 100%;
+    height: auto;
+    overflow: visible;
+  }
+
   .argus-mobile-tab-header {
     padding-top: calc(env(safe-area-inset-top, 0px) + 1rem);
     background: #0f0f16;
@@ -385,8 +399,7 @@ body {
   --argus-floating-mobile-composer-clearance: calc(var(--argus-floating-mobile-bottom) + 5.75rem);
 }
 
-@media (display-mode: standalone) and (max-width: 1023px),
-  (display-mode: fullscreen) and (max-width: 1023px) {
+@media (display-mode: standalone) and (max-width: 1023px) {
   :root {
     /* Hug the home-indicator safe inset (its own value already clears the home bar) instead of
        lifting the pills by a fixed 2rem floor, which left a wide dead band below them. */

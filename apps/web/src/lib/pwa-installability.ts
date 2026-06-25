@@ -32,7 +32,7 @@ export const argusPwaManifest = {
   scope: '/',
   theme_color: '#0f0f16',
   background_color: '#0f0f16',
-  display: 'fullscreen',
+  display: 'standalone',
   orientation: 'portrait',
   icons: [
     { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
