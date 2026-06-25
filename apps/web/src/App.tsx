@@ -6,6 +6,7 @@ import { RegisterScreen } from './features/auth/RegisterScreen';
 import { prefersReducedMotion } from './lib/pref';
 import { ArgusAppIcon } from './features/brand/ArgusAppIcon';
 import { usePwaUpdate } from './features/pwa/PwaUpdateContext';
+import { PushReconciler } from './features/pwa/PushReconciler';
 import { APP_VERSION_TAG } from './lib/app-version';
 import { conversationEnterMotion, modalPanelExitMotion, paneBackEnterMotion } from './features/ui';
 import { ChatProvider } from './features/chat/ChatContext';
@@ -181,7 +182,7 @@ function LandingRoute() {
                     mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
                   }`}
                 >
-                  Welcome to Argus
+                  Welcome back
                 </h1>
                 <p
                   className={`mx-auto mb-8 max-w-[18rem] text-base leading-relaxed text-white/60 transition-all duration-500 delay-[350ms] ${
@@ -198,7 +199,7 @@ function LandingRoute() {
                 >
                   <button
                     onClick={handleLogin}
-                    className="w-full flex items-center justify-center gap-3 bg-purple-500 hover:bg-purple-400 text-white font-medium py-3 rounded-xl transition-all duration-300 text-sm shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40 hover:-translate-y-0.5 active:translate-y-0 active:shadow-purple-500/20"
+                    className="w-full flex items-center justify-center gap-3 bg-[var(--argus-brand-400)] hover:bg-[var(--argus-brand-300)] text-white font-medium py-3 rounded-xl transition-all duration-300 text-sm shadow-lg shadow-[#783db0]/25 hover:shadow-[#783db0]/40 hover:-translate-y-0.5 active:translate-y-0 active:shadow-[#783db0]/20"
                   >
                     <Fingerprint className="w-5 h-5" />
                     Continue with passkey
@@ -209,7 +210,7 @@ function LandingRoute() {
                   <button
                     type="button"
                     onClick={() => setPanel('register')}
-                    className="mt-3 w-full rounded-xl border border-white/5 py-2.5 text-sm text-white/50 transition-colors hover:border-purple-500/30 hover:text-white/80"
+                    className="mt-3 w-full rounded-xl border border-white/5 py-2.5 text-sm text-white/50 transition-colors hover:border-[var(--argus-brand-400)]/30 hover:text-white/80"
                   >
                     I have an invite code →
                   </button>
@@ -224,14 +225,14 @@ function LandingRoute() {
                     By continuing, you agree to our{' '}
                     <span
                       aria-disabled="true"
-                      className="text-purple-400 underline underline-offset-2"
+                      className="text-[var(--argus-brand-300)] underline underline-offset-2"
                     >
                       Terms of Service
                     </span>{' '}
                     and{' '}
                     <span
                       aria-disabled="true"
-                      className="text-purple-400 underline underline-offset-2"
+                      className="text-[var(--argus-brand-300)] underline underline-offset-2"
                     >
                       Privacy Policy
                     </span>
@@ -258,6 +259,7 @@ function AuthenticatedShell() {
     <AuthenticatedRouteBoundary>
       <DeviceProvider>
         <UnlockGate>
+          <PushReconciler />
           <ChatProvider>
             <AppShell />
           </ChatProvider>

@@ -71,6 +71,43 @@ self.addEventListener('message', (event: ExtendableMessageEvent) => {
   if (event.data?.type === 'SKIP_WAITING') void self.skipWaiting();
 });
 
+// pushsubscriptionchange: the browser fires this when it invalidates/rotates the push subscription on its
+// own (most relevant on iOS, where the subscription is dropped when the SW is replaced on an app update).
+// Re-subscribe with the same applicationServerKey so delivery keeps working even with no tab open, then ping
+// open clients so an authenticated context re-registers the new endpoint with the server (PUT
+// /push/subscription is JWT-guarded — the SW has no token, so the actual save happens client-side via
+// reconcilePushSubscription). Best-effort: if no client is open, the next authenticated startup reconciles.
+interface PushSubscriptionChangeEvent extends ExtendableEvent {
+  readonly oldSubscription: PushSubscription | null;
+  readonly newSubscription: PushSubscription | null;
+}
+
+async function handlePushSubscriptionChange(event: PushSubscriptionChangeEvent): Promise<void> {
+  // Prefer the browser-provided replacement (Firefox / newer Chrome populate newSubscription); only
+  // re-subscribe manually when it's absent, so we don't create a redundant second endpoint.
+  if (!event.newSubscription) {
+    const applicationServerKey = event.oldSubscription?.options.applicationServerKey;
+    if (applicationServerKey) {
+      try {
+        await self.registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey,
+        });
+      } catch {
+        // best-effort — an open client's reconcile will recreate the subscription
+      }
+    }
+  }
+  const clients = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
+  for (const client of clients) {
+    client.postMessage({ type: 'push-subscription-changed' });
+  }
+}
+
+self.addEventListener('pushsubscriptionchange', ((event: ExtendableEvent) => {
+  event.waitUntil(handlePushSubscriptionChange(event as PushSubscriptionChangeEvent));
+}) as EventListener);
+
 interface StoredNotificationSettings {
   quietHoursEnabled: boolean;
   quietHoursStart: string;

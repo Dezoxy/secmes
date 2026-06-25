@@ -9,9 +9,9 @@ export default function ProfileRoute() {
     <div className="relative h-full lg:flex lg:items-center lg:justify-center lg:bg-[#1a1a24] lg:p-4">
       <div className="flex h-full flex-col overflow-hidden bg-[#0f0f16] lg:h-[calc(100%-2rem)] lg:w-full lg:max-w-2xl lg:rounded-3xl lg:bg-[#12121a] lg:shadow-2xl lg:shadow-black/50">
         <div className="bg-[#0f0f16] p-4 pt-[env(safe-area-inset-top)] lg:pt-4 lg:bg-[#12121a]">
-          <h1 className="flex items-center justify-center gap-2">
+          <h1 className="flex items-center gap-2">
             <ArgusAppIcon className="h-8 w-8 rounded-lg shadow-sm shadow-purple-500/25" />
-            <span className="text-xl font-bold tracking-wider">
+            <span className="flex-1 text-center text-xl font-bold tracking-wider">
               <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
                 PROFILE
               </span>

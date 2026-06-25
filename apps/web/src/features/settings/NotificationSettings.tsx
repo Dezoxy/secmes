@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Bell } from 'lucide-react';
 import { SettingsRow, StateBlock } from '../ui';
-import { subscribeToPush, unsubscribeFromPush } from '../../lib/push';
+import { reconcilePushSubscription, subscribeToPush, unsubscribeFromPush } from '../../lib/push';
 import { readMutedConversationIds, syncMuteStateToCache, unmuteAll } from './conversation-mute';
 
 export type NotificationSettingsRecord = {
@@ -61,11 +61,29 @@ export function NotificationSettings({
       setSubscribed(false);
       return;
     }
-    navigator.serviceWorker.ready
-      .then((reg) => reg.pushManager.getSubscription())
-      .then((sub) => setSubscribed(sub !== null))
-      .catch(() => setSubscribed(false));
-  }, []);
+    let active = true;
+    void (async () => {
+      // Self-heal a dropped subscription (e.g. iOS dropping it on an app update) so the toggle reflects
+      // reality rather than a stale "Tap to enable" gap. No prompt — reconcile is a no-op unless granted.
+      if (deviceId && VAPID_KEY) {
+        try {
+          await reconcilePushSubscription(deviceId, VAPID_KEY);
+        } catch {
+          // best-effort — fall through to read whatever subscription state exists
+        }
+      }
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (active) setSubscribed(sub !== null);
+      } catch {
+        if (active) setSubscribed(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [deviceId]);
 
   const handleEnable = useCallback(async () => {
     if (!deviceId || !VAPID_KEY) return;
