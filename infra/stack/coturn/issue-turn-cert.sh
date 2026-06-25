@@ -223,6 +223,7 @@ RENEW_FLAGS=()
 [ "$FORCE_RENEW" -eq 1 ] && RENEW_FLAGS=(--force)
 
 log "running acme.sh --issue for ${DOMAIN} (dns_cf / Let's Encrypt)..."
+HOOK_UPLOADED=1  # deploy hook fires on exit 0 and uploads cert+key to KV; set 0 on skip.
 "$ACME" --issue --dns dns_cf -d "$DOMAIN" --server letsencrypt \
   --home "$ACME_HOME" \
   --fullchain-file "$CERT_FILE" \
@@ -232,6 +233,7 @@ log "running acme.sh --issue for ${DOMAIN} (dns_cf / Let's Encrypt)..."
   EXIT=$?
   # acme.sh exit 2 = cert already valid and not yet due for renewal (not an error in normal runs).
   if [ $EXIT -eq 2 ] && [ "$FORCE_RENEW" -eq 0 ]; then
+    HOOK_UPLOADED=0  # hook did NOT fire; main script must upload to KV below.
     log "cert is still valid — use --renew to force. Uploading the existing cert from acme.sh store."
     # Retrieve from the acme.sh cert store (ECC preferred, RSA fallback).
     CERT_STORE_DIR="${ACME_HOME}/${DOMAIN}_ecc"
@@ -255,7 +257,7 @@ log "running acme.sh --issue for ${DOMAIN} (dns_cf / Let's Encrypt)..."
   fi
 }
 
-# Validate cert before uploading: check it covers the right domain and isn't already expired.
+# Validate cert: check it covers the right domain and isn't already expired.
 openssl x509 -noout -checkend 0 -in "$CERT_FILE" || {
   log "FATAL: issued cert is expired or invalid"
   exit 1
@@ -265,18 +267,19 @@ openssl x509 -noout -text -in "$CERT_FILE" | grep -q "$DOMAIN" || {
   exit 1
 }
 
-# Upload cert + key to Key Vault via --file (never argv — values never appear in ps/cmdline).
-log "uploading argus-turn-tls-cert → Key Vault ${KV}..."
-az keyvault secret set --vault-name "$KV" --name "argus-turn-tls-cert" \
-  --file "$CERT_FILE" --encoding utf-8 --only-show-errors >/dev/null
-log "uploading argus-turn-tls-key → Key Vault ${KV}..."
-az keyvault secret set --vault-name "$KV" --name "argus-turn-tls-key" \
-  --file "$KEY_FILE" --encoding utf-8 --only-show-errors >/dev/null
+if [ "$HOOK_UPLOADED" -eq 0 ]; then
+  # exit-2 path: deploy hook did not fire; upload cert + key to KV manually.
+  # (On exit-0, the hook already uploaded — KEY_FILE is wiped by the hook, so don't read it.)
+  log "uploading argus-turn-tls-cert → Key Vault ${KV}..."
+  az keyvault secret set --vault-name "$KV" --name "argus-turn-tls-cert" \
+    --file "$CERT_FILE" --encoding utf-8 --only-show-errors >/dev/null
+  log "uploading argus-turn-tls-key → Key Vault ${KV}..."
+  az keyvault secret set --vault-name "$KV" --name "argus-turn-tls-key" \
+    --file "$KEY_FILE" --encoding utf-8 --only-show-errors >/dev/null
+  : >"$KEY_FILE"
+fi
 
-# Wipe the install-dir copy of the private key (belt-and-suspenders; dir is already 0700).
-: >"$KEY_FILE"
-
-log "cert + key uploaded. Verifying..."
+log "cert + key in Key Vault. Verifying..."
 az keyvault secret show --vault-name "$KV" --name "argus-turn-tls-cert" \
   --query "value" -o tsv --only-show-errors | openssl x509 -noout -subject -dates
 log "Key Vault delivery verified."
