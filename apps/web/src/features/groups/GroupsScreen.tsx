@@ -47,7 +47,6 @@ export default function GroupsScreen() {
 
   const groupConversations = conversations.filter((c) => c.type === 'group');
 
-  const [mounted, setMounted] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(tabSelectedId.get('/groups') ?? null);
   useEffect(() => {
     tabSelectedId.set('/groups', selectedId);
@@ -91,10 +90,6 @@ export default function GroupsScreen() {
 
   // Read receipts only — delivered receipts are handled globally by ChatProvider.
   useReceiptSending({ conversations, liveIds, selectedId, selectedIsLive, sendDelivered: false });
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   useEffect(() => {
     const mq = window.matchMedia('(min-width: 1024px)');
@@ -248,11 +243,7 @@ export default function GroupsScreen() {
 
   return (
     <div className="relative flex h-full bg-[#1a1a24] sm:items-center sm:justify-center sm:p-4">
-      <div
-        className={`absolute inset-0 w-full sm:static sm:h-[calc(100%-2rem)] sm:max-w-6xl bg-[#12121a] sm:rounded-3xl overflow-hidden flex shadow-2xl shadow-black/50 transition-all duration-700 ease-out ${
-          mounted ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
-        }`}
-      >
+      <div className="absolute inset-0 w-full sm:static sm:h-[calc(100%-2rem)] sm:max-w-6xl bg-[#12121a] sm:rounded-3xl overflow-hidden flex shadow-2xl shadow-black/50">
         {/* Sidebar */}
         <aside
           aria-label="Group conversations"
@@ -262,9 +253,7 @@ export default function GroupsScreen() {
           onTouchEndCapture={handleSidebarTouchEndCapture}
           className={`${
             showSidebar && !mobileThreadClosing ? 'flex' : 'hidden lg:flex'
-          } relative w-full lg:w-80 shrink-0 flex-col bg-[#0f0f16] border-r border-white/5 transition-all duration-500 ${
-            mounted ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-8'
-          } ${mobileSidebarReturning ? paneBackEnterMotion : ''}`}
+          } relative w-full lg:w-80 shrink-0 flex-col bg-[#0f0f16] border-r border-white/5 ${mobileSidebarReturning ? paneBackEnterMotion : ''}`}
         >
           <div className="argus-mobile-tab-header relative bg-[#0f0f16]/80 backdrop-blur-xl p-4">
             <div className="flex items-center gap-2">
@@ -380,9 +369,7 @@ export default function GroupsScreen() {
           aria-label="Group chat"
           className={`${
             !showSidebar || mobileThreadClosing ? 'flex' : 'hidden lg:flex'
-          } flex-1 flex-col transition-all duration-500 delay-100 ${
-            mounted ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-8'
-          } ${mobileThreadClosing ? paneBackExitMotion : ''}`}
+          } flex-1 flex-col ${mobileThreadClosing ? paneBackExitMotion : ''}`}
         >
           {selectedConversation ? (
             <div
