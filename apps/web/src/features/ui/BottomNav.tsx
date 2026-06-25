@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { MessageSquare, Users, UserPlus, Settings2, User, type LucideIcon } from 'lucide-react';
+import { useFloatingClearance } from './useFloatingClearance';
 
 interface NavItem {
   to: string;
@@ -24,8 +25,16 @@ const ALL_TAB_ITEMS = [...NAV_ITEMS, PROFILE_NAV_ITEM];
 export function BottomNav({ onNavigate }: BottomNavProps) {
   const { pathname } = useLocation();
 
+  // Reserve only the floating pills' real height (+ offset + gap) as scroll clearance, so content
+  // fills the bottom edge-to-edge instead of leaving a reserved dead band below the bar. The nav is
+  // fixed-height and only hides transiently (conversation view), so keep the last value on unmount.
+  const setNavClearance = useFloatingClearance('--argus-floating-mobile-nav-clearance', {
+    keepLastOnUnmount: true,
+  });
+
   return (
     <nav
+      ref={setNavClearance}
       aria-label="Main navigation"
       className="argus-floating-mobile-bottom pointer-events-none absolute inset-x-0 z-30 px-2 pb-2 pt-1 lg:static lg:shrink-0 lg:pb-[calc(env(safe-area-inset-bottom)_+_1.5rem)]"
     >
