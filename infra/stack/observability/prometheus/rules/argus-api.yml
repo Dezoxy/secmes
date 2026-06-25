@@ -112,6 +112,15 @@ groups:
           summary: 'Postgres connection pool above 80%'
           description: 'Active connections to the argus database exceed 80% of max_connections.'
 
+      - alert: ArgusCoturnDown
+        expr: up{job="coturn"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'coturn TURN relay is unreachable'
+          description: 'Prometheus cannot scrape coturn:9641 for >2m — the TURN relay may be down. All relay-only calls will fail. See docs/runbooks/voip-turn.md.'
+
       - alert: LokiIngestionSilent
         expr: rate(loki_distributor_lines_received_total[5m]) == 0
         for: 10m

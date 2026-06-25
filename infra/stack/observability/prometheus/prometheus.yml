@@ -43,3 +43,10 @@ scrape_configs:
   - job_name: redis
     static_configs:
       - targets: ['redis-exporter:9121']
+
+  # coturn TURN relay — runs as network_mode:host, so Prometheus reaches it via host-gateway
+  # (Docker resolves host.docker.internal → host IP via extra_hosts in compose.prod.yaml).
+  # Port 9641 is not opened in the NSG; scraping is host-local only.
+  - job_name: coturn
+    static_configs:
+      - targets: ['host.docker.internal:9641']
