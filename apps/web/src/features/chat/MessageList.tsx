@@ -7,12 +7,15 @@ interface MessageListProps {
   conversation: Conversation;
   onImageClick: (url: string) => void;
   bottomNavClearance?: boolean;
+  /** Chat thread: reserve room so messages clear the floating header + input bars. */
+  floatingBars?: boolean;
 }
 
 export function MessageList({
   conversation,
   onImageClick,
   bottomNavClearance = false,
+  floatingBars = false,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const previousMessageCount = useRef(conversation.messages.length);
@@ -60,9 +63,12 @@ export function MessageList({
 
   const getSender = (senderId: string) =>
     senderId === currentUser.id ? currentUser : users.find((u) => u.id === senderId);
-  const bottomPadding = bottomNavClearance
-    ? 'pb-[calc(env(safe-area-inset-bottom)_+_6rem)] lg:pb-4'
-    : 'pb-4';
+  const topPadding = floatingBars ? 'pt-[calc(env(safe-area-inset-top)_+_5rem)]' : 'pt-4';
+  const bottomPadding = floatingBars
+    ? 'pb-[calc(env(safe-area-inset-bottom)_+_5.5rem)]'
+    : bottomNavClearance
+      ? 'pb-[calc(env(safe-area-inset-bottom)_+_6rem)] lg:pb-4'
+      : 'pb-4';
 
   return (
     <div
@@ -70,7 +76,7 @@ export function MessageList({
       role="region"
       aria-label="Message thread"
       aria-live="polite"
-      className={`flex-1 space-y-3 overflow-y-auto px-4 pt-4 ${bottomPadding}`}
+      className={`flex-1 space-y-3 overflow-y-auto px-4 ${topPadding} ${bottomPadding}`}
     >
       {conversation.messages.map((message, index) => {
         const isOwn = message.senderId === currentUser.id;
