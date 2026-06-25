@@ -30,15 +30,30 @@ Common failure modes:
 
 ## Fix: IMDS unreachable (external-ip resolution fails)
 
-Set `ARGUS_TURN_EXTERNAL_IP=<public-ip>/<private-ip>` in the environment the deploy script sources, then restart:
+Set `ARGUS_TURN_EXTERNAL_IP=<public-ip>/<private-ip>` in the environment the deploy script sources, then restart.
+
+**On AWS EC2 (IMDSv2):**
 
 ```bash
-# Find the IPs
 TOKEN=$(curl -sX PUT -H "X-aws-ec2-metadata-token-ttl-seconds: 60" http://169.254.169.254/latest/api/token)
 PUB=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4)
 PRIV=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/local-ipv4)
 echo "ARGUS_TURN_EXTERNAL_IP=${PUB}/${PRIV}"
+```
 
+**On Azure:**
+
+```bash
+PUB=$(curl -s -H 'Metadata: true' \
+  'http://169.254.169.254/metadata/instance/network/interface/0/ipv4/ipAddress/0/publicIpAddress?api-version=2021-02-01&format=text')
+PRIV=$(curl -s -H 'Metadata: true' \
+  'http://169.254.169.254/metadata/instance/network/interface/0/ipv4/ipAddress/0/privateIpAddress?api-version=2021-02-01&format=text')
+echo "ARGUS_TURN_EXTERNAL_IP=${PUB}/${PRIV}"
+```
+
+Then set the env var and restart:
+
+```bash
 # Set in the deploy env, then restart
 docker compose -f /opt/argus/compose.prod.yaml up -d --no-deps coturn
 ```
@@ -75,7 +90,7 @@ docker compose -f /opt/argus/compose.prod.yaml ps coturn
 # Expected: coturn   ... healthy
 
 # Prometheus scrape should recover (check after ~1m)
-curl -s http://localhost:9090/api/v1/query?query=up{job="coturn"} | jq '.data.result[0].value[1]'
+curl -s 'http://localhost:9090/api/v1/query?query=up%7Bjob%3D%22coturn%22%7D' | jq '.data.result[0].value[1]'
 # Expected: "1"
 ```
 
