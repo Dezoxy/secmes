@@ -51,7 +51,7 @@ describe('CallsController route contract', () => {
 describe('CallsController behaviour', () => {
   it('returns the service response verbatim', async () => {
     const { controller, calls } = makeController();
-    const result = await controller.mintTurnCredentials(auth);
+    const result = await controller.mintTurnCredentials(auth, {});
     expect(result).toEqual(MOCK_RESPONSE);
     expect(calls.mintTurnCredentials).toHaveBeenCalledWith(auth);
   });
@@ -59,7 +59,9 @@ describe('CallsController behaviour', () => {
   it('propagates ForbiddenException from the service (no accepted friends)', async () => {
     const { controller, calls } = makeController();
     calls.mintTurnCredentials.mockRejectedValue(new ForbiddenException('no accepted friends'));
-    await expect(controller.mintTurnCredentials(auth)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(controller.mintTurnCredentials(auth, {})).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
   });
 
   it('does not pass credential to any logger', async () => {
@@ -80,7 +82,7 @@ describe('CallsController behaviour', () => {
     const { calls: calls2 } = makeController();
     calls2.mintTurnCredentials.mockResolvedValue(proxyResponse);
     const controller2 = new CallsController(calls2 as unknown as CallsService);
-    await controller2.mintTurnCredentials(auth);
+    await controller2.mintTurnCredentials(auth, {});
     // The controller must not have accessed iceServers — it just returns what the service gives it.
     expect(credentialAccessed).toBe(false);
   });
