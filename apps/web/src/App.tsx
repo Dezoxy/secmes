@@ -376,7 +376,7 @@ function RouteLoadingFallback() {
 }
 
 export default function App() {
-  // Clear the iOS standalone-PWA stale top-chrome seam that reappears after the app resumes.
+  // Clear the iOS installed-PWA stale top-chrome seam that reappears after the app resumes.
   useResumeRepaint();
 
   return (

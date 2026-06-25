@@ -8,14 +8,15 @@ import { ToastProvider, applyThemeToDocument } from './features/ui';
 import { readStoredDeviceSettings } from './features/settings/device-settings';
 import './index.css';
 
-// Only an installed (standalone) PWA pins maximum-scale=1 — this stops iOS from zooming the page
-// when a small input is focused. We do it here (not in the static viewport meta) so a normal
-// browser tab keeps pinch-zoom available for accessibility. iOS exposes standalone via the
-// non-standard navigator.standalone; other engines via the display-mode media query.
-const isStandalone =
+// Only an installed PWA pins maximum-scale=1 — this stops iOS from zooming the page when a small
+// input is focused. We do it here (not in the static viewport meta) so a normal browser tab keeps
+// pinch-zoom available for accessibility. iOS exposes installed PWAs via the non-standard
+// navigator.standalone; other engines via the display-mode media query.
+const isInstalledPwa =
   window.matchMedia('(display-mode: standalone)').matches ||
+  window.matchMedia('(display-mode: fullscreen)').matches ||
   (navigator as Navigator & { standalone?: boolean }).standalone === true;
-if (isStandalone) {
+if (isInstalledPwa) {
   document
     .querySelector('meta[name="viewport"]')
     ?.setAttribute(
