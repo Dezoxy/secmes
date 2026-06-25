@@ -61,11 +61,99 @@ export default function FriendsScreen() {
   const [sentDisplayName, setSentDisplayName] = useState<string | null>(null);
   const [confirmingUnfriendId, setConfirmingUnfriendId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchFocused, setSearchFocused] = useState(false);
   const infightLookupQuery = useRef<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (searchOpen) searchInputRef.current?.focus();
-  }, [searchOpen]);
+  const listRef = useRef<HTMLDivElement>(null);
+  const touchStartY = useRef<number | null>(null);
+  const sidebarTouchStartY = useRef<number | null>(null);
+  const searchTouchStartY = useRef<number | null>(null);
+
+  const revealSearch = () => setSearchOpen(true);
+
+  const hideSearch = () => {
+    searchInputRef.current?.blur();
+    setSearchFocused(false);
+    setSearchOpen(false);
+    setFriendQuery('');
+    setLookupResult(null);
+    setSendRequestError(null);
+    infightLookupQuery.current = null;
+  };
+
+  const hideSearchIfIdle = () => {
+    if (!searchFocused) setSearchOpen(false);
+  };
+
+  const focusSearch = () => {
+    revealSearch();
+    window.requestAnimationFrame(() => searchInputRef.current?.focus());
+  };
+
+  const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    const scrollTop = listRef.current?.scrollTop ?? 0;
+    if (event.deltaY < -12 && scrollTop <= 2) revealSearch();
+    if (event.deltaY > 12) {
+      if (searchOpen) hideSearch();
+      else if (scrollTop > 12) hideSearchIfIdle();
+    }
+  };
+
+  const handleSidebarWheelCapture = (event: React.WheelEvent<HTMLDivElement>) => {
+    if (searchOpen && event.deltaY > 12) hideSearch();
+  };
+
+  const handleSidebarTouchStartCapture = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (searchOpen) sidebarTouchStartY.current = event.touches[0]?.clientY ?? null;
+  };
+
+  const handleSidebarTouchMoveCapture = (event: React.TouchEvent<HTMLDivElement>) => {
+    const startY = sidebarTouchStartY.current;
+    const currentY = event.touches[0]?.clientY;
+    if (startY === null || currentY === undefined) return;
+    if (currentY - startY < -28) hideSearch();
+  };
+
+  const handleSidebarTouchEndCapture = () => {
+    sidebarTouchStartY.current = null;
+  };
+
+  const handleTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (searchOpen || (listRef.current?.scrollTop ?? 0) <= 2) {
+      touchStartY.current = event.touches[0]?.clientY ?? null;
+    }
+  };
+
+  const handleTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    const startY = touchStartY.current;
+    const currentY = event.touches[0]?.clientY;
+    if (startY === null || currentY === undefined) return;
+    if (currentY - startY > 28 && (listRef.current?.scrollTop ?? 0) <= 2) revealSearch();
+    if (currentY - startY < -28 && searchOpen) hideSearch();
+  };
+
+  const handleTouchEnd = () => {
+    touchStartY.current = null;
+  };
+
+  const handleSearchWheel = (event: React.WheelEvent<HTMLElement>) => {
+    if (event.deltaY > 12) hideSearch();
+  };
+
+  const handleSearchTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    searchTouchStartY.current = event.touches[0]?.clientY ?? null;
+  };
+
+  const handleSearchTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    const startY = searchTouchStartY.current;
+    const currentY = event.touches[0]?.clientY;
+    if (startY === null || currentY === undefined) return;
+    if (currentY - startY < -28) hideSearch();
+  };
+
+  const handleSearchTouchEnd = () => {
+    searchTouchStartY.current = null;
+  };
 
   const trimmedFriendQuery = friendQuery.trim();
   const filteredFriends = useMemo(
@@ -136,7 +224,13 @@ export default function FriendsScreen() {
 
   return (
     <div className="relative h-full lg:flex lg:items-center lg:justify-center lg:bg-[#1a1a24] lg:p-4">
-      <div className="flex h-full flex-col overflow-hidden bg-[#0f0f16] lg:h-[calc(100%-2rem)] lg:w-full lg:max-w-2xl lg:rounded-3xl lg:bg-[#12121a] lg:shadow-2xl lg:shadow-black/50">
+      <div
+        className="flex h-full flex-col overflow-hidden bg-[#0f0f16] lg:h-[calc(100%-2rem)] lg:w-full lg:max-w-2xl lg:rounded-3xl lg:bg-[#12121a] lg:shadow-2xl lg:shadow-black/50"
+        onWheelCapture={handleSidebarWheelCapture}
+        onTouchStartCapture={handleSidebarTouchStartCapture}
+        onTouchMoveCapture={handleSidebarTouchMoveCapture}
+        onTouchEndCapture={handleSidebarTouchEndCapture}
+      >
         <div className="bg-[#0f0f16] p-4 pt-[env(safe-area-inset-top)] lg:pt-4 lg:bg-[#12121a]">
           <div className="flex flex-col items-center gap-0.5">
             <h1 className="flex items-center gap-2">
@@ -155,6 +249,10 @@ export default function FriendsScreen() {
           {/* Search input — slides in when open */}
           <div
             id="friend-search-panel"
+            onWheel={handleSearchWheel}
+            onTouchStart={handleSearchTouchStart}
+            onTouchMove={handleSearchTouchMove}
+            onTouchEnd={handleSearchTouchEnd}
             className={`overflow-hidden transition-all duration-300 ease-out ${
               searchOpen ? 'mt-3 max-h-20 opacity-100' : 'pointer-events-none max-h-0 opacity-0'
             }`}
@@ -174,6 +272,15 @@ export default function FriendsScreen() {
                   setLookupResult(null);
                   infightLookupQuery.current = null;
                 }}
+                onWheel={handleSearchWheel}
+                onTouchStart={handleSearchTouchStart}
+                onTouchMove={handleSearchTouchMove}
+                onTouchEnd={handleSearchTouchEnd}
+                onFocus={() => {
+                  setSearchFocused(true);
+                  revealSearch();
+                }}
+                onBlur={() => setSearchFocused(false)}
                 aria-label="Search friends or enter Argus ID"
                 placeholder="Search friends or enter Argus ID..."
                 ref={searchInputRef}
@@ -183,13 +290,7 @@ export default function FriendsScreen() {
               <button
                 type="button"
                 tabIndex={searchOpen ? undefined : -1}
-                onClick={() => {
-                  setFriendQuery('');
-                  setLookupResult(null);
-                  setSendRequestError(null);
-                  infightLookupQuery.current = null;
-                  setSearchOpen(false);
-                }}
+                onClick={hideSearch}
                 aria-label="Close search"
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/60"
               >
@@ -207,7 +308,7 @@ export default function FriendsScreen() {
           >
             <button
               type="button"
-              onClick={() => setSearchOpen(true)}
+              onClick={focusSearch}
               aria-label="Reveal friend search"
               aria-expanded={searchOpen}
               aria-controls="friend-search-panel"
@@ -218,7 +319,15 @@ export default function FriendsScreen() {
           </div>
         </div>
 
-        <div className="flex-1 space-y-2 overflow-y-auto px-2 pt-3 pb-[calc(env(safe-area-inset-bottom)_+_6rem)] lg:pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)]">
+        <div
+          ref={listRef}
+          onWheel={handleWheel}
+          onScroll={hideSearchIfIdle}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          className="flex-1 space-y-2 overflow-y-auto px-2 pt-3 pb-[calc(env(safe-area-inset-bottom)_+_6rem)] lg:pb-[calc(env(safe-area-inset-bottom)_+_0.75rem)]"
+        >
           {friendsError && (
             <p className="mx-2 text-xs text-amber-400/70">
               Could not refresh friends — data may be stale.
