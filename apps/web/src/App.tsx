@@ -6,6 +6,7 @@ import { RegisterScreen } from './features/auth/RegisterScreen';
 import { prefersReducedMotion } from './lib/pref';
 import { ArgusAppIcon } from './features/brand/ArgusAppIcon';
 import { usePwaUpdate } from './features/pwa/PwaUpdateContext';
+import { useResumeRepaint } from './features/pwa/useResumeRepaint';
 import { PushReconciler } from './features/pwa/PushReconciler';
 import { APP_VERSION_TAG } from './lib/app-version';
 import { conversationEnterMotion, modalPanelExitMotion, paneBackEnterMotion } from './features/ui';
@@ -375,6 +376,9 @@ function RouteLoadingFallback() {
 }
 
 export default function App() {
+  // Clear the iOS standalone-PWA stale top-chrome seam that reappears after the app resumes.
+  useResumeRepaint();
+
   return (
     <>
       <Suspense fallback={<RouteLoadingFallback />}>
