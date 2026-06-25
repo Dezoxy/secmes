@@ -28,11 +28,11 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
   const actionsRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
-  const composerRef = useRef<HTMLDivElement>(null);
 
   // Size the message-list bottom clearance to the composer's live height (grows with attachment
   // previews / multiline), so the last message clears the composer without a reserved dead band.
-  useFloatingClearance(composerRef, '--argus-floating-mobile-composer-clearance');
+  // A callback ref re-observes when the composer swaps between its disabled and live elements.
+  const setComposerClearance = useFloatingClearance('--argus-floating-mobile-composer-clearance');
 
   useEffect(() => {
     if (!actionMenuOpen) return;
@@ -112,7 +112,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
   if (disabled) {
     return (
       <div
-        ref={composerRef}
+        ref={setComposerClearance}
         className="argus-floating-mobile-bottom pointer-events-none absolute inset-x-0 z-20 px-2 pb-2 pl-[calc(env(safe-area-inset-left)_+_0.5rem)] pr-[calc(env(safe-area-inset-right)_+_0.5rem)]"
       >
         <div className="pointer-events-auto rounded-2xl bg-[#12121a]/95 p-4 shadow-[0_-2px_24px_rgba(0,0,0,0.55)] ring-1 ring-white/[0.08] backdrop-blur-xl">
@@ -126,7 +126,7 @@ export function ChatInput({ onSend, disabled = false, disabledNotice }: ChatInpu
 
   return (
     <div
-      ref={composerRef}
+      ref={setComposerClearance}
       className="argus-floating-mobile-bottom pointer-events-none fixed left-1/2 z-20 w-[min(21rem,calc(100vw-3rem))] -translate-x-1/2 pb-1 lg:absolute lg:w-[min(21rem,calc(100%-3rem))]"
     >
       <div className="pointer-events-auto w-full rounded-xl bg-[#12121a]/95 p-2 shadow-[0_-2px_24px_rgba(0,0,0,0.55)] ring-1 ring-white/[0.08] backdrop-blur-xl">

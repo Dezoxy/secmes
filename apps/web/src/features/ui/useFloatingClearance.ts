@@ -1,4 +1,4 @@
-import { useEffect, type RefObject } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 interface FloatingClearanceOptions {
   /** Extra breathing room above the control, in rem. */
@@ -15,49 +15,55 @@ interface FloatingClearanceOptions {
 
 /**
  * Keep a scroll-clearance CSS variable in sync with the *real* rendered height of a floating
- * bottom control (the nav pills or the chat composer).
+ * bottom control (the nav pills or the chat composer), and return a callback ref to attach to it.
  *
  * The clearance a scroller reserves at its bottom = the control's measured height + the floating
  * bottom offset + a small gap. Deriving it from a live measurement (instead of a hardcoded rem
  * guess) means content rests exactly above the control on every device safe-area inset and at
  * every in-app font-size level — no oversized dead band below the control, and nothing hidden
- * behind it. Falls back to the stylesheet default before the first measurement (and, unless
- * `keepLastOnUnmount`, on unmount).
+ * behind it. The `env(safe-area-inset-bottom)` part lives inside the CSS `calc()`, so the browser
+ * already recomputes the offset on orientation/inset changes; we only need to track the element's
+ * own height, which a ResizeObserver covers.
+ *
+ * A callback ref (rather than a passed-in RefObject) is used so the observer always tracks the
+ * node the control currently renders: if the control swaps its element (e.g. the composer flips
+ * between its disabled banner and the live input), React re-invokes the ref and we re-observe the
+ * new node instead of leaving the observer on a detached one.
  */
 export function useFloatingClearance(
-  ref: RefObject<HTMLElement | null>,
   cssVar: string,
   { gapRem = 0.75, keepLastOnUnmount = false }: FloatingClearanceOptions = {},
-): void {
-  useEffect(() => {
-    const initial = ref.current;
-    if (!initial || typeof ResizeObserver === 'undefined') return;
+): (node: HTMLElement | null) => void {
+  const observerRef = useRef<ResizeObserver | null>(null);
 
-    const root = document.documentElement;
-    // Read ref.current live (not a captured element) so the value stays correct even if the
-    // observed control's DOM node is swapped out from under us.
-    const apply = () => {
-      const el = ref.current;
-      if (!el) return;
-      root.style.setProperty(
-        cssVar,
-        `calc(${el.offsetHeight}px + var(--argus-floating-mobile-bottom) + ${gapRem}rem)`,
-      );
-    };
+  const setNode = useCallback(
+    (node: HTMLElement | null) => {
+      observerRef.current?.disconnect();
+      observerRef.current = null;
 
-    apply();
-    const observer = new ResizeObserver(apply);
-    observer.observe(initial);
-    window.addEventListener('resize', apply);
-
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', apply);
-      if (!keepLastOnUnmount) {
-        // Drop the measured value so a scroller that outlives this control reverts to the static
-        // fallback rather than holding a now-wrong height (e.g. a grown composer that just unmounted).
-        root.style.removeProperty(cssVar);
+      const root = document.documentElement;
+      if (!node) {
+        if (!keepLastOnUnmount) root.style.removeProperty(cssVar);
+        return;
       }
-    };
-  }, [ref, cssVar, gapRem, keepLastOnUnmount]);
+      if (typeof ResizeObserver === 'undefined') return;
+
+      const apply = () => {
+        root.style.setProperty(
+          cssVar,
+          `calc(${node.offsetHeight}px + var(--argus-floating-mobile-bottom) + ${gapRem}rem)`,
+        );
+      };
+      apply();
+      const observer = new ResizeObserver(apply);
+      observer.observe(node);
+      observerRef.current = observer;
+    },
+    [cssVar, gapRem, keepLastOnUnmount],
+  );
+
+  // Defensive: tear the observer down on unmount even if the ref-detach path didn't run.
+  useEffect(() => () => observerRef.current?.disconnect(), []);
+
+  return setNode;
 }
