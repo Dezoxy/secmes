@@ -351,7 +351,7 @@ export default function ChatScreen() {
           {selectedConversation ? (
             <div
               key={selectedConversation.id}
-              className={`flex min-h-0 flex-1 flex-col ${conversationEnterMotion}`}
+              className={`relative flex min-h-0 flex-1 flex-col ${conversationEnterMotion}`}
             >
               <ChatHeader
                 conversation={selectedConversation}
@@ -367,28 +367,33 @@ export default function ChatScreen() {
                     : undefined
                 }
               />
-              {effectiveSelectedIsLive && !selectedIsSyncLost && (
-                <ReconnectBanner status={connectionStatus} className="mx-4 mt-3" />
-              )}
-              {selectedIsSyncLost && (
-                <StateBlock
-                  icon={Unplug}
-                  title="Conversation out of sync"
-                  variant="offline"
-                  compact
-                  role="status"
-                  ariaLive="polite"
-                  className="mx-4 mt-3"
-                >
-                  This conversation fell too far behind to sync. New messages may not appear and
-                  older ones may be unavailable.
-                </StateBlock>
-              )}
               <MessageList
                 conversation={selectedConversation}
                 onImageClick={setPreviewImage}
                 bottomNavClearance={false}
+                floatingBars
               />
+              {(effectiveSelectedIsLive || selectedIsSyncLost) && (
+                <div className="pointer-events-none absolute inset-x-0 top-[calc(env(safe-area-inset-top)_+_4.5rem)] z-10 flex flex-col gap-2 px-2 pl-[calc(env(safe-area-inset-left)_+_0.5rem)] pr-[calc(env(safe-area-inset-right)_+_0.5rem)]">
+                  {effectiveSelectedIsLive && !selectedIsSyncLost && (
+                    <ReconnectBanner status={connectionStatus} className="pointer-events-auto" />
+                  )}
+                  {selectedIsSyncLost && (
+                    <StateBlock
+                      icon={Unplug}
+                      title="Conversation out of sync"
+                      variant="offline"
+                      compact
+                      role="status"
+                      ariaLive="polite"
+                      className="pointer-events-auto"
+                    >
+                      This conversation fell too far behind to sync. New messages may not appear and
+                      older ones may be unavailable.
+                    </StateBlock>
+                  )}
+                </div>
+              )}
               {effectiveSelectedIsLive && !selectedIsSyncLost && (
                 <ChatInput
                   onSend={handleSend}
