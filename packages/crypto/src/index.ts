@@ -722,10 +722,14 @@ export class Conversation {
    * snapshot without modifying it. The `senderDataSecret` is resolved per the message epoch —
    * ts-mls retains old-epoch receiver data in `historicalReceiverData` for in-flight messages
    * (P1: always use the epoch-matching secret, not blindly the current epoch's).
+   * Also resolves the epoch-correct ratchet tree so `decryptAuthenticated` can attribute the sender
+   * even when a message races an epoch change (e.g. a call invite sent at epoch N arrives after a
+   * commit advances the group to epoch N+1).
    */
   private async decryptInner(wire: Uint8Array): Promise<{
     plaintext: string;
     senderLeafIndex: number;
+    ratchetTree: RatchetTree;
     newState: ClientState;
     msgEpoch: bigint;
   }> {
@@ -753,6 +757,15 @@ export class Conversation {
     } else {
       senderDataSecret = this.state.keySchedule.senderDataSecret;
     }
+    // Resolve the epoch-correct ratchet tree upfront. For current-epoch messages this is
+    // newState.ratchetTree; for old-epoch messages (historical) we use historicalReceiverData
+    // which ts-mls stores with the full ratchetTree + groupContext (see epochReceiverData.ts).
+    // This lets decryptAuthenticated attribute the sender even when a message races an epoch change.
+    const epochRatchetTree =
+      msgEpoch < this.state.groupContext.epoch
+        ? // historicalReceiverData holds the full snapshot; already checked above (throws if absent)
+          this.state.historicalReceiverData.get(msgEpoch)!.ratchetTree
+        : null; // resolved after processMessage returns newState
     const [result, senderData] = await Promise.all([
       processMessage(msg, this.state, emptyPskIndex, acceptAll, this.cs),
       // SECURITY: decryptSenderData returns the leaf that ts-mls messageProtection.js:120-123
@@ -776,6 +789,7 @@ export class Conversation {
     return {
       plaintext: td.decode(result.message),
       senderLeafIndex: senderData.leafIndex,
+      ratchetTree: epochRatchetTree ?? result.newState.ratchetTree,
       newState: result.newState,
       msgEpoch,
     };
@@ -802,30 +816,25 @@ export class Conversation {
    * Fail-closed: every failure path throws — no partial results, no silent downgrades:
    *   F1 malformed wire / trailing bytes, F2 wrong wire format, F3 wrong message kind,
    *   F4 invalid MLS signature (propagated from processMessage, incl. SenderData-leaf≠signed-leaf),
-   *   F6 SenderData MAC failure, F7 sender leaf not a current group member,
-   *   F8 non-Basic credential type, F9 malformed UTF-8 in credential identity,
-   *   F10 old-epoch message (sender identity cannot be resolved without the historical ratchet tree,
-   *       which ts-mls does not retain in historicalReceiverData; rejecting is fail-closed and
-   *       appropriate for call signaling — a delayed multi-epoch signal is not actionable).
+   *   F6 SenderData MAC failure, F7 sender leaf not in the message-epoch roster,
+   *   F8 non-Basic credential type, F9 malformed UTF-8 in credential identity.
+   *
+   * Old-epoch messages (e.g. a call invite sent at epoch N arriving after a commit advances the
+   * group to epoch N+1) are handled correctly: `decryptInner` resolves the epoch-matching ratchet
+   * tree from `historicalReceiverData` (which ts-mls stores as a full snapshot — `epochReceiverData.ts`
+   * shows `ratchetTree` + `groupContext` + `senderDataSecret`), so the sender is resolved against the
+   * membership at the time the message was sent.
    */
   async decryptAuthenticated(wire: Uint8Array): Promise<AuthenticatedMessage> {
     return this.run(async () => {
-      const { plaintext, senderLeafIndex, newState, msgEpoch } = await this.decryptInner(wire);
-      // F10: ts-mls does not retain the historical ratchet tree, only historicalReceiverData
-      // (senderDataSecret only). Resolving the sender leaf against the current epoch's ratchetTree
-      // for an old-epoch message would risk mis-attribution if that leaf was removed and reused.
-      // Fail-closed: reject old-epoch messages rather than return a potentially wrong identity.
-      if (msgEpoch !== newState.groupContext.epoch) {
-        throw new Error(
-          `decryptAuthenticated: message epoch ${msgEpoch} does not match current epoch ${newState.groupContext.epoch} — cannot safely resolve sender identity without historical ratchet tree`,
-        );
-      }
-      // Resolve leafIndex → identity from newState's roster (P2: state not yet advanced, so we
-      // use newState directly; avoids F7/F8/F9 throw leaving this.state in a post-advance limbo).
+      const { plaintext, senderLeafIndex, ratchetTree, newState } = await this.decryptInner(wire);
+      // Resolve leafIndex → identity from the epoch-correct roster. For old-epoch messages
+      // `ratchetTree` is the historical snapshot; for current-epoch it is newState.ratchetTree.
+      // Either way the tree is the one ts-mls verified the signature against.
       let senderIdentity: string | undefined;
-      for (let nodeIdx = 0; nodeIdx < newState.ratchetTree.length; nodeIdx++) {
+      for (let nodeIdx = 0; nodeIdx < ratchetTree.length; nodeIdx++) {
         if (nodeIdx % 2 !== 0) continue; // parent node slot
-        const node = newState.ratchetTree[nodeIdx];
+        const node = ratchetTree[nodeIdx];
         if (!node || node.nodeType !== 'leaf') continue; // blank leaf
         if (nodeIdx / 2 !== senderLeafIndex) continue;
         const cred = node.leaf.credential;
@@ -840,9 +849,9 @@ export class Conversation {
         senderIdentity = tdStrict.decode(cred.identity);
         break;
       }
-      // F7: leaf not found in the current roster — reject; never accept an unauthenticated sender.
+      // F7: leaf not found in the message-epoch roster — reject; never accept an unauthenticated sender.
       if (senderIdentity === undefined) {
-        throw new Error(`sender leaf ${senderLeafIndex} is not a current group member`);
+        throw new Error(`sender leaf ${senderLeafIndex} is not in the message-epoch group roster`);
       }
       // P2: advance state only after all membership/credential checks pass.
       this.state = newState;
