@@ -32,13 +32,13 @@ test('mobile root uses Radarr-style natural document scrolling', async ({ page }
     return {
       bodyOverflowY: getComputedStyle(document.body).overflowY,
       rootOverflow: root ? getComputedStyle(root).overflow : null,
-      shellMinHeight: shell ? getComputedStyle(shell).minHeight : null,
+      shellHeight: shell ? getComputedStyle(shell).height : null,
     };
   });
 
   expect(metrics.bodyOverflowY).toBe('auto');
   expect(metrics.rootOverflow).toBe('visible');
-  expect(metrics.shellMinHeight).toBe('844px');
+  expect(metrics.shellHeight).toBe('844px');
 });
 
 test('mobile tab header remains in the controlled app pane', async ({ page }) => {
