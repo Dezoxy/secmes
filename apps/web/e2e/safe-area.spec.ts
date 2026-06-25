@@ -39,13 +39,15 @@ test('bottom nav clearance is measured and content clears the floating pills', a
 
 // The resume-repaint workaround must never leave the app dimmed: after a background→resume cycle
 // (visibilitychange) the transient #root opacity nudge has to settle back to fully opaque.
-test('resume repaint leaves #root fully opaque', async ({ page }) => {
+test('foreground repaint leaves #root fully opaque', async ({ page }) => {
   await page.goto('/chat');
 
-  await page.evaluate(() => {
+  const pageshowOpacity = await page.evaluate(() => {
     document.dispatchEvent(new Event('visibilitychange'));
     window.dispatchEvent(new Event('pageshow'));
+    return document.getElementById('root')?.style.opacity ?? '';
   });
+  expect(pageshowOpacity).toBe('0.9999');
   // Allow the two requestAnimationFrame ticks that restore opacity to run.
   await page.waitForTimeout(100);
 

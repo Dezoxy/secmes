@@ -341,15 +341,13 @@ body {
 }
 
 #root {
-  position: fixed;
-  inset: 0;
+  min-height: 100dvh;
+  height: 100dvh;
   /* Paint the app background so the safe-area inset strips (status bar / home indicator)
-     in an installed iOS PWA always render the app colour instead of a bare canvas. */
+     in an installed iOS PWA always render the app colour instead of a bare canvas. Keep #root as
+     the app viewport, not a second scroll container; individual screens own their scroll areas. */
   background: var(--argus-color-app-bg);
-  /* Fallback scroller: real pages fit 100dvh exactly (no scroll appears), but any
-     routed surface that still relies on document scrolling (e.g. the /v2 design
-     sketches) stays reachable here instead of being clipped. */
-  overflow: auto;
+  overflow: hidden;
   overscroll-behavior: none;
 }
 
