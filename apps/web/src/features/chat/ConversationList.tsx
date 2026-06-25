@@ -135,7 +135,7 @@ export function ConversationList({
           type="button"
           onClick={focusSearch}
           aria-label="Reveal conversation search"
-          className="flex w-full justify-center py-2 focus:outline-none"
+          className="flex w-full justify-center py-2 focus:outline-none focus-visible:rounded-lg focus-visible:ring-2 focus-visible:ring-purple-400/60"
         >
           <span className="h-1 w-8 rounded-full bg-white/15" aria-hidden="true" />
         </button>
