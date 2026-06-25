@@ -483,7 +483,6 @@ describe('RealtimeGateway', () => {
 
     const s = mkSocket();
     await authed(s, 'alice', 'T1');
-    messaging.isMember.mockResolvedValue(true);
     callsAuthz.validateAndRelay.mockReturnValue(null); // callId not in map
 
     // Use listener (not vi.spyOn) — InProcessRealtimeBus dispatches synchronously; a spy on the
@@ -498,7 +497,9 @@ describe('RealtimeGateway', () => {
     expect(lastSend(s)).toBeUndefined(); // no error frame (no oracle)
   });
 
-  it('call.signal: non-member conversation → silent drop', async () => {
+  it('call.signal: non-participant sender (validateAndRelay null) → silent drop', async () => {
+    // Membership is enforced at invite time — per-frame we only check the authz map.
+    // A socket that is not callerSub/calleeSub for the callId gets validateAndRelay=null.
     const CALL_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
     const payload = {
       conversationId: CONV,
@@ -509,7 +510,7 @@ describe('RealtimeGateway', () => {
 
     const s = mkSocket();
     await authed(s, 'alice', 'T1');
-    messaging.isMember.mockResolvedValue(false); // not a member
+    callsAuthz.validateAndRelay.mockReturnValue(null); // alice is not a participant in this call
 
     const received: unknown[] = [];
     bus.onCallSignal((e) => received.push(e));
@@ -519,7 +520,7 @@ describe('RealtimeGateway', () => {
 
     expect(received).toHaveLength(0);
     expect(lastSend(s)).toBeUndefined();
-    expect(callsAuthz.validateAndRelay).not.toHaveBeenCalled(); // gate fails before authz map lookup
+    expect(callsAuthz.validateAndRelay).toHaveBeenCalled(); // authz map IS checked (no prior gate to skip it)
   });
 
   it('call.signal: unauthenticated socket → silent drop (no close)', async () => {
@@ -564,7 +565,6 @@ describe('RealtimeGateway', () => {
 
     const s = mkSocket();
     await authed(s, 'alice', 'T1');
-    messaging.isMember.mockResolvedValue(true);
     callsAuthz.validateAndRelay.mockReturnValue(entry);
 
     const received: unknown[] = [];
@@ -607,7 +607,6 @@ describe('RealtimeGateway', () => {
 
     const s = mkSocket();
     await authed(s, 'alice', 'T1');
-    messaging.isMember.mockResolvedValue(true);
     callsAuthz.validateAndRelay.mockReturnValue(entry);
 
     const received: unknown[] = [];
@@ -666,7 +665,6 @@ describe('RealtimeGateway', () => {
 
     const s = mkSocket();
     await authed(s, 'alice', 'T1');
-    messaging.isMember.mockResolvedValue(true);
     callsAuthz.validateAndRelay.mockReturnValue(entry);
 
     const received: unknown[] = [];

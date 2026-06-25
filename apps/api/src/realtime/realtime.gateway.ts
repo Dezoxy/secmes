@@ -394,11 +394,9 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     const parsed = CallEnvelopeSchema.safeParse(data);
     if (!parsed.success) return;
     const { conversationId, callId, envelope, msgSeq } = parsed.data;
-    // Membership check — same authz as subscribe.
-    const isMember = await this.messaging.isMember(state.auth, conversationId);
-    if (this.conns.get(client) !== state) return; // disconnected during async lookup
-    if (!isMember) return; // silent drop — indistinguishable from unknown callId (no oracle)
     // callId authz — must be in the live map AND sender must be a registered participant.
+    // Membership is already established: the authz entry only exists because both participants
+    // passed the membership + direct-conversation gate at invite time. No per-frame DB lookup.
     const entry = this.callsAuthz.validateAndRelay(callId, state.auth.sub, state.auth.tenantId);
     if (!entry) return; // unknown/expired/non-participant — silent drop
     // Guard: client-supplied conversationId must match the invite-registered value. A participant
