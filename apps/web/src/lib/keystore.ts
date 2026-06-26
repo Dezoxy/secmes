@@ -1045,7 +1045,12 @@ export class DeviceKeystore {
     const groups = (await this.db.getAll(GROUP_STORE)) as StoredGroupState[];
     if (groups.some((r) => r.identity !== currentIdentity)) return true;
     const logs = (await this.db.getAll(MSGLOG_STORE)) as StoredMessageLog[];
-    return logs.some((r) => r.identity !== currentIdentity);
+    if (logs.some((r) => r.identity !== currentIdentity)) return true;
+    // Also catch the crash window where saveStagedCommit wrote PENDING_STORE but the
+    // GROUP_STORE write never happened — the orphaned-pending scan in loadConversations
+    // skips mismatched identities, so this data would be silently lost without the check.
+    const pending = (await this.db.getAll(PENDING_STORE)) as StoredPendingCommit[];
+    return pending.some((r) => r.identity !== currentIdentity);
   }
 
   private async unseal(
