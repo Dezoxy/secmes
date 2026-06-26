@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 
-import { Fingerprint, Loader2, Lock, UserCog } from 'lucide-react';
+import { Fingerprint, Loader2, Lock, ShieldAlert, UserCog } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 import { ArgusAppIcon } from '../brand/ArgusAppIcon';
@@ -25,7 +25,7 @@ const slides = [
 ];
 
 export function UnlockGate({ children }: { children: ReactNode }): ReactNode {
-  const { status, error, unlock, resetForNewAccount } = useDevice();
+  const { status, error, unlock, resetForNewAccount, confirmReset } = useDevice();
   const autoTried = useRef(false);
 
   const creating = status === 'needs-create';
@@ -49,11 +49,12 @@ export function UnlockGate({ children }: { children: ReactNode }): ReactNode {
 
   const goToSlide = useCallback((index: number) => setActiveSlide(index), []);
 
-  // Auto-unlock with no prompt ONLY when the login/registration ceremony already stashed the unlock key — a
-  // fresh assertion needs a user gesture, so on reload (no stashed key) we wait for the button click below.
+  // Auto-unlock ONLY for 'needs-unlock' (existing sealed device + stashed key from login ceremony).
+  // 'needs-create' is intentionally excluded: creating a new device is irreversible and should
+  // always require an explicit button click so the user sees the "Set up this device" label.
   useEffect(() => {
     if (autoTried.current || error) return;
-    if (status !== 'needs-unlock' && status !== 'needs-create') return;
+    if (status !== 'needs-unlock') return;
     if (!hasPendingUnlockKey()) return;
     autoTried.current = true;
     void unlock();
@@ -106,6 +107,30 @@ export function UnlockGate({ children }: { children: ReactNode }): ReactNode {
         >
           {busy && <Loader2 className="h-4 w-4 animate-spin" />}
           Set up my account here
+        </button>
+      </div>,
+    );
+  }
+
+  if (status === 'needs-confirm-reset') {
+    return cardShell(
+      <ShieldAlert className="h-6 w-6 text-amber-400" />,
+      'Conversation history may be inaccessible',
+      'Encrypted conversation data was found on this device but cannot be reached — the original device credential is missing. Starting fresh will permanently lose access to this data.',
+      <div className="space-y-3">
+        {error && <p className="text-xs text-red-400/80">{error}</p>}
+        <p className="text-xs text-white/50">
+          This typically happens when the browser cleared local storage during a PWA update. If you
+          believe your data should still be here, contact your admin before continuing.
+        </p>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void confirmReset()}
+          className={PRIMARY}
+        >
+          {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+          Start fresh (data will be lost)
         </button>
       </div>,
     );

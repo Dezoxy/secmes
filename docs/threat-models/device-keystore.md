@@ -17,6 +17,13 @@ On first use a device generates its MLS key material via `@argus/crypto` (`MlsEn
 
 1. **At-rest disclosure (Information disclosure).** IndexedDB stores **only the PRF-sealed blob** (AES-256-GCM under the per-passkey unlock key) — XSS or a local-device compromise reads ciphertext that's useless without a WebAuthn ceremony on the passkey. The exposure window is now an **unlocked session** (unsealed keys in memory), not data-at-rest; CSP/SRI (checkpoint 43) reduces the in-session XSS surface.
 2. **Eviction / data loss.** iOS Safari can evict IndexedDB. → **no recovery by design** (`prf-keystore-unlock.md`): a wiped store is a fresh start (the admin mints a new registration code), consistent with forward secrecy — there is no passphrase backup to re-derive from.
+
+   **Partial-eviction sub-case (PR #425).** A PWA update download can increase storage pressure enough for the browser to evict the keystore `STORE` entry (device row + sealed key blob) while leaving `GROUP_STORE`, `MSGLOG_STORE`, and `PENDING_STORE` intact — the encrypted history survives but its decryption key does not. The old code silently created a new device (new UUID, new signing key), making the surviving ciphertext permanently inaccessible. The fix: before calling `getOrCreateDevice` when `status === 'needs-create'`, `keystore.hasOrphanedData(identity)` scans all three stores for records whose `identity` doesn't match the identity about to be created. If any exist, the flow pauses in `'needs-confirm-reset'` and surfaces an explicit warning card ("Conversation history may be inaccessible") requiring the user to click "Start fresh (data will be lost)" before proceeding. Stores checked:
+   - `GROUP_STORE` — encrypted MLS group states
+   - `MSGLOG_STORE` — encrypted message logs
+   - `PENDING_STORE` — staged MLS commits (crash-window coverage: a `saveStagedCommit` may have written here before the matching `GROUP_STORE` write)
+
+   `POOL_STORE` (key packages) and `VERIFIED_PEERS_STORE` (cached peer verification) are intentionally excluded — both are non-history operational data that is re-derived or re-fetched without user-visible data loss.
 3. **Server exfiltration of private keys.** → structural: only the keystore (client) touches the private package; nothing serializes it toward the server (the key directory publishes the **public** package only).
 
 ## 4. Invariant check
