@@ -147,4 +147,30 @@ describe('FriendsScreen — unfriend interactive flow', () => {
     root.unmount();
     document.body.removeChild(container);
   });
+
+  it('does not show the empty friends state while the first authenticated refresh is pending', async () => {
+    vi.mocked(useChatContext).mockReturnValue(
+      makeCtx({
+        friends: [],
+        friendsLoaded: false,
+        friendsError: false,
+        manager: {} as unknown,
+      }) as unknown as ReturnType<typeof useChatContext>,
+    );
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(createElement(MemoryRouter, null, createElement(FriendsScreen)));
+    });
+
+    expect(container.textContent).toContain('Friends not loaded');
+    expect(container.textContent).not.toContain('Friends unavailable');
+    expect(container.textContent).not.toContain('No accepted friends yet');
+
+    root.unmount();
+    document.body.removeChild(container);
+  });
 });

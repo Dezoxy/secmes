@@ -161,6 +161,7 @@ export default function FriendsScreen() {
     [friends, friendQuery],
   );
   const friendsUnavailable = friendsError && !friendsLoaded && friends.length === 0;
+  const showEmptyFriends = friends.length === 0 && (friendsLoaded || !canMutate);
   const showFriendRequestAction = trimmedFriendQuery.length > 0 && filteredFriends.length === 0;
   const pendingForQuery =
     sentArgusId !== null && sentArgusId.toLowerCase() === trimmedFriendQuery.toLowerCase();
@@ -340,7 +341,7 @@ export default function FriendsScreen() {
             <EmptyState title="Friends unavailable" icon={Users} compact className="mx-2 mt-4">
               Contacts could not be loaded. Try again in a moment.
             </EmptyState>
-          ) : friends.length === 0 ? (
+          ) : showEmptyFriends ? (
             <EmptyState title="No accepted friends yet" icon={Users} compact className="mx-2 mt-4">
               Add friends by their Argus ID to keep contacts after reinstall.
             </EmptyState>
