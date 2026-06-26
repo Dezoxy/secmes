@@ -21,6 +21,10 @@ import { expect, test } from '@playwright/test';
 test('needs-confirm-reset warning card is absent during normal operation', async ({ page }) => {
   await page.goto('/chat');
 
+  // Wait for the chat to settle before checking absence — without this the assertions would
+  // pass trivially while React is still mounting (same pattern as sync-lost.spec.ts).
+  await expect(page.getByPlaceholder('Type a message...')).toBeVisible();
+
   // In demo mode DeviceContext jumps straight to 'ready' — the warning card should never render.
   await expect(
     page.getByRole('heading', { name: 'Conversation history may be inaccessible' }),
