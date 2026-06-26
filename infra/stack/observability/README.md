@@ -24,7 +24,7 @@ container stdout (json logs) ──Alloy (ro tail, no socket, scrub)──▶ lo
 | `grafana/provisioning/dashboards/` | the file-based dashboard provider |
 | `grafana/dashboards/argus-api-overview.json` | starter dashboard (request rate, 5xx ratio, latency p50/95/99, process) |
 | `loki/loki-config.yml` | Loki store (#47b) — filesystem, 7-day retention, no auth (internal) |
-| `alloy/config.alloy` | Alloy collector (#47b) — tails container json-logs (read-only, **no socket**), scrubs secret shapes, pushes to Loki |
+| `alloy/config.alloy` | Alloy collector (#47b) — tails container json-logs (read-only, **no socket**), labels streams by Compose service, scrubs secret shapes, pushes to Loki |
 
 ## Security model (see the threat model)
 

@@ -17,7 +17,7 @@ local.file_match "containers" {
 }
 
 // Give each container its OWN Loki stream by deriving a `container` label from the log path (the container id
-// directory). Without this every container collapses into one {job="docker", stream=…} stream — which both
+// directory). Without this every container collapses into one {job="docker", stream=...} stream — which both
 // makes interlaced timestamps from different files trip Loki's out-of-order rejection (worst during the
 // first-arming backfill) and leaves logs unqueryable per container. No Docker socket needed — the id is in the
 // path. Bounded cardinality: ~one stream per running container, well under max_streams_per_user.
@@ -44,12 +44,17 @@ loki.source.file "containers" {
 }
 
 loki.process "scrub" {
-  // Docker json-file line shape: {"log":"<line>\n","stream":"stdout|stderr","time":"<rfc3339nano>"}
+  // Docker json-file line shape:
+  // {"log":"<line>\n","stream":"stdout|stderr","time":"<rfc3339nano>","attrs":{"com.docker.compose.service":"api"}}
+  // `attrs` is populated by compose.prod.yaml's json-file log labels, giving Grafana readable service names
+  // without mounting the Docker socket.
   stage.json {
     expressions = {
-      log    = "log",
-      stream = "stream",
-      time   = "time",
+      log             = "log",
+      stream          = "stream",
+      time            = "time",
+      compose_project = "attrs.\"com.docker.compose.project\"",
+      service         = "attrs.\"com.docker.compose.service\"",
     }
   }
   stage.timestamp {
@@ -57,7 +62,12 @@ loki.process "scrub" {
     format = "RFC3339Nano"
   }
   stage.labels {
-    values = { stream = "stream" }
+    values = {
+      stream          = "stream",
+      service         = "service",
+      service_name    = "service",
+      compose_project = "compose_project",
+    }
   }
   stage.output {
     source = "log"
