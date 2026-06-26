@@ -33,15 +33,34 @@
         "name": "level",
         "label": "Level",
         "type": "custom",
-        "query": "error,warn,info",
+        "query": "error,warn,info,debug",
         "current": { "value": ["error", "warn", "info"], "text": ["error", "warn", "info"] },
         "options": [
           { "value": "error", "text": "error", "selected": true },
           { "value": "warn", "text": "warn", "selected": true },
-          { "value": "info", "text": "info", "selected": true }
+          { "value": "info", "text": "info", "selected": true },
+          { "value": "debug", "text": "debug", "selected": false }
         ],
         "multi": true,
         "includeAll": false,
+        "hide": 0
+      },
+      {
+        "name": "context",
+        "label": "Context",
+        "type": "query",
+        "datasource": { "type": "loki", "uid": "argus-loki" },
+        "query": {
+          "label": "context",
+          "refId": "StandardVariableQuery",
+          "stream": "{job=\"docker\", service=~\"$service\"}",
+          "type": 1
+        },
+        "refresh": 2,
+        "sort": 1,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": false,
         "hide": 0
       },
       {
@@ -73,7 +92,7 @@
         {
           "refId": "A",
           "datasource": { "type": "loki", "uid": "argus-loki" },
-          "expr": "sum by (level) (count_over_time({job=\"docker\", service=~\"$service\", level=~\"$level\"} [$__interval]))",
+          "expr": "sum by (level) (count_over_time({job=\"docker\", service=~\"$service\", level=~\"$level\", context=~\"$context\"} [$__interval]))",
           "legendFormat": "{{level}}"
         }
       ]
@@ -95,7 +114,7 @@
         {
           "refId": "A",
           "datasource": { "type": "loki", "uid": "argus-loki" },
-          "expr": "{job=\"docker\", service=~\"$service\", level=~\"$level\"} | json |~ \"$search\""
+          "expr": "{job=\"docker\", service=~\"$service\", level=~\"$level\", context=~\"$context\"} | json |~ \"$search\""
         }
       ]
     },
@@ -111,7 +130,7 @@
         {
           "refId": "A",
           "datasource": { "type": "loki", "uid": "argus-loki" },
-          "expr": "sum by (service) (count_over_time({job=\"docker\", service=~\"$service\", level=\"error\"} [$__range]))",
+          "expr": "sum by (service) (count_over_time({job=\"docker\", service=~\"$service\", level=\"error\", context=~\"$context\"} [$__range]))",
           "legendFormat": "{{service}}"
         }
       ]
@@ -128,8 +147,59 @@
         {
           "refId": "A",
           "datasource": { "type": "loki", "uid": "argus-loki" },
-          "expr": "sum by (service) (count_over_time({job=\"docker\", service=~\"$service\", level=\"warn\"} [$__range]))",
+          "expr": "sum by (service) (count_over_time({job=\"docker\", service=~\"$service\", level=\"warn\", context=~\"$context\"} [$__range]))",
           "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "bargauge",
+      "title": "User-facing API 5xx by route (range)",
+      "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } }, "overrides": [] },
+      "options": { "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"] }, "displayMode": "gradient" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "argus-prometheus" },
+          "expr": "sum by (route, status) (increase(argus_api_http_requests_total{status=~\"5..\"}[$__range]))",
+          "legendFormat": "{{status}} {{route}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "bargauge",
+      "title": "Observability errors by service (range)",
+      "datasource": { "type": "loki", "uid": "argus-loki" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } }, "overrides": [] },
+      "options": { "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"] }, "displayMode": "gradient" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "argus-loki" },
+          "expr": "sum by (service) (count_over_time({job=\"docker\", service=~\"prometheus|grafana|alertmanager|loki|alloy|tempo|pyroscope|postgres-exporter|redis-exporter\"} |~ \"(?i)(\\\\berror\\\\b|\\\\bfatal\\\\b|\\\\bpanic\\\\b|level=error|level=fatal)\" [$__range]))",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "bargauge",
+      "title": "Error/warn count by context (range)",
+      "datasource": { "type": "loki", "uid": "argus-loki" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 36 },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 5 }] } }, "overrides": [] },
+      "options": { "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"] }, "displayMode": "gradient" },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "argus-loki" },
+          "expr": "sum by (context) (count_over_time({job=\"docker\", service=~\"$service\", level=~\"error|warn\", context=~\"$context\"} [$__range]))",
+          "legendFormat": "{{context}}"
         }
       ]
     }
