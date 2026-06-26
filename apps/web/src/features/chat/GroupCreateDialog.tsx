@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Search, UserPlus, Users, X } from 'lucide-react';
+import { Check, Search, UserPlus, Users, X } from 'lucide-react';
 import type { Conversation as MlsGroup } from '@argus/crypto';
-import { lookupUserByArgusId, type UserLookupResult } from '../../lib/api';
+import { lookupUserByArgusId, type Friend, type UserLookupResult } from '../../lib/api';
 import {
   GroupConversationManager,
   type GroupConversationSession,
@@ -49,6 +49,8 @@ interface GroupCreateDialogProps {
   existingConversation?: MlsGroup;
   existingMemberIds?: Set<string>;
   existingGroupName?: string;
+  /** Pre-populated friends list for quick-add suggestions. */
+  friends?: Friend[];
   // Callbacks.
   onCreated?: (session: GroupConversationSession) => void;
   onAdded?: (addedUsers: UserLookupResult[]) => void;
@@ -64,6 +66,7 @@ export function GroupCreateDialog({
   existingConversation,
   existingMemberIds,
   existingGroupName,
+  friends,
   onCreated,
   onAdded,
   onClose,
@@ -76,6 +79,7 @@ export function GroupCreateDialog({
   const [phase, setPhase] = useState<Phase>({ tag: 'picking' });
   const [actionError, setActionError] = useState<SafeUiError | null>(null);
   const [closing, setClosing] = useState(false);
+  const [confirmingFriendId, setConfirmingFriendId] = useState<string | null>(null);
 
   const handleClose = () => {
     if (closing) return;
@@ -86,6 +90,29 @@ export function GroupCreateDialog({
   const excluded = new Set<string>(
     [selfUserId, ...(existingMemberIds ?? [])].filter((id): id is string => id != null),
   );
+
+  const suggestedFriends = (friends ?? []).filter(
+    (f) => !excluded.has(f.userId) && !selected.some((s) => s.userId === f.userId),
+  );
+
+  const handleAddFriend = (friend: Friend): void => {
+    if (selected.length >= MAX_GROUP_MEMBERS) {
+      setLookupError(`Maximum ${MAX_GROUP_MEMBERS} members reached.`);
+      setConfirmingFriendId(null);
+      return;
+    }
+    setSelected((prev) => [
+      ...prev,
+      {
+        userId: friend.userId,
+        argusId: friend.argusId,
+        displayName: friend.displayName,
+        avatarSeed: friend.avatarSeed,
+      },
+    ]);
+    setConfirmingFriendId(null);
+    setLookupError(null);
+  };
 
   const handleLookup = (): void => {
     const id = argusId.trim();
@@ -306,6 +333,70 @@ export function GroupCreateDialog({
       </div>
 
       {lookupError && <p className="mb-2 text-xs text-red-400">{lookupError}</p>}
+
+      {suggestedFriends.length > 0 && (
+        <div className="mb-3">
+          <p className="mb-1.5 text-xs font-medium text-white/40 uppercase tracking-wide">
+            Your friends
+          </p>
+          <div className="max-h-40 space-y-1 overflow-y-auto">
+            {suggestedFriends.map((friend) => {
+              const label = friend.displayName ?? friend.argusId;
+              const isConfirming = confirmingFriendId === friend.userId;
+              return (
+                <div
+                  key={friend.userId}
+                  className="flex items-center gap-3 rounded-xl border border-white/5 bg-[#1a1a26] p-2.5"
+                >
+                  <Avatar
+                    src={dicebearAvatar(friend.userId)}
+                    name={label}
+                    size="sm"
+                    shape="circle"
+                    className="shrink-0"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm text-white/80">{label}</p>
+                  </div>
+                  {isConfirming ? (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-xs text-white/50">Add?</span>
+                      <button
+                        type="button"
+                        onClick={() => handleAddFriend(friend)}
+                        disabled={busy}
+                        aria-label={`Confirm add ${label}`}
+                        className="flex items-center gap-1 rounded-lg bg-purple-600/80 px-2.5 py-1 text-xs font-medium text-white hover:bg-purple-600 disabled:opacity-50"
+                      >
+                        <Check className="h-3 w-3" />
+                        Yes
+                      </button>
+                      <IconButton
+                        onClick={() => setConfirmingFriendId(null)}
+                        size="sm"
+                        aria-label="Cancel"
+                        disabled={busy}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </IconButton>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingFriendId(friend.userId)}
+                      disabled={busy}
+                      aria-label={`Add ${label}`}
+                      className="shrink-0 rounded-lg border border-white/10 px-3 py-1 text-xs text-white/60 transition-colors hover:border-purple-500/40 hover:text-white/90 disabled:opacity-50"
+                    >
+                      Add
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {busy && (
         <LoadingState
