@@ -45,6 +45,7 @@ export default function GroupsScreen() {
     numbersByConv,
     verifiedByConv,
     persistGroupCreated,
+    friends,
   } = useChatContext();
 
   const groupConversations = conversations.filter((c) => c.type === 'group');
@@ -53,6 +54,7 @@ export default function GroupsScreen() {
   useEffect(() => {
     tabSelectedId.set('/groups', selectedId);
   }, [selectedId]);
+  const [scrollTrigger, setScrollTrigger] = useState(0);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showSidebar, setShowSidebar] = useState(true);
   const [mobileThreadClosing, setMobileThreadClosing] = useState(false);
@@ -129,6 +131,7 @@ export default function GroupsScreen() {
     setMobileThreadClosing(false);
     setMobileSidebarReturning(false);
     setSelectedId(id);
+    setScrollTrigger((n) => n + 1);
     if (window.innerWidth < 1024) setShowSidebar(false);
   };
 
@@ -413,6 +416,7 @@ export default function GroupsScreen() {
                 onImageClick={setPreviewImage}
                 bottomNavClearance={false}
                 floatingBars
+                scrollTrigger={scrollTrigger}
               />
               {effectiveSelectedIsLive && !selectedIsSyncLost && <ChatInput onSend={handleSend} />}
             </div>
@@ -443,6 +447,7 @@ export default function GroupsScreen() {
           manager={groupManager}
           deps={messagingDeps}
           selfUserId={profile?.userId}
+          friends={friends}
           onCreated={(session) => {
             persistGroupCreated(session);
             setSelectedId(session.conversationId);
@@ -462,6 +467,7 @@ export default function GroupsScreen() {
           existingConversation={liveGroups.current.get(selectedId)}
           existingMemberIds={new Set(selectedConversation?.participants.map((p) => p.id) ?? [])}
           existingGroupName={selectedConversation?.name}
+          friends={friends}
           onAdded={(addedUsers) => {
             setAddMemberOpen(false);
             if (addedUsers.length > 0 && selectedId) {
