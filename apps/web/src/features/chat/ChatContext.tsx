@@ -176,7 +176,6 @@ export function ChatProvider({ children }: ChatProviderProps) {
   const [outgoingRequests, setOutgoingRequests] = useState<FriendRequest[]>([]);
   const [friendsError, setFriendsError] = useState(false);
   const refreshFriendsInFlight = useRef<Promise<void> | null>(null);
-  const refreshFriendsQueued = useRef(false);
   const inFlightRequestIds = useRef(new Set<string>());
   const [peerToConvId, setPeerToConvId] = useState<Map<string, string>>(new Map());
   const [convToPeerId, setConvToPeerId] = useState<Map<string, string>>(new Map());
@@ -244,75 +243,71 @@ export function ChatProvider({ children }: ChatProviderProps) {
 
   const refreshFriends = useCallback(() => {
     if (refreshFriendsInFlight.current) {
-      refreshFriendsQueued.current = true;
       return refreshFriendsInFlight.current;
     }
 
     const refresh = (async () => {
-      do {
-        refreshFriendsQueued.current = false;
-        let failed = false;
-        let pendingTargets: Array<'friends' | 'incoming' | 'outgoing'> = [
-          'friends',
-          'incoming',
-          'outgoing',
-        ];
+      let failed = false;
+      let pendingTargets: Array<'friends' | 'incoming' | 'outgoing'> = [
+        'friends',
+        'incoming',
+        'outgoing',
+      ];
 
-        for (let attempt = 0; attempt <= FRIENDS_REFRESH_RETRY_DELAYS_MS.length; attempt += 1) {
-          const retryDelayMs = FRIENDS_REFRESH_RETRY_DELAYS_MS[attempt];
-          const results = await Promise.all(
-            pendingTargets.map(async (target) => {
-              try {
-                if (target === 'friends') {
-                  return { target, ok: true as const, value: await listFriends() };
-                }
-                return {
-                  target,
-                  ok: true as const,
-                  value: await listFriendRequests(target),
-                };
-              } catch (reason) {
-                return { target, ok: false as const, reason };
+      for (let attempt = 0; attempt <= FRIENDS_REFRESH_RETRY_DELAYS_MS.length; attempt += 1) {
+        const retryDelayMs = FRIENDS_REFRESH_RETRY_DELAYS_MS[attempt];
+        const results = await Promise.all(
+          pendingTargets.map(async (target) => {
+            try {
+              if (target === 'friends') {
+                return { target, ok: true as const, value: await listFriends() };
               }
-            }),
-          );
-          const nextPendingTargets: typeof pendingTargets = [];
-
-          for (const result of results) {
-            if (result.ok) {
-              if (result.target === 'friends') {
-                setFriends(result.value);
-                setFriendsLoaded(true);
-              } else if (result.target === 'incoming') {
-                setIncomingRequests(result.value);
-              } else {
-                setOutgoingRequests(result.value);
-              }
-              continue;
+              return {
+                target,
+                ok: true as const,
+                value: await listFriendRequests(target),
+              };
+            } catch (reason) {
+              return { target, ok: false as const, reason };
             }
+          }),
+        );
+        const nextPendingTargets: typeof pendingTargets = [];
 
-            if (retryDelayMs !== undefined && isRetryableFriendRefreshReason(result.reason)) {
-              nextPendingTargets.push(result.target);
+        for (const result of results) {
+          if (result.ok) {
+            if (result.target === 'friends') {
+              setFriends(result.value);
+              setFriendsLoaded(true);
+            } else if (result.target === 'incoming') {
+              setIncomingRequests(result.value);
             } else {
-              failed = true;
+              setOutgoingRequests(result.value);
             }
-          }
-
-          if (nextPendingTargets.length === 0) {
-            setFriendsError(failed && manager !== null);
-            break;
-          }
-
-          if (retryDelayMs !== undefined) {
-            pendingTargets = nextPendingTargets;
-            await wait(retryDelayMs);
             continue;
           }
 
-          setFriendsError(manager !== null);
+          if (retryDelayMs !== undefined && isRetryableFriendRefreshReason(result.reason)) {
+            nextPendingTargets.push(result.target);
+          } else {
+            failed = true;
+          }
+        }
+
+        if (nextPendingTargets.length === 0) {
+          setFriendsError(failed && manager !== null);
           break;
         }
-      } while (refreshFriendsQueued.current);
+
+        if (retryDelayMs !== undefined) {
+          pendingTargets = nextPendingTargets;
+          await wait(retryDelayMs);
+          continue;
+        }
+
+        setFriendsError(manager !== null);
+        break;
+      }
     })().finally(() => {
       refreshFriendsInFlight.current = null;
     });
@@ -321,7 +316,7 @@ export function ChatProvider({ children }: ChatProviderProps) {
     return refresh;
   }, [manager]);
 
-  const refreshFriendsAfterMutation = useCallback(async () => {
+  const refreshFriendsAfterChange = useCallback(async () => {
     const currentRefresh = refreshFriendsInFlight.current;
     if (currentRefresh) await currentRefresh;
     await refreshFriends();
@@ -363,8 +358,8 @@ export function ChatProvider({ children }: ChatProviderProps) {
         );
       }, []),
       onFriendRequest: useCallback(() => {
-        void refreshFriends();
-      }, [refreshFriends]),
+        void refreshFriendsAfterChange();
+      }, [refreshFriendsAfterChange]),
     });
 
   useConversationHistoryRehydration({
@@ -504,9 +499,9 @@ export function ChatProvider({ children }: ChatProviderProps) {
   const handleSendFriendRequest = useCallback(
     async (argusId: string) => {
       await sendFriendRequest(argusId);
-      await refreshFriendsAfterMutation();
+      await refreshFriendsAfterChange();
     },
-    [refreshFriendsAfterMutation],
+    [refreshFriendsAfterChange],
   );
 
   const handleAcceptRequest = useCallback(
@@ -515,12 +510,12 @@ export function ChatProvider({ children }: ChatProviderProps) {
       inFlightRequestIds.current.add(requestId);
       try {
         await acceptFriendRequest(requestId);
-        await refreshFriendsAfterMutation();
+        await refreshFriendsAfterChange();
       } finally {
         inFlightRequestIds.current.delete(requestId);
       }
     },
-    [refreshFriendsAfterMutation],
+    [refreshFriendsAfterChange],
   );
 
   const handleDeclineRequest = useCallback(
@@ -529,12 +524,12 @@ export function ChatProvider({ children }: ChatProviderProps) {
       inFlightRequestIds.current.add(requestId);
       try {
         await declineFriendRequest(requestId);
-        await refreshFriendsAfterMutation();
+        await refreshFriendsAfterChange();
       } finally {
         inFlightRequestIds.current.delete(requestId);
       }
     },
-    [refreshFriendsAfterMutation],
+    [refreshFriendsAfterChange],
   );
 
   const handleCancelRequest = useCallback(
@@ -543,12 +538,12 @@ export function ChatProvider({ children }: ChatProviderProps) {
       inFlightRequestIds.current.add(requestId);
       try {
         await cancelFriendRequest(requestId);
-        await refreshFriendsAfterMutation();
+        await refreshFriendsAfterChange();
       } finally {
         inFlightRequestIds.current.delete(requestId);
       }
     },
-    [refreshFriendsAfterMutation],
+    [refreshFriendsAfterChange],
   );
 
   const handleUnfriend = useCallback(
@@ -557,12 +552,12 @@ export function ChatProvider({ children }: ChatProviderProps) {
       inFlightRequestIds.current.add(userId);
       try {
         await unfriend(userId);
-        await refreshFriendsAfterMutation();
+        await refreshFriendsAfterChange();
       } finally {
         inFlightRequestIds.current.delete(userId);
       }
     },
-    [refreshFriendsAfterMutation],
+    [refreshFriendsAfterChange],
   );
 
   const persistStartedConversation = useCallback(

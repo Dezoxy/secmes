@@ -180,7 +180,7 @@ test('friends panel retries transient friends reads without retrying throttled r
   await expect(page.getByRole('button', { name: /Open conversation with Alice/ })).toBeVisible();
   await page.waitForTimeout(1300);
   expect(friendsCalls).toBeGreaterThanOrEqual(2);
-  expect(incomingCalls).toBeLessThanOrEqual(2);
+  expect(incomingCalls).toBe(1);
 });
 
 test('friends panel shows incoming requests with Accept and Decline buttons', async ({ page }) => {
