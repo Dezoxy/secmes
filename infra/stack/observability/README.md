@@ -40,6 +40,23 @@ container stdout (json logs) ──Alloy (ro tail, no socket, scrub)──▶ lo
   root-owned logs, bounded by `cap_drop:[ALL]` + read-only rootfs. A scrub stage masks any
   bearer/JWT/presigned-URL value as defense-in-depth on top of the app's IDs-only logging discipline.
 
+## Log labels
+
+Grafana incident dashboards use Loki's `service` label as the primary service dimension. Compose writes
+`com.docker.compose.service` into Docker json-file attrs, and Alloy promotes that attr to both `service` and
+`service_name` without mounting the Docker socket. The `container` label still exists only to keep each Docker
+log file in a separate Loki stream; dashboards must not expose container IDs as the main service filter.
+
+Structured app logs may also carry low-cardinality `level` and `context` labels. Non-Pino services such as
+Prometheus, Grafana, Loki, and Alloy do not reliably emit those labels, so their dashboard panels must query by
+`service` and parse/filter the log line instead of requiring Pino-only labels.
+
+`coturn` is the intentional exception: it uses Docker's `local` logging driver with short retention so relay
+metadata stays off long-term Loki storage. Debug coturn from local rotated container logs and Prometheus health
+signals, not the centralized logs dashboard.
+
+CI enforces this with `scripts/check-observability-log-labels.sh` in the `compose-guard` job.
+
 ## Validate locally
 
 ```bash
