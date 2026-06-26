@@ -63,7 +63,7 @@ The move that makes web + native genuinely share logic:
 
 **Keep the PWA as a thin web client over the same shared core.** Rationale:
 - The whole reuse argument *depends* on web + native sharing `@argus/contracts`, `@argus/crypto`, and `packages/client-core`. Freezing the PWA would fork the shared logic; deleting it loses the no-install client and the validation harness.
-- The Phase-0 `@noble` crypto reroute makes `@argus/crypto` platform-pure — which **benefits the PWA too** (drops its `crypto.subtle` dependency).
+- The Phase-0 crypto provider is **capability-detected**: the PWA keeps WebCrypto `crypto.subtle` sealing (no regression — it retains its non-extractable unlock key), while Hermes uses the `@noble` fallback. The shared `@argus/crypto` runs on both *without* downgrading the web keystore.
 - Feature development now **leads on native**; the PWA tracks via the shared core. Only the PWA's platform shim (service worker, Web Push, install, safe-area hacks) is replaced by native — the rest is shared.
 
 ## 7. Monorepo & build wiring

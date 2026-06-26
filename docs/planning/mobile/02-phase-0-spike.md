@@ -23,7 +23,7 @@ Everything else (UI, navigation, push plumbing) is ordinary work that *will* suc
 **Tasks**
 - Author a custom `ts-mls` `CryptoProvider` whose `makeHpke` supplies a **non-`@hpke/core`** KEM backed by `@noble/curves` x25519, satisfying `ts-mls`' HPKE seal/open contract. Injection point: `ts-mls .../crypto/getCiphersuiteImpl.js` `provider`.
 - **Introduce the `GroupCryptoEngine` adapter from day one** (see [01](./01-code-reuse-and-monorepo.md) §9): wrap `ts-mls` behind the Argus-owned interface so the spike *also* validates the boundary that later lets the engine be swapped for a native/Rust core without touching UI. The provider (below `ts-mls`) and the engine interface (above it) land together.
-- Reroute the four `crypto.subtle` sites in `packages/crypto` to `@noble`: `index.ts:148` (SHA-256), `seal.ts` (AES-GCM import/encrypt/decrypt, AAD-bound), `turn-credential.ts` (HMAC-SHA1 — or drop it from the client entirely; creds come from `POST /calls/turn-credentials`).
+- Make the four `crypto.subtle` sites in `packages/crypto` **capability-detected** (WebCrypto where present, `@noble` fallback on Hermes) — **not** a blanket swap: `index.ts:148` (SHA-256), `seal.ts` (AES-GCM import/encrypt/decrypt, AAD-bound), `turn-credential.ts` (HMAC-SHA1 — or drop it from the client entirely; creds come from `POST /calls/turn-credentials`). The **PWA must keep WebCrypto sealing** (non-extractable `importUnlockKey`); only Hermes takes the `@noble` path.
 - Install `react-native-get-random-values` (imported **first** at app entry) and confirm it bridges the OS CSPRNG (`SecRandomCopyBytes` / `SecureRandom`). All MLS key material, attachment keys, and IVs depend on it.
 - Verify `TextEncoder`/`TextDecoder` — including the strict `new TextDecoder('utf-8', { fatal: true })` in `index.ts` (a security control against lossy-UTF-8 identity collisions). Polyfill (`text-encoding`/`fast-text-encoding`) if `fatal` mode isn't honored.
 - Verify `atob`/`btoa` (or replace `fromB64`/`toB64` with a Uint8Array base64 lib).
@@ -79,7 +79,7 @@ Two independent sub-checks, both on real hardware.
 
 **Tasks**
 - `react-native-keychain`: generate a **non-exportable** enclave (iOS) / StrongBox-or-TEE (Android) key; wrap/unwrap a random 32-byte DB key; assert `accessControl` (biometric) + `accessible = WhenUnlockedThisDeviceOnly`.
-- **Probe StrongBox availability** on a real mid-range Android (device-dependent; TEE-backed Keystore is the floor).
+- **Probe hardware-backing** on a real mid-range Android via `securityLevel: SECURE_HARDWARE` + `getSecurityLevel()` (TEE floor; StrongBox is a best-effort upgrade requiring a native module, not a `react-native-keychain` flag).
 - Confirm the random DB key comes from the OS CSPRNG (`react-native-get-random-values`); confirm wipe-on-fresh-install behaviour on iOS (Keychain survives uninstall).
 
 **Exit criteria**
