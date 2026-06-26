@@ -1,14 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { HardDrive } from 'lucide-react';
-import type { Conversation as MlsGroup } from '@argus/crypto';
 import { listEnrollments } from '../lib/api';
-import type { MessagingDeps } from '../lib/messaging';
 import { useAuth } from '../features/auth/AuthContext';
+import { useChatContext } from '../features/chat/ChatContext';
 import { ApproveDevicePanel } from '../features/device/ApproveDevicePanel';
 import { EmptyState } from '../features/ui';
-import { DeviceProvider, useDevice } from '../features/device/DeviceContext';
-import { UnlockGate } from '../features/device/UnlockGate';
+import { useDevice } from '../features/device/DeviceContext';
 import { DeviceSettings } from '../features/settings/DeviceSettings';
+import { useSetNavVisible } from './NavVisibilityContext';
 import { RoutePageShell } from './RoutePageShell';
 
 function CurrentDeviceSettings() {
@@ -24,14 +23,9 @@ function CurrentDeviceSettings() {
 
 function DeviceApprovalPrompt() {
   const { profile } = useAuth();
-  const { device, deviceId, deviceIsProvisional, keystore, sessionKey } = useDevice();
+  const { deviceId, deviceIsProvisional } = useDevice();
+  const { liveGroups, messagingDeps } = useChatContext();
   const [pendingEnrollmentId, setPendingEnrollmentId] = useState<string | null>(null);
-  const liveGroupsRef = useRef(new Map<string, MlsGroup>());
-
-  const messagingDeps = useMemo<MessagingDeps | null>(
-    () => (device && keystore && sessionKey ? { device, keystore, sessionKey } : null),
-    [device, keystore, sessionKey],
-  );
 
   useEffect(() => {
     if (!deviceId || deviceIsProvisional !== false) {
@@ -66,13 +60,20 @@ function DeviceApprovalPrompt() {
       enrollmentId={pendingEnrollmentId}
       selfUserId={profile.userId}
       messagingDeps={messagingDeps}
-      liveGroupsRef={liveGroupsRef}
+      liveGroupsRef={liveGroups}
       onClose={() => setPendingEnrollmentId(null)}
     />
   );
 }
 
 export default function DevicesRoute() {
+  const setNavVisible = useSetNavVisible();
+
+  useEffect(() => {
+    setNavVisible(false);
+    return () => setNavVisible(true);
+  }, [setNavVisible]);
+
   return (
     <RoutePageShell
       eyebrow="Devices"
@@ -81,12 +82,8 @@ export default function DevicesRoute() {
       icon={HardDrive}
     >
       <div className="space-y-4">
-        <DeviceProvider>
-          <UnlockGate>
-            <CurrentDeviceSettings />
-            <DeviceApprovalPrompt />
-          </UnlockGate>
-        </DeviceProvider>
+        <CurrentDeviceSettings />
+        <DeviceApprovalPrompt />
         <EmptyState icon={HardDrive} title="Trusted-device list coming next">
           Listing and revoke controls stay placeholder-only until the backend contract is ready.
         </EmptyState>
