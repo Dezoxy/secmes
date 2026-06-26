@@ -249,12 +249,13 @@ export ARGUS_INGRESS_IMAGE="$ingress_digest"
 export ARGUS_SECRETS_DIR="$SECRETS_DIR"
 
 # --- 3b. Redis AUTH prep — MUST run before step 4 starts redis. From the Key Vault redis_password, generate
-#        two credential FILES (never env — invariant #5: a password in container env surfaces via `docker
+#        three credential FILES (never env — invariant #5: a password in container env surfaces via `docker
 #        inspect` / the daemon's at-rest config):
 #          • redis.conf  → redis-server `requirepass` (config-file AUTH, never a `--requirepass` argv leak)
 #          • redis_url   → the api's REDIS_URL_FILE (ioredis parses `redis://:<pw>@redis:6379`)
-#        Both are 0444 tmpfs Docker-secret files (0444 not 0400 — file-secrets are bind-mounted root-owned and
-#        must be readable by the non-root container users; see the chmod note below). The raw redis_password
+#          • redis_exporter_passwords.json → redis_exporter's REDIS_PASSWORD_FILE JSON map
+#        All three are 0444 tmpfs Docker-secret files (0444 not 0400 — file-secrets are bind-mounted root-owned
+#        and must be readable by the non-root container users; see the chmod note below). The raw redis_password
 #        file (already fetched) is mounted into redis so its healthcheck reads REDISCLI_AUTH from a file too.
 #        So NO Redis credential ever lands in env.
 #        These must exist before the first `up -d ... redis` — generating them in step 6 (after redis already
@@ -275,6 +276,7 @@ case "$_redispw" in
   ;;
 esac
 _redis_conf="$(printf 'save ""\nappendonly no\nrequirepass %s' "$_redispw")"
+_redis_exporter_passwords="$(printf '{"redis://redis:6379":"%s"}' "$_redispw")"
 # Detect whether the redis password/conf CHANGED since the last deploy so step 4 can force-recreate redis only
 # when it must (see there). `up -d` recreates a container on a config/image change but NOT when a mounted
 # secret FILE's *content* changes — so a rotated redis password wouldn't reach the running redis without this.
@@ -284,14 +286,16 @@ if [ -f "$SECRETS_DIR/redis.conf" ] && [ "$_redis_conf" = "$(cat "$SECRETS_DIR/r
 fi
 printf '%s\n' "$_redis_conf" >"$SECRETS_DIR/redis.conf"
 printf 'redis://:%s@redis:6379' "$_redispw" >"$SECRETS_DIR/redis_url"
+printf '%s\n' "$_redis_exporter_passwords" >"$SECRETS_DIR/redis_exporter_passwords.json"
 # Mode 0444, NOT 0400: file-based Compose secrets are bind-mounted, and the host file's owner/mode carry
 # through to the container UNCHANGED on Linux (no uid/gid remapping — that only happens on macOS Docker
 # Desktop's file-sharing layer, which is why a Mac test misleadingly "passes"). These files are root-owned,
 # so a 0400 file is unreadable by the non-root consumers (redis uid 999, api/node uid 1000) and the rollout
 # fails. 0444 lets the container user read them; confinement is the 0700 root tmpfs SECRETS_DIR, not the mode.
-chmod 0444 "$SECRETS_DIR/redis.conf" "$SECRETS_DIR/redis_url"
+chmod 0444 "$SECRETS_DIR/redis.conf" "$SECRETS_DIR/redis_url" "$SECRETS_DIR/redis_exporter_passwords.json"
 _redispw=""
 _redis_conf=""
+_redis_exporter_passwords=""
 
 # --- 3c. GlitchTip DATABASE_URL — derived from glitchtip_db_password (same pattern as redis_url above).
 #         The URL is NEVER stored in Key Vault directly; only the password is. This keeps the single source
@@ -337,6 +341,11 @@ docker compose -f "$COMPOSE" up -d postgres
 if [ "${REDIS_CONF_CHANGED:-1}" = 1 ]; then
   log "redis conf is new/changed — (re)creating redis to load the current password"
   docker compose -f "$COMPOSE" up -d --force-recreate --no-deps redis
+  # redis-exporter reads the generated REDIS_PASSWORD_FILE. Recreate it immediately after redis has the new
+  # password so Prometheus does not scrape an exporter still using the old startup-loaded password map during
+  # the longer migration/probe section below.
+  log "redis conf is new/changed — force-recreating redis-exporter to load the current password file"
+  docker compose -f "$COMPOSE" up -d --force-recreate redis-exporter
 else
   docker compose -f "$COMPOSE" up -d --no-deps redis
 fi
