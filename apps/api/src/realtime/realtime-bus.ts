@@ -173,6 +173,107 @@ export const FriendRequestCreatedEventSchema = z.object({
 });
 
 /**
+ * The callee's device receives a ring frame when a gate-passing invite is processed. METADATA ONLY:
+ * the caller's DB id + the shared conversation id — never SDP, keys, or content (invariant #2).
+ * Routes by identity (tenantId, calleeSub) → callee's connected socket(s).
+ */
+export interface CallRingEvent {
+  tenantId: string;
+  callId: string;
+  conversationId: string;
+  /** Caller's internal user UUID — callee uses this to resolve the caller's display name. */
+  callerUserId: string;
+  /** Callee's external identity subject (`users.external_identity_id`) for socket routing. */
+  calleeSub: string;
+  media: 'audio';
+}
+
+export const CallRingEventSchema = z
+  .object({
+    tenantId: z.string().min(1),
+    callId: z.string().uuid(),
+    conversationId: z.string().uuid(),
+    callerUserId: z.string().uuid(),
+    calleeSub: z.string().min(1),
+    media: z.literal('audio'),
+  })
+  .strict();
+
+/**
+ * A peer-to-peer signaling frame relayed through the gateway. The `envelope.ciphertext` is an
+ * opaque MLS blob — the server forwards it verbatim and never parses it (invariant #1). `alg` and
+ * `epoch` are wire-protocol metadata the receiver needs to select the right group key; the server
+ * does not interpret them. Routed by (tenantId, peerSub) identity — delivered only to the
+ * registered peer's sockets, not to the conversation room.
+ */
+export interface CallSignalEvent {
+  tenantId: string;
+  callId: string;
+  conversationId: string;
+  /** Sender's client-scoped sequence number — passed through verbatim for the receiver's ordering. */
+  msgSeq: number;
+  /** Sender's external identity subject. */
+  senderSub: string;
+  /** Sender's verified DB UUID — used to attribute the frame per CallSignalFrameSchema. */
+  senderUserId: string;
+  /** Peer's external identity subject — the delivery target (routing is by identity, not room). */
+  peerSub: string;
+  /** Gateway-minted monotonic counter — lets the receiver detect out-of-order delivery. */
+  deliverySeq: number;
+  /** MLS envelope forwarded verbatim — ciphertext is opaque; alg/epoch are wire metadata only. */
+  envelope: { ciphertext: string; alg: string; epoch: number };
+}
+
+export const CallSignalEventSchema = z
+  .object({
+    tenantId: z.string().min(1),
+    callId: z.string().uuid(),
+    conversationId: z.string().uuid(),
+    msgSeq: z.number().int().nonnegative(),
+    senderSub: z.string().min(1),
+    senderUserId: z.string(),
+    peerSub: z.string().min(1),
+    deliverySeq: z.number().int(),
+    envelope: z
+      .object({
+        ciphertext: z.string().min(1),
+        alg: z.string().min(1),
+        epoch: z.number().int().nonnegative(),
+      })
+      .strict(),
+  })
+  .strict();
+
+/**
+ * A server-issued end-of-call notification for server-known lifecycle events only (ring timeout,
+ * abrupt peer disconnect). Client-initiated decline/busy/cancel/hangup travel inside the encrypted
+ * `call.signal` — the server never learns the call phase from those. Delivered by identity
+ * (callerSub + calleeSub) rather than room fan-out, so participants who are online but not
+ * subscribed to the conversation room (the common state during ringing) still receive the event.
+ */
+export interface CallEndEvent {
+  tenantId: string;
+  callId: string;
+  conversationId: string;
+  reason: 'timeout' | 'peer-gone';
+  /** Caller's socket-auth subject — used for identity-routed delivery. */
+  callerSub: string;
+  /** Callee's canonical socket-auth subject — used for identity-routed delivery. */
+  calleeSub: string;
+}
+
+export const CallEndEventSchema = z
+  .object({
+    tenantId: z.string().min(1),
+    callId: z.string().uuid(),
+    conversationId: z.string().uuid(),
+    reason: z.enum(['timeout', 'peer-gone']),
+    callerSub: z.string().min(1),
+    calleeSub: z.string().min(1),
+  })
+  .strict();
+
+/**
  * Realtime fan-out bus — decouples the HTTP send path (publisher) from the WebSocket gateway
  * (subscriber). Abstract so it can be in-process (single-pod / dev / tests) or Redis-backed for
  * cross-pod delivery (checkpoint 29). Only the opaque ciphertext envelope ever crosses it.
@@ -196,4 +297,11 @@ export abstract class RealtimeBus {
   ): void;
   abstract emitFriendRequestCreated(event: FriendRequestCreatedEvent): void;
   abstract onFriendRequestCreated(listener: (event: FriendRequestCreatedEvent) => void): void;
+  // ── VoIP signaling ──
+  abstract emitCallRing(event: CallRingEvent): void;
+  abstract onCallRing(listener: (event: CallRingEvent) => void): void;
+  abstract emitCallSignal(event: CallSignalEvent): void;
+  abstract onCallSignal(listener: (event: CallSignalEvent) => void): void;
+  abstract emitCallEnd(event: CallEndEvent): void;
+  abstract onCallEnd(listener: (event: CallEndEvent) => void): void;
 }
