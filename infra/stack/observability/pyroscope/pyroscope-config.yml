@@ -8,7 +8,7 @@ server:
 storage:
   backend: filesystem
   filesystem:
-    dir: /data/blocks
+    dir: /data
 
 pyroscopedb:
   data_path: /data/pyroscopedb
