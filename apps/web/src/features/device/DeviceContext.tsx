@@ -113,6 +113,11 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
     identity: string;
     uuid: string;
   } | null>(null);
+  // After clearDevice()+getOrCreateDevice() succeeds but provisionDevice() fails, store the created
+  // device here so a retry can skip the destructive clear phase and only retry provisioning.
+  // Without this, a retry after a partial provisioning failure would wipe the newly-created device's
+  // private keys even if the key packages were already published to the server.
+  const pendingResetDevice = useRef<DeviceKeys | null>(null);
 
   // The breakglass/metadata-only admin has no MLS device and no keystore — it never touches message content,
   // so it skips the gate entirely (ChatScreen is null-device-tolerant; new conversations are hidden).
@@ -265,6 +270,11 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
   // Called when the user explicitly confirms a fresh start after seeing the 'needs-confirm-reset'
   // warning. Wipes orphaned data, then proceeds to create the new device using the unlock key that
   // was already derived during the interrupted unlock() call — no second passkey tap required.
+  //
+  // Retry-safe: clearDevice()+getOrCreateDevice() only run on the first attempt. If provisionDevice()
+  // fails (e.g. network error after key packages are published), the created device is stashed in
+  // pendingResetDevice so retries skip the destructive clear and only retry provisioning. Without this,
+  // a retry would wipe the private keys for already-published key packages, making them unresolvable.
   const confirmReset = useCallback(async (): Promise<void> => {
     if (!keystore || status !== 'needs-confirm-reset') return;
     const pending = pendingUnlockKeyForReset.current;
@@ -272,11 +282,19 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
     setStatus('unlocking');
     setError(null);
     try {
-      await keystore.clearDevice(); // wipe all stores including the orphaned data
-      const dev = await keystore.getOrCreateDevice(pending.identity, pending.key);
-      if (!dev) throw new Error('no device found after reset');
+      let dev = pendingResetDevice.current;
+      if (!dev) {
+        // First attempt: wipe all stores including the orphaned data, then create.
+        await keystore.clearDevice();
+        dev = await keystore.getOrCreateDevice(pending.identity, pending.key);
+        if (!dev) throw new Error('no device found after reset');
+        // Stash so a provisioning failure doesn't re-run the destructive clear on retry.
+        pendingResetDevice.current = dev;
+      }
       const { pool: provisioned, result } = await provisionDevice(keystore, dev, pending.key);
-      pendingUnlockKeyForReset.current = null; // clear only on full success
+      // Clear both refs only on full success.
+      pendingUnlockKeyForReset.current = null;
+      pendingResetDevice.current = null;
       setDevice(dev);
       setPool(provisioned);
       setDeviceId(result.deviceId);
@@ -285,7 +303,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
       setStatus('ready');
     } catch {
       setError('could not set up the device — try again');
-      setStatus('needs-confirm-reset'); // pending key still available for retry
+      setStatus('needs-confirm-reset'); // pending key + created device (if any) still available for retry
     }
   }, [keystore, status]);
 
