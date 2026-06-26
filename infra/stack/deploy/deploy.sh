@@ -152,6 +152,37 @@ if [ -n "$_prometheus_applied_hash" ] && [ "$_prometheus_applied_hash" = "$PROME
 fi
 _prometheus_applied_hash=""
 _prometheus_new_hash=""
+_grafana_dashboards_dir="$APP_DIR/infra/stack/observability/grafana/dashboards"
+_grafana_provisioning_dir="$APP_DIR/infra/stack/observability/grafana/provisioning"
+if [ ! -d "$_grafana_dashboards_dir" ]; then
+  log "FATAL: missing Grafana dashboards directory after staging: $_grafana_dashboards_dir"
+  exit 1
+fi
+if ! find "$_grafana_dashboards_dir" -type f -name '*.json' -print -quit | grep -q .; then
+  log "FATAL: no Grafana dashboard JSON files staged in $_grafana_dashboards_dir"
+  exit 1
+fi
+_grafana_applied_hash_file="$APP_DIR/.grafana-config-applied.sha256"
+_grafana_applied_hash=""
+if [ -f "$_grafana_applied_hash_file" ]; then
+  _grafana_applied_hash="$(cat "$_grafana_applied_hash_file")"
+fi
+GRAFANA_CONF_CHANGED=1
+_grafana_new_hash="$(
+  find "$_grafana_provisioning_dir" "$_grafana_dashboards_dir" -type f -print0 |
+    sort -z |
+    xargs -0 sha256sum |
+    sha256sum |
+    cut -d' ' -f1
+)"
+GRAFANA_CONF_HASH="$_grafana_new_hash"
+if [ -n "$_grafana_applied_hash" ] && [ "$_grafana_applied_hash" = "$GRAFANA_CONF_HASH" ]; then
+  GRAFANA_CONF_CHANGED=0
+fi
+_grafana_applied_hash=""
+_grafana_new_hash=""
+_grafana_dashboards_dir=""
+_grafana_provisioning_dir=""
 # GlitchTip entrypoint wrapper — bind-mounted read-only into the glitchtip + glitchtip-worker containers.
 # Contains NO secrets (reads them from Docker-secret files at runtime); world-executable so the container
 # user can exec it regardless of uid.
@@ -609,6 +640,11 @@ if [ "${PROMETHEUS_CONF_CHANGED:-1}" = 1 ]; then
   log "prometheus config changed; force-recreating prometheus so the refreshed bind mount is loaded"
   docker compose -f "$COMPOSE" up -d --force-recreate --no-deps prometheus
   printf '%s\n' "$PROMETHEUS_CONF_HASH" >"$_prometheus_applied_hash_file"
+fi
+if [ "${GRAFANA_CONF_CHANGED:-1}" = 1 ]; then
+  log "grafana provisioning changed; force-recreating grafana so the refreshed bind mount is loaded"
+  docker compose -f "$COMPOSE" up -d --force-recreate --no-deps grafana
+  printf '%s\n' "$GRAFANA_CONF_HASH" >"$_grafana_applied_hash_file"
 fi
 # The api reads REDIS_URL_FILE ONCE at module construction and holds a persistent ioredis connection. On a
 # redis password ROTATION the `up -d` above won't recreate the api when the image/config is unchanged (a

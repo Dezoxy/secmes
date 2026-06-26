@@ -32,7 +32,7 @@ Loki showed repeated Postgres errors and exporter `collector failed name=wal` li
 
 ## 2. Fix Grafana dashboard provisioning error
 
-**Status:** [x] Diagnosed / [ ] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
 
 ### Problem
 
@@ -46,9 +46,10 @@ that path into Grafana. The runtime error means the staged VM path or bind mount
 
 ### Plan
 
-- [ ] Confirm `deploy.sh` stages `infra/stack/observability/grafana/dashboards` into `/opt/argus`.
-- [ ] Patch staging or the bind mount if the directory is omitted.
-- [ ] Keep dashboards read-only inside Grafana.
+- [x] Confirm `deploy.sh` stages `infra/stack/observability/grafana/dashboards` into `/opt/argus`.
+- [x] Fail deploy if the staged dashboard directory is missing or contains no dashboard JSON files.
+- [x] Recreate Grafana during deploy when the bind-mounted provisioning or dashboard files change.
+- [x] Keep dashboards read-only inside Grafana.
 
 ### Verification
 
