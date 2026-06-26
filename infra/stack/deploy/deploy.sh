@@ -608,8 +608,8 @@ fi
 # value never enters the compose/up environment or container config.
 docker compose -f "$COMPOSE" up -d $STACK_SERVICES
 if [ "${PROMETHEUS_CONF_CHANGED:-1}" = 1 ]; then
-  log "prometheus config changed; reloading prometheus with SIGHUP"
-  docker compose -f "$COMPOSE" kill -s HUP prometheus
+  log "prometheus config changed; force-recreating prometheus so the refreshed bind mount is loaded"
+  docker compose -f "$COMPOSE" up -d --force-recreate --no-deps prometheus
 fi
 # The api reads REDIS_URL_FILE ONCE at module construction and holds a persistent ioredis connection. On a
 # redis password ROTATION the `up -d` above won't recreate the api when the image/config is unchanged (a
