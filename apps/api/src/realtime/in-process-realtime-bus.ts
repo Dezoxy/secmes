@@ -2,6 +2,9 @@ import { EventEmitter } from 'node:events';
 
 import {
   RealtimeBus,
+  type CallEndEvent,
+  type CallRingEvent,
+  type CallSignalEvent,
   type CommitCreatedEvent,
   type DeviceEnrollmentApprovedEvent,
   type DeviceEnrollmentPendingEvent,
@@ -81,5 +84,29 @@ export class InProcessRealtimeBus extends RealtimeBus {
 
   onFriendRequestCreated(listener: (event: FriendRequestCreatedEvent) => void): void {
     this.emitter.on('friend.request.created', listener);
+  }
+
+  emitCallRing(event: CallRingEvent): void {
+    this.emitter.emit('call.ring', event);
+  }
+
+  onCallRing(listener: (event: CallRingEvent) => void): void {
+    this.emitter.on('call.ring', listener);
+  }
+
+  emitCallSignal(event: CallSignalEvent): void {
+    this.emitter.emit('call.signal', event);
+  }
+
+  onCallSignal(listener: (event: CallSignalEvent) => void): void {
+    this.emitter.on('call.signal', listener);
+  }
+
+  emitCallEnd(event: CallEndEvent): void {
+    this.emitter.emit('call.end', event);
+  }
+
+  onCallEnd(listener: (event: CallEndEvent) => void): void {
+    this.emitter.on('call.end', listener);
   }
 }

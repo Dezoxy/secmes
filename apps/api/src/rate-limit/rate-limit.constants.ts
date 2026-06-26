@@ -75,6 +75,8 @@ export const SENSITIVE_LIMITS = {
   breakglassLogin: 10,
   /** Credential minting is cheap but a leaked-creds farm shouldn't be free; generous for retry. */
   turnCredentials: 30,
+  /** Call preference read/write — simple DB op; caps runaway update loops. */
+  callSettings: 60,
   /** Exact argus-id lookup — anti-enumeration guard. Exact-match-only is the real control;
    *  this cap makes bulk scanning visible in logs and expensive. */
   lookupUser: 10,

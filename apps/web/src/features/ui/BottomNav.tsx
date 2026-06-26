@@ -89,7 +89,7 @@ function BottomNavLink({
             }
           : undefined
       }
-      className={`flex flex-col items-center gap-0.5 rounded-xl px-2 py-1.5 transition-colors duration-200 ${className ?? ''} ${
+      className={`flex flex-col items-center gap-0.5 px-2 py-1.5 transition-colors duration-200 ${className ?? 'rounded-xl'} ${
         active
           ? 'bg-[#1e1e2e] text-purple-300'
           : 'text-white/45 hover:bg-white/[0.04] hover:text-white/70'

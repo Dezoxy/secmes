@@ -18,7 +18,9 @@ test('viewport lets iOS own the safe-area strips', async ({ page }) => {
   );
 });
 
-test('mobile root uses Radarr-style natural document scrolling', async ({ page }) => {
+test('mobile root locks document scroll — AppShell is the only scroll surface', async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/chat');
 
@@ -32,13 +34,13 @@ test('mobile root uses Radarr-style natural document scrolling', async ({ page }
     return {
       bodyOverflowY: getComputedStyle(document.body).overflowY,
       rootOverflow: root ? getComputedStyle(root).overflow : null,
-      shellMinHeight: shell ? getComputedStyle(shell).minHeight : null,
+      shellHeight: shell ? getComputedStyle(shell).height : null,
     };
   });
 
-  expect(metrics.bodyOverflowY).toBe('auto');
-  expect(metrics.rootOverflow).toBe('visible');
-  expect(metrics.shellMinHeight).toBe('844px');
+  expect(metrics.bodyOverflowY).toBe('hidden');
+  expect(metrics.rootOverflow).toBe('hidden');
+  expect(metrics.shellHeight).toBe('844px');
 });
 
 test('mobile tab header remains in the controlled app pane', async ({ page }) => {
