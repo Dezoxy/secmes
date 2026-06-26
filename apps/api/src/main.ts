@@ -18,6 +18,7 @@ import { ErrorTrackingInterceptor } from './observability/error-tracking.interce
 import { metricsMiddleware } from './observability/metrics.middleware.js';
 import { startMetricsServer } from './observability/metrics-server.js';
 import { pinoConfig } from './observability/logger.js';
+import { configureDynamicResponseCaching } from './common/http-cache.js';
 
 // Bootstrap-phase logger for messages emitted before/after the DI container is up.
 const bootLog = pino({ ...pinoConfig, name: 'Bootstrap' });
@@ -36,6 +37,10 @@ async function bootstrap(): Promise<void> {
   // Switch NestJS's internal logger to the Pino logger provisioned by LoggerModule, flushing any
   // buffered boot-phase logs through Pino.
   app.useLogger(app.get(Logger));
+
+  // Dynamic authenticated API responses must never return 304/not-modified. Polling endpoints such as
+  // GET /welcomes carry per-device join metadata and a 304 response has no JSON body for the client to drain.
+  configureDynamicResponseCaching(app);
 
   // Report unhandled/5xx errors to Sentry/GlitchTip without altering the response (observe + rethrow). No-op
   // when error tracking is disabled. Captures method + route-template + opaque ids only.
