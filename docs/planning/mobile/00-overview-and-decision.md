@@ -11,7 +11,7 @@ Pivot argus from a PWA to **native iOS + Android apps as the primary client**, b
 1. **Locked-phone calling is impossible in a PWA.** The VoIP feature needs to ring a phone that is asleep/locked. Only **CallKit (iOS) + ConnectionService (Android)**, woken by **VoIP push (PushKit / FCM high-priority)**, can do this. A PWA fundamentally cannot. This is the #1 driver.
 2. **The iOS PWA "backfire."** Unreliable Web Push (install-only, `userVisibleOnly`, subscriptions silently dropped on every service-worker update), no background execution, install friction, evictable storage, and a pile of iOS-WKWebView CSS/JS workarounds (safe-area, repaint hacks).
 
-The **server does not change** (beyond two additive config items). `apps/api` stays crypto-blind, RLS-enforced, transport-agnostic. The pivot is entirely client-side.
+The **server changes only additively** — three Phase-1 deliverables: the WebAuthn origin allowlist, the native push-token contract, and a native refresh-token transport contract (RN can't read the HttpOnly refresh cookie). `apps/api` stays crypto-blind, RLS-enforced, transport-agnostic; the pivot is otherwise entirely client-side.
 
 ## 2. Decision: React Native + Expo
 
@@ -102,4 +102,4 @@ Load-bearing source references (verified this audit):
 - A locked iPhone **rings via CallKit** on an incoming call; two-way relay-only audio connects; the server sees only `envelope.ciphertext`.
 - A native client and the PWA **share the same MLS conversations** (cross-client interop proven) — the same engine, the same wire format.
 - Native push **wakes the app** to live-deliver messages, with **content-free** payloads (no IDs, no text).
-- All six security invariants hold; the only server changes are additive (origin allowlist, native push-token contract).
+- All six security invariants hold; the only server changes are additive (origin allowlist, native push-token contract, native refresh-token transport).
