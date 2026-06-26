@@ -1,6 +1,6 @@
 # Runtime health improvement plan
 
-> **Status:** ACTIVE 2026-06-26. Track 1 implementation is in progress; deployed verification is still pending.
+> **Status:** ACTIVE 2026-06-26. Must-fix implementation is in progress; deployed verification is still pending.
 > **Origin:** AWS experiment VM triage via SSM plus Loki/Grafana log review after the Friends screen showed
 > stale data during the `aws-v0.8.16` rollout.
 
@@ -21,7 +21,7 @@ cleanup.
 
 | # | Track | Priority | Status | Why it matters |
 |---|-------|----------|--------|----------------|
-| 1 | [Must fix](./01-must-fix.md) | P1 | [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged | User-visible stale Friends state plus false critical alerts. |
+| 1 | [Must fix](./01-must-fix.md) | P1 | Items 1-2 implemented; item 1 merged; deployed verification pending | User-visible stale Friends state plus false critical alerts. |
 | 2 | [Should improve](./02-should-improve.md) | P2 | [x] Diagnosed / [ ] Implemented / [ ] Verified / [ ] Merged | Observability noise hides real incidents and makes dashboards less trustworthy. |
 | 3 | [Nice to have](./03-nice-to-have.md) | P3 | [x] Diagnosed / [ ] Implemented / [ ] Verified / [ ] Merged | Better deploy UX, dashboards, and regression checks. |
 

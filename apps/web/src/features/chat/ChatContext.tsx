@@ -59,6 +59,23 @@ import type { Conversation, User } from './seed';
 export type { AnonymousProfile } from '../settings/ProfileSettings';
 
 const DEMO_PROFILE_SUBJECT = 'demo-local';
+const FRIENDS_REFRESH_RETRY_DELAYS_MS = [300, 900] as const;
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
+}
+
+function isRetryableFriendRefreshReason(reason: unknown): boolean {
+  const message = reason instanceof Error ? reason.message : String(reason);
+  return message === 'Network request failed.' || /status (408|429|5\d\d)\b/.test(message);
+}
+
+function shouldRetryFriendRefresh(results: PromiseSettledResult<unknown>[]): boolean {
+  const rejected = results.filter((result) => result.status === 'rejected');
+  return (
+    rejected.length > 0 && rejected.every((result) => isRetryableFriendRefreshReason(result.reason))
+  );
+}
 
 function currentUserFromProfile(profile: AnonymousProfile): User {
   return {
@@ -165,6 +182,7 @@ export function ChatProvider({ children }: ChatProviderProps) {
   const [incomingRequests, setIncomingRequests] = useState<FriendRequest[]>([]);
   const [outgoingRequests, setOutgoingRequests] = useState<FriendRequest[]>([]);
   const [friendsError, setFriendsError] = useState(false);
+  const refreshFriendsInFlight = useRef<Promise<void> | null>(null);
   const inFlightRequestIds = useRef(new Set<string>());
   const [peerToConvId, setPeerToConvId] = useState<Map<string, string>>(new Map());
   const [convToPeerId, setConvToPeerId] = useState<Map<string, string>>(new Map());
@@ -230,22 +248,53 @@ export function ChatProvider({ children }: ChatProviderProps) {
     setConversations,
   });
 
-  const refreshFriends = useCallback(async () => {
-    try {
-      const [fl, inc, out] = await Promise.all([
-        listFriends(),
-        listFriendRequests('incoming'),
-        listFriendRequests('outgoing'),
-      ]);
-      setFriends(fl);
-      setFriendsLoaded(true);
-      setIncomingRequests(inc);
-      setOutgoingRequests(out);
-      setFriendsError(false);
-    } catch {
-      if (manager) setFriendsError(true);
-    }
+  const refreshFriends = useCallback(() => {
+    if (refreshFriendsInFlight.current) return refreshFriendsInFlight.current;
+
+    const refresh = (async () => {
+      for (let attempt = 0; attempt <= FRIENDS_REFRESH_RETRY_DELAYS_MS.length; attempt += 1) {
+        const results = await Promise.allSettled([
+          listFriends(),
+          listFriendRequests('incoming'),
+          listFriendRequests('outgoing'),
+        ]);
+        const [friendsResult, incomingResult, outgoingResult] = results;
+
+        if (friendsResult.status === 'fulfilled') {
+          setFriends(friendsResult.value);
+          setFriendsLoaded(true);
+        }
+        if (incomingResult.status === 'fulfilled') setIncomingRequests(incomingResult.value);
+        if (outgoingResult.status === 'fulfilled') setOutgoingRequests(outgoingResult.value);
+
+        const failed = results.some((result) => result.status === 'rejected');
+        if (!failed) {
+          setFriendsError(false);
+          return;
+        }
+
+        const retryDelayMs = FRIENDS_REFRESH_RETRY_DELAYS_MS[attempt];
+        if (retryDelayMs !== undefined && shouldRetryFriendRefresh(results)) {
+          await wait(retryDelayMs);
+          continue;
+        }
+
+        if (manager) setFriendsError(true);
+        return;
+      }
+    })().finally(() => {
+      refreshFriendsInFlight.current = null;
+    });
+
+    refreshFriendsInFlight.current = refresh;
+    return refresh;
   }, [manager]);
+
+  const refreshFriendsAfterMutation = useCallback(async () => {
+    const currentRefresh = refreshFriendsInFlight.current;
+    if (currentRefresh) await currentRefresh;
+    await refreshFriends();
+  }, [refreshFriends]);
 
   const { liveIds, liveGroups, addLive, connectionStatus, refoldPeerReceiptWatermarks } =
     useLiveConversations({
@@ -424,9 +473,9 @@ export function ChatProvider({ children }: ChatProviderProps) {
   const handleSendFriendRequest = useCallback(
     async (argusId: string) => {
       await sendFriendRequest(argusId);
-      await refreshFriends();
+      await refreshFriendsAfterMutation();
     },
-    [refreshFriends],
+    [refreshFriendsAfterMutation],
   );
 
   const handleAcceptRequest = useCallback(
@@ -435,12 +484,12 @@ export function ChatProvider({ children }: ChatProviderProps) {
       inFlightRequestIds.current.add(requestId);
       try {
         await acceptFriendRequest(requestId);
-        await refreshFriends();
+        await refreshFriendsAfterMutation();
       } finally {
         inFlightRequestIds.current.delete(requestId);
       }
     },
-    [refreshFriends],
+    [refreshFriendsAfterMutation],
   );
 
   const handleDeclineRequest = useCallback(
@@ -449,12 +498,12 @@ export function ChatProvider({ children }: ChatProviderProps) {
       inFlightRequestIds.current.add(requestId);
       try {
         await declineFriendRequest(requestId);
-        await refreshFriends();
+        await refreshFriendsAfterMutation();
       } finally {
         inFlightRequestIds.current.delete(requestId);
       }
     },
-    [refreshFriends],
+    [refreshFriendsAfterMutation],
   );
 
   const handleCancelRequest = useCallback(
@@ -463,12 +512,12 @@ export function ChatProvider({ children }: ChatProviderProps) {
       inFlightRequestIds.current.add(requestId);
       try {
         await cancelFriendRequest(requestId);
-        await refreshFriends();
+        await refreshFriendsAfterMutation();
       } finally {
         inFlightRequestIds.current.delete(requestId);
       }
     },
-    [refreshFriends],
+    [refreshFriendsAfterMutation],
   );
 
   const handleUnfriend = useCallback(
@@ -477,12 +526,12 @@ export function ChatProvider({ children }: ChatProviderProps) {
       inFlightRequestIds.current.add(userId);
       try {
         await unfriend(userId);
-        await refreshFriends();
+        await refreshFriendsAfterMutation();
       } finally {
         inFlightRequestIds.current.delete(userId);
       }
     },
-    [refreshFriends],
+    [refreshFriendsAfterMutation],
   );
 
   const persistStartedConversation = useCallback(
