@@ -81,6 +81,108 @@ test('friends panel shows accepted friends from API', async ({ page }) => {
   await expect(page.getByText('1 accepted')).toBeVisible();
 });
 
+test('friends panel retries a transient accepted-friends refresh failure', async ({ page }) => {
+  let friendsCalls = 0;
+  await page.route('**/api/friends', (route) => {
+    if (route.request().method() !== 'GET') {
+      void route.continue();
+      return;
+    }
+    friendsCalls += 1;
+    if (friendsCalls === 1) {
+      void route.fulfill({
+        status: 502,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'temporary deploy window' }),
+      });
+      return;
+    }
+    void route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ friends: [ALICE] }),
+    });
+  });
+
+  await page.route('**/api/friends/requests**', (route) => {
+    if (route.request().method() !== 'GET') {
+      void route.continue();
+      return;
+    }
+    void route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ requests: [] }),
+    });
+  });
+
+  await page.goto('/chat');
+  await page.getByRole('link', { name: 'Friends' }).click();
+
+  await expect(page.getByRole('button', { name: /Open conversation with Alice/ })).toBeVisible();
+  await expect(page.getByText('1 accepted')).toBeVisible();
+  await expect(page.getByText('No accepted friends yet')).toBeHidden();
+  expect(friendsCalls).toBeGreaterThanOrEqual(2);
+});
+
+test('friends panel retries transient friends reads without retrying throttled requests', async ({
+  page,
+}) => {
+  let friendsCalls = 0;
+  let incomingCalls = 0;
+
+  await page.route('**/api/friends', (route) => {
+    if (route.request().method() !== 'GET') {
+      void route.continue();
+      return;
+    }
+    friendsCalls += 1;
+    if (friendsCalls === 1) {
+      void route.fulfill({
+        status: 502,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'temporary deploy window' }),
+      });
+      return;
+    }
+    void route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ friends: [ALICE] }),
+    });
+  });
+
+  await page.route('**/api/friends/requests**', (route) => {
+    if (route.request().method() !== 'GET') {
+      void route.continue();
+      return;
+    }
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('box') === 'incoming') {
+      incomingCalls += 1;
+      void route.fulfill({
+        status: 429,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'too many refreshes' }),
+      });
+      return;
+    }
+    void route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ requests: [] }),
+    });
+  });
+
+  await page.goto('/chat');
+  await page.getByRole('link', { name: 'Friends' }).click();
+
+  await expect(page.getByRole('button', { name: /Open conversation with Alice/ })).toBeVisible();
+  await page.waitForTimeout(1300);
+  expect(friendsCalls).toBeGreaterThanOrEqual(2);
+  expect(incomingCalls).toBe(1);
+});
+
 test('friends panel shows incoming requests with Accept and Decline buttons', async ({ page }) => {
   await stubFriendsApi(page, { incoming: [BOB] });
   await page.goto('/chat');
