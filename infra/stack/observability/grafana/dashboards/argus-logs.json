@@ -181,7 +181,7 @@
         {
           "refId": "A",
           "datasource": { "type": "loki", "uid": "argus-loki" },
-          "expr": "sum by (service) (count_over_time({job=\"docker\", service=~\"prometheus|grafana|alertmanager|loki|alloy|tempo|pyroscope|postgres-exporter|redis-exporter\", level=\"error\", context=~\"$context\"} [$__range]))",
+          "expr": "sum by (service) (count_over_time({job=\"docker\", service=~\"prometheus|grafana|alertmanager|loki|alloy|tempo|pyroscope|postgres-exporter|redis-exporter\"} |~ \"(?i)(\\\\berror\\\\b|\\\\bfatal\\\\b|\\\\bpanic\\\\b|level=error|level=fatal)\" [$__range]))",
           "legendFormat": "{{service}}"
         }
       ]
