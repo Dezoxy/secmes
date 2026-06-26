@@ -13,9 +13,10 @@ type LinkState = 'registering' | 'awaiting' | 'linked' | 'rejected' | 'error';
 
 interface LinkDevicePanelProps {
   onClose: () => void;
+  onLinked?: () => void;
 }
 
-export function LinkDevicePanel({ onClose }: LinkDevicePanelProps) {
+export function LinkDevicePanel({ onClose, onLinked }: LinkDevicePanelProps) {
   const { device, deviceId } = useDevice();
   const [state, setState] = useState<LinkState>('registering');
   const [safetyNumber, setSafetyNumber] = useState<string | null>(null);
@@ -62,6 +63,7 @@ export function LinkDevicePanel({ onClose }: LinkDevicePanelProps) {
           const approved = await listEnrollments('approved');
           if (approved.some((e) => e.id === enrollmentId)) {
             setState('linked');
+            onLinked?.();
           } else {
             setState('rejected'); // expired or rejected by D1
           }
@@ -69,7 +71,7 @@ export function LinkDevicePanel({ onClose }: LinkDevicePanelProps) {
         .catch(() => {});
     }, 3_000);
     return () => clearInterval(t);
-  }, [state, enrollmentId]);
+  }, [state, enrollmentId, onLinked]);
 
   return (
     <Modal

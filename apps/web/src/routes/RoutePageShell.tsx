@@ -39,14 +39,14 @@ function joinClasses(...classes: Array<string | false | undefined>): string {
 
 function markRouteShellNavigation(to: string, currentPath: string): void {
   if (routeShellPaths.has(to) && to !== currentPath) {
-    sessionStorage.setItem(ROUTE_SHELL_BACK_MARKER, '1');
+    sessionStorage.setItem(ROUTE_SHELL_BACK_MARKER, to);
   } else {
     sessionStorage.removeItem(ROUTE_SHELL_BACK_MARKER);
   }
 }
 
-function consumeRouteShellBackMarker(): boolean {
-  const marked = sessionStorage.getItem(ROUTE_SHELL_BACK_MARKER) === '1';
+function consumeRouteShellBackMarker(currentPath: string): boolean {
+  const marked = sessionStorage.getItem(ROUTE_SHELL_BACK_MARKER) === currentPath;
   sessionStorage.removeItem(ROUTE_SHELL_BACK_MARKER);
   return marked;
 }
@@ -67,7 +67,7 @@ export function RoutePageShell({
   // external/prior-tab entries) keeps deep links, fresh PWA loads, and external referrers landing on
   // /chat instead of navigating off-site.
   const handleBack = useCallback(() => {
-    const routeShellBack = consumeRouteShellBackMarker();
+    const routeShellBack = consumeRouteShellBackMarker(location.pathname);
     if (location.key !== 'default' || routeShellBack) {
       navigate(-1);
     } else {
@@ -75,7 +75,7 @@ export function RoutePageShell({
       // button from /chat would bounce the user straight back into this guarded route.
       navigate('/chat', { replace: true });
     }
-  }, [location.key, navigate]);
+  }, [location.key, location.pathname, navigate]);
 
   return (
     <AuthenticatedRouteBoundary>

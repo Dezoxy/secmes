@@ -6,8 +6,14 @@ import { DeviceSettings } from '../features/settings/DeviceSettings';
 import { RoutePageShell } from './RoutePageShell';
 
 function CurrentDeviceSettings() {
-  const { deviceId, deviceIsProvisional } = useDevice();
-  return <DeviceSettings deviceId={deviceId} deviceIsProvisional={deviceIsProvisional} />;
+  const { deviceId, deviceIsProvisional, markDeviceTrusted } = useDevice();
+  return (
+    <DeviceSettings
+      deviceId={deviceId}
+      deviceIsProvisional={deviceIsProvisional}
+      onDeviceTrusted={markDeviceTrusted}
+    />
+  );
 }
 
 export default function DevicesRoute() {

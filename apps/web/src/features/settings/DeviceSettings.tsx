@@ -5,9 +5,14 @@ import { Button, SettingsRow } from '../ui';
 interface DeviceSettingsProps {
   deviceId: string | null;
   deviceIsProvisional: boolean | null;
+  onDeviceTrusted?: () => void;
 }
 
-export function DeviceSettings({ deviceId, deviceIsProvisional }: DeviceSettingsProps) {
+export function DeviceSettings({
+  deviceId,
+  deviceIsProvisional,
+  onDeviceTrusted,
+}: DeviceSettingsProps) {
   const [linkOpen, setLinkOpen] = useState(false);
   const trusted = deviceId !== null && deviceIsProvisional === false;
 
@@ -43,7 +48,9 @@ export function DeviceSettings({ deviceId, deviceIsProvisional }: DeviceSettings
       )}
       <SettingsRow title="Trusted devices" value="Requires backend device registry UI" />
       <SettingsRow title="Revoke device" value="Requires backend revoke endpoint" />
-      {linkOpen && <LinkDevicePanel onClose={() => setLinkOpen(false)} />}
+      {linkOpen && (
+        <LinkDevicePanel onClose={() => setLinkOpen(false)} onLinked={onDeviceTrusted} />
+      )}
     </div>
   );
 }

@@ -34,6 +34,20 @@ test('the route shell back button steps back through in-app history', async ({ p
   await expect(page).toHaveURL(/\/chat$/);
 });
 
+test('the route shell marker is cleared after browser back between shell routes', async ({
+  page,
+}) => {
+  await page.goto('/security');
+  await page.getByRole('link', { name: 'Devices', exact: true }).click();
+  await expect(page).toHaveURL(/\/devices$/);
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/security$/);
+
+  await page.getByRole('button', { name: 'Go back' }).click();
+  await expect(page).toHaveURL(/\/chat$/);
+});
+
 test('the route shell back button falls back to chat on a deep link with no in-app history', async ({
   page,
 }) => {
