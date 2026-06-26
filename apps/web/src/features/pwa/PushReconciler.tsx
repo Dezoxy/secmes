@@ -12,11 +12,10 @@ const VAPID_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined;
  * the SILENT self-heal (`reconcilePushSubscription`), which restores a dropped subscription with no user
  * action on Android/desktop.
  *
- * iOS can't be healed silently: WebKit drops the subscription when the service worker is replaced on an
- * update AND refuses to recreate it without a user gesture — even with permission already granted — so the
- * silent `subscribe()` throws. For that case we surface a small, dismissible "turn notifications back on"
- * banner whose tap drives `subscribeToPush` inside a user gesture (the only thing iOS allows). On other
- * platforms the silent path succeeds, `pushNeedsReenable()` is false, and the banner never appears.
+ * On iOS the service worker's `pushsubscriptionchange` handler re-subscribes in SW context (no user
+ * gesture required per spec), so the silent path now also works on iOS after an SW update. The banner
+ * is retained as a fallback: if the SW-level subscribe still fails (e.g. iOS <16.4, offline, push
+ * provider error) and `pushNeedsReenable()` returns true, a one-tap restore prompt is shown.
  */
 export function PushReconciler() {
   const { deviceId } = useDevice();

@@ -10,6 +10,21 @@ import { buildVerifiedResponse, checkAssetIntegrity, expectedHashFor } from './l
 
 declare let self: ServiceWorkerGlobalScope & typeof globalThis;
 
+// Build-time VAPID public key (base64url). Vite replaces import.meta.env at build time, so this
+// is inlined into the emitted sw.js the same way client-side env vars are. Used as a fallback in
+// handlePushSubscriptionChange when event.oldSubscription is null (iOS drops it before the event
+// fires), which is what prevented silent re-subscription on every SW update on iOS.
+const SW_VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined;
+
+/** Convert a base64url string to a Uint8Array. Mirrors fromBase64Url in lib/push.ts. */
+function swFromBase64Url(b64url: string): Uint8Array {
+  const normalized = b64url.replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
+  const binary = atob(normalized + '='.repeat((4 - (normalized.length % 4)) % 4));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
 // Build-time subresource-integrity manifest (CDI-1): { "assets/<file>": "<sha384-base64>" } for every built
 // JS/CSS asset. INLINED into the emitted dist/sw.js by the scripts/inline-sw-integrity.mjs post-build step
 // (run from the build script, after vite-plugin-pwa emits sw.js) — it reuses the exact hashes already written
@@ -86,7 +101,13 @@ async function handlePushSubscriptionChange(event: PushSubscriptionChangeEvent):
   // Prefer the browser-provided replacement (Firefox / newer Chrome populate newSubscription); only
   // re-subscribe manually when it's absent, so we don't create a redundant second endpoint.
   if (!event.newSubscription) {
-    const applicationServerKey = event.oldSubscription?.options.applicationServerKey;
+    // On iOS, event.oldSubscription is null when the SW is replaced via skipWaiting — the browser
+    // has already dropped the subscription before this event fires, so there is no oldSubscription
+    // to read the applicationServerKey from. Fall back to the build-time VAPID key so we can
+    // re-subscribe from service-worker context (no user gesture required per the Push API spec).
+    const applicationServerKey: ArrayBuffer | Uint8Array | null =
+      event.oldSubscription?.options.applicationServerKey ??
+      (SW_VAPID_PUBLIC_KEY ? swFromBase64Url(SW_VAPID_PUBLIC_KEY) : null);
     if (applicationServerKey) {
       try {
         await self.registration.pushManager.subscribe({
@@ -94,7 +115,7 @@ async function handlePushSubscriptionChange(event: PushSubscriptionChangeEvent):
           applicationServerKey,
         });
       } catch {
-        // best-effort — an open client's reconcile will recreate the subscription
+        // best-effort — an open client's reconcile / banner will recreate the subscription
       }
     }
   }
