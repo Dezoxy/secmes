@@ -105,9 +105,15 @@ async function handlePushSubscriptionChange(event: PushSubscriptionChangeEvent):
     // has already dropped the subscription before this event fires, so there is no oldSubscription
     // to read the applicationServerKey from. Fall back to the build-time VAPID key so we can
     // re-subscribe from service-worker context (no user gesture required per the Push API spec).
-    const applicationServerKey: ArrayBuffer | Uint8Array | null =
-      event.oldSubscription?.options.applicationServerKey ??
-      (SW_VAPID_PUBLIC_KEY ? swFromBase64Url(SW_VAPID_PUBLIC_KEY) : null);
+    let applicationServerKey: ArrayBuffer | Uint8Array | null =
+      event.oldSubscription?.options.applicationServerKey ?? null;
+    if (!applicationServerKey && SW_VAPID_PUBLIC_KEY) {
+      try {
+        applicationServerKey = swFromBase64Url(SW_VAPID_PUBLIC_KEY);
+      } catch {
+        // malformed build-time VAPID key — subscribe skipped; clients broadcast below still runs
+      }
+    }
     if (applicationServerKey) {
       try {
         await self.registration.pushManager.subscribe({
