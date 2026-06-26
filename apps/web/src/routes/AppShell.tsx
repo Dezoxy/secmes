@@ -3,6 +3,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { BottomNav, TAB_PATHS } from '../features/ui/BottomNav';
 import { useSwipeTabs } from '../features/ui/useSwipeTabs';
 import { NavVisibilityContext } from './NavVisibilityContext';
+import { UpdateOverlay } from '../features/pwa/UpdateOverlay';
 
 const TAB_ANIM_MS = 280;
 
@@ -100,6 +101,7 @@ export default function AppShell() {
         </div>
       </div>
       {navVisible && <BottomNav onNavigate={animatedNavigateTo} />}
+      <UpdateOverlay />
     </div>
   );
 }
