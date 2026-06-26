@@ -6,7 +6,7 @@
 
 ## 1. Grafana/Loki service labels show container IDs
 
-**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [x] Merged
 
 ### Problem
 
@@ -37,7 +37,7 @@ container IDs.
 
 ## 2. Friends refresh keeps stale UI after deploy-window API failures
 
-**Status:** [x] Diagnosed / [ ] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
 
 ### Problem
 
@@ -52,12 +52,12 @@ still had `accepted | 1`.
 
 ### Plan
 
-- [ ] Make `refreshFriends()` in `apps/web/src/features/chat/ChatContext.tsx` in-flight guarded so overlapping
+- [x] Make `refreshFriends()` in `apps/web/src/features/chat/ChatContext.tsx` in-flight guarded so overlapping
   triggers share one request set.
-- [ ] Preserve the last known-good friends list on transient network, `502`, or deploy-window failures.
-- [ ] Add a short retry/backoff for transient failures.
-- [ ] Keep the warning visible, but make it clear data is temporarily stale instead of implying no friends exist.
-- [ ] Add or update E2E coverage for a transient `/api/friends` failure.
+- [x] Preserve the last known-good friends list on transient network, `502`, or deploy-window failures.
+- [x] Add a short retry/backoff for transient failures.
+- [x] Keep the warning visible, but make it clear data is temporarily stale instead of implying no friends exist.
+- [x] Add or update E2E coverage for a transient `/api/friends` failure.
 
 ### Verification
 
@@ -81,7 +81,7 @@ The client refresh path requests accepted friends plus incoming and outgoing fri
 
 ### Plan
 
-- [ ] First fix client-side duplicate refreshes with an in-flight guard.
+- [x] First fix client-side duplicate refreshes with an in-flight guard.
 - [ ] Audit all `refreshFriends()` triggers: tab open, manager initialization, friend-request websocket event,
   mutations, and app resume if present.
 - [ ] Raise `SENSITIVE_LIMITS.friendsList` only if deduped normal use still approaches the cap.
