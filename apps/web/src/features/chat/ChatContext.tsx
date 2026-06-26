@@ -183,6 +183,7 @@ export function ChatProvider({ children }: ChatProviderProps) {
   const [outgoingRequests, setOutgoingRequests] = useState<FriendRequest[]>([]);
   const [friendsError, setFriendsError] = useState(false);
   const refreshFriendsInFlight = useRef<Promise<void> | null>(null);
+  const refreshFriendsQueued = useRef(false);
   const inFlightRequestIds = useRef(new Set<string>());
   const [peerToConvId, setPeerToConvId] = useState<Map<string, string>>(new Map());
   const [convToPeerId, setConvToPeerId] = useState<Map<string, string>>(new Map());
@@ -249,39 +250,46 @@ export function ChatProvider({ children }: ChatProviderProps) {
   });
 
   const refreshFriends = useCallback(() => {
-    if (refreshFriendsInFlight.current) return refreshFriendsInFlight.current;
+    if (refreshFriendsInFlight.current) {
+      refreshFriendsQueued.current = true;
+      return refreshFriendsInFlight.current;
+    }
 
     const refresh = (async () => {
-      for (let attempt = 0; attempt <= FRIENDS_REFRESH_RETRY_DELAYS_MS.length; attempt += 1) {
-        const results = await Promise.allSettled([
-          listFriends(),
-          listFriendRequests('incoming'),
-          listFriendRequests('outgoing'),
-        ]);
-        const [friendsResult, incomingResult, outgoingResult] = results;
+      do {
+        refreshFriendsQueued.current = false;
 
-        if (friendsResult.status === 'fulfilled') {
-          setFriends(friendsResult.value);
-          setFriendsLoaded(true);
+        for (let attempt = 0; attempt <= FRIENDS_REFRESH_RETRY_DELAYS_MS.length; attempt += 1) {
+          const results = await Promise.allSettled([
+            listFriends(),
+            listFriendRequests('incoming'),
+            listFriendRequests('outgoing'),
+          ]);
+          const [friendsResult, incomingResult, outgoingResult] = results;
+
+          if (friendsResult.status === 'fulfilled') {
+            setFriends(friendsResult.value);
+            setFriendsLoaded(true);
+          }
+          if (incomingResult.status === 'fulfilled') setIncomingRequests(incomingResult.value);
+          if (outgoingResult.status === 'fulfilled') setOutgoingRequests(outgoingResult.value);
+
+          const failed = results.some((result) => result.status === 'rejected');
+          if (!failed) {
+            setFriendsError(false);
+            break;
+          }
+
+          const retryDelayMs = FRIENDS_REFRESH_RETRY_DELAYS_MS[attempt];
+          if (retryDelayMs !== undefined && shouldRetryFriendRefresh(results)) {
+            await wait(retryDelayMs);
+            continue;
+          }
+
+          if (manager) setFriendsError(true);
+          break;
         }
-        if (incomingResult.status === 'fulfilled') setIncomingRequests(incomingResult.value);
-        if (outgoingResult.status === 'fulfilled') setOutgoingRequests(outgoingResult.value);
-
-        const failed = results.some((result) => result.status === 'rejected');
-        if (!failed) {
-          setFriendsError(false);
-          return;
-        }
-
-        const retryDelayMs = FRIENDS_REFRESH_RETRY_DELAYS_MS[attempt];
-        if (retryDelayMs !== undefined && shouldRetryFriendRefresh(results)) {
-          await wait(retryDelayMs);
-          continue;
-        }
-
-        if (manager) setFriendsError(true);
-        return;
-      }
+      } while (refreshFriendsQueued.current);
     })().finally(() => {
       refreshFriendsInFlight.current = null;
     });
