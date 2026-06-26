@@ -247,6 +247,9 @@ _tunnel_token_old_sha=""
 # so step 6 can force-recreate the api when the key changes. Empty when the file doesn't exist yet (first deploy).
 _vapid_key_old_sha=""
 [ -f "$SECRETS_DIR/vapid_private_key" ] && _vapid_key_old_sha="$(sha256sum "$SECRETS_DIR/vapid_private_key" | cut -d' ' -f1)"
+_alertmanager_webhook_old_sha=""
+[ -f "$SECRETS_DIR/alertmanager_webhook_url" ] &&
+  _alertmanager_webhook_old_sha="$(sha256sum "$SECRETS_DIR/alertmanager_webhook_url" | cut -d' ' -f1)"
 systemctl restart argus-secrets.service
 systemctl enable argus-secrets.service >/dev/null 2>&1 || true
 # TUNNEL_TOKEN_CHANGED=1 unless the freshly-fetched token byte-matches the pre-fetch one. =1 on a first deploy
@@ -267,6 +270,12 @@ if [ -n "$_vapid_key_old_sha" ] && [ -f "$SECRETS_DIR/vapid_private_key" ] &&
   VAPID_KEY_CHANGED=0
 fi
 _vapid_key_old_sha=""
+ALERTMANAGER_WEBHOOK_CHANGED=1
+if [ -n "$_alertmanager_webhook_old_sha" ] && [ -f "$SECRETS_DIR/alertmanager_webhook_url" ] &&
+  [ "$_alertmanager_webhook_old_sha" = "$(sha256sum "$SECRETS_DIR/alertmanager_webhook_url" | cut -d' ' -f1)" ]; then
+  ALERTMANAGER_WEBHOOK_CHANGED=0
+fi
+_alertmanager_webhook_old_sha=""
 _alertmanager_conf="$APP_DIR/infra/stack/observability/alertmanager/alertmanager.yml"
 _alertmanager_unarmed_conf="$APP_DIR/infra/stack/observability/alertmanager/alertmanager.unarmed.yml"
 if [ ! -f "$_alertmanager_conf" ] || [ ! -f "$_alertmanager_unarmed_conf" ]; then
@@ -666,8 +675,8 @@ if [ "${PROMETHEUS_CONF_CHANGED:-1}" = 1 ]; then
   docker compose -f "$COMPOSE" up -d --force-recreate --no-deps prometheus
   printf '%s\n' "$PROMETHEUS_CONF_HASH" >"$_prometheus_applied_hash_file"
 fi
-if [ "${ALERTMANAGER_CONF_CHANGED:-1}" = 1 ]; then
-  log "alertmanager config changed; force-recreating alertmanager so the selected receiver config is loaded"
+if [ "${ALERTMANAGER_CONF_CHANGED:-1}" = 1 ] || [ "${ALERTMANAGER_WEBHOOK_CHANGED:-1}" = 1 ]; then
+  log "alertmanager config or webhook secret changed; force-recreating alertmanager so the selected receiver config is loaded"
   docker compose -f "$COMPOSE" up -d --force-recreate --no-deps alertmanager
   printf '%s\n' "$ALERTMANAGER_CONF_HASH" >"$_alertmanager_applied_hash_file"
 fi
