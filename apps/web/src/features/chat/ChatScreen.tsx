@@ -78,6 +78,7 @@ export default function ChatScreen() {
   const [selectedId, setSelectedId] = useState<string | null>(
     demoMode ? 'conv-1' : (locationState?.selectedId ?? tabSelectedId.get('/chat') ?? null),
   );
+  const [scrollTrigger, setScrollTrigger] = useState(0);
   useEffect(() => {
     if (!demoMode) tabSelectedId.set('/chat', selectedId);
   }, [selectedId]);
@@ -331,6 +332,7 @@ export default function ChatScreen() {
     setMobileThreadClosing(false);
     setMobileSidebarReturning(false);
     setSelectedId(id);
+    setScrollTrigger((n) => n + 1);
     if (window.innerWidth < 1024) setShowSidebar(false);
   };
 
@@ -373,6 +375,7 @@ export default function ChatScreen() {
 
   const handleOpenExisting = (conversationId: string): void => {
     setSelectedId(conversationId);
+    setScrollTrigger((n) => n + 1);
     setStartOpen(false);
     setStartPrefillArgusId(undefined);
   };
@@ -557,6 +560,7 @@ export default function ChatScreen() {
                 onImageClick={setPreviewImage}
                 bottomNavClearance={false}
                 floatingBars
+                scrollTrigger={scrollTrigger}
               />
               {effectiveSelectedIsLive && !selectedIsSyncLost && (
                 <ChatInput
@@ -609,6 +613,7 @@ export default function ChatScreen() {
           existingConversation={liveGroups.current.get(selectedId)}
           existingMemberIds={new Set(selectedConversation?.participants.map((p) => p.id) ?? [])}
           existingGroupName={selectedConversation?.name}
+          friends={friends}
           onAdded={(addedUsers) => {
             setAddMemberOpen(false);
             if (addedUsers.length > 0 && selectedId) {

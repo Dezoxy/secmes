@@ -53,6 +53,25 @@ test('voice and video call buttons show coming soon toast', async ({ page }) => 
   await expect(page.getByText('Voice and video calls are coming soon')).toBeVisible();
 });
 
+test('group member picker shows suggested friends and supports cancel then confirm', async ({
+  page,
+}) => {
+  await page.goto('/__e2e/group-create');
+
+  await expect(page.getByText('Your friends')).toBeVisible();
+  await expect(page.getByText('Eve')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Add Eve' }).click();
+  await expect(page.getByRole('button', { name: 'Confirm add Eve' })).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByRole('button', { name: 'Add Eve' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Add Eve' }).click();
+  await page.getByRole('button', { name: 'Confirm add Eve' }).click();
+  await expect(page.getByRole('button', { name: 'Add Eve' })).toHaveCount(0);
+  await expect(page.getByText('Eve', { exact: true })).toBeVisible();
+});
+
 test('call button toast is debounced — rapid clicks show only one toast', async ({ page }) => {
   await page.goto('/chat');
 
