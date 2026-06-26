@@ -570,6 +570,7 @@ services:
     <<: *json-log-labels
     image: prometheuscommunity/postgres-exporter:v0.17.0
     restart: unless-stopped
+    command: ['--no-collector.wal']
     # Use DATA_SOURCE_PASS_FILE + DATA_SOURCE_USER + DATA_SOURCE_URI instead of DATA_SOURCE_NAME so the
     # credential never enters the process environment (invariant #5). deploy.sh extracts the argus_app
     # password from the database_url DSN and writes it to a dedicated argus_app_password secret file.
