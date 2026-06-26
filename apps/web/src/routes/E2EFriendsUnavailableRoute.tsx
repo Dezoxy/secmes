@@ -79,6 +79,7 @@ export default function E2EFriendsUnavailableRoute() {
       handleProfileChange: () => true,
       serverProfile: { userId: currentUser.id, displayName: currentUser.name } as MeBound,
       deviceId: 'e2e-device',
+      deviceIsProvisional: false,
       numbersByConv: {},
       setNumbersByConv: () => undefined,
       verifiedByConv: {},
