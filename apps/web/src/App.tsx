@@ -23,6 +23,10 @@ const E2EGroupCreateRoute =
   import.meta.env.VITE_E2E_GROUP_CREATE === '1'
     ? lazy(() => import('./routes/E2EGroupCreateRoute'))
     : null;
+const E2EFriendsUnavailableRoute =
+  import.meta.env.VITE_E2E_FRIENDS_UNAVAILABLE === '1'
+    ? lazy(() => import('./routes/E2EFriendsUnavailableRoute'))
+    : null;
 
 const DevicesRoute = lazy(() => import('./routes/DevicesRoute'));
 const SecurityRoute = lazy(() => import('./routes/SecurityRoute'));
@@ -309,6 +313,9 @@ export default function App() {
           <Route path="/v2/:sketchId" element={<V2SketchRoute />} />
           {E2EGroupCreateRoute && (
             <Route path="/__e2e/group-create" element={<E2EGroupCreateRoute />} />
+          )}
+          {E2EFriendsUnavailableRoute && (
+            <Route path="/__e2e/friends-unavailable" element={<E2EFriendsUnavailableRoute />} />
           )}
         </Routes>
       </Suspense>
