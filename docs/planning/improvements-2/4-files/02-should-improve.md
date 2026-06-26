@@ -6,7 +6,7 @@
 
 ## 1. Stop Postgres exporter WAL permission spam
 
-**Status:** [x] Diagnosed / [ ] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
 
 ### Problem
 
@@ -20,9 +20,9 @@ Loki showed repeated Postgres errors and exporter `collector failed name=wal` li
 
 ### Plan
 
-- [ ] Prefer disabling the WAL collector for `postgres-exporter` unless WAL metrics are needed now.
-- [ ] If WAL metrics are required, grant only the narrow monitoring permission needed for that collector.
-- [ ] Keep exporter credentials file-backed via `DATA_SOURCE_PASS_FILE`.
+- [x] Prefer disabling the WAL collector for `postgres-exporter` unless WAL metrics are needed now.
+- [x] Do not grant WAL monitoring privileges now; WAL metrics are not needed for current incident response.
+- [x] Keep exporter credentials file-backed via `DATA_SOURCE_PASS_FILE`.
 
 ### Verification
 
@@ -32,7 +32,7 @@ Loki showed repeated Postgres errors and exporter `collector failed name=wal` li
 
 ## 2. Fix Grafana dashboard provisioning error
 
-**Status:** [x] Diagnosed / [ ] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
 
 ### Problem
 
@@ -46,9 +46,10 @@ that path into Grafana. The runtime error means the staged VM path or bind mount
 
 ### Plan
 
-- [ ] Confirm `deploy.sh` stages `infra/stack/observability/grafana/dashboards` into `/opt/argus`.
-- [ ] Patch staging or the bind mount if the directory is omitted.
-- [ ] Keep dashboards read-only inside Grafana.
+- [x] Confirm `deploy.sh` stages `infra/stack/observability/grafana/dashboards` into `/opt/argus`.
+- [x] Fail deploy if the staged dashboard directory is missing or contains no dashboard JSON files.
+- [x] Recreate Grafana during deploy when the bind-mounted provisioning or dashboard files change.
+- [x] Keep dashboards read-only inside Grafana.
 
 ### Verification
 
@@ -57,7 +58,7 @@ that path into Grafana. The runtime error means the staged VM path or bind mount
 
 ## 3. Make Alertmanager unarmed state quiet
 
-**Status:** [x] Diagnosed / [ ] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
 
 ### Problem
 
@@ -70,10 +71,10 @@ Loki showed `Notify for alerts failed` and `unsupported protocol scheme ""` for 
 
 ### Plan
 
-- [ ] Change unarmed Alertmanager behavior to a real null receiver, or template the config during deploy based
+- [x] Change unarmed Alertmanager behavior to a real null receiver, or template the config during deploy based
   on whether `alertmanager_webhook_url` is non-empty.
-- [ ] Preserve the file-backed webhook secret.
-- [ ] Document how to arm the webhook in the runbook.
+- [x] Preserve the file-backed webhook secret.
+- [x] Document how to arm the webhook in the runbook.
 
 ### Verification
 

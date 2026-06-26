@@ -37,7 +37,7 @@ container IDs.
 
 ## 2. Friends refresh keeps stale UI after deploy-window API failures
 
-**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [x] Merged
 
 ### Problem
 
@@ -67,7 +67,7 @@ still had `accepted | 1`.
 
 ## 3. Friends request refresh hits `429`
 
-**Status:** [x] Diagnosed / [ ] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [x] Merged
 
 ### Problem
 
@@ -82,10 +82,14 @@ The client refresh path requests accepted friends plus incoming and outgoing fri
 ### Plan
 
 - [x] First fix client-side duplicate refreshes with an in-flight guard.
-- [ ] Audit all `refreshFriends()` triggers: tab open, manager initialization, friend-request websocket event,
+- [x] Audit all `refreshFriends()` triggers: tab open, manager initialization, friend-request websocket event,
   mutations, and app resume if present.
-- [ ] Raise `SENSITIVE_LIMITS.friendsList` only if deduped normal use still approaches the cap.
-- [ ] Keep mutation limits tighter than read limits.
+- [x] Add a short client-side freshness window for normal tab refreshes so repeated opens reuse the recent read
+  instead of re-querying `/friends/requests`.
+- [x] Force refreshes after mutations and friend-request websocket events so real state changes are still visible
+  immediately.
+- [x] Keep `SENSITIVE_LIMITS.friendsList` unchanged unless deduped normal use still approaches the cap.
+- [x] Keep mutation limits tighter than read limits.
 
 ### Verification
 
@@ -95,7 +99,7 @@ The client refresh path requests accepted friends plus incoming and outgoing fri
 
 ## 4. Redis exporter crash loop creates false `RedisDown`
 
-**Status:** [x] Diagnosed / [ ] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [x] Merged
 
 ### Problem
 
@@ -109,10 +113,9 @@ Prometheus fired `RedisDown`.
 
 ### Plan
 
-- [ ] Patch `compose.prod.yaml` to use the Redis exporter's supported raw password-file flag or environment
-  wiring correctly.
-- [ ] Keep the Redis password file-backed; do not move it into an environment value.
-- [ ] Confirm the exporter can authenticate against Redis without exposing the password in `docker inspect`.
+- [x] Patch `compose.prod.yaml` to mount a generated Redis exporter password-file in the upstream JSON format.
+- [x] Keep the Redis password file-backed; do not move it into an environment value or process argv.
+- [x] Force-recreate `redis-exporter` when the Redis password changes so it reloads the generated file.
 
 ### Verification
 
@@ -122,7 +125,7 @@ Prometheus fired `RedisDown`.
 
 ## 5. coturn scrape failure creates false `ArgusCoturnDown`
 
-**Status:** [x] Diagnosed / [ ] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
 
 ### Problem
 
@@ -135,10 +138,11 @@ the scrape protocol. The coturn healthcheck itself was healthy.
 
 ### Plan
 
-- [ ] Add the Prometheus 3 fallback scrape protocol setting to the coturn scrape job in
+- [x] Add the Prometheus 3 fallback scrape protocol setting to the coturn scrape job in
   `infra/stack/observability/prometheus/prometheus.yml`.
-- [ ] Keep coturn internal/host-local scraping only; do not publish a metrics port.
-- [ ] Confirm the alert description does not claim the relay is down when the scrape parser is the failure.
+- [x] Recreate Prometheus during deploy when the bind-mounted Prometheus config or rules change.
+- [x] Keep coturn internal/host-local scraping only; do not publish a metrics port.
+- [x] Confirm the alert description does not claim the relay is down when the scrape parser is the failure.
 
 ### Verification
 

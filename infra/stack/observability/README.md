@@ -19,7 +19,8 @@ container stdout (json logs) ──Alloy (ro tail, no socket, scrub)──▶ lo
 |------|------|
 | `prometheus/prometheus.yml` | scrape config (scrapes `api:9090` + self), alerting → `alertmanager:9093` |
 | `prometheus/rules/argus-api.yml` | alert rules + the API **SLOs** (availability, 5xx < 1%/5%, p95 < 1s) |
-| `alertmanager/alertmanager.yml` | routing + a **null receiver** (wire a real webhook/email at arming, secret from Key Vault) |
+| `alertmanager/alertmanager.yml` | armed routing to a webhook loaded from `alertmanager_webhook_url` |
+| `alertmanager/alertmanager.unarmed.yml` | null receiver used by deploy.sh while the webhook secret is empty |
 | `grafana/provisioning/datasources/` | the Prometheus **and Loki** datasources (read-only) |
 | `grafana/provisioning/dashboards/` | the file-based dashboard provider |
 | `grafana/dashboards/argus-api-overview.json` | starter dashboard (request rate, 5xx ratio, latency p50/95/99, process) |

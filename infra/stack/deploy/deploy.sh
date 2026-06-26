@@ -126,11 +126,63 @@ install -m 0640 -o root -g argus "$REPO_ROOT/compose.prod.yaml" "$COMPOSE"
 # Observability config tree (Prometheus/Grafana/Alertmanager) — the compose services bind-mount it read-only
 # at ./infra/stack/observability (relative to $COMPOSE in $APP_DIR). World-readable (0755 dirs / 0644 files) so
 # the non-root prometheus/grafana container users can read it; it contains NO secrets (Grafana's admin pw is a
-# Key Vault credential file, not in this tree). Refresh from the staged repo each deploy.
+# Key Vault credential file, not in this tree). Refresh from the staged repo each deploy. Track the last
+# successfully applied Prometheus hash outside the replaced tree so failed deploy retries still recreate
+# Prometheus after a config-only change.
+_prometheus_applied_hash_file="$APP_DIR/.prometheus-config-applied.sha256"
+_prometheus_applied_hash=""
+if [ -f "$_prometheus_applied_hash_file" ]; then
+  _prometheus_applied_hash="$(cat "$_prometheus_applied_hash_file")"
+fi
 rm -rf "$APP_DIR/infra/stack/observability" "$APP_DIR/infra/stack/glitchtip"
 install -d -m 0755 "$APP_DIR/infra/stack"
 cp -a "$REPO_ROOT/infra/stack/observability" "$APP_DIR/infra/stack/observability"
 chmod -R a+rX "$APP_DIR/infra/stack/observability"
+PROMETHEUS_CONF_CHANGED=1
+_prometheus_new_hash="$(
+  find "$APP_DIR/infra/stack/observability/prometheus" -type f -print0 |
+    sort -z |
+    xargs -0 sha256sum |
+    sha256sum |
+    cut -d' ' -f1
+)"
+PROMETHEUS_CONF_HASH="$_prometheus_new_hash"
+if [ -n "$_prometheus_applied_hash" ] && [ "$_prometheus_applied_hash" = "$PROMETHEUS_CONF_HASH" ]; then
+  PROMETHEUS_CONF_CHANGED=0
+fi
+_prometheus_applied_hash=""
+_prometheus_new_hash=""
+_grafana_dashboards_dir="$APP_DIR/infra/stack/observability/grafana/dashboards"
+_grafana_provisioning_dir="$APP_DIR/infra/stack/observability/grafana/provisioning"
+if [ ! -d "$_grafana_dashboards_dir" ]; then
+  log "FATAL: missing Grafana dashboards directory after staging: $_grafana_dashboards_dir"
+  exit 1
+fi
+if ! find "$_grafana_dashboards_dir" -type f -name '*.json' -print -quit | grep -q .; then
+  log "FATAL: no Grafana dashboard JSON files staged in $_grafana_dashboards_dir"
+  exit 1
+fi
+_grafana_applied_hash_file="$APP_DIR/.grafana-config-applied.sha256"
+_grafana_applied_hash=""
+if [ -f "$_grafana_applied_hash_file" ]; then
+  _grafana_applied_hash="$(cat "$_grafana_applied_hash_file")"
+fi
+GRAFANA_CONF_CHANGED=1
+_grafana_new_hash="$(
+  find "$_grafana_provisioning_dir" "$_grafana_dashboards_dir" -type f -print0 |
+    sort -z |
+    xargs -0 sha256sum |
+    sha256sum |
+    cut -d' ' -f1
+)"
+GRAFANA_CONF_HASH="$_grafana_new_hash"
+if [ -n "$_grafana_applied_hash" ] && [ "$_grafana_applied_hash" = "$GRAFANA_CONF_HASH" ]; then
+  GRAFANA_CONF_CHANGED=0
+fi
+_grafana_applied_hash=""
+_grafana_new_hash=""
+_grafana_dashboards_dir=""
+_grafana_provisioning_dir=""
 # GlitchTip entrypoint wrapper — bind-mounted read-only into the glitchtip + glitchtip-worker containers.
 # Contains NO secrets (reads them from Docker-secret files at runtime); world-executable so the container
 # user can exec it regardless of uid.
@@ -195,6 +247,9 @@ _tunnel_token_old_sha=""
 # so step 6 can force-recreate the api when the key changes. Empty when the file doesn't exist yet (first deploy).
 _vapid_key_old_sha=""
 [ -f "$SECRETS_DIR/vapid_private_key" ] && _vapid_key_old_sha="$(sha256sum "$SECRETS_DIR/vapid_private_key" | cut -d' ' -f1)"
+_alertmanager_webhook_old_sha=""
+[ -f "$SECRETS_DIR/alertmanager_webhook_url" ] &&
+  _alertmanager_webhook_old_sha="$(sha256sum "$SECRETS_DIR/alertmanager_webhook_url" | cut -d' ' -f1)"
 systemctl restart argus-secrets.service
 systemctl enable argus-secrets.service >/dev/null 2>&1 || true
 # TUNNEL_TOKEN_CHANGED=1 unless the freshly-fetched token byte-matches the pre-fetch one. =1 on a first deploy
@@ -215,6 +270,37 @@ if [ -n "$_vapid_key_old_sha" ] && [ -f "$SECRETS_DIR/vapid_private_key" ] &&
   VAPID_KEY_CHANGED=0
 fi
 _vapid_key_old_sha=""
+ALERTMANAGER_WEBHOOK_CHANGED=1
+if [ -n "$_alertmanager_webhook_old_sha" ] && [ -f "$SECRETS_DIR/alertmanager_webhook_url" ] &&
+  [ "$_alertmanager_webhook_old_sha" = "$(sha256sum "$SECRETS_DIR/alertmanager_webhook_url" | cut -d' ' -f1)" ]; then
+  ALERTMANAGER_WEBHOOK_CHANGED=0
+fi
+_alertmanager_webhook_old_sha=""
+_alertmanager_conf="$APP_DIR/infra/stack/observability/alertmanager/alertmanager.yml"
+_alertmanager_unarmed_conf="$APP_DIR/infra/stack/observability/alertmanager/alertmanager.unarmed.yml"
+if [ ! -f "$_alertmanager_conf" ] || [ ! -f "$_alertmanager_unarmed_conf" ]; then
+  log "FATAL: missing Alertmanager config template after staging"
+  exit 1
+fi
+if [ -s "$SECRETS_DIR/alertmanager_webhook_url" ]; then
+  log "alertmanager webhook is armed; using webhook receiver config"
+else
+  log "alertmanager webhook is unarmed; using null receiver config"
+  cp "$_alertmanager_unarmed_conf" "$_alertmanager_conf"
+fi
+_alertmanager_applied_hash_file="$APP_DIR/.alertmanager-config-applied.sha256"
+_alertmanager_applied_hash=""
+if [ -f "$_alertmanager_applied_hash_file" ]; then
+  _alertmanager_applied_hash="$(cat "$_alertmanager_applied_hash_file")"
+fi
+ALERTMANAGER_CONF_CHANGED=1
+ALERTMANAGER_CONF_HASH="$(sha256sum "$_alertmanager_conf" | cut -d' ' -f1)"
+if [ -n "$_alertmanager_applied_hash" ] && [ "$_alertmanager_applied_hash" = "$ALERTMANAGER_CONF_HASH" ]; then
+  ALERTMANAGER_CONF_CHANGED=0
+fi
+_alertmanager_applied_hash=""
+_alertmanager_conf=""
+_alertmanager_unarmed_conf=""
 
 # --- 3. GHCR login (token from Key Vault, transient) + pull the signed images. ---
 log "pulling images ${IMAGE_TAG} from ${GHCR_REGISTRY}"
@@ -249,12 +335,13 @@ export ARGUS_INGRESS_IMAGE="$ingress_digest"
 export ARGUS_SECRETS_DIR="$SECRETS_DIR"
 
 # --- 3b. Redis AUTH prep — MUST run before step 4 starts redis. From the Key Vault redis_password, generate
-#        two credential FILES (never env — invariant #5: a password in container env surfaces via `docker
+#        three credential FILES (never env — invariant #5: a password in container env surfaces via `docker
 #        inspect` / the daemon's at-rest config):
 #          • redis.conf  → redis-server `requirepass` (config-file AUTH, never a `--requirepass` argv leak)
 #          • redis_url   → the api's REDIS_URL_FILE (ioredis parses `redis://:<pw>@redis:6379`)
-#        Both are 0444 tmpfs Docker-secret files (0444 not 0400 — file-secrets are bind-mounted root-owned and
-#        must be readable by the non-root container users; see the chmod note below). The raw redis_password
+#          • redis_exporter_passwords.json → redis_exporter's REDIS_PASSWORD_FILE JSON map
+#        All three are 0444 tmpfs Docker-secret files (0444 not 0400 — file-secrets are bind-mounted root-owned
+#        and must be readable by the non-root container users; see the chmod note below). The raw redis_password
 #        file (already fetched) is mounted into redis so its healthcheck reads REDISCLI_AUTH from a file too.
 #        So NO Redis credential ever lands in env.
 #        These must exist before the first `up -d ... redis` — generating them in step 6 (after redis already
@@ -275,6 +362,7 @@ case "$_redispw" in
   ;;
 esac
 _redis_conf="$(printf 'save ""\nappendonly no\nrequirepass %s' "$_redispw")"
+_redis_exporter_passwords="$(printf '{"redis://redis:6379":"%s"}' "$_redispw")"
 # Detect whether the redis password/conf CHANGED since the last deploy so step 4 can force-recreate redis only
 # when it must (see there). `up -d` recreates a container on a config/image change but NOT when a mounted
 # secret FILE's *content* changes — so a rotated redis password wouldn't reach the running redis without this.
@@ -284,14 +372,16 @@ if [ -f "$SECRETS_DIR/redis.conf" ] && [ "$_redis_conf" = "$(cat "$SECRETS_DIR/r
 fi
 printf '%s\n' "$_redis_conf" >"$SECRETS_DIR/redis.conf"
 printf 'redis://:%s@redis:6379' "$_redispw" >"$SECRETS_DIR/redis_url"
+printf '%s\n' "$_redis_exporter_passwords" >"$SECRETS_DIR/redis_exporter_passwords.json"
 # Mode 0444, NOT 0400: file-based Compose secrets are bind-mounted, and the host file's owner/mode carry
 # through to the container UNCHANGED on Linux (no uid/gid remapping — that only happens on macOS Docker
 # Desktop's file-sharing layer, which is why a Mac test misleadingly "passes"). These files are root-owned,
 # so a 0400 file is unreadable by the non-root consumers (redis uid 999, api/node uid 1000) and the rollout
 # fails. 0444 lets the container user read them; confinement is the 0700 root tmpfs SECRETS_DIR, not the mode.
-chmod 0444 "$SECRETS_DIR/redis.conf" "$SECRETS_DIR/redis_url"
+chmod 0444 "$SECRETS_DIR/redis.conf" "$SECRETS_DIR/redis_url" "$SECRETS_DIR/redis_exporter_passwords.json"
 _redispw=""
 _redis_conf=""
+_redis_exporter_passwords=""
 
 # --- 3c. GlitchTip DATABASE_URL — derived from glitchtip_db_password (same pattern as redis_url above).
 #         The URL is NEVER stored in Key Vault directly; only the password is. This keeps the single source
@@ -337,6 +427,11 @@ docker compose -f "$COMPOSE" up -d postgres
 if [ "${REDIS_CONF_CHANGED:-1}" = 1 ]; then
   log "redis conf is new/changed — (re)creating redis to load the current password"
   docker compose -f "$COMPOSE" up -d --force-recreate --no-deps redis
+  # redis-exporter reads the generated REDIS_PASSWORD_FILE. Recreate it immediately after redis has the new
+  # password so Prometheus does not scrape an exporter still using the old startup-loaded password map during
+  # the longer migration/probe section below.
+  log "redis conf is new/changed — force-recreating redis-exporter to load the current password file"
+  docker compose -f "$COMPOSE" up -d --force-recreate redis-exporter
 else
   docker compose -f "$COMPOSE" up -d --no-deps redis
 fi
@@ -575,6 +670,21 @@ fi
 # No TUNNEL_TOKEN env: cloudflared reads the token from its mounted file-secret (TUNNEL_TOKEN_FILE), so the
 # value never enters the compose/up environment or container config.
 docker compose -f "$COMPOSE" up -d $STACK_SERVICES
+if [ "${PROMETHEUS_CONF_CHANGED:-1}" = 1 ]; then
+  log "prometheus config changed; force-recreating prometheus so the refreshed bind mount is loaded"
+  docker compose -f "$COMPOSE" up -d --force-recreate --no-deps prometheus
+  printf '%s\n' "$PROMETHEUS_CONF_HASH" >"$_prometheus_applied_hash_file"
+fi
+if [ "${ALERTMANAGER_CONF_CHANGED:-1}" = 1 ] || [ "${ALERTMANAGER_WEBHOOK_CHANGED:-1}" = 1 ]; then
+  log "alertmanager config or webhook secret changed; force-recreating alertmanager so the selected receiver config is loaded"
+  docker compose -f "$COMPOSE" up -d --force-recreate --no-deps alertmanager
+  printf '%s\n' "$ALERTMANAGER_CONF_HASH" >"$_alertmanager_applied_hash_file"
+fi
+if [ "${GRAFANA_CONF_CHANGED:-1}" = 1 ]; then
+  log "grafana provisioning changed; force-recreating grafana so the refreshed bind mount is loaded"
+  docker compose -f "$COMPOSE" up -d --force-recreate --no-deps grafana
+  printf '%s\n' "$GRAFANA_CONF_HASH" >"$_grafana_applied_hash_file"
+fi
 # The api reads REDIS_URL_FILE ONCE at module construction and holds a persistent ioredis connection. On a
 # redis password ROTATION the `up -d` above won't recreate the api when the image/config is unchanged (a
 # same-IMAGE_TAG/secret-only redeploy) — it would keep authenticating with the OLD password against the

@@ -81,6 +81,54 @@ test('friends panel shows accepted friends from API', async ({ page }) => {
   await expect(page.getByText('1 accepted')).toBeVisible();
 });
 
+test('friends panel reuses a recent refresh across repeated tab opens', async ({ page }) => {
+  let friendsCalls = 0;
+  let incomingCalls = 0;
+  let outgoingCalls = 0;
+
+  await page.route('**/api/friends', (route) => {
+    if (route.request().method() !== 'GET') {
+      void route.continue();
+      return;
+    }
+    friendsCalls += 1;
+    void route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ friends: [ALICE] }),
+    });
+  });
+
+  await page.route('**/api/friends/requests**', (route) => {
+    if (route.request().method() !== 'GET') {
+      void route.continue();
+      return;
+    }
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('box') === 'incoming') incomingCalls += 1;
+    else outgoingCalls += 1;
+    void route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ requests: [] }),
+    });
+  });
+
+  await page.goto('/chat');
+  await page.getByRole('link', { name: 'Friends' }).click();
+  await expect(page.getByRole('button', { name: /Open conversation with Alice/ })).toBeVisible();
+
+  await page.getByRole('link', { name: 'Chat', exact: true }).click();
+  await page.getByRole('link', { name: 'Friends' }).click();
+  await page.getByRole('link', { name: 'Chat', exact: true }).click();
+  await page.getByRole('link', { name: 'Friends' }).click();
+  await page.waitForTimeout(250);
+
+  expect(friendsCalls).toBe(1);
+  expect(incomingCalls).toBe(1);
+  expect(outgoingCalls).toBe(1);
+});
+
 test('friends panel retries a transient accepted-friends refresh failure', async ({ page }) => {
   let friendsCalls = 0;
   await page.route('**/api/friends', (route) => {

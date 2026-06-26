@@ -60,6 +60,12 @@ export type { AnonymousProfile } from '../settings/ProfileSettings';
 
 const DEMO_PROFILE_SUBJECT = 'demo-local';
 const FRIENDS_REFRESH_RETRY_DELAYS_MS = [300, 900] as const;
+const FRIENDS_REFRESH_FRESH_MS = 10_000;
+const FRIENDS_REFRESH_FAILURE_BACKOFF_MS = 2_000;
+
+interface RefreshFriendsOptions {
+  force?: boolean;
+}
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
@@ -117,7 +123,7 @@ interface ChatContextValue {
   incomingRequests: FriendRequest[];
   outgoingRequests: FriendRequest[];
   friendsError: boolean;
-  refreshFriends: () => Promise<void>;
+  refreshFriends: (options?: RefreshFriendsOptions) => Promise<void>;
   // Peer maps (DM dedup + friendship gate)
   peerToConvId: Map<string, string>;
   convToPeerId: Map<string, string>;
@@ -177,6 +183,8 @@ export function ChatProvider({ children }: ChatProviderProps) {
   const [outgoingRequests, setOutgoingRequests] = useState<FriendRequest[]>([]);
   const [friendsError, setFriendsError] = useState(false);
   const refreshFriendsInFlight = useRef<Promise<void> | null>(null);
+  const refreshFriendsLastSuccessAt = useRef<number | null>(null);
+  const refreshFriendsLastFailureAt = useRef<number | null>(null);
   const inFlightRequestIds = useRef(new Set<string>());
   const [peerToConvId, setPeerToConvId] = useState<Map<string, string>>(new Map());
   const [convToPeerId, setConvToPeerId] = useState<Map<string, string>>(new Map());
@@ -243,85 +251,115 @@ export function ChatProvider({ children }: ChatProviderProps) {
     setConversations,
   });
 
-  const refreshFriends = useCallback(() => {
-    if (refreshFriendsInFlight.current) {
-      return refreshFriendsInFlight.current;
-    }
+  const refreshFriends = useCallback(
+    (options: RefreshFriendsOptions = {}) => {
+      if (refreshFriendsInFlight.current) {
+        return refreshFriendsInFlight.current;
+      }
 
-    const refresh = (async () => {
-      let failed = false;
-      let pendingTargets: Array<'friends' | 'incoming' | 'outgoing'> = [
-        'friends',
-        'incoming',
-        'outgoing',
-      ];
+      const now = Date.now();
+      const lastSuccessAt = refreshFriendsLastSuccessAt.current;
+      if (
+        !options.force &&
+        lastSuccessAt !== null &&
+        now - lastSuccessAt < FRIENDS_REFRESH_FRESH_MS
+      ) {
+        return Promise.resolve();
+      }
+      const lastFailureAt = refreshFriendsLastFailureAt.current;
+      if (
+        !options.force &&
+        lastFailureAt !== null &&
+        now - lastFailureAt < FRIENDS_REFRESH_FAILURE_BACKOFF_MS
+      ) {
+        return Promise.resolve();
+      }
 
-      for (let attempt = 0; attempt <= FRIENDS_REFRESH_RETRY_DELAYS_MS.length; attempt += 1) {
-        const retryDelayMs = FRIENDS_REFRESH_RETRY_DELAYS_MS[attempt];
-        const results = await Promise.all(
-          pendingTargets.map(async (target) => {
-            try {
-              if (target === 'friends') {
-                return { target, ok: true as const, value: await listFriends() };
+      const refresh = (async () => {
+        let failed = false;
+        let pendingTargets: Array<'friends' | 'incoming' | 'outgoing'> = [
+          'friends',
+          'incoming',
+          'outgoing',
+        ];
+
+        for (let attempt = 0; attempt <= FRIENDS_REFRESH_RETRY_DELAYS_MS.length; attempt += 1) {
+          const retryDelayMs = FRIENDS_REFRESH_RETRY_DELAYS_MS[attempt];
+          const results = await Promise.all(
+            pendingTargets.map(async (target) => {
+              try {
+                if (target === 'friends') {
+                  return { target, ok: true as const, value: await listFriends() };
+                }
+                return {
+                  target,
+                  ok: true as const,
+                  value: await listFriendRequests(target),
+                };
+              } catch (reason) {
+                return { target, ok: false as const, reason };
               }
-              return {
-                target,
-                ok: true as const,
-                value: await listFriendRequests(target),
-              };
-            } catch (reason) {
-              return { target, ok: false as const, reason };
-            }
-          }),
-        );
-        const nextPendingTargets: typeof pendingTargets = [];
+            }),
+          );
+          const nextPendingTargets: typeof pendingTargets = [];
 
-        for (const result of results) {
-          if (result.ok) {
-            if (result.target === 'friends') {
-              setFriends(result.value);
-              setFriendsLoaded(true);
-            } else if (result.target === 'incoming') {
-              setIncomingRequests(result.value);
-            } else {
-              setOutgoingRequests(result.value);
+          for (const result of results) {
+            if (result.ok) {
+              if (result.target === 'friends') {
+                setFriends(result.value);
+                setFriendsLoaded(true);
+              } else if (result.target === 'incoming') {
+                setIncomingRequests(result.value);
+              } else {
+                setOutgoingRequests(result.value);
+              }
+              continue;
             }
+
+            if (retryDelayMs !== undefined && isRetryableFriendRefreshReason(result.reason)) {
+              nextPendingTargets.push(result.target);
+            } else {
+              failed = true;
+            }
+          }
+
+          if (nextPendingTargets.length === 0) {
+            setFriendsError(failed && manager !== null);
+            if (failed) {
+              refreshFriendsLastFailureAt.current = Date.now();
+              refreshFriendsLastSuccessAt.current = null;
+            } else {
+              refreshFriendsLastSuccessAt.current = Date.now();
+              refreshFriendsLastFailureAt.current = null;
+            }
+            break;
+          }
+
+          if (retryDelayMs !== undefined) {
+            pendingTargets = nextPendingTargets;
+            await wait(retryDelayMs);
             continue;
           }
 
-          if (retryDelayMs !== undefined && isRetryableFriendRefreshReason(result.reason)) {
-            nextPendingTargets.push(result.target);
-          } else {
-            failed = true;
-          }
-        }
-
-        if (nextPendingTargets.length === 0) {
-          setFriendsError(failed && manager !== null);
+          setFriendsError(manager !== null);
+          refreshFriendsLastFailureAt.current = Date.now();
+          refreshFriendsLastSuccessAt.current = null;
           break;
         }
+      })().finally(() => {
+        refreshFriendsInFlight.current = null;
+      });
 
-        if (retryDelayMs !== undefined) {
-          pendingTargets = nextPendingTargets;
-          await wait(retryDelayMs);
-          continue;
-        }
-
-        setFriendsError(manager !== null);
-        break;
-      }
-    })().finally(() => {
-      refreshFriendsInFlight.current = null;
-    });
-
-    refreshFriendsInFlight.current = refresh;
-    return refresh;
-  }, [manager]);
+      refreshFriendsInFlight.current = refresh;
+      return refresh;
+    },
+    [manager],
+  );
 
   const refreshFriendsAfterChange = useCallback(async () => {
     const currentRefresh = refreshFriendsInFlight.current;
     if (currentRefresh) await currentRefresh;
-    await refreshFriends();
+    await refreshFriends({ force: true });
   }, [refreshFriends]);
 
   const { liveIds, liveGroups, addLive, connectionStatus, refoldPeerReceiptWatermarks } =
@@ -389,7 +427,7 @@ export function ChatProvider({ children }: ChatProviderProps) {
   }, [currentUserProfile]);
 
   useEffect(() => {
-    if (manager) void refreshFriends();
+    if (manager) void refreshFriends({ force: true });
   }, [refreshFriends, manager]);
 
   // Seed the shared privacy cache from the server before read receipts are allowed on fresh devices.
