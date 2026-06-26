@@ -40,7 +40,8 @@ limits_config:
   ingestion_rate_mb: 8
   ingestion_burst_size_mb: 16
   # Cardinality guards — the classic single-VM Loki footgun (a label explosion bloats the index on the disk
-  # Loki shares with Postgres). Only `stream` is a label today; this caps a future relabel from running away.
+  # Loki shares with Postgres). Log labels are intentionally low-cardinality: stream, service, service_name,
+  # compose_project, container, level, and context.
   max_streams_per_user: 5000
   max_label_names_per_series: 15
 

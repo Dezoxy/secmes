@@ -17,7 +17,7 @@
         "type": "query",
         "datasource": { "type": "loki", "uid": "argus-loki" },
         "query": {
-          "label": "context",
+          "label": "service",
           "refId": "StandardVariableQuery",
           "stream": "{job=\"docker\"}",
           "type": 1
@@ -73,7 +73,7 @@
         {
           "refId": "A",
           "datasource": { "type": "loki", "uid": "argus-loki" },
-          "expr": "sum by (level) (count_over_time({job=\"docker\"} | json [$__interval]))",
+          "expr": "sum by (level) (count_over_time({job=\"docker\", service=~\"$service\", level=~\"$level\"} [$__interval]))",
           "legendFormat": "{{level}}"
         }
       ]
@@ -95,7 +95,7 @@
         {
           "refId": "A",
           "datasource": { "type": "loki", "uid": "argus-loki" },
-          "expr": "{job=\"docker\"} | json | level=~\"$level\" | context=~\"$service\" |~ \"$search\""
+          "expr": "{job=\"docker\", service=~\"$service\", level=~\"$level\"} | json |~ \"$search\""
         }
       ]
     },
@@ -111,8 +111,8 @@
         {
           "refId": "A",
           "datasource": { "type": "loki", "uid": "argus-loki" },
-          "expr": "sum by (context) (count_over_time({job=\"docker\", level=\"error\"} | json [$__range]))",
-          "legendFormat": "{{context}}"
+          "expr": "sum by (service) (count_over_time({job=\"docker\", service=~\"$service\", level=\"error\"} [$__range]))",
+          "legendFormat": "{{service}}"
         }
       ]
     },
@@ -128,8 +128,8 @@
         {
           "refId": "A",
           "datasource": { "type": "loki", "uid": "argus-loki" },
-          "expr": "sum by (context) (count_over_time({job=\"docker\", level=\"warn\"} | json [$__range]))",
-          "legendFormat": "{{context}}"
+          "expr": "sum by (service) (count_over_time({job=\"docker\", service=~\"$service\", level=\"warn\"} [$__range]))",
+          "legendFormat": "{{service}}"
         }
       ]
     }

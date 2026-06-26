@@ -1,5 +1,11 @@
 name: argus-prod
 
+x-json-log-labels: &json-log-labels
+  logging:
+    driver: json-file
+    options:
+      labels: com.docker.compose.project,com.docker.compose.service
+
 # Production stack for the single Azure VM (germanywestcentral). STANDALONE — run it on its own, NOT layered
 # over compose.yaml (which is local-dev only and carries throwaway creds + MinIO + dev source mounts):
 #   docker compose -f compose.prod.yaml up -d
@@ -26,6 +32,7 @@ name: argus-prod
 
 services:
   postgres:
+    <<: *json-log-labels
     image: postgres:16-alpine
     restart: unless-stopped
     # Bootstrap OWNER account (init + migrations). The API does NOT connect as this role — it uses the
@@ -68,6 +75,7 @@ services:
           cpus: '1.5'
 
   redis:
+    <<: *json-log-labels
     image: redis:8-alpine
     restart: unless-stopped
     # AUTH via a generated CONFIG FILE (`requirepass` from Key Vault) — never a `--requirepass` CLI arg, which
@@ -102,6 +110,7 @@ services:
           cpus: '0.5'
 
   api:
+    <<: *json-log-labels
     # Image is built + scanned + signed by cd.yml and pulled by tag here (CD sets ARGUS_API_IMAGE to the
     # registry digest/tag). No build stanza in prod — the VM pulls a known-good image, it does not build.
     # The API also listens on :9090 (METRICS_PORT) for the Prometheus scrape (checkpoint 47). NO published
@@ -215,6 +224,7 @@ services:
           cpus: '1.0'
 
   caddy:
+    <<: *json-log-labels
     # Single-origin router: serves the PWA static build (baked in) + proxies /api,/ws to the api.
     # Built from the repo root by cd.yml and pulled by tag; the build stanza lets you build it locally too.
     image: ${ARGUS_INGRESS_IMAGE:-argus-ingress:local}
@@ -246,6 +256,7 @@ services:
           cpus: '0.5'
 
   cloudflared:
+    <<: *json-log-labels
     # Outbound tunnel to the Cloudflare edge — the ONLY ingress. No published ports. Ingress hostnames
     # (4rgus.com → http://caddy:8080, admin.* behind Cloudflare Access) are dashboard-managed (token tunnel).
     # Pin: verify/refresh the tag before first deploy (Dependabot tracks it). cloudflared is date-versioned.
@@ -341,6 +352,7 @@ services:
   # repo tree deploy.sh stages into /opt/argus. NO published ports — only Grafana is reachable, via Caddy +
   # Access. Threat model: docs/threat-models/observability.md.
   prometheus:
+    <<: *json-log-labels
     image: prom/prometheus:v3.6.0
     restart: unless-stopped
     command:
@@ -368,6 +380,7 @@ services:
           cpus: '0.75'
 
   alertmanager:
+    <<: *json-log-labels
     image: prom/alertmanager:v0.29.0
     restart: unless-stopped
     command:
@@ -395,6 +408,7 @@ services:
   # Cloudflare Access). Admin password is a Key-Vault credential FILE via Grafana's native `__FILE` support
   # (invariant #5 — never an env value at rest). Anonymous + sign-up disabled; phone-home off.
   grafana:
+    <<: *json-log-labels
     image: grafana/grafana:12.1.1
     restart: unless-stopped
     environment:
@@ -435,6 +449,7 @@ services:
   # FS + tmpfs, filesystem storage on a named volume; 7-day retention. Verify/refresh the image tag at arming.
   # Threat model: docs/threat-models/centralized-logs.md.
   loki:
+    <<: *json-log-labels
     image: grafana/loki:3.5.0
     restart: unless-stopped
     command: ['-config.file=/etc/loki/loki-config.yml']
@@ -461,6 +476,7 @@ services:
   # socket bound it (it can read logs and nothing more). Pushes to Loki over the internal network; no published
   # port. The config scrubs secret-shaped values as defense-in-depth. See docs/threat-models/centralized-logs.md.
   alloy:
+    <<: *json-log-labels
     image: grafana/alloy:v1.16.3
     restart: unless-stopped
     command:
@@ -499,6 +515,7 @@ services:
   # http://tempo:4318 (OTEL_EXPORTER_OTLP_ENDPOINT above). 72-h block retention — traces are more
   # ephemeral than logs. Threat model: docs/threat-models/structured-logging-and-tracing.md.
   tempo:
+    <<: *json-log-labels
     image: grafana/tempo:2.9.0
     restart: unless-stopped
     command: ['-config.file=/etc/tempo/tempo-config.yml']
@@ -521,6 +538,7 @@ services:
   # Continuous profiling (observability Track D). INTERNAL ONLY — no published ports. Grafana queries
   # http://pyroscope:4040; the API SDK pushes profiles. Profiles contain stack frames only (no data values).
   pyroscope:
+    <<: *json-log-labels
     image: grafana/pyroscope:1.13.0
     restart: unless-stopped
     # -compactor.blocks-retention-period: the YAML equivalent field does not exist in
@@ -548,6 +566,7 @@ services:
   # internal Docker network. PG_EXPORTER_DISABLE_SETTINGS_METRICS prevents leaking GUC values as
   # metric labels (invariant #6). redis-exporter reads auth from a file (invariant #5).
   postgres-exporter:
+    <<: *json-log-labels
     image: prometheuscommunity/postgres-exporter:v0.17.0
     restart: unless-stopped
     # Use DATA_SOURCE_PASS_FILE + DATA_SOURCE_USER + DATA_SOURCE_URI instead of DATA_SOURCE_NAME so the
@@ -577,6 +596,7 @@ services:
           cpus: '0.25'
 
   redis-exporter:
+    <<: *json-log-labels
     image: oliver006/redis_exporter:v1.74.0
     restart: unless-stopped
     environment:
@@ -612,6 +632,7 @@ services:
   # See docs/threat-models/error-tracking.md.
 
   glitchtip-db:
+    <<: *json-log-labels
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
@@ -645,6 +666,7 @@ services:
           cpus: '0.5'
 
   glitchtip:
+    <<: *json-log-labels
     # Pin: verify/refresh the tag before first deploy (Dependabot tracks it).
     image: glitchtip/glitchtip:6.1.8
     restart: unless-stopped
@@ -698,6 +720,7 @@ services:
           cpus: '0.75'
 
   glitchtip-worker:
+    <<: *json-log-labels
     # Pin: verify/refresh the tag before first deploy (Dependabot tracks it).
     image: glitchtip/glitchtip:6.1.8
     restart: unless-stopped
