@@ -669,6 +669,18 @@ fi
 # shellcheck disable=SC2086 # intentional word-splitting: empty STACK_SERVICES = all services; else the explicit set
 # No TUNNEL_TOKEN env: cloudflared reads the token from its mounted file-secret (TUNNEL_TOKEN_FILE), so the
 # value never enters the compose/up environment or container config.
+_pyroscope_volume_owner_marker="$APP_DIR/.pyroscope-volume-owner-v1"
+if [ ! -f "$_pyroscope_volume_owner_marker" ]; then
+  log "ensuring pyroscope data volumes are writable by uid/gid 10001"
+  docker volume create argus-prod_pyroscope-data >/dev/null
+  docker volume create argus-prod_pyroscope-compactor-data >/dev/null
+  docker run --rm --user 0 --entrypoint chown -v argus-prod_pyroscope-data:/data \
+    postgres:16-alpine -R 10001:10001 /data >/dev/null
+  docker run --rm --user 0 --entrypoint chown -v argus-prod_pyroscope-compactor-data:/data-compactor \
+    postgres:16-alpine -R 10001:10001 /data-compactor >/dev/null
+  touch "$_pyroscope_volume_owner_marker"
+fi
+_pyroscope_volume_owner_marker=""
 docker compose -f "$COMPOSE" up -d $STACK_SERVICES
 if [ "${PROMETHEUS_CONF_CHANGED:-1}" = 1 ]; then
   log "prometheus config changed; force-recreating prometheus so the refreshed bind mount is loaded"

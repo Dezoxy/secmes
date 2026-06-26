@@ -541,6 +541,8 @@ services:
     <<: *json-log-labels
     image: grafana/pyroscope:1.13.0
     restart: unless-stopped
+    # The upstream image runs as uid/gid 10001 and pre-owns /data + /data-compactor.
+    # Mount the writable volumes there so read_only rootfs can stay enabled.
     # -compactor.blocks-retention-period: the YAML equivalent field does not exist in
     # compactor.Config in Pyroscope 1.13.0 (the struct was refactored); pass it as a CLI flag.
     command:
@@ -548,7 +550,8 @@ services:
       - '-compactor.blocks-retention-period=72h'
     volumes:
       - ./infra/stack/observability/pyroscope:/etc/pyroscope:ro
-      - pyroscope-data:/var/pyroscope
+      - pyroscope-data:/data
+      - pyroscope-compactor-data:/data-compactor
     read_only: true
     tmpfs:
       - /tmp
@@ -873,5 +876,6 @@ volumes:
   tempo-data:
   # Continuous profiling (Track D): Pyroscope profile blocks (72-h retention).
   pyroscope-data:
+  pyroscope-compactor-data:
   # GlitchTip dedicated Postgres data (roadmap #48 Slice B) — separate cluster from the app DB.
   glitchtip-db-data:
