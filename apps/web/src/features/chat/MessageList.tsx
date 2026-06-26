@@ -9,6 +9,8 @@ interface MessageListProps {
   bottomNavClearance?: boolean;
   /** Chat thread: reserve room so messages clear the floating header + input bars. */
   floatingBars?: boolean;
+  /** Increment to force an instant scroll-to-bottom (e.g. when re-entering the same conversation). */
+  scrollTrigger?: number;
 }
 
 export function MessageList({
@@ -16,6 +18,7 @@ export function MessageList({
   onImageClick,
   bottomNavClearance = false,
   floatingBars = false,
+  scrollTrigger,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const previousMessageCount = useRef(conversation.messages.length);
@@ -30,6 +33,16 @@ export function MessageList({
     },
     [],
   );
+
+  // Scroll to bottom whenever the conversation is (re-)entered, using rAF to ensure layout is ready.
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node) return;
+    const id = requestAnimationFrame(() => {
+      node.scrollTo({ top: node.scrollHeight, behavior: 'auto' });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [scrollTrigger]);
 
   useEffect(() => {
     const node = scrollRef.current;
