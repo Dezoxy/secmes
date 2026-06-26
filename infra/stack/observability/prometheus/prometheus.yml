@@ -48,5 +48,8 @@ scrape_configs:
   # (Docker resolves host.docker.internal → host IP via extra_hosts in compose.prod.yaml).
   # Port 9641 is not opened in the NSG; scraping is host-local only.
   - job_name: coturn
+    # coturn 4.6.2 exposes classic Prometheus text but can omit Content-Type; Prometheus 3 needs an
+    # explicit fallback protocol for blank/unparseable response headers.
+    fallback_scrape_protocol: PrometheusText0.0.4
     static_configs:
       - targets: ['host.docker.internal:9641']

@@ -99,7 +99,7 @@ The client refresh path requests accepted friends plus incoming and outgoing fri
 
 ## 4. Redis exporter crash loop creates false `RedisDown`
 
-**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [x] Merged
 
 ### Problem
 
@@ -125,7 +125,7 @@ Prometheus fired `RedisDown`.
 
 ## 5. coturn scrape failure creates false `ArgusCoturnDown`
 
-**Status:** [x] Diagnosed / [ ] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
 
 ### Problem
 
@@ -138,10 +138,10 @@ the scrape protocol. The coturn healthcheck itself was healthy.
 
 ### Plan
 
-- [ ] Add the Prometheus 3 fallback scrape protocol setting to the coturn scrape job in
+- [x] Add the Prometheus 3 fallback scrape protocol setting to the coturn scrape job in
   `infra/stack/observability/prometheus/prometheus.yml`.
-- [ ] Keep coturn internal/host-local scraping only; do not publish a metrics port.
-- [ ] Confirm the alert description does not claim the relay is down when the scrape parser is the failure.
+- [x] Keep coturn internal/host-local scraping only; do not publish a metrics port.
+- [x] Confirm the alert description does not claim the relay is down when the scrape parser is the failure.
 
 ### Verification
 
