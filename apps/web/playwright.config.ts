@@ -21,6 +21,7 @@ export default defineConfig({
     env: {
       VITE_DEMO_MODE: '1',
       VITE_E2E_GROUP_CREATE: '1',
+      VITE_E2E_FRIENDS_UNAVAILABLE: '1',
       VITE_OIDC_ISSUER: '',
       VITE_OIDC_CLIENT_ID: '',
       VITE_OIDC_REDIRECT_URI: '',
