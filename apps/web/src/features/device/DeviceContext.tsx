@@ -92,6 +92,8 @@ interface DeviceState {
    * proceed to create a new device. Only meaningful in that state; a no-op otherwise.
    */
   confirmReset: () => Promise<void>;
+  /** Mark this local device as trusted after the server-approved enrollment event reaches this PWA. */
+  markDeviceTrusted: () => void;
 }
 
 const DeviceCtx = createContext<DeviceState | null>(null);
@@ -313,6 +315,10 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
     }
   }, [keystore, status]);
 
+  const markDeviceTrusted = useCallback(() => {
+    setDeviceIsProvisional((current) => (current === true ? false : current));
+  }, []);
+
   const value: DeviceState = {
     device,
     pool,
@@ -326,6 +332,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
     unlock,
     resetForNewAccount,
     confirmReset,
+    markDeviceTrusted,
   };
   return <DeviceCtx.Provider value={value}>{children}</DeviceCtx.Provider>;
 }

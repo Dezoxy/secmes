@@ -67,7 +67,8 @@ export function RoutePageShell({
   // external/prior-tab entries) keeps deep links, fresh PWA loads, and external referrers landing on
   // /chat instead of navigating off-site.
   const handleBack = useCallback(() => {
-    if (location.key !== 'default' || consumeRouteShellBackMarker()) {
+    const routeShellBack = consumeRouteShellBackMarker();
+    if (location.key !== 'default' || routeShellBack) {
       navigate(-1);
     } else {
       // No in-app history: replace (don't push) this deep-link entry, otherwise the browser/system Back

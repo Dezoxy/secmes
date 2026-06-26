@@ -173,7 +173,8 @@ export function ChatProvider({ children }: ChatProviderProps) {
   const [privacySettingsVersion, setPrivacySettingsVersion] = useState(0);
   const mappedDMConvsRef = useRef(new Set<string>());
 
-  const { device, pool, deviceId, deviceIsProvisional, keystore, sessionKey } = useDevice();
+  const { device, pool, deviceId, deviceIsProvisional, keystore, sessionKey, markDeviceTrusted } =
+    useDevice();
   const { profile, subjectId } = useAuth();
   const profileSubjectId = subjectId ?? DEMO_PROFILE_SUBJECT;
 
@@ -260,6 +261,7 @@ export function ChatProvider({ children }: ChatProviderProps) {
       backfillInto,
       setConversations,
       onEnrollmentPending: useCallback((id: string) => setPendingEnrollmentId(id), []),
+      onEnrollmentApproved: markDeviceTrusted,
       onPeerKeyChanged: useCallback(
         (_peerUserId: string, conversationId: string, newNumbers: string[]) => {
           setNumbersByConv((prev) => ({ ...prev, [conversationId]: newNumbers[0] ?? '' }));

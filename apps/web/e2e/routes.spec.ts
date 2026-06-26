@@ -26,6 +26,12 @@ test('the route shell back button steps back through in-app history', async ({ p
 
   await page.getByRole('button', { name: 'Go back' }).click();
   await expect(page).toHaveURL(/\/security$/);
+
+  // The consumed shell marker must not leak into a later direct route load; otherwise the next "deep link"
+  // back action would incorrectly step through old browser history instead of returning to Chat.
+  await page.goto('/storage');
+  await page.getByRole('button', { name: 'Go back' }).click();
+  await expect(page).toHaveURL(/\/chat$/);
 });
 
 test('the route shell back button falls back to chat on a deep link with no in-app history', async ({

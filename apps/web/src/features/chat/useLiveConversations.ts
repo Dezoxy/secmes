@@ -120,6 +120,8 @@ interface UseLiveConversationsOptions {
   setConversations: Dispatch<SetStateAction<Conversation[]>>;
   /** Called when another device of this user registers a pending enrollment request (D1 side). */
   onEnrollmentPending?: (enrollmentId: string) => void;
+  /** Called when this device's enrollment is approved (D2 side). */
+  onEnrollmentApproved?: () => void;
   /** Called when a new incoming friend request arrived — caller should refresh incoming requests. */
   onFriendRequest?: () => void;
   /**
@@ -245,6 +247,7 @@ export function useLiveConversations({
   backfillInto,
   setConversations,
   onEnrollmentPending,
+  onEnrollmentApproved,
   onFriendRequest,
   onPeerKeyChanged,
   onPeerVerified,
@@ -746,6 +749,7 @@ export function useLiveConversations({
       },
       // B2: this user's enrollment was approved — D2 drains Welcomes to join conversations D1 added it to.
       onEnrollmentApproved: () => {
+        onEnrollmentApproved?.();
         drainRef.current();
       },
       onFriendRequest: () => {
@@ -798,6 +802,7 @@ export function useLiveConversations({
     backfillInto,
     mergeIncoming,
     messagingDeps,
+    onEnrollmentApproved,
     onEnrollmentPending,
     onFriendRequest,
     onSyncLost,
