@@ -140,6 +140,7 @@ the scrape protocol. The coturn healthcheck itself was healthy.
 
 - [x] Add the Prometheus 3 fallback scrape protocol setting to the coturn scrape job in
   `infra/stack/observability/prometheus/prometheus.yml`.
+- [x] Reload Prometheus during deploy when the bind-mounted Prometheus config or rules change.
 - [x] Keep coturn internal/host-local scraping only; do not publish a metrics port.
 - [x] Confirm the alert description does not claim the relay is down when the scrape parser is the failure.
 
