@@ -67,6 +67,11 @@ class PublishResultDto {
 
   @ApiProperty({ description: 'total unclaimed KeyPackages for this device after the call' })
   available!: number;
+
+  @ApiProperty({
+    description: 'true when this device must still be approved by an existing trusted device',
+  })
+  isProvisional!: boolean;
 }
 
 class ClaimedKeyPackageDto {

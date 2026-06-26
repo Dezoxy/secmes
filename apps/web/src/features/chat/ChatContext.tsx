@@ -123,6 +123,7 @@ interface ChatContextValue {
   handleProfileChange: (profile: AnonymousProfile) => boolean;
   serverProfile: MeBound | null | undefined;
   deviceId: string | null;
+  deviceIsProvisional: boolean | null;
   // Verification state
   numbersByConv: Record<string, string>;
   setNumbersByConv: React.Dispatch<React.SetStateAction<Record<string, string>>>;
@@ -172,7 +173,7 @@ export function ChatProvider({ children }: ChatProviderProps) {
   const [privacySettingsVersion, setPrivacySettingsVersion] = useState(0);
   const mappedDMConvsRef = useRef(new Set<string>());
 
-  const { device, pool, deviceId, keystore, sessionKey } = useDevice();
+  const { device, pool, deviceId, deviceIsProvisional, keystore, sessionKey } = useDevice();
   const { profile, subjectId } = useAuth();
   const profileSubjectId = subjectId ?? DEMO_PROFILE_SUBJECT;
 
@@ -611,6 +612,7 @@ export function ChatProvider({ children }: ChatProviderProps) {
     handleProfileChange,
     serverProfile: profile,
     deviceId,
+    deviceIsProvisional,
     numbersByConv,
     setNumbersByConv,
     verifiedByConv,

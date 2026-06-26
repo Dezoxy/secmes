@@ -60,8 +60,12 @@ describe.skipIf(!DB_URL)('KeyDirectoryService', () => {
     const res = await dir.publish(bobAuth, 'Qk9CU0lH', ['a2V5LTE=', 'a2V5LTI=']);
     expect(res.published).toBe(2);
     expect(res.available).toBe(2); // both unclaimed after publish
+    expect(res.isProvisional).toBe(false); // first device is trusted
     const [d] = await sql`select user_id from devices where id = ${res.deviceId}`;
     expect(d?.user_id).toBe(bobId); // device is bound to Bob's verified identity
+
+    const second = await dir.publish(bobAuth, 'Qk9CMg==', ['a2V5LTM=']);
+    expect(second.isProvisional).toBe(true); // later devices require enrollment approval
   });
 
   it('claims one-time-use packages, returns the device identity, then reports empty', async () => {

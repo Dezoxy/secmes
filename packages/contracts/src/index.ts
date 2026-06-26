@@ -265,6 +265,7 @@ export const PublishKeyPackagesResponseSchema = z.object({
   deviceId: z.string().uuid(),
   published: z.number().int().nonnegative(),
   available: z.number().int().nonnegative(),
+  isProvisional: z.boolean(),
 });
 export type PublishKeyPackagesResponse = z.infer<typeof PublishKeyPackagesResponseSchema>;
 

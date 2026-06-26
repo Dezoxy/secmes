@@ -1,6 +1,14 @@
 import { HardDrive } from 'lucide-react';
 import { EmptyState } from '../features/ui';
+import { DeviceProvider, useDevice } from '../features/device/DeviceContext';
+import { UnlockGate } from '../features/device/UnlockGate';
+import { DeviceSettings } from '../features/settings/DeviceSettings';
 import { RoutePageShell } from './RoutePageShell';
+
+function CurrentDeviceSettings() {
+  const { deviceId, deviceIsProvisional } = useDevice();
+  return <DeviceSettings deviceId={deviceId} deviceIsProvisional={deviceIsProvisional} />;
+}
 
 export default function DevicesRoute() {
   return (
@@ -10,10 +18,16 @@ export default function DevicesRoute() {
       description="A route-owned device surface for current-device status, trusted-device listing, and future revoke controls."
       icon={HardDrive}
     >
-      <EmptyState icon={HardDrive} title="Device management shell">
-        Device provisioning and unlock still run through the existing device provider. Listing and
-        revoke controls stay placeholder-only until the backend contract is ready.
-      </EmptyState>
+      <div className="space-y-4">
+        <DeviceProvider>
+          <UnlockGate>
+            <CurrentDeviceSettings />
+          </UnlockGate>
+        </DeviceProvider>
+        <EmptyState icon={HardDrive} title="Trusted-device list coming next">
+          Listing and revoke controls stay placeholder-only until the backend contract is ready.
+        </EmptyState>
+      </div>
     </RoutePageShell>
   );
 }

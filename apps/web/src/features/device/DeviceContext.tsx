@@ -62,6 +62,8 @@ interface DeviceState {
   pool: DeviceKeys[] | null;
   /** This device's server id (from provisioning) — needed to list/fetch/consume Welcomes (Slice 4). */
   deviceId: string | null;
+  /** True until this device is approved by an existing trusted device. */
+  deviceIsProvisional: boolean | null;
   /** The per-device UUID component of the composite MLS identity (userId:deviceUuid). Used by B2 enrollment. */
   deviceUuid: string | null;
   keystore: DeviceKeystore | null;
@@ -101,6 +103,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
   const [device, setDevice] = useState<DeviceKeys | null>(null);
   const [pool, setPool] = useState<DeviceKeys[] | null>(null);
   const [deviceId, setDeviceId] = useState<string | null>(null);
+  const [deviceIsProvisional, setDeviceIsProvisional] = useState<boolean | null>(null);
   const [deviceUuid, setDeviceUuid] = useState<string | null>(null);
   const [sessionKey, setSessionKey] = useState<CryptoKey | null>(null);
   // Demo mode has no real device — render the chat (seed-driven) without a gate.
@@ -248,6 +251,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
       setDevice(dev);
       setPool(provisioned);
       setDeviceId(result.deviceId);
+      setDeviceIsProvisional(result.isProvisional);
       setDeviceUuid(uuid);
       setSessionKey(unlockKey); // seals the device/pool + per-conversation state (memory only)
       setStatus('ready');
@@ -263,6 +267,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
     if (!keystore) return;
     await keystore.clearDevice(); // wipes the other account's device + pool from this browser's single slot
     setSessionKey(null);
+    setDeviceIsProvisional(null);
     setError(null);
     setStatus('needs-create');
   }, [keystore]);
@@ -298,6 +303,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
       setDevice(dev);
       setPool(provisioned);
       setDeviceId(result.deviceId);
+      setDeviceIsProvisional(result.isProvisional);
       setDeviceUuid(pending.uuid);
       setSessionKey(pending.key);
       setStatus('ready');
@@ -311,6 +317,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
     device,
     pool,
     deviceId,
+    deviceIsProvisional,
     deviceUuid,
     keystore,
     sessionKey,

@@ -55,10 +55,13 @@ describe('api client', () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
       .mockResolvedValue(
-        new Response(JSON.stringify({ deviceId, published: 2, available: 8 }), { status: 200 }),
+        new Response(
+          JSON.stringify({ deviceId, published: 2, available: 8, isProvisional: false }),
+          { status: 200 },
+        ),
       );
     const res = await publishKeyPackages('sigpub==', ['kpA', 'kpB']);
-    expect(res).toEqual({ deviceId, published: 2, available: 8 });
+    expect(res).toEqual({ deviceId, published: 2, available: 8, isProvisional: false });
     expect(fetchSpy.mock.calls[0]?.[0]).toBe('/api/devices/me/key-packages');
     const init = fetchSpy.mock.calls[0]?.[1];
     expect(init?.method).toBe('POST');

@@ -10356,12 +10356,17 @@
             "description": "total unclaimed KeyPackages for this device after the call",
             "format": "int64",
             "maximum": 9007199254740991
+          },
+          "isProvisional": {
+            "type": "boolean",
+            "description": "true when this device must still be approved by an existing trusted device"
           }
         },
         "required": [
           "deviceId",
           "published",
-          "available"
+          "available",
+          "isProvisional"
         ],
         "additionalProperties": false
       },

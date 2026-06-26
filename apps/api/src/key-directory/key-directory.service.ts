@@ -30,6 +30,8 @@ export interface PublishResult {
   /** Total UNCLAIMED KeyPackages for this device after the call — lets the client replenish to target
    * after others have claimed some (re-publishing claimed packages inserts nothing, so count drives it). */
   available: number;
+  /** True when this device still needs approval from an existing trusted device. */
+  isProvisional: boolean;
 }
 
 export interface ClaimedKeyPackage {
@@ -92,7 +94,7 @@ export class KeyDirectoryService {
           // (via revokeUnclaimed) and then re-publishing — racing back to a "no trusted devices" state.
           set: { signaturePublicKey },
         })
-        .returning({ id: schema.devices.id });
+        .returning({ id: schema.devices.id, isProvisional: schema.devices.isProvisional });
       if (!device) throw new Error('device upsert returned no row');
 
       // Lock the device row so the cap count-then-insert is atomic per device (no concurrent-publish
@@ -130,7 +132,12 @@ export class KeyDirectoryService {
           `too many unclaimed key packages (max ${MAX_AVAILABLE_PER_DEVICE} per device)`,
         );
       }
-      return { deviceId: device.id, published: inserted.length, available };
+      return {
+        deviceId: device.id,
+        published: inserted.length,
+        available,
+        isProvisional: device.isProvisional,
+      };
     });
   }
 

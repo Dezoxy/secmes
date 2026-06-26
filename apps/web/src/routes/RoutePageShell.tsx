@@ -30,8 +30,25 @@ const navItems = [
   { to: '/storage', label: 'Storage', icon: Database },
 ];
 
+const ROUTE_SHELL_BACK_MARKER = 'argus:route-shell-back';
+const routeShellPaths = new Set(['/security', '/devices', '/storage']);
+
 function joinClasses(...classes: Array<string | false | undefined>): string {
   return classes.filter(Boolean).join(' ');
+}
+
+function markRouteShellNavigation(to: string, currentPath: string): void {
+  if (routeShellPaths.has(to) && to !== currentPath) {
+    sessionStorage.setItem(ROUTE_SHELL_BACK_MARKER, '1');
+  } else {
+    sessionStorage.removeItem(ROUTE_SHELL_BACK_MARKER);
+  }
+}
+
+function consumeRouteShellBackMarker(): boolean {
+  const marked = sessionStorage.getItem(ROUTE_SHELL_BACK_MARKER) === '1';
+  sessionStorage.removeItem(ROUTE_SHELL_BACK_MARKER);
+  return marked;
 }
 
 export function RoutePageShell({
@@ -46,10 +63,11 @@ export function RoutePageShell({
 
   // Smart back: only step back when there is genuine in-app history. React Router stamps the first
   // location of a session with key "default"; any in-app navigation produces a unique key. Keying off
-  // that (rather than window.history.length, which also counts external/prior-tab entries) keeps deep
-  // links, fresh PWA loads, and external referrers landing on /chat instead of navigating off-site.
+  // that plus our route-shell nav marker (rather than window.history.length, which also counts
+  // external/prior-tab entries) keeps deep links, fresh PWA loads, and external referrers landing on
+  // /chat instead of navigating off-site.
   const handleBack = useCallback(() => {
-    if (location.key !== 'default') {
+    if (location.key !== 'default' || consumeRouteShellBackMarker()) {
       navigate(-1);
     } else {
       // No in-app history: replace (don't push) this deep-link entry, otherwise the browser/system Back
@@ -88,6 +106,7 @@ export function RoutePageShell({
                   <Link
                     key={to}
                     to={to}
+                    onClick={() => markRouteShellNavigation(to, location.pathname)}
                     aria-current={active ? 'page' : undefined}
                     className={joinClasses(
                       'inline-flex min-h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors',
