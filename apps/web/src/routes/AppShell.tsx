@@ -72,7 +72,8 @@ export default function AppShell() {
     if (next !== currentIndex) animatedNavigateTo(TAB_PATHS[next]!);
   }, [currentIndex, animatedNavigateTo]);
 
-  useSwipeTabs(contentRef, onSwipePrev, onSwipeNext, isMobile);
+  const swipeTabsEnabled = isMobile && currentIndex !== -1;
+  useSwipeTabs(contentRef, onSwipePrev, onSwipeNext, swipeTabsEnabled);
 
   // Compute direction synchronously during render, before updating the ref.
   let motionClass = '';

@@ -18,6 +18,53 @@ for (const route of routeShells) {
   });
 }
 
+test('/devices does not leave the page on mobile tab-swipe gestures', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/devices');
+  await expect(page.getByRole('heading', { name: 'Trusted devices' })).toBeVisible();
+
+  await page.evaluate(() => {
+    const target = document.querySelector('[data-testid="app-shell"] > div');
+    if (!target) throw new Error('missing app shell content');
+
+    const touch = (x: number, y: number) =>
+      new Touch({
+        identifier: 1,
+        target,
+        clientX: x,
+        clientY: y,
+        pageX: x,
+        pageY: y,
+        screenX: x,
+        screenY: y,
+      });
+
+    const start = touch(260, 360);
+    target.dispatchEvent(
+      new TouchEvent('touchstart', {
+        bubbles: true,
+        cancelable: true,
+        touches: [start],
+        targetTouches: [start],
+        changedTouches: [start],
+      }),
+    );
+
+    const end = touch(120, 360);
+    target.dispatchEvent(
+      new TouchEvent('touchend', {
+        bubbles: true,
+        cancelable: true,
+        touches: [],
+        targetTouches: [],
+        changedTouches: [end],
+      }),
+    );
+  });
+
+  await expect(page).toHaveURL(/\/devices$/);
+});
+
 test('the route shell back button steps back through in-app history', async ({ page }) => {
   await page.goto('/security');
   // In-app navigation (PUSH) to another shell so there is genuine Argus history to return to.

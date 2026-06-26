@@ -236,6 +236,27 @@ export function setsEqual(a: string[], b: string[]): boolean {
   return true;
 }
 
+type ApprovedEnrollmentRow = {
+  id: string;
+  requestingDeviceId: string;
+  fingerprint: string;
+};
+
+export function splitApprovedEnrollmentsForDevice(
+  rows: ApprovedEnrollmentRow[],
+  deviceId: string | null,
+): { ownDevice: ApprovedEnrollmentRow[]; otherDevices: ApprovedEnrollmentRow[] } {
+  if (!deviceId) return { ownDevice: [], otherDevices: rows };
+
+  const ownDevice: ApprovedEnrollmentRow[] = [];
+  const otherDevices: ApprovedEnrollmentRow[] = [];
+  for (const row of rows) {
+    if (row.requestingDeviceId === deviceId) ownDevice.push(row);
+    else otherDevices.push(row);
+  }
+  return { ownDevice, otherDevices };
+}
+
 export function useLiveConversations({
   device,
   pool,
@@ -614,26 +635,37 @@ export function useLiveConversations({
           .catch(() => {
             /* best-effort — missed enrollments reappear on the next reconnect */
           });
-        // Retry fan-out for approved enrollments whose fan-out may have been partial (D1 side).
-        // enrollDevice is idempotent: it skips conversations where D2 is already a leaf.
-        if (messagingDeps) {
-          void Promise.all([listEnrollments('approved'), listMyConversations()])
-            .then(([approved, conversationIds]) => {
-              for (const row of approved) {
-                void enrollDevice(
-                  messagingDeps,
-                  selfUserId,
-                  row.requestingDeviceId,
-                  row.fingerprint,
-                  conversationIds,
-                  liveGroups.current,
-                ).catch(() => {
-                  /* best-effort retry */
-                });
-              }
-            })
-            .catch(() => {});
-        }
+        // Reconcile approved enrollments missed while this socket was disconnected. On D2, clear the
+        // provisional flag and drain Welcomes. On trusted D1 devices, retry fan-out for other approved
+        // devices whose fan-out may have been partial. enrollDevice is idempotent: it skips conversations
+        // where D2 is already a leaf.
+        void listEnrollments('approved')
+          .then(async (approved) => {
+            const { ownDevice, otherDevices } = splitApprovedEnrollmentsForDevice(
+              approved,
+              deviceId,
+            );
+            for (const row of ownDevice) {
+              onEnrollmentApproved?.(row.id);
+              drainRef.current();
+            }
+
+            if (!messagingDeps || otherDevices.length === 0) return;
+            const conversationIds = await listMyConversations();
+            for (const row of otherDevices) {
+              void enrollDevice(
+                messagingDeps,
+                selfUserId,
+                row.requestingDeviceId,
+                row.fingerprint,
+                conversationIds,
+                liveGroups.current,
+              ).catch(() => {
+                /* best-effort retry */
+              });
+            }
+          })
+          .catch(() => {});
         // D2 side: drain any Welcomes that arrived while offline. The onEnrollmentApproved /
         // onWelcome nudges are only delivered while connected, so a reconnect must re-poll.
         // drainWelcomes is idempotent — it skips already-joined conversations.
