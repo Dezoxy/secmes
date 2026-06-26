@@ -5,7 +5,7 @@
 
 ## 1. Improve deploy-window UX for mobile clients
 
-**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [x] Merged
 
 ### Problem
 
@@ -24,7 +24,7 @@ that look like user data disappeared.
 
 ## 2. Improve observability dashboards after service labels are fixed
 
-**Status:** [x] Diagnosed / [ ] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
 
 ### Problem
 
@@ -33,10 +33,10 @@ failing, what changed around deploy time, and whether alerts are real or scrape/
 
 ### Plan
 
-- [ ] Add service-grouped log panels for `api`, `caddy`, `redis-exporter`, `postgres-exporter`, `prometheus`,
+- [x] Add service-grouped log panels for `api`, `caddy`, `redis-exporter`, `postgres-exporter`, `prometheus`,
   `grafana`, `alertmanager`, `pyroscope`, `loki`, `alloy`, and `coturn`.
-- [ ] Add quick filters for `level`, `service`, and `context`.
-- [ ] Add panels separating user-facing `5xx` from observability-service errors.
+- [x] Add quick filters for `level`, `service`, and `context`.
+- [x] Add panels separating user-facing `5xx` from observability-service errors.
 
 ### Verification
 
