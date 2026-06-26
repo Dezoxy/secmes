@@ -64,6 +64,8 @@ What it *would* add (anti-automation on the unauthenticated register/options end
 
 **Verdict:** do **not** build attestation for V1/V2. Revisit only if a concrete abuse problem emerges that rate-limiting cannot contain, and scope it narrowly to the unauthenticated abuse endpoints — never as a gate on content or auth correctness.
 
+**Note (decision #9, 2026-06-26):** the native refresh-token P1 — iOS native passkeys assert the same `https://<rpID>` origin as the PWA, so origin can't distinguish native from web for body-vs-cookie delivery — was resolved by **sender-constrained (DPoP-style) refresh tokens** bound to a dedicated non-exportable, biometric-gated keystore key (own `argus-refresh-pop:v1` domain; every rotation verifies a hardware-key PoP over the single-use token-hash before rotating, so a leaked body token is inert), **not** by attestation. A cryptographic binding to a key the attacker can't use is strictly stronger and cheaper than App Attest / Play Integrity here, and avoids their false-reject / platform-dependency costs — so this P1 does **not** reopen the deferral. See [03](./03-roadmap-ios-then-android.md) Phase 1; full design in `docs/threat-models/native-refresh-pop.md` (to be written before the contract lands).
+
 ## 7. Impact on the six invariants
 
 | # | Invariant | Status |
