@@ -46,7 +46,7 @@ failing, what changed around deploy time, and whether alerts are real or scrape/
 
 ## 3. Add log-label regression checks
 
-**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [x] Merged
 
 ### Problem
 
