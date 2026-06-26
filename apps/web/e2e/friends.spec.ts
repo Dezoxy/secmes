@@ -125,12 +125,24 @@ test('friends panel retries a transient accepted-friends refresh failure', async
   expect(friendsCalls).toBeGreaterThanOrEqual(2);
 });
 
-test('friends panel does not immediately retry a throttled request refresh', async ({ page }) => {
+test('friends panel retries transient friends reads without retrying throttled requests', async ({
+  page,
+}) => {
+  let friendsCalls = 0;
   let incomingCalls = 0;
 
   await page.route('**/api/friends', (route) => {
     if (route.request().method() !== 'GET') {
       void route.continue();
+      return;
+    }
+    friendsCalls += 1;
+    if (friendsCalls === 1) {
+      void route.fulfill({
+        status: 502,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'temporary deploy window' }),
+      });
       return;
     }
     void route.fulfill({
@@ -167,6 +179,7 @@ test('friends panel does not immediately retry a throttled request refresh', asy
 
   await expect(page.getByRole('button', { name: /Open conversation with Alice/ })).toBeVisible();
   await page.waitForTimeout(1300);
+  expect(friendsCalls).toBeGreaterThanOrEqual(2);
   expect(incomingCalls).toBeLessThanOrEqual(2);
 });
 

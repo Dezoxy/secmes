@@ -70,13 +70,6 @@ function isRetryableFriendRefreshReason(reason: unknown): boolean {
   return message === 'Network request failed.' || /status (408|5\d\d)\b/.test(message);
 }
 
-function shouldRetryFriendRefresh(results: PromiseSettledResult<unknown>[]): boolean {
-  const rejected = results.filter((result) => result.status === 'rejected');
-  return (
-    rejected.length > 0 && rejected.every((result) => isRetryableFriendRefreshReason(result.reason))
-  );
-}
-
 function currentUserFromProfile(profile: AnonymousProfile): User {
   return {
     ...currentUser,
@@ -258,35 +251,65 @@ export function ChatProvider({ children }: ChatProviderProps) {
     const refresh = (async () => {
       do {
         refreshFriendsQueued.current = false;
+        let failed = false;
+        let pendingTargets: Array<'friends' | 'incoming' | 'outgoing'> = [
+          'friends',
+          'incoming',
+          'outgoing',
+        ];
 
         for (let attempt = 0; attempt <= FRIENDS_REFRESH_RETRY_DELAYS_MS.length; attempt += 1) {
-          const results = await Promise.allSettled([
-            listFriends(),
-            listFriendRequests('incoming'),
-            listFriendRequests('outgoing'),
-          ]);
-          const [friendsResult, incomingResult, outgoingResult] = results;
+          const retryDelayMs = FRIENDS_REFRESH_RETRY_DELAYS_MS[attempt];
+          const results = await Promise.all(
+            pendingTargets.map(async (target) => {
+              try {
+                if (target === 'friends') {
+                  return { target, ok: true as const, value: await listFriends() };
+                }
+                return {
+                  target,
+                  ok: true as const,
+                  value: await listFriendRequests(target),
+                };
+              } catch (reason) {
+                return { target, ok: false as const, reason };
+              }
+            }),
+          );
+          const nextPendingTargets: typeof pendingTargets = [];
 
-          if (friendsResult.status === 'fulfilled') {
-            setFriends(friendsResult.value);
-            setFriendsLoaded(true);
+          for (const result of results) {
+            if (result.ok) {
+              if (result.target === 'friends') {
+                setFriends(result.value);
+                setFriendsLoaded(true);
+              } else if (result.target === 'incoming') {
+                setIncomingRequests(result.value);
+              } else {
+                setOutgoingRequests(result.value);
+              }
+              continue;
+            }
+
+            if (retryDelayMs !== undefined && isRetryableFriendRefreshReason(result.reason)) {
+              nextPendingTargets.push(result.target);
+            } else {
+              failed = true;
+            }
           }
-          if (incomingResult.status === 'fulfilled') setIncomingRequests(incomingResult.value);
-          if (outgoingResult.status === 'fulfilled') setOutgoingRequests(outgoingResult.value);
 
-          const failed = results.some((result) => result.status === 'rejected');
-          if (!failed) {
-            setFriendsError(false);
+          if (nextPendingTargets.length === 0) {
+            setFriendsError(failed && manager !== null);
             break;
           }
 
-          const retryDelayMs = FRIENDS_REFRESH_RETRY_DELAYS_MS[attempt];
-          if (retryDelayMs !== undefined && shouldRetryFriendRefresh(results)) {
+          if (retryDelayMs !== undefined) {
+            pendingTargets = nextPendingTargets;
             await wait(retryDelayMs);
             continue;
           }
 
-          if (manager) setFriendsError(true);
+          setFriendsError(manager !== null);
           break;
         }
       } while (refreshFriendsQueued.current);
