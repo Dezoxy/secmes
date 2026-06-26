@@ -224,6 +224,10 @@ export default function FriendsScreen() {
     }
   };
 
+  const handleRetryRefresh = () => {
+    void refreshFriends({ force: true });
+  };
+
   return (
     <div className="relative h-full lg:flex lg:items-center lg:justify-center lg:bg-[#1a1a24] lg:p-4">
       <div
@@ -332,14 +336,32 @@ export default function FriendsScreen() {
           className="argus-scroll-clear-floating-nav flex-1 space-y-2 overflow-y-auto px-2 pt-3"
         >
           {friendsError && (
-            <p className="mx-2 text-xs text-amber-400/70">
-              Could not refresh friends — data may be stale.
+            <p role="status" className="mx-2 text-xs text-amber-400/75">
+              Friends refresh is delayed. The service may be restarting; saved contacts were not
+              removed.
             </p>
           )}
 
           {friendsUnavailable ? (
-            <EmptyState title="Friends unavailable" icon={Users} compact className="mx-2 mt-4">
-              Contacts could not be loaded. Try again in a moment.
+            <EmptyState
+              title="Friends temporarily unavailable"
+              icon={Users}
+              compact
+              className="mx-2 mt-4"
+            >
+              The service could not be reached after retrying. Keep this screen open or try again
+              shortly.
+              {canMutate && (
+                <Button
+                  type="button"
+                  variant="subtle"
+                  size="sm"
+                  className="mt-3"
+                  onClick={handleRetryRefresh}
+                >
+                  Try again
+                </Button>
+              )}
             </EmptyState>
           ) : showEmptyFriends ? (
             <EmptyState title="No accepted friends yet" icon={Users} compact className="mx-2 mt-4">
