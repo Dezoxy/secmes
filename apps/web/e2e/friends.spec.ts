@@ -173,6 +173,47 @@ test('friends panel retries a transient accepted-friends refresh failure', async
   expect(friendsCalls).toBeGreaterThanOrEqual(2);
 });
 
+test('friends unavailable state can be retried manually after a service restart', async ({
+  page,
+}) => {
+  let friendsCalls = 0;
+  let recover = false;
+
+  await page.route('**/api/friends', (route) => {
+    if (route.request().method() !== 'GET') {
+      void route.continue();
+      return;
+    }
+    friendsCalls += 1;
+    if (!recover) {
+      void route.fulfill({
+        status: 502,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'temporary deploy window' }),
+      });
+      return;
+    }
+    void route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ friends: [ALICE] }),
+    });
+  });
+
+  await page.goto('/__e2e/friends-unavailable');
+
+  await expect(page.getByText('Friends temporarily unavailable')).toBeVisible();
+  await expect(page.getByText('No accepted friends yet')).toBeHidden();
+  expect(friendsCalls).toBeGreaterThanOrEqual(1);
+
+  recover = true;
+  await page.getByRole('button', { name: 'Try again' }).click();
+
+  await expect(page.getByRole('button', { name: /Open conversation with Alice/ })).toBeVisible();
+  await expect(page.getByText('1 accepted')).toBeVisible();
+  expect(friendsCalls).toBeGreaterThanOrEqual(2);
+});
+
 test('friends panel retries transient friends reads without retrying throttled requests', async ({
   page,
 }) => {

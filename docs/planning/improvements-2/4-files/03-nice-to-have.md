@@ -5,7 +5,7 @@
 
 ## 1. Improve deploy-window UX for mobile clients
 
-**Status:** [x] Diagnosed / [ ] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
 
 ### Problem
 
@@ -14,7 +14,7 @@ that look like user data disappeared.
 
 ### Plan
 
-- [ ] Add deploy-window-friendly retry messaging for transient API failures.
+- [x] Add deploy-window-friendly retry messaging for transient API failures.
 - [ ] Ensure websocket reconnect status and API refresh status use consistent copy.
 - [ ] Consider a post-deploy refresh nudge when the app detects API recovery.
 

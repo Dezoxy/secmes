@@ -96,7 +96,7 @@ function withCurrentUserProfile(conversation: Conversation, profile: User): Conv
   };
 }
 
-interface ChatContextValue {
+export interface ChatContextValue {
   // Conversations
   conversations: Conversation[];
   setConversations: React.Dispatch<React.SetStateAction<Conversation[]>>;
@@ -157,7 +157,7 @@ interface ChatContextValue {
   persistGroupCreated: (session: GroupConversationSession) => void;
 }
 
-const ChatContext = createContext<ChatContextValue | null>(null);
+export const ChatContext = createContext<ChatContextValue | null>(null);
 
 export function useChatContext(): ChatContextValue {
   const ctx = useContext(ChatContext);

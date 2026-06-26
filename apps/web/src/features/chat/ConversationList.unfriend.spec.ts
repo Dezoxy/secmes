@@ -124,11 +124,13 @@ describe('FriendsScreen — unfriend interactive flow', () => {
   });
 
   it('does not show the empty friends state when the first refresh has not loaded', async () => {
+    const refreshFriends = vi.fn().mockResolvedValue(undefined);
     vi.mocked(useChatContext).mockReturnValue(
       makeCtx({
         friends: [],
         friendsLoaded: false,
         friendsError: true,
+        refreshFriends,
       }) as unknown as ReturnType<typeof useChatContext>,
     );
 
@@ -140,9 +142,21 @@ describe('FriendsScreen — unfriend interactive flow', () => {
       root.render(createElement(MemoryRouter, null, createElement(FriendsScreen)));
     });
 
-    expect(container.textContent).toContain('Friends unavailable');
+    expect(container.textContent).toContain('Friends temporarily unavailable');
+    expect(container.textContent).toContain('service could not be reached after retrying');
     expect(container.textContent).toContain('Friends not loaded');
     expect(container.textContent).not.toContain('No accepted friends yet');
+
+    const retryBtn = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(
+      (b) => b.textContent === 'Try again',
+    );
+    expect(retryBtn, 'Retry button must be visible on the unavailable friends state').toBeTruthy();
+
+    await act(async () => {
+      retryBtn!.click();
+    });
+
+    expect(refreshFriends).toHaveBeenCalledWith({ force: true });
 
     root.unmount();
     document.body.removeChild(container);

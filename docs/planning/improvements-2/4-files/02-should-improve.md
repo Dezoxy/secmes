@@ -83,7 +83,7 @@ Loki showed `Notify for alerts failed` and `unsupported protocol scheme ""` for 
 
 ## 4. Fix Pyroscope write permissions
 
-**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [x] Merged
 
 ### Problem
 
