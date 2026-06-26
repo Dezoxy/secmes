@@ -25,6 +25,16 @@ require_file "$LOGS_DASHBOARD"
 
 compose_config="$(docker compose -f "$COMPOSE_FILE" config --format json)"
 
+coturn_log_driver="$(jq -r '.services.coturn.logging.driver // ""' <<<"$compose_config")"
+if [ "$coturn_log_driver" != "local" ]; then
+  fail "coturn must stay on Docker's local logging driver so TURN relay metadata is not centralized in Loki."
+fi
+coturn_max_size="$(jq -r '.services.coturn.logging.options["max-size"] // ""' <<<"$compose_config")"
+coturn_max_file="$(jq -r '.services.coturn.logging.options["max-file"] // ""' <<<"$compose_config")"
+if [ "$coturn_max_size" != "10m" ] || [ "$coturn_max_file" != "3" ]; then
+  fail "coturn local logs must keep short retention: expected max-size=10m and max-file=3."
+fi
+
 non_json_services="$(
   jq -r '
     .services
@@ -45,7 +55,7 @@ missing_log_labels="$(
     .services
     | to_entries[]
     | select((.value.logging.driver // "") == "json-file")
-    | select(((.value.logging.options.labels // "") | contains("com.docker.compose.service")) | not)
+    | select((((.value.logging.options.labels // "") | split(",") | map(gsub("^[[:space:]]+|[[:space:]]+$"; "")) | index("com.docker.compose.service")) == null))
     | .key
   ' <<<"$compose_config"
 )"
@@ -61,6 +71,19 @@ grep -Eq 'service_name[[:space:]]*=[[:space:]]*"service"' "$ALLOY_CONFIG" ||
   fail "Alloy must keep service_name as a service-label alias for dashboard compatibility."
 if grep -Eq 'docker\.sock|/var/run/docker\.sock' "$ALLOY_CONFIG"; then
   fail "Alloy log enrichment must not use the Docker socket."
+fi
+docker_socket_volumes="$(
+  jq -r '
+    .services
+    | to_entries[]
+    | .key as $service
+    | (.value.volumes // [])[]
+    | select(((.source // "") | test("docker\\.sock")) or ((.target // "") | test("docker\\.sock")))
+    | $service + ": " + (.source // "") + " -> " + (.target // "")
+  ' <<<"$compose_config"
+)"
+if [ -n "$docker_socket_volumes" ]; then
+  fail "Compose services must not mount the daemon-root-equivalent Docker socket: ${docker_socket_volumes//$'\n'/; }"
 fi
 
 jq -e '
