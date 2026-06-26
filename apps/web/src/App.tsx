@@ -19,6 +19,10 @@ const GroupsScreen = lazy(() => import('./features/groups/GroupsScreen'));
 const FriendsScreen = lazy(() => import('./features/friends/FriendsScreen'));
 const SettingsRoute = lazy(() => import('./routes/SettingsRoute'));
 const ProfileRoute = lazy(() => import('./routes/ProfileRoute'));
+const E2EGroupCreateRoute =
+  import.meta.env.VITE_E2E_GROUP_CREATE === '1'
+    ? lazy(() => import('./routes/E2EGroupCreateRoute'))
+    : null;
 
 const DevicesRoute = lazy(() => import('./routes/DevicesRoute'));
 const SecurityRoute = lazy(() => import('./routes/SecurityRoute'));
@@ -303,6 +307,9 @@ export default function App() {
           <Route path="/admin" element={<AdminLoginRoute />} />
           <Route path="/v2" element={<V2SketchRoute />} />
           <Route path="/v2/:sketchId" element={<V2SketchRoute />} />
+          {E2EGroupCreateRoute && (
+            <Route path="/__e2e/group-create" element={<E2EGroupCreateRoute />} />
+          )}
         </Routes>
       </Suspense>
     </>
