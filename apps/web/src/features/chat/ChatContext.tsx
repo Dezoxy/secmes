@@ -61,6 +61,7 @@ export type { AnonymousProfile } from '../settings/ProfileSettings';
 const DEMO_PROFILE_SUBJECT = 'demo-local';
 const FRIENDS_REFRESH_RETRY_DELAYS_MS = [300, 900] as const;
 const FRIENDS_REFRESH_FRESH_MS = 10_000;
+const FRIENDS_REFRESH_FAILURE_BACKOFF_MS = 2_000;
 
 interface RefreshFriendsOptions {
   force?: boolean;
@@ -181,7 +182,8 @@ export function ChatProvider({ children }: ChatProviderProps) {
   const [outgoingRequests, setOutgoingRequests] = useState<FriendRequest[]>([]);
   const [friendsError, setFriendsError] = useState(false);
   const refreshFriendsInFlight = useRef<Promise<void> | null>(null);
-  const refreshFriendsLastNetworkAt = useRef<number | null>(null);
+  const refreshFriendsLastSuccessAt = useRef<number | null>(null);
+  const refreshFriendsLastFailureAt = useRef<number | null>(null);
   const inFlightRequestIds = useRef(new Set<string>());
   const [peerToConvId, setPeerToConvId] = useState<Map<string, string>>(new Map());
   const [convToPeerId, setConvToPeerId] = useState<Map<string, string>>(new Map());
@@ -254,15 +256,22 @@ export function ChatProvider({ children }: ChatProviderProps) {
       }
 
       const now = Date.now();
-      const lastNetworkAt = refreshFriendsLastNetworkAt.current;
+      const lastSuccessAt = refreshFriendsLastSuccessAt.current;
       if (
         !options.force &&
-        lastNetworkAt !== null &&
-        now - lastNetworkAt < FRIENDS_REFRESH_FRESH_MS
+        lastSuccessAt !== null &&
+        now - lastSuccessAt < FRIENDS_REFRESH_FRESH_MS
       ) {
         return Promise.resolve();
       }
-      refreshFriendsLastNetworkAt.current = now;
+      const lastFailureAt = refreshFriendsLastFailureAt.current;
+      if (
+        !options.force &&
+        lastFailureAt !== null &&
+        now - lastFailureAt < FRIENDS_REFRESH_FAILURE_BACKOFF_MS
+      ) {
+        return Promise.resolve();
+      }
 
       const refresh = (async () => {
         let failed = false;
@@ -314,6 +323,12 @@ export function ChatProvider({ children }: ChatProviderProps) {
 
           if (nextPendingTargets.length === 0) {
             setFriendsError(failed && manager !== null);
+            if (failed) {
+              refreshFriendsLastFailureAt.current = Date.now();
+            } else {
+              refreshFriendsLastSuccessAt.current = Date.now();
+              refreshFriendsLastFailureAt.current = null;
+            }
             break;
           }
 
@@ -324,6 +339,7 @@ export function ChatProvider({ children }: ChatProviderProps) {
           }
 
           setFriendsError(manager !== null);
+          refreshFriendsLastFailureAt.current = Date.now();
           break;
         }
       })().finally(() => {
