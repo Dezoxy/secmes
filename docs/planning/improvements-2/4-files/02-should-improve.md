@@ -6,7 +6,7 @@
 
 ## 1. Stop Postgres exporter WAL permission spam
 
-**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [x] Merged
 
 ### Problem
 
@@ -32,7 +32,7 @@ Loki showed repeated Postgres errors and exporter `collector failed name=wal` li
 
 ## 2. Fix Grafana dashboard provisioning error
 
-**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [x] Merged
 
 ### Problem
 
@@ -58,7 +58,7 @@ that path into Grafana. The runtime error means the staged VM path or bind mount
 
 ## 3. Make Alertmanager unarmed state quiet
 
-**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [x] Merged
 
 ### Problem
 
@@ -83,7 +83,7 @@ Loki showed `Notify for alerts failed` and `unsupported protocol scheme ""` for 
 
 ## 4. Fix Pyroscope write permissions
 
-**Status:** [x] Diagnosed / [ ] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
 
 ### Problem
 
@@ -96,9 +96,9 @@ permission denied`.
 
 ### Plan
 
-- [ ] Check the Pyroscope image user and named-volume ownership expectation.
-- [ ] Fix the `pyroscope-data` volume ownership or set an explicit compatible runtime user.
-- [ ] Keep `read_only: true` for the container root filesystem and only make the data volume writable.
+- [x] Check the Pyroscope image user and named-volume ownership expectation.
+- [x] Fix the `pyroscope-data` volume ownership or set an explicit compatible runtime user.
+- [x] Keep `read_only: true` for the container root filesystem and only make the data volume writable.
 
 ### Verification
 
