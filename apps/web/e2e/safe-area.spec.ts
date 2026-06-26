@@ -18,7 +18,9 @@ test('viewport lets iOS own the safe-area strips', async ({ page }) => {
   );
 });
 
-test('mobile root uses Radarr-style natural document scrolling', async ({ page }) => {
+test('mobile root locks document scroll — AppShell is the only scroll surface', async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/chat');
 
@@ -36,8 +38,8 @@ test('mobile root uses Radarr-style natural document scrolling', async ({ page }
     };
   });
 
-  expect(metrics.bodyOverflowY).toBe('auto');
-  expect(metrics.rootOverflow).toBe('visible');
+  expect(metrics.bodyOverflowY).toBe('hidden');
+  expect(metrics.rootOverflow).toBe('hidden');
   expect(metrics.shellHeight).toBe('844px');
 });
 
