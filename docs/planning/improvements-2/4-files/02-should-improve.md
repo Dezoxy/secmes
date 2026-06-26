@@ -6,7 +6,7 @@
 
 ## 1. Stop Postgres exporter WAL permission spam
 
-**Status:** [x] Diagnosed / [ ] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
 
 ### Problem
 
@@ -20,9 +20,9 @@ Loki showed repeated Postgres errors and exporter `collector failed name=wal` li
 
 ### Plan
 
-- [ ] Prefer disabling the WAL collector for `postgres-exporter` unless WAL metrics are needed now.
-- [ ] If WAL metrics are required, grant only the narrow monitoring permission needed for that collector.
-- [ ] Keep exporter credentials file-backed via `DATA_SOURCE_PASS_FILE`.
+- [x] Prefer disabling the WAL collector for `postgres-exporter` unless WAL metrics are needed now.
+- [x] Do not grant WAL monitoring privileges now; WAL metrics are not needed for current incident response.
+- [x] Keep exporter credentials file-backed via `DATA_SOURCE_PASS_FILE`.
 
 ### Verification
 

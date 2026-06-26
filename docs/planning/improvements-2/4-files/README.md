@@ -21,8 +21,8 @@ cleanup.
 
 | # | Track | Priority | Status | Why it matters |
 |---|-------|----------|--------|----------------|
-| 1 | [Must fix](./01-must-fix.md) | P1 | Items 1-5 implemented; items 1-4 merged; deployed verification pending | User-visible stale Friends state plus false critical alerts. |
-| 2 | [Should improve](./02-should-improve.md) | P2 | [x] Diagnosed / [ ] Implemented / [ ] Verified / [ ] Merged | Observability noise hides real incidents and makes dashboards less trustworthy. |
+| 1 | [Must fix](./01-must-fix.md) | P1 | Items 1-5 implemented and merged; deployed verification pending | User-visible stale Friends state plus false critical alerts. |
+| 2 | [Should improve](./02-should-improve.md) | P2 | Item 1 implemented; deployed verification pending | Observability noise hides real incidents and makes dashboards less trustworthy. |
 | 3 | [Nice to have](./03-nice-to-have.md) | P3 | [x] Diagnosed / [ ] Implemented / [ ] Verified / [ ] Merged | Better deploy UX, dashboards, and regression checks. |
 
 ## Recommended order
