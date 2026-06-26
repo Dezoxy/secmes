@@ -85,6 +85,27 @@ docker_socket_volumes="$(
 if [ -n "$docker_socket_volumes" ]; then
   fail "Compose services must not mount the daemon-root-equivalent Docker socket: ${docker_socket_volumes//$'\n'/; }"
 fi
+docker_socket_named_volumes="$(
+  jq -r '
+    (.volumes // {})
+    | to_entries[]
+    | .key as $volume
+    | .value as $config
+    | [
+        ($config.driver // ""),
+        ($config.driver_opts.device // ""),
+        ($config.driver_opts.o // ""),
+        ($config.driver_opts.type // "")
+      ]
+    | map(tostring)
+    | join(" ")
+    | select(test("docker\\.sock"))
+    | $volume + ": " + .
+  ' <<<"$compose_config"
+)"
+if [ -n "$docker_socket_named_volumes" ]; then
+  fail "Compose named volumes must not bind the daemon-root-equivalent Docker socket: ${docker_socket_named_volumes//$'\n'/; }"
+fi
 
 jq -e '
   .templating.list[]
