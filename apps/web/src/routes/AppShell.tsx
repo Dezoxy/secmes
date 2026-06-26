@@ -90,7 +90,7 @@ export default function AppShell() {
   return (
     <div
       data-testid="app-shell"
-      className="flex min-h-[100dvh] flex-col bg-[#0f0f16] text-white lg:h-[100dvh]"
+      className="relative flex h-[100dvh] flex-col overflow-hidden bg-[#0f0f16] text-white"
     >
       <div ref={contentRef} className="relative min-h-0 flex-1 overflow-hidden">
         <div key={location.pathname} className={`absolute inset-0 ${motionClass}`}>

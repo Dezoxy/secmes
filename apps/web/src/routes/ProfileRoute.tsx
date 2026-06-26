@@ -7,7 +7,7 @@ export default function ProfileRoute() {
   return (
     <div className="relative h-full lg:flex lg:items-center lg:justify-center lg:bg-[#1a1a24] lg:p-4">
       <div className="flex h-full flex-col overflow-hidden bg-[#0f0f16] lg:h-[calc(100%-2rem)] lg:w-full lg:max-w-2xl lg:rounded-3xl lg:bg-[#12121a] lg:shadow-2xl lg:shadow-black/50">
-        <div className="argus-mobile-tab-header argus-mobile-tab-title-header bg-[#0f0f16] p-4 lg:bg-[#12121a]">
+        <div className="argus-mobile-tab-header argus-mobile-tab-title-header shrink-0 bg-[#0f0f16] p-4 lg:bg-[#12121a]">
           <h1 className="text-center">
             <span className="text-xl font-bold tracking-wider">
               <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
