@@ -48,7 +48,7 @@ export function DeviceSettings({
       )}
       <SettingsRow title="Trusted devices" value="Requires backend device registry UI" />
       <SettingsRow title="Revoke device" value="Requires backend revoke endpoint" />
-      {linkOpen && deviceIsProvisional && (
+      {linkOpen && deviceId && (
         <LinkDevicePanel onClose={() => setLinkOpen(false)} onLinked={onDeviceTrusted} />
       )}
     </div>
