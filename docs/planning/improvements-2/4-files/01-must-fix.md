@@ -37,7 +37,7 @@ container IDs.
 
 ## 2. Friends refresh keeps stale UI after deploy-window API failures
 
-**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [x] Merged
 
 ### Problem
 
@@ -67,7 +67,7 @@ still had `accepted | 1`.
 
 ## 3. Friends request refresh hits `429`
 
-**Status:** [x] Diagnosed / [ ] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
 
 ### Problem
 
@@ -82,10 +82,14 @@ The client refresh path requests accepted friends plus incoming and outgoing fri
 ### Plan
 
 - [x] First fix client-side duplicate refreshes with an in-flight guard.
-- [ ] Audit all `refreshFriends()` triggers: tab open, manager initialization, friend-request websocket event,
+- [x] Audit all `refreshFriends()` triggers: tab open, manager initialization, friend-request websocket event,
   mutations, and app resume if present.
-- [ ] Raise `SENSITIVE_LIMITS.friendsList` only if deduped normal use still approaches the cap.
-- [ ] Keep mutation limits tighter than read limits.
+- [x] Add a short client-side freshness window for normal tab refreshes so repeated opens reuse the recent read
+  instead of re-querying `/friends/requests`.
+- [x] Force refreshes after mutations and friend-request websocket events so real state changes are still visible
+  immediately.
+- [x] Keep `SENSITIVE_LIMITS.friendsList` unchanged unless deduped normal use still approaches the cap.
+- [x] Keep mutation limits tighter than read limits.
 
 ### Verification
 
