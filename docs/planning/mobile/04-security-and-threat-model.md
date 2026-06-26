@@ -1,6 +1,6 @@
 # 04 — Security & threat model
 
-> **Status:** planning. How the trust boundary and security posture change when this E2EE messenger moves from a browser PWA to native iOS/Android. **Net verdict: a strengthening of the at-rest posture, at the cost of two documented downgrades and two additive server deliverables. No invariant is relaxed; the server stays crypto-blind and RLS-enforced.** Produced by a `security-architect` pass; the main session implements in small reviewer-gated slices.
+> **Status:** planning. How the trust boundary and security posture change when this E2EE messenger moves from a browser PWA to native iOS/Android. **Net verdict: a strengthening of the at-rest posture, at the cost of one documented native downgrade (working keys are extractable in the Hermes heap — mitigated by the hardware-wrapped root) and three additive server deliverables. No invariant is relaxed; the server stays crypto-blind and RLS-enforced.** Produced by a `security-architect` pass; the main session implements in small reviewer-gated slices.
 
 ---
 
@@ -14,7 +14,7 @@
 | PRF salt/credential continuity | **RETIRED on native (decision #8)** | The web unlock key = `PRF(hmac-secret, APP_PRF_SALT)`. Native does **not** use PRF — it uses a hardware-wrapped random key (§2) — so the three-vendor byte-parity dependency does not exist on native. PRF stays web-only. |
 | RP-ID / origin trust: one web origin → **multiple app origins** | Widening (controlled) | `expectedOrigin` widens to an **exact allowlist** of app origins (iOS associated-domain, Android `apk-key-hash`) — never a wildcard. The RP domain publishes `apple-app-site-association` + `assetlinks.json`. |
 | App distribution | New intermediaries | Code reaches users via App Store / Play / EAS Update (OTA) instead of a Cloudflare-fronted bundle with SRI. CDI-1 subresource-integrity → store code-signing; OTA becomes a new signed code-delivery path. Apple/Google can now compel or push a build — a supply-chain trust expansion to document. |
-| **Server trust model** | **Unchanged — and that's the point** | `apps/api` stays crypto-blind, transport-agnostic, RLS-enforced. The pivot adds **no** server-side ability to read content. All new trust surfaces are client-side, plus two additive server-config widenings. |
+| **Server trust model** | **Unchanged — and that's the point** | `apps/api` stays crypto-blind, transport-agnostic, RLS-enforced. The pivot adds **no** server-side ability to read content. All new trust surfaces are client-side, plus three additive server-config items (origin allowlist, native push-token contract, native refresh-token transport). |
 
 ## 2. Key storage — two-tier wrapping (native: hardware-wrapped random key, **no PRF**)
 
