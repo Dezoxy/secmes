@@ -126,16 +126,13 @@ install -m 0640 -o root -g argus "$REPO_ROOT/compose.prod.yaml" "$COMPOSE"
 # Observability config tree (Prometheus/Grafana/Alertmanager) — the compose services bind-mount it read-only
 # at ./infra/stack/observability (relative to $COMPOSE in $APP_DIR). World-readable (0755 dirs / 0644 files) so
 # the non-root prometheus/grafana container users can read it; it contains NO secrets (Grafana's admin pw is a
-# Key Vault credential file, not in this tree). Refresh from the staged repo each deploy.
-_prometheus_old_hash=""
-if [ -d "$APP_DIR/infra/stack/observability/prometheus" ]; then
-  _prometheus_old_hash="$(
-    find "$APP_DIR/infra/stack/observability/prometheus" -type f -print0 |
-      sort -z |
-      xargs -0 sha256sum |
-      sha256sum |
-      cut -d' ' -f1
-  )"
+# Key Vault credential file, not in this tree). Refresh from the staged repo each deploy. Track the last
+# successfully applied Prometheus hash outside the replaced tree so failed deploy retries still recreate
+# Prometheus after a config-only change.
+_prometheus_applied_hash_file="$APP_DIR/.prometheus-config-applied.sha256"
+_prometheus_applied_hash=""
+if [ -f "$_prometheus_applied_hash_file" ]; then
+  _prometheus_applied_hash="$(cat "$_prometheus_applied_hash_file")"
 fi
 rm -rf "$APP_DIR/infra/stack/observability" "$APP_DIR/infra/stack/glitchtip"
 install -d -m 0755 "$APP_DIR/infra/stack"
@@ -149,10 +146,11 @@ _prometheus_new_hash="$(
     sha256sum |
     cut -d' ' -f1
 )"
-if [ -n "$_prometheus_old_hash" ] && [ "$_prometheus_old_hash" = "$_prometheus_new_hash" ]; then
+PROMETHEUS_CONF_HASH="$_prometheus_new_hash"
+if [ -n "$_prometheus_applied_hash" ] && [ "$_prometheus_applied_hash" = "$PROMETHEUS_CONF_HASH" ]; then
   PROMETHEUS_CONF_CHANGED=0
 fi
-_prometheus_old_hash=""
+_prometheus_applied_hash=""
 _prometheus_new_hash=""
 # GlitchTip entrypoint wrapper — bind-mounted read-only into the glitchtip + glitchtip-worker containers.
 # Contains NO secrets (reads them from Docker-secret files at runtime); world-executable so the container
@@ -610,6 +608,7 @@ docker compose -f "$COMPOSE" up -d $STACK_SERVICES
 if [ "${PROMETHEUS_CONF_CHANGED:-1}" = 1 ]; then
   log "prometheus config changed; force-recreating prometheus so the refreshed bind mount is loaded"
   docker compose -f "$COMPOSE" up -d --force-recreate --no-deps prometheus
+  printf '%s\n' "$PROMETHEUS_CONF_HASH" >"$_prometheus_applied_hash_file"
 fi
 # The api reads REDIS_URL_FILE ONCE at module construction and holds a persistent ioredis connection. On a
 # redis password ROTATION the `up -d` above won't recreate the api when the image/config is unchanged (a
