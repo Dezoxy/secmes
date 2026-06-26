@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Check, Search, UserPlus, Users, X } from 'lucide-react';
 import type { Conversation as MlsGroup } from '@argus/crypto';
 import { lookupUserByArgusId, type Friend, type UserLookupResult } from '../../lib/api';
@@ -87,12 +87,18 @@ export function GroupCreateDialog({
     setTimeout(onClose, 220);
   };
 
-  const excluded = new Set<string>(
-    [selfUserId, ...(existingMemberIds ?? [])].filter((id): id is string => id != null),
+  const excluded = useMemo(
+    () =>
+      new Set<string>(
+        [selfUserId, ...(existingMemberIds ?? [])].filter((id): id is string => id != null),
+      ),
+    [existingMemberIds, selfUserId],
   );
+  const selectedIds = useMemo(() => new Set(selected.map((s) => s.userId)), [selected]);
 
-  const suggestedFriends = (friends ?? []).filter(
-    (f) => !excluded.has(f.userId) && !selected.some((s) => s.userId === f.userId),
+  const suggestedFriends = useMemo(
+    () => (friends ?? []).filter((f) => !excluded.has(f.userId) && !selectedIds.has(f.userId)),
+    [excluded, friends, selectedIds],
   );
 
   const handleAddFriend = (friend: Friend): void => {
@@ -101,15 +107,19 @@ export function GroupCreateDialog({
       setConfirmingFriendId(null);
       return;
     }
-    setSelected((prev) => [
-      ...prev,
-      {
-        userId: friend.userId,
-        argusId: friend.argusId,
-        displayName: friend.displayName,
-        avatarSeed: friend.avatarSeed,
-      },
-    ]);
+    setSelected((prev) =>
+      prev.some((u) => u.userId === friend.userId)
+        ? prev
+        : [
+            ...prev,
+            {
+              userId: friend.userId,
+              argusId: friend.argusId,
+              displayName: friend.displayName,
+              avatarSeed: friend.avatarSeed,
+            },
+          ],
+    );
     setConfirmingFriendId(null);
     setLookupError(null);
   };
@@ -137,7 +147,11 @@ export function GroupCreateDialog({
           setLookupError(`Maximum ${MAX_GROUP_MEMBERS} members reached.`);
           return;
         }
-        setSelected((prev) => [...prev, result]);
+        setSelected((prev) =>
+          prev.length >= MAX_GROUP_MEMBERS || prev.some((u) => u.userId === result.userId)
+            ? prev
+            : [...prev, result],
+        );
         setArgusId('');
       })
       .catch(() => setLookupError('Lookup failed. Check the id and try again.'))
@@ -364,7 +378,7 @@ export function GroupCreateDialog({
                       <button
                         type="button"
                         onClick={() => handleAddFriend(friend)}
-                        disabled={busy}
+                        disabled={busy || looking}
                         aria-label={`Confirm add ${label}`}
                         className="flex items-center gap-1 rounded-lg bg-purple-600/80 px-2.5 py-1 text-xs font-medium text-white hover:bg-purple-600 disabled:opacity-50"
                       >
@@ -375,7 +389,7 @@ export function GroupCreateDialog({
                         onClick={() => setConfirmingFriendId(null)}
                         size="sm"
                         aria-label="Cancel"
-                        disabled={busy}
+                        disabled={busy || looking}
                       >
                         <X className="h-3.5 w-3.5" />
                       </IconButton>
@@ -384,7 +398,7 @@ export function GroupCreateDialog({
                     <button
                       type="button"
                       onClick={() => setConfirmingFriendId(friend.userId)}
-                      disabled={busy}
+                      disabled={busy || looking}
                       aria-label={`Add ${label}`}
                       className="shrink-0 rounded-lg border border-white/10 px-3 py-1 text-xs text-white/60 transition-colors hover:border-purple-500/40 hover:text-white/90 disabled:opacity-50"
                     >

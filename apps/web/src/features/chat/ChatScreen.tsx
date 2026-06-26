@@ -375,6 +375,7 @@ export default function ChatScreen() {
 
   const handleOpenExisting = (conversationId: string): void => {
     setSelectedId(conversationId);
+    setScrollTrigger((n) => n + 1);
     setStartOpen(false);
     setStartPrefillArgusId(undefined);
   };
