@@ -1,0 +1,20 @@
+# Alertmanager unarmed config. Used by deploy.sh when argus-alertmanager-webhook-url is empty.
+# Alerts remain visible in Alertmanager and Grafana, but no notification delivery is attempted.
+#
+# Whatever receiver is used MUST stay content-free: alert labels/annotations carry alert names, severity,
+# and metric context only - never message content (invariant #2; see observability.md).
+route:
+  receiver: 'null'
+  group_by: ['alertname', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+receivers:
+  - name: 'null'
+
+inhibit_rules:
+  # A firing critical for an alertname silences the matching warning, to cut duplicate noise.
+  - source_matchers: [severity = 'critical']
+    target_matchers: [severity = 'warning']
+    equal: ['alertname']

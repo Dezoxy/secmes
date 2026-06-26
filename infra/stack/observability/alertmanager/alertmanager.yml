@@ -1,8 +1,7 @@
-# Alertmanager config. Routes alerts from Prometheus to a webhook receiver (Slack incoming webhook or any
-# HTTP endpoint). The webhook URL is loaded from a mounted secret file — never hardcoded. The secret is
-# OPTIONAL: an empty file (first boot, pre-arming) means notifications silently fail but alerts are still
-# visible in the Alertmanager UI and Grafana. Arm by provisioning argus-alertmanager-webhook-url in Key
-# Vault; Alertmanager hot-reloads via SIGHUP — no container restart needed.
+# Alertmanager armed config. Routes alerts from Prometheus to a webhook receiver (Slack incoming webhook or
+# any HTTP endpoint). The webhook URL is loaded from a mounted secret file - never hardcoded. deploy.sh uses
+# this config only when argus-alertmanager-webhook-url is non-empty; otherwise it stages
+# alertmanager.unarmed.yml so unarmed first boot is quiet.
 #
 # Whatever receiver is used MUST stay content-free: alert labels/annotations carry alert names, severity,
 # and metric context only — never message content (invariant #2; see observability.md).
@@ -15,8 +14,7 @@ route:
 
 receivers:
   # Webhook receiver — URL read from a Docker secret file at notification time (url_file, Alertmanager
-  # >= 0.25.0). Empty file = no-op until the operator provisions argus-alertmanager-webhook-url in Key
-  # Vault. send_resolved=true so recovery notifications also fire.
+  # >= 0.25.0). send_resolved=true so recovery notifications also fire.
   - name: 'webhook'
     webhook_configs:
       - url_file: /run/secrets/alertmanager_webhook_url

@@ -58,7 +58,7 @@ that path into Grafana. The runtime error means the staged VM path or bind mount
 
 ## 3. Make Alertmanager unarmed state quiet
 
-**Status:** [x] Diagnosed / [ ] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
 
 ### Problem
 
@@ -71,10 +71,10 @@ Loki showed `Notify for alerts failed` and `unsupported protocol scheme ""` for 
 
 ### Plan
 
-- [ ] Change unarmed Alertmanager behavior to a real null receiver, or template the config during deploy based
+- [x] Change unarmed Alertmanager behavior to a real null receiver, or template the config during deploy based
   on whether `alertmanager_webhook_url` is non-empty.
-- [ ] Preserve the file-backed webhook secret.
-- [ ] Document how to arm the webhook in the runbook.
+- [x] Preserve the file-backed webhook secret.
+- [x] Document how to arm the webhook in the runbook.
 
 ### Verification
 
