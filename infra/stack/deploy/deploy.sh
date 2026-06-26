@@ -341,6 +341,11 @@ docker compose -f "$COMPOSE" up -d postgres
 if [ "${REDIS_CONF_CHANGED:-1}" = 1 ]; then
   log "redis conf is new/changed — (re)creating redis to load the current password"
   docker compose -f "$COMPOSE" up -d --force-recreate --no-deps redis
+  # redis-exporter reads the generated REDIS_PASSWORD_FILE. Recreate it immediately after redis has the new
+  # password so Prometheus does not scrape an exporter still using the old startup-loaded password map during
+  # the longer migration/probe section below.
+  log "redis conf is new/changed — force-recreating redis-exporter to load the current password file"
+  docker compose -f "$COMPOSE" up -d --force-recreate redis-exporter
 else
   docker compose -f "$COMPOSE" up -d --no-deps redis
 fi
@@ -591,12 +596,6 @@ docker compose -f "$COMPOSE" up -d $STACK_SERVICES
 if [ "${REDIS_CONF_CHANGED:-1}" = 1 ] || [ "${VAPID_KEY_CHANGED:-1}" = 1 ]; then
   log "redis conf or VAPID key is new/changed — force-recreating api to load the current secrets"
   docker compose -f "$COMPOSE" up -d --force-recreate --no-deps api
-fi
-# redis-exporter reads the generated REDIS_PASSWORD_FILE. A password rotation changes the mounted file without
-# changing compose config, so force-recreate it alongside redis/api to avoid stale auth and false RedisDown.
-if [ "${REDIS_CONF_CHANGED:-1}" = 1 ]; then
-  log "redis conf is new/changed — force-recreating redis-exporter to load the current password file"
-  docker compose -f "$COMPOSE" up -d --force-recreate --no-deps redis-exporter
 fi
 # cloudflared reads TUNNEL_TOKEN_FILE ONCE at startup. On a token ROTATION the file content changed but the
 # `up -d` above won't recreate the already-running cloudflared (only a config/image change triggers that, not a
