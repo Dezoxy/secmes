@@ -23,18 +23,19 @@ test('the route shell back button steps back through in-app history', async ({ p
   // In-app navigation (PUSH) to another shell so there is genuine Argus history to return to.
   await page.getByRole('link', { name: 'Devices', exact: true }).click();
   await expect(page).toHaveURL(/\/devices$/);
+  await expect(page.getByRole('heading', { name: 'Trusted devices' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Go back' }).click();
   await expect(page).toHaveURL(/\/security$/);
 
-  // The consumed shell marker must not leak into a later direct route load; otherwise the next "deep link"
+  // The shell link state must not leak into a later direct route load; otherwise the next "deep link"
   // back action would incorrectly step through old browser history instead of returning to Chat.
   await page.goto('/storage');
   await page.getByRole('button', { name: 'Go back' }).click();
   await expect(page).toHaveURL(/\/chat$/);
 });
 
-test('the route shell marker is cleared after browser back between shell routes', async ({
+test('the route shell link state is cleared after browser back between shell routes', async ({
   page,
 }) => {
   await page.goto('/security');

@@ -30,25 +30,17 @@ const navItems = [
   { to: '/storage', label: 'Storage', icon: Database },
 ];
 
-const ROUTE_SHELL_BACK_MARKER = 'argus:route-shell-back';
 const routeShellPaths = new Set(['/security', '/devices', '/storage']);
 
 function joinClasses(...classes: Array<string | false | undefined>): string {
   return classes.filter(Boolean).join(' ');
 }
 
-function markRouteShellNavigation(to: string, currentPath: string): void {
-  if (routeShellPaths.has(to) && to !== currentPath) {
-    sessionStorage.setItem(ROUTE_SHELL_BACK_MARKER, to);
-  } else {
-    sessionStorage.removeItem(ROUTE_SHELL_BACK_MARKER);
-  }
-}
-
-function consumeRouteShellBackMarker(currentPath: string): boolean {
-  const marked = sessionStorage.getItem(ROUTE_SHELL_BACK_MARKER) === currentPath;
-  sessionStorage.removeItem(ROUTE_SHELL_BACK_MARKER);
-  return marked;
+function routeShellLinkState(
+  to: string,
+  currentPath: string,
+): { routeShellBack: true } | undefined {
+  return routeShellPaths.has(to) && to !== currentPath ? { routeShellBack: true } : undefined;
 }
 
 export function RoutePageShell({
@@ -62,12 +54,11 @@ export function RoutePageShell({
   const navigate = useNavigate();
 
   // Smart back: only step back when there is genuine in-app history. React Router stamps the first
-  // location of a session with key "default"; any in-app navigation produces a unique key. Keying off
-  // that plus our route-shell nav marker (rather than window.history.length, which also counts
-  // external/prior-tab entries) keeps deep links, fresh PWA loads, and external referrers landing on
-  // /chat instead of navigating off-site.
+  // location of a session with key "default"; any in-app navigation produces a unique key. The shell
+  // link state covers browsers/PWA shells that preserve the default key on the target entry.
   const handleBack = useCallback(() => {
-    const routeShellBack = consumeRouteShellBackMarker(location.pathname);
+    const routeShellBack =
+      (location.state as { routeShellBack?: unknown } | null)?.routeShellBack === true;
     if (location.key !== 'default' || routeShellBack) {
       navigate(-1);
     } else {
@@ -75,7 +66,7 @@ export function RoutePageShell({
       // button from /chat would bounce the user straight back into this guarded route.
       navigate('/chat', { replace: true });
     }
-  }, [location.key, location.pathname, navigate]);
+  }, [location.key, location.state, navigate]);
 
   return (
     <AuthenticatedRouteBoundary>
@@ -107,7 +98,7 @@ export function RoutePageShell({
                   <Link
                     key={to}
                     to={to}
-                    onClick={() => markRouteShellNavigation(to, location.pathname)}
+                    state={routeShellLinkState(to, location.pathname)}
                     aria-current={active ? 'page' : undefined}
                     className={joinClasses(
                       'inline-flex min-h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors',

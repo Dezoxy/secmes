@@ -121,7 +121,7 @@ interface UseLiveConversationsOptions {
   /** Called when another device of this user registers a pending enrollment request (D1 side). */
   onEnrollmentPending?: (enrollmentId: string) => void;
   /** Called when this device's enrollment is approved (D2 side). */
-  onEnrollmentApproved?: () => void;
+  onEnrollmentApproved?: (enrollmentId: string) => void;
   /** Called when a new incoming friend request arrived — caller should refresh incoming requests. */
   onFriendRequest?: () => void;
   /**
@@ -747,10 +747,19 @@ export function useLiveConversations({
         if (requestingDeviceId === deviceId) return;
         onEnrollmentPending?.(enrollmentId);
       },
-      // B2: this user's enrollment was approved — D2 drains Welcomes to join conversations D1 added it to.
-      onEnrollmentApproved: () => {
-        onEnrollmentApproved?.();
-        drainRef.current();
+      // B2: an enrollment for this user was approved. The gateway fans this account-level event to all
+      // connected devices, so only the requesting device may clear its local provisional flag or drain.
+      onEnrollmentApproved: (enrollmentId) => {
+        void listEnrollments('approved')
+          .then((rows) => {
+            const enrollment = rows.find((row) => row.id === enrollmentId);
+            if (enrollment?.requestingDeviceId !== deviceId) return;
+            onEnrollmentApproved?.(enrollmentId);
+            drainRef.current();
+          })
+          .catch(() => {
+            /* best-effort — the next reconnect/poll rechecks approved enrollments */
+          });
       },
       onFriendRequest: () => {
         onFriendRequest?.();
@@ -800,6 +809,7 @@ export function useLiveConversations({
   }, [
     applyReceipt,
     backfillInto,
+    deviceId,
     mergeIncoming,
     messagingDeps,
     onEnrollmentApproved,

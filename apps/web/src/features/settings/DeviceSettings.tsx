@@ -41,14 +41,14 @@ export function DeviceSettings({
           </p>
         )}
       </div>
-      {deviceId && (
+      {deviceId && deviceIsProvisional && (
         <Button variant="subtle" size="md" onClick={() => setLinkOpen(true)} className="w-full">
-          {deviceIsProvisional ? 'Request approval for this device' : 'Link another device'}
+          Request approval for this device
         </Button>
       )}
       <SettingsRow title="Trusted devices" value="Requires backend device registry UI" />
       <SettingsRow title="Revoke device" value="Requires backend revoke endpoint" />
-      {linkOpen && (
+      {linkOpen && deviceIsProvisional && (
         <LinkDevicePanel onClose={() => setLinkOpen(false)} onLinked={onDeviceTrusted} />
       )}
     </div>
