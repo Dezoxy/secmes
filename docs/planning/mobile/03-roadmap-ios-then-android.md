@@ -65,7 +65,7 @@ Detailed in **[02 — Phase-0 spike](./02-phase-0-spike.md)**. Fail-closed: no U
 **Tasks**
 - Rewrite ~11.9k lines of `.tsx` as RN primitives (`View`/`Text`/`Pressable`/`TextInput`/`Image`); keep Tailwind class strings via **NativeWind**; `lucide-react` → `lucide-react-native`; `@dicebear` SVG via `react-native-svg`; replace `apply-theme.ts` CSS-variable application with a theme context (color math in `theme.ts` reused).
 - Re-wire `react-router-dom` routes to **React Navigation / Expo Router**; the 6 React Contexts (Auth/Chat/Device/Update/Toast/NavVisibility) and reducers run under RN React largely unchanged — only render output is ported; gain real native gesture nav (retire `useSwipeBack`/`useSwipeTabs`).
-- Integrate native push (`expo-notifications`) for content-free message-wake → reconnect WS → fetch ciphertext; the client renders a fixed generic "New message" body (the server never ships per-message text).
+- Integrate native push (`expo-notifications`): the payload carries a **generic content-free *visible* alert** ("New message", no IDs/text) so the OS notifies even if the background JS wake is dropped; on open, reconnect WS → fetch ciphertext → render the real content. (Don't depend on a silent/data-only wake as the sole path — see [04](./04-security-and-threat-model.md) §3.)
 - Wire the existing release-notes pipeline into a native "what's new" screen.
 
 **Verification:** on-device iOS dev build — full passkey login, send/receive messages live, friends/groups/settings flows, push wakes + live-delivers; **shares the same conversations as the PWA** (cross-client interop). Snapshot/behavioral tests on the shared `client-core`; manual product walkthrough.
