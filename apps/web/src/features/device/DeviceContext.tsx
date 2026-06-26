@@ -1,4 +1,12 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 
 import type { DeviceKeys } from '@argus/crypto';
 import {
@@ -28,6 +36,7 @@ export type DeviceStatus =
   | 'needs-create' // first run on this profile — create + seal under the passkey
   | 'needs-unlock' // a sealed device exists for THIS account — open it with the passkey
   | 'needs-switch' // a device for a DIFFERENT account is on this browser (single slot) — reset to continue
+  | 'needs-confirm-reset' // orphaned encrypted data detected — user must confirm fresh start
   | 'unlocking' // opening + provisioning
   | 'ready' // unlocked + pool published (or breakglass / demo passthrough)
   | 'error'; // no PRF on this authenticator → fresh-start required
@@ -76,6 +85,11 @@ interface DeviceState {
    * — a lost passkey means the admin mints a new registration code).
    */
   resetForNewAccount: () => Promise<void>;
+  /**
+   * Confirm a fresh-start after the `'needs-confirm-reset'` warning: wipe orphaned data and
+   * proceed to create a new device. Only meaningful in that state; a no-op otherwise.
+   */
+  confirmReset: () => Promise<void>;
 }
 
 const DeviceCtx = createContext<DeviceState | null>(null);
@@ -92,6 +106,13 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
   // Demo mode has no real device — render the chat (seed-driven) without a gate.
   const [status, setStatus] = useState<DeviceStatus>(configured ? 'loading' : 'ready');
   const [error, setError] = useState<string | null>(null);
+  // Stash the derived unlock key across the 'needs-confirm-reset' pause so the user's passkey
+  // assertion doesn't need to be repeated after they confirm the fresh start.
+  const pendingUnlockKeyForReset = useRef<{
+    key: CryptoKey;
+    identity: string;
+    uuid: string;
+  } | null>(null);
 
   // The breakglass/metadata-only admin has no MLS device and no keystore — it never touches message content,
   // so it skips the gate entirely (ChatScreen is null-device-tolerant; new conversations are hidden).
@@ -204,6 +225,15 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
         await keystore.rebindGroupStates(dev); // update GROUP_STORE identity guards
         await keystore.rebindMessageLogs(dev); // update MSGLOG identity guards
       } else if (creating) {
+        // Before silently creating a new device, check if orphaned encrypted data survives from a
+        // prior device (e.g. after browser storage eviction cleared only the STORE entry). Creating
+        // a new device would make that data permanently inaccessible — the identity guard wouldn't
+        // match. Pause in 'needs-confirm-reset' so the user can acknowledge the data loss.
+        if (await keystore.hasOrphanedData(identity)) {
+          pendingUnlockKeyForReset.current = { key: unlockKey, identity, uuid };
+          setStatus('needs-confirm-reset');
+          return;
+        }
         dev = await keystore.getOrCreateDevice(identity, unlockKey);
       } else {
         dev = await keystore.loadDevice(identity, unlockKey);
@@ -232,6 +262,33 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
     setStatus('needs-create');
   }, [keystore]);
 
+  // Called when the user explicitly confirms a fresh start after seeing the 'needs-confirm-reset'
+  // warning. Wipes orphaned data, then proceeds to create the new device using the unlock key that
+  // was already derived during the interrupted unlock() call — no second passkey tap required.
+  const confirmReset = useCallback(async (): Promise<void> => {
+    if (!keystore || status !== 'needs-confirm-reset') return;
+    const pending = pendingUnlockKeyForReset.current;
+    if (!pending) return;
+    setStatus('unlocking');
+    setError(null);
+    try {
+      await keystore.clearDevice(); // wipe all stores including the orphaned data
+      const dev = await keystore.getOrCreateDevice(pending.identity, pending.key);
+      if (!dev) throw new Error('no device found after reset');
+      const { pool: provisioned, result } = await provisionDevice(keystore, dev, pending.key);
+      pendingUnlockKeyForReset.current = null; // clear only on full success
+      setDevice(dev);
+      setPool(provisioned);
+      setDeviceId(result.deviceId);
+      setDeviceUuid(pending.uuid);
+      setSessionKey(pending.key);
+      setStatus('ready');
+    } catch {
+      setError('could not set up the device — try again');
+      setStatus('needs-confirm-reset'); // pending key still available for retry
+    }
+  }, [keystore, status]);
+
   const value: DeviceState = {
     device,
     pool,
@@ -243,6 +300,7 @@ export function DeviceProvider({ children }: { children: ReactNode }): ReactNode
     error,
     unlock,
     resetForNewAccount,
+    confirmReset,
   };
   return <DeviceCtx.Provider value={value}>{children}</DeviceCtx.Provider>;
 }

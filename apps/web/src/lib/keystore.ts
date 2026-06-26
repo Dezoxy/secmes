@@ -1034,6 +1034,20 @@ export class DeviceKeystore {
     await this.db.delete(VERIFIED_PEERS_STORE, peerUserId);
   }
 
+  /**
+   * True when GROUP_STORE or MSGLOG_STORE contain records for an identity other than
+   * `currentIdentity` — i.e. there is encrypted history sealed under a device that is no longer
+   * present in STORE. This signals that a previous device's data survives in the database but is
+   * inaccessible without the original signing key, so creating a NEW device would silently orphan
+   * it. Called before `getOrCreateDevice` to gate the `'needs-confirm-reset'` warning.
+   */
+  async hasOrphanedData(currentIdentity: string): Promise<boolean> {
+    const groups = (await this.db.getAll(GROUP_STORE)) as StoredGroupState[];
+    if (groups.some((r) => r.identity !== currentIdentity)) return true;
+    const logs = (await this.db.getAll(MSGLOG_STORE)) as StoredMessageLog[];
+    return logs.some((r) => r.identity !== currentIdentity);
+  }
+
   private async unseal(
     stored: StoredDevice,
     identity: string,

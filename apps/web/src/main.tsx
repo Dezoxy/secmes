@@ -21,6 +21,10 @@ if (isStandalone) {
     ?.setAttribute('content', 'width=device-width, initial-scale=1.0, maximum-scale=1');
 }
 
+// Request persistent storage as early as possible so the browser doesn't evict IndexedDB
+// under storage pressure (e.g. during a PWA update that temporarily grows Cache Storage).
+void navigator.storage?.persist();
+
 // Apply stored appearance settings before first paint to avoid FOUC.
 const { accentId, fontSizeLevel } = readStoredDeviceSettings();
 applyThemeToDocument(accentId, fontSizeLevel);
