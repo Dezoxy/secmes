@@ -325,6 +325,7 @@ export function ChatProvider({ children }: ChatProviderProps) {
             setFriendsError(failed && manager !== null);
             if (failed) {
               refreshFriendsLastFailureAt.current = Date.now();
+              refreshFriendsLastSuccessAt.current = null;
             } else {
               refreshFriendsLastSuccessAt.current = Date.now();
               refreshFriendsLastFailureAt.current = null;
@@ -340,6 +341,7 @@ export function ChatProvider({ children }: ChatProviderProps) {
 
           setFriendsError(manager !== null);
           refreshFriendsLastFailureAt.current = Date.now();
+          refreshFriendsLastSuccessAt.current = null;
           break;
         }
       })().finally(() => {
