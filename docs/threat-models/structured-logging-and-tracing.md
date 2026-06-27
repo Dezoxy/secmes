@@ -18,9 +18,9 @@ api (Pino JSON to stdout)
            ▼  Docker json-file log
 Alloy (reads /var/lib/docker/containers/*-json.log, read-only, no socket)
   ├── outer JSON parse: log, stream, time
-  ├── inner JSON parse (new): level, context, reqId, trace_id, span_id
+  ├── inner JSON parse: level, context
   ├── stream labels: level, context (low-cardinality)
-  ├── structured metadata: reqId, trace_id, span_id (high-cardinality, per-line)
+  ├── reqId, trace_id, span_id remain in the JSON log body for line-level drill-down
   └── scrub stage (defense-in-depth): masks bearer tokens, JWTs, presigned URLs, 40+ char opaque tokens
            │
            ▼
@@ -45,7 +45,7 @@ Grafana (trace viewer, linked from Loki log lines via trace_id derived field)
 
 ## 2. Assets & trust boundaries
 
-- **Loki structured metadata** (reqId, trace_id, span_id): opaque identifiers, no content meaning.
+- **Log-body correlation IDs** (reqId, trace_id, span_id): opaque identifiers, no content meaning.
 - **Tempo spans**: route templates + status codes + durations only; no bodies, no SQL, no headers.
 - **Pino logger config**: `redact` and `serializers.req` are first-party controls; Alloy scrub is second.
 - **Tempo service**: internal only (no published port). Same posture as Loki/Prometheus: reachable only
@@ -72,8 +72,8 @@ Grafana (trace viewer, linked from Loki log lines via trace_id derived field)
   mapping or routing them through Caddy would expose the ingest APIs publicly. Guarded by the same
   comment + no-published-ports convention as Prometheus.
 - **Tampering / cardinality:** `level` and `context` are Loki stream labels; their value space is
-  bounded (7 log levels, ~20 service contexts). High-cardinality fields (reqId, trace_id, span_id) go
-  into Loki structured metadata, not stream labels, staying under `max_streams_per_user: 5000`.
+  bounded (7 log levels, ~20 service contexts). High-cardinality fields (reqId, trace_id, span_id) stay
+  in each JSON log body instead of stream labels, staying under `max_streams_per_user: 5000`.
 - **Resource exhaustion (Tempo):** 72h retention + 512m memory limit. Adjust based on real trace volume.
 
 ## 4. Invariant check

@@ -74,22 +74,17 @@ loki.process "scrub" {
   }
 
   // Parse inner Pino JSON fields so Loki can filter/query by level and context (low-cardinality
-  // stream labels) and correlate logs to traces via structured metadata (high-cardinality per-line).
+  // stream labels). Keep reqId/trace_id/span_id in the log body for Grafana derived fields; high-cardinality
+  // trace correlation does not need Loki structured metadata in this stack.
   // trace_id / span_id are 32-char hex (under the 40-char scrub threshold below — will NOT be redacted).
   stage.json {
     expressions = {
       level    = "level",
       context  = "context",
-      req_id   = "reqId",
-      trace_id = "trace_id",
-      span_id  = "span_id",
     }
   }
   stage.labels {
     values = { level = "level", context = "context" }
-  }
-  stage.structured_metadata {
-    values = { req_id = "req_id", trace_id = "trace_id", span_id = "span_id" }
   }
 
   // Defense-in-depth: mask credential-shaped values that should never appear in a log line anyway.

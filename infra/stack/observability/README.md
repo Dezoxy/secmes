@@ -66,7 +66,7 @@ docker run --rm --entrypoint amtool -v "$PWD/infra/stack/observability/alertmana
   prom/alertmanager:v0.28.1 check-config /etc/alertmanager/alertmanager.yml
 # logs (#47b)
 docker run --rm -v "$PWD/infra/stack/observability/loki:/etc/loki:ro" \
-  grafana/loki:3.5.0 -config.file=/etc/loki/loki-config.yml -verify-config
+  grafana/loki:3.5.1 -config.file=/etc/loki/loki-config.yml -verify-config
 docker run --rm -v "$PWD/infra/stack/observability/alloy:/etc/alloy:ro" \
   grafana/alloy:v1.16.3 validate /etc/alloy/config.alloy
 ```
