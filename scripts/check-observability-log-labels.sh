@@ -69,6 +69,10 @@ grep -Eq 'service[[:space:]]*=[[:space:]]*"service"' "$ALLOY_CONFIG" ||
   fail "Alloy must promote the parsed Compose service into the Loki service label."
 grep -Eq 'service_name[[:space:]]*=[[:space:]]*"service"' "$ALLOY_CONFIG" ||
   fail "Alloy must keep service_name as a service-label alias for dashboard compatibility."
+loki_image="$(jq -r '.services.loki.image // ""' <<<"$compose_config")"
+if [ "$loki_image" = "grafana/loki:3.5.0" ]; then
+  fail "Loki 3.5.0 has a known structured-metadata accounting bug that spams negative structured metadata errors; use 3.5.1 or newer."
+fi
 if grep -Eq 'docker\.sock|/var/run/docker\.sock' "$ALLOY_CONFIG"; then
   fail "Alloy log enrichment must not use the Docker socket."
 fi

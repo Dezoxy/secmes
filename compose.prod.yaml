@@ -450,7 +450,7 @@ services:
   # Threat model: docs/threat-models/centralized-logs.md.
   loki:
     <<: *json-log-labels
-    image: grafana/loki:3.5.0
+    image: grafana/loki:3.5.1
     restart: unless-stopped
     command: ['-config.file=/etc/loki/loki-config.yml']
     volumes:
