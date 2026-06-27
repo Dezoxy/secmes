@@ -19,7 +19,9 @@ const EXCLUDE = '44444444-4444-4444-4444-444444444444';
 
 function makeController() {
   const dir = {
-    publish: vi.fn().mockResolvedValue({ deviceId: DEVICE, published: 2, available: 5 }),
+    publish: vi
+      .fn()
+      .mockResolvedValue({ deviceId: DEVICE, published: 2, available: 5, isProvisional: false }),
     claim: vi
       .fn()
       .mockResolvedValue({ deviceId: DEVICE, signaturePublicKey: 'spk', keyPackage: 'kp' }),

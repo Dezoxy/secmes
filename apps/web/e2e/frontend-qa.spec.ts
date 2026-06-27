@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 const routeShells = [
   { path: '/security', heading: 'Security', marker: 'Unlocked by your passkey' },
-  { path: '/devices', heading: 'Trusted devices', marker: 'Device management shell' },
+  { path: '/devices', heading: 'Trusted devices', marker: 'Current device' },
   { path: '/storage', heading: 'Data & storage', marker: 'Encrypted local state only' },
 ];
 

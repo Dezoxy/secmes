@@ -301,11 +301,11 @@ export default function App() {
             <Route path="/friends" element={<FriendsScreen />} />
             <Route path="/settings" element={<SettingsRoute />} />
             <Route path="/profile" element={<ProfileRoute />} />
+            <Route path="/devices" element={<DevicesRoute />} />
           </Route>
 
           {/* Legacy authenticated routes — keep their own RoutePageShell top-nav */}
           <Route path="/security" element={<SecurityRoute />} />
-          <Route path="/devices" element={<DevicesRoute />} />
           <Route path="/storage" element={<StorageRoute />} />
           <Route path="/transparency" element={<TransparencyRoute />} />
           <Route path="/admin" element={<AdminLoginRoute />} />

@@ -30,8 +30,17 @@ const navItems = [
   { to: '/storage', label: 'Storage', icon: Database },
 ];
 
+const routeShellPaths = new Set(['/security', '/devices', '/storage']);
+
 function joinClasses(...classes: Array<string | false | undefined>): string {
   return classes.filter(Boolean).join(' ');
+}
+
+function routeShellLinkState(
+  to: string,
+  currentPath: string,
+): { routeShellBack: true } | undefined {
+  return routeShellPaths.has(to) && to !== currentPath ? { routeShellBack: true } : undefined;
 }
 
 export function RoutePageShell({
@@ -45,18 +54,19 @@ export function RoutePageShell({
   const navigate = useNavigate();
 
   // Smart back: only step back when there is genuine in-app history. React Router stamps the first
-  // location of a session with key "default"; any in-app navigation produces a unique key. Keying off
-  // that (rather than window.history.length, which also counts external/prior-tab entries) keeps deep
-  // links, fresh PWA loads, and external referrers landing on /chat instead of navigating off-site.
+  // location of a session with key "default"; any in-app navigation produces a unique key. The shell
+  // link state covers browsers/PWA shells that preserve the default key on the target entry.
   const handleBack = useCallback(() => {
-    if (location.key !== 'default') {
+    const routeShellBack =
+      (location.state as { routeShellBack?: unknown } | null)?.routeShellBack === true;
+    if (location.key !== 'default' || routeShellBack) {
       navigate(-1);
     } else {
       // No in-app history: replace (don't push) this deep-link entry, otherwise the browser/system Back
       // button from /chat would bounce the user straight back into this guarded route.
       navigate('/chat', { replace: true });
     }
-  }, [location.key, navigate]);
+  }, [location.key, location.state, navigate]);
 
   return (
     <AuthenticatedRouteBoundary>
@@ -88,6 +98,7 @@ export function RoutePageShell({
                   <Link
                     key={to}
                     to={to}
+                    state={routeShellLinkState(to, location.pathname)}
                     aria-current={active ? 'page' : undefined}
                     className={joinClasses(
                       'inline-flex min-h-9 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-medium transition-colors',

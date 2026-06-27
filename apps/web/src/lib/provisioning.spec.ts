@@ -20,7 +20,12 @@ describe('provisionDevice', () => {
     globalThis.indexedDB = new IDBFactory();
     publish.mockReset();
     // Default: the directory already has a full pool unclaimed → no replenishment needed.
-    publish.mockResolvedValue({ deviceId: 'd', published: 10, available: 10 });
+    publish.mockResolvedValue({
+      deviceId: 'd',
+      published: 10,
+      available: 10,
+      isProvisional: false,
+    });
   });
 
   it('ensures the pool and publishes its PUBLIC KeyPackages under the signature key', async () => {
@@ -63,8 +68,8 @@ describe('provisionDevice', () => {
     // (the replenishment) tops the directory back up to 10.
     publish
       .mockReset()
-      .mockResolvedValueOnce({ deviceId: 'd', published: 10, available: 2 })
-      .mockResolvedValueOnce({ deviceId: 'd', published: 8, available: 10 });
+      .mockResolvedValueOnce({ deviceId: 'd', published: 10, available: 2, isProvisional: false })
+      .mockResolvedValueOnce({ deviceId: 'd', published: 8, available: 10, isProvisional: false });
 
     await provisionDevice(ks, device, key);
 
@@ -82,7 +87,9 @@ describe('provisionDevice', () => {
     const key = await importUnlockKey(new Uint8Array(32).fill(1));
     const device = await ks.getOrCreateDevice('u1', key);
     await ks.ensurePool(device, key, 105); // a grown pool (> the 100-per-request server limit)
-    publish.mockReset().mockResolvedValue({ deviceId: 'd', published: 0, available: 105 });
+    publish
+      .mockReset()
+      .mockResolvedValue({ deviceId: 'd', published: 0, available: 105, isProvisional: false });
 
     await provisionDevice(ks, device, key);
 

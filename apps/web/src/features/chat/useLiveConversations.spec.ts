@@ -9,6 +9,7 @@ import {
   liveConversationShell,
   prependConversationIfMissing,
   setsEqual,
+  splitApprovedEnrollmentsForDevice,
 } from './useLiveConversations';
 
 const existingConversation: Conversation = {
@@ -28,6 +29,29 @@ describe('live conversation helpers', () => {
     const next = addLiveId(existing, 'new-live');
     expect(next).not.toBe(existing);
     expect([...next].sort()).toEqual(['existing-live', 'new-live']);
+  });
+
+  it('splits approved enrollments into this device and other-device fan-out work', () => {
+    const rows = [
+      { id: 'enroll-self', requestingDeviceId: 'device-self', fingerprint: 'self-key' },
+      { id: 'enroll-other', requestingDeviceId: 'device-other', fingerprint: 'other-key' },
+    ];
+
+    expect(splitApprovedEnrollmentsForDevice(rows, 'device-self')).toEqual({
+      ownDevice: [rows[0]],
+      otherDevices: [rows[1]],
+    });
+  });
+
+  it('does not clear local approval state when the current device is unknown', () => {
+    const rows = [
+      { id: 'enroll-other', requestingDeviceId: 'device-other', fingerprint: 'other-key' },
+    ];
+
+    expect(splitApprovedEnrollmentsForDevice(rows, null)).toEqual({
+      ownDevice: [],
+      otherDevices: rows,
+    });
   });
 
   it('prepends missing live conversations without duplicating existing ones', () => {
