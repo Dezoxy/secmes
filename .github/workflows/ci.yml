@@ -155,6 +155,8 @@ jobs:
           echo "compose.prod.yaml: exactly one host-network service (coturn) OK"
       - name: Assert CSP connect-src pins the prod B2 bucket (CSP-1)
         run: bash scripts/check-csp-connect-src.sh
+      - name: Assert observability logs use service labels
+        run: bash scripts/check-observability-log-labels.sh
 
   dockerignore-guard:
     runs-on: ubuntu-latest

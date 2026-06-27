@@ -24,7 +24,7 @@ that look like user data disappeared.
 
 ## 2. Improve observability dashboards after service labels are fixed
 
-**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [x] Merged
 
 ### Problem
 
@@ -33,8 +33,10 @@ failing, what changed around deploy time, and whether alerts are real or scrape/
 
 ### Plan
 
-- [x] Add service-grouped log panels for `api`, `caddy`, `redis-exporter`, `postgres-exporter`, `prometheus`,
-  `grafana`, `alertmanager`, `pyroscope`, `loki`, `alloy`, and `coturn`.
+- [x] Add service-grouped log panels for centralized Loki services: `api`, `caddy`, `redis-exporter`,
+  `postgres-exporter`, `prometheus`, `grafana`, `alertmanager`, `pyroscope`, `loki`, and `alloy`.
+- [x] Keep `coturn` out of centralized Loki storage; use local short-retention logs and Prometheus health
+  signals for TURN triage.
 - [x] Add quick filters for `level`, `service`, and `context`.
 - [x] Add panels separating user-facing `5xx` from observability-service errors.
 
@@ -44,7 +46,7 @@ failing, what changed around deploy time, and whether alerts are real or scrape/
 
 ## 3. Add log-label regression checks
 
-**Status:** [x] Diagnosed / [ ] Implemented / [ ] Verified / [ ] Merged
+**Status:** [x] Diagnosed / [x] Implemented / [ ] Verified / [x] Merged
 
 ### Problem
 
@@ -53,9 +55,9 @@ return dashboards to opaque IDs.
 
 ### Plan
 
-- [ ] Add a lightweight config/static test for the Alloy relabel rules and Grafana dashboard queries.
-- [ ] Fail if dashboards use opaque container IDs as the primary service dimension.
-- [ ] Document the intended labels in the centralized logs threat model or observability README.
+- [x] Add a lightweight config/static test for the Alloy relabel rules and Grafana dashboard queries.
+- [x] Fail if dashboards use opaque container IDs as the primary service dimension.
+- [x] Document the intended labels in the centralized logs threat model or observability README.
 
 ### Verification
 
