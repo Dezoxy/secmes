@@ -6,6 +6,7 @@ COMPOSE_FILE="$ROOT/compose.prod.yaml"
 ALLOY_CONFIG="$ROOT/infra/stack/observability/alloy/config.alloy"
 DASHBOARD_DIR="$ROOT/infra/stack/observability/grafana/dashboards"
 LOGS_DASHBOARD="$DASHBOARD_DIR/argus-logs.json"
+DEPLOY_SH="$ROOT/infra/stack/deploy/deploy.sh"
 
 fail() {
   echo "::error::$1" >&2
@@ -22,6 +23,7 @@ require_file() {
 require_file "$COMPOSE_FILE"
 require_file "$ALLOY_CONFIG"
 require_file "$LOGS_DASHBOARD"
+require_file "$DEPLOY_SH"
 
 compose_config="$(docker compose -f "$COMPOSE_FILE" config --format json)"
 
@@ -152,5 +154,16 @@ jq -e '
   | select(contains("{job=\"docker\"") and test("by[[:space:]]*\\([^)]*service"))
 ' "$LOGS_DASHBOARD" >/dev/null ||
   fail "argus Logs dashboard must contain at least one Loki panel grouped by service."
+
+grep -Fq 'ensure_grafana_dashboards_visible' "$DEPLOY_SH" ||
+  fail "deploy.sh must verify Grafana dashboard visibility inside the container after rollout."
+grep -Fq "docker exec \"\$cid\" sh -c" "$DEPLOY_SH" ||
+  fail "deploy.sh must inspect Grafana's container-side dashboard mount, not only host-side files."
+grep -Fq 'find /etc/grafana/dashboards -type f -name "*.json"' "$DEPLOY_SH" ||
+  fail "deploy.sh must require Grafana to see at least one dashboard JSON file."
+grep -Fq '/etc/grafana/provisioning/dashboards/provider.yml' "$DEPLOY_SH" ||
+  fail "deploy.sh must require Grafana to see its dashboard provider file."
+grep -Fq -- '--force-recreate --no-deps grafana' "$DEPLOY_SH" ||
+  fail "deploy.sh must force-recreate Grafana when refreshed bind mounts are not visible."
 
 echo "observability log label guard OK"

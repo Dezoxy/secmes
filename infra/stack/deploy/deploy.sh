@@ -776,6 +776,29 @@ wait_running() { # $1 = compose service without a healthcheck
     return 1
   }
 }
+grafana_dashboards_visible() {
+  local cid
+  cid="$(docker compose -f "$COMPOSE" ps -q grafana 2>/dev/null || true)"
+  [ -n "$cid" ] || return 1
+  docker exec "$cid" sh -c '
+    test -d /etc/grafana/dashboards &&
+      find /etc/grafana/dashboards -type f -name "*.json" -print -quit | grep -q . &&
+      test -f /etc/grafana/provisioning/dashboards/provider.yml
+  ' >/dev/null 2>&1
+}
+ensure_grafana_dashboards_visible() {
+  if grafana_dashboards_visible; then
+    return 0
+  fi
+  log "grafana cannot see staged dashboards/provisioning; force-recreating grafana to refresh bind mounts"
+  docker compose -f "$COMPOSE" up -d --force-recreate --no-deps grafana
+  wait_running grafana
+  if ! grafana_dashboards_visible; then
+    log "FATAL: grafana still cannot see /etc/grafana/dashboards/*.json and /etc/grafana/provisioning/dashboards/provider.yml"
+    return 1
+  fi
+  printf '%s\n' "$GRAFANA_CONF_HASH" >"$_grafana_applied_hash_file"
+}
 log "waiting for the rollout to become healthy (api, caddy, coturn, glitchtip) + the tunnel"
 wait_healthy api
 wait_healthy caddy
@@ -789,6 +812,7 @@ wait_healthy coturn
 wait_running prometheus
 wait_running alertmanager
 wait_running grafana
+ensure_grafana_dashboards_visible
 # Centralized logs (checkpoint 47b): same posture — Loki + Alloy have no shell for a CMD healthcheck, so gate
 # on running + not-crash-looping (catches a bad config mount / missing log dir / image pull).
 wait_running loki
