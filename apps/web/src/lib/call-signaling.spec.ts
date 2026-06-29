@@ -233,6 +233,43 @@ describe('createCallSignaling — receiveFrame()', () => {
     expect(onSignal).toHaveBeenCalledTimes(1);
   });
 
+  it('uses the authenticated inner msgSeq for HW — spoofed high outer msgSeq cannot block future frames', async () => {
+    const onSignal = vi.fn();
+    // Two successive decrypt results: inner msgSeq 1 then 2
+    const conv = {
+      epoch: 0,
+      encrypt: vi.fn(),
+      decryptAuthenticated: vi
+        .fn()
+        .mockResolvedValueOnce({
+          plaintext: signalJson({ msgSeq: 1 }),
+          senderIdentity: PEER_IDENTITY,
+        })
+        .mockResolvedValueOnce({
+          plaintext: signalJson({ msgSeq: 2 }),
+          senderIdentity: PEER_IDENTITY,
+        }),
+    };
+    const sig = createCallSignaling({
+      conversation: conv as never,
+      localIdentity: LOCAL_IDENTITY,
+      callId: CALL_ID,
+      conversationId: CONV_ID,
+      socket: makeFakeSocket(),
+      onSignal,
+    });
+
+    // Frame 1: outer msgSeq spoofed to 999, inner authenticated msgSeq = 1
+    // HW must advance to 1 (not 999) so frame 2 is not blocked
+    await sig.receiveFrame(makeInboundFrame({ msgSeq: 999 }));
+    expect(onSignal).toHaveBeenCalledTimes(1);
+
+    // Frame 2: outer msgSeq = 2, inner msgSeq = 2. If HW was 999 this would fail pre-decrypt (2 <= 999).
+    // With the fix HW is 1 so 2 > 1 → frame passes.
+    await sig.receiveFrame(makeInboundFrame({ msgSeq: 2 }));
+    expect(onSignal).toHaveBeenCalledTimes(2);
+  });
+
   it('drops a loopback frame (senderIdentity === localIdentity)', async () => {
     const onSignal = vi.fn();
     const conv = makeFakeConversation({

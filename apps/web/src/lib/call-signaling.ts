@@ -137,11 +137,6 @@ export function createCallSignaling(opts: CallSignalingOptions): CallSignaling {
         return;
       }
 
-      // Advance the high-water AFTER successful decryption so a failed decrypt doesn't lock out
-      // a valid retransmit of the same seq (though the ratchet already advanced — a retransmit
-      // would fail decryption anyway, making this ordering moot but consistent).
-      inSeqHW.set(frame.senderUserId, frame.msgSeq);
-
       let parsed: ReturnType<typeof CallSignalSchema.safeParse>;
       try {
         parsed = CallSignalSchema.safeParse(JSON.parse(plaintext));
@@ -154,6 +149,15 @@ export function createCallSignaling(opts: CallSignalingOptions): CallSignaling {
         onError?.(new Error('call signal failed schema validation'));
         return;
       }
+
+      // Authoritative replay check on the authenticated inner sequence.
+      // The pre-decrypt check (above) uses the unverified outer `frame.msgSeq` as a fast-reject;
+      // this check uses `parsed.data.msgSeq` so a spoofed high outer value cannot poison the HW.
+      if (hw !== undefined && parsed.data.msgSeq <= hw) return;
+
+      // Advance the HW with the authenticated inner sequence — prevents a spoofed outer msgSeq from
+      // blocking future frames by falsely inflating the high-water mark.
+      inSeqHW.set(frame.senderUserId, parsed.data.msgSeq);
 
       // Cross-call guard: the server routes by callId but a mis-delivered frame shouldn't be acted on.
       if (parsed.data.callId !== callId) return;

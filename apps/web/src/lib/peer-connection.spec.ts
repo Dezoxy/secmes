@@ -173,4 +173,45 @@ describe('createPeerConnection', () => {
     const pc = FakePC.instances[0]!;
     expect(pc.senders[0]?.track).toBe(track);
   });
+
+  it('buffers ICE candidates added before remote description is set, then flushes on acceptAnswer', async () => {
+    const apc = createPeerConnection(TURN_CONFIG, makeCallbacks());
+    const pc = FakePC.instances[0]!;
+    const addCandidateSpy = vi.spyOn(pc, 'addIceCandidate');
+
+    const candidate = { candidate: 'candidate:1 1 udp 1 192.0.2.1 50000 typ host' };
+    await apc.addIceCandidate(candidate); // remote desc not set yet — should buffer
+    expect(addCandidateSpy).not.toHaveBeenCalled();
+
+    const answer: RTCSessionDescriptionInit = { type: 'answer', sdp: 'v=0\r\nanswer' };
+    await apc.acceptAnswer(answer); // sets remote desc → should flush the buffered candidate
+    expect(addCandidateSpy).toHaveBeenCalledOnce();
+  });
+
+  it('buffers ICE candidates added before acceptOffer and flushes after setRemoteDescription', async () => {
+    const apc = createPeerConnection(TURN_CONFIG, makeCallbacks());
+    const pc = FakePC.instances[0]!;
+    const addCandidateSpy = vi.spyOn(pc, 'addIceCandidate');
+
+    const candidate = { candidate: 'candidate:1 1 udp 1 192.0.2.2 50001 typ host' };
+    await apc.addIceCandidate(candidate); // buffered before remote desc
+    expect(addCandidateSpy).not.toHaveBeenCalled();
+
+    const offer: RTCSessionDescriptionInit = { type: 'offer', sdp: 'v=0\r\noffer' };
+    await apc.acceptOffer(offer); // sets remote desc → flush
+    expect(addCandidateSpy).toHaveBeenCalledOnce();
+  });
+
+  it('adds ICE candidates directly after remote description is set', async () => {
+    const apc = createPeerConnection(TURN_CONFIG, makeCallbacks());
+    const pc = FakePC.instances[0]!;
+    const addCandidateSpy = vi.spyOn(pc, 'addIceCandidate');
+
+    const answer: RTCSessionDescriptionInit = { type: 'answer', sdp: 'v=0\r\nanswer' };
+    await apc.acceptAnswer(answer); // remote desc now set
+
+    const candidate = { candidate: 'candidate:1 1 udp 1 192.0.2.3 50002 typ host' };
+    await apc.addIceCandidate(candidate); // should go directly, no buffering
+    expect(addCandidateSpy).toHaveBeenCalledOnce();
+  });
 });

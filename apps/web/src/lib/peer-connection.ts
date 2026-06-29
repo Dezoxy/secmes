@@ -65,6 +65,17 @@ export function createPeerConnection(
     callbacks.onRemoteTrack(ev.track, ev.streams);
   });
 
+  // ICE candidates can arrive before the remote description is set (trickle ICE race).
+  // Buffer them and flush once setRemoteDescription is called.
+  let remoteDescSet = false;
+  const pendingCandidates: RTCIceCandidateInit[] = [];
+
+  async function flushPendingCandidates(): Promise<void> {
+    for (const c of pendingCandidates.splice(0)) {
+      await pc.addIceCandidate(new RTCIceCandidate(c));
+    }
+  }
+
   return {
     async createOffer(): Promise<RTCSessionDescriptionInit> {
       const offer = await pc.createOffer();
@@ -74,6 +85,8 @@ export function createPeerConnection(
 
     async acceptOffer(offer: RTCSessionDescriptionInit): Promise<RTCSessionDescriptionInit> {
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      remoteDescSet = true;
+      await flushPendingCandidates();
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       return { type: answer.type, sdp: answer.sdp ?? '' };
@@ -81,9 +94,15 @@ export function createPeerConnection(
 
     async acceptAnswer(answer: RTCSessionDescriptionInit): Promise<void> {
       await pc.setRemoteDescription(new RTCSessionDescription(answer));
+      remoteDescSet = true;
+      await flushPendingCandidates();
     },
 
     async addIceCandidate(candidate: RTCIceCandidateInit): Promise<void> {
+      if (!remoteDescSet) {
+        pendingCandidates.push(candidate);
+        return;
+      }
       // Empty string candidate is the end-of-candidates sentinel — pass through as-is.
       await pc.addIceCandidate(new RTCIceCandidate(candidate));
     },
