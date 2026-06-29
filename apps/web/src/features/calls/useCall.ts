@@ -87,6 +87,16 @@ export function useCall(opts: UseCallOptions): UseCallResult {
   // while setupCall was awaiting loadTurnConfig()/getAudioStream() (the async setup window).
   const callGenRef = useRef(0);
 
+  // Client-side outbound ring timeout — clears if the peer accepts/declines/or teardown fires.
+  const outboundRingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearOutboundRingTimer = useCallback(() => {
+    if (outboundRingTimerRef.current !== null) {
+      clearTimeout(outboundRingTimerRef.current);
+      outboundRingTimerRef.current = null;
+    }
+  }, []);
+
   const clearEndedTimer = useCallback(() => {
     if (endedTimerRef.current !== null) {
       clearTimeout(endedTimerRef.current);
@@ -98,6 +108,7 @@ export function useCall(opts: UseCallOptions): UseCallResult {
   const teardown = useCallback(
     (reason: string) => {
       callGenRef.current++;
+      clearOutboundRingTimer();
       clearEndedTimer();
       pcRef.current?.close();
       pcRef.current = null;
@@ -115,18 +126,19 @@ export function useCall(opts: UseCallOptions): UseCallResult {
         ringRef.current = null;
       }, 2000);
     },
-    [clearEndedTimer],
+    [clearEndedTimer, clearOutboundRingTimer],
   );
 
   // Cleanup on unmount.
   useEffect(
     () => () => {
+      clearOutboundRingTimer();
       clearEndedTimer();
       pcRef.current?.close();
       streamRef.current?.getTracks().forEach((t) => t.stop());
       if (audioRef.current) audioRef.current.srcObject = null;
     },
-    [clearEndedTimer],
+    [clearEndedTimer, clearOutboundRingTimer],
   );
 
   // Initialise the audio element once (never rendered in DOM — just played).
@@ -184,7 +196,14 @@ export function useCall(opts: UseCallOptions): UseCallResult {
       const conversation = liveGroups.current.get(conversationId);
       if (!conversation) return false;
 
-      const [config, stream] = await Promise.all([loadTurnConfig(), getAudioStream()]);
+      let config: Awaited<ReturnType<typeof loadTurnConfig>>;
+      let stream: MediaStream;
+      try {
+        [config, stream] = await Promise.all([loadTurnConfig(), getAudioStream()]);
+      } catch {
+        // TURN credential fetch or getUserMedia rejected — return false so callers release + teardown.
+        return false;
+      }
       streamRef.current = stream;
 
       const pc = createPeerConnection(config, {
@@ -271,8 +290,16 @@ export function useCall(opts: UseCallOptions): UseCallResult {
         media: { audio: true, video: false },
         relayOnly: true,
       });
+
+      // Guard against a peer that never answers — friendship gate may silently reject the invite
+      // without the server ever sending call.end, leaving the caller stuck on "Calling…".
+      outboundRingTimerRef.current = setTimeout(() => {
+        outboundRingTimerRef.current = null;
+        socket.sendCallRelease(callId);
+        teardown('no-answer');
+      }, 30_000);
     },
-    [clearEndedTimer, setupCall, socket, teardown],
+    [clearEndedTimer, clearOutboundRingTimer, setupCall, socket, teardown],
   );
 
   const acceptCall = useCallback(async () => {
