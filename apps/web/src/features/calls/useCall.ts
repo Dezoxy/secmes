@@ -83,6 +83,10 @@ export function useCall(opts: UseCallOptions): UseCallResult {
   // Timeout handle for 'ended' → 'idle' auto-dismiss.
   const endedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Generation counter: incremented by teardown so startCall can detect a hangup that fired
+  // while setupCall was awaiting loadTurnConfig()/getAudioStream() (the async setup window).
+  const callGenRef = useRef(0);
+
   const clearEndedTimer = useCallback(() => {
     if (endedTimerRef.current !== null) {
       clearTimeout(endedTimerRef.current);
@@ -93,6 +97,7 @@ export function useCall(opts: UseCallOptions): UseCallResult {
   // Shared teardown: close PC, stop stream, null refs, schedule idle.
   const teardown = useCallback(
     (reason: string) => {
+      callGenRef.current++;
       clearEndedTimer();
       pcRef.current?.close();
       pcRef.current = null;
@@ -239,16 +244,21 @@ export function useCall(opts: UseCallOptions): UseCallResult {
   const startCall = useCallback(
     async (conversationId: string, peerUserId: string) => {
       clearEndedTimer();
+      const gen = ++callGenRef.current;
       // Allocate a server-minted callId BEFORE creating the PC (need it for signaling).
       const { callId } = await inviteToCall(peerUserId, { conversationId, media: 'audio' });
 
       setCallPhase({ type: 'calling', callId, conversationId, peerUserId });
 
       const ok = await setupCall(callId, conversationId);
-      if (!ok) {
-        // Peer is already ringing — release the call server-side before teardown.
+      if (!ok || callGenRef.current !== gen) {
+        // Either setup failed or hangUp fired while awaiting TURN/media (gen mismatch).
+        // Peer is already ringing — release server-side, clean up any partial PC.
+        pcRef.current?.close();
+        pcRef.current = null;
+        sigRef.current = null;
         socket.sendCallRelease(callId);
-        teardown('setup-failed');
+        if (callGenRef.current === gen) teardown('setup-failed');
         return;
       }
 

@@ -818,6 +818,9 @@ export function useLiveConversations({
       onFriendRequest: () => {
         onFriendRequest?.();
       },
+      // onCallRing/Signal/End are stable useCallback delegates (empty deps, ref-delegating in ChatContext)
+      // and are intentionally excluded from the socket useEffect dep array below — including them would
+      // re-create the socket on every render.
       onCallRing,
       onCallSignalFrame,
       onCallEnd,
