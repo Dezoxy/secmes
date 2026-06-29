@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Conversation as MlsGroup } from '@argus/crypto';
 import type { CallSignal } from '@argus/contracts';
 import { inviteToCall } from '../../lib/api';
+import { fromBase64 } from '../../lib/base64';
 import { createCallSignaling } from '../../lib/call-signaling';
 import { getAudioStream } from '../../lib/media-devices';
 import { createPeerConnection, type ArgusPC } from '../../lib/peer-connection';
@@ -333,13 +334,26 @@ export function useCall(opts: UseCallOptions): UseCallResult {
         return;
       }
 
-      const offer = await pcRef.current!.createOffer();
-      await sigRef.current!.send({
-        type: 'call.invite',
-        sdp: offer,
-        media: { audio: true, video: false },
-        relayOnly: true,
-      });
+      // If offer creation or the invite send fails, clean up — caller is stuck with PC/stream
+      // open and the callee ringing until server timeout.
+      try {
+        const offer = await pcRef.current!.createOffer();
+        await sigRef.current!.send({
+          type: 'call.invite',
+          sdp: offer,
+          media: { audio: true, video: false },
+          relayOnly: true,
+        });
+      } catch {
+        pcRef.current?.close();
+        pcRef.current = null;
+        sigRef.current = null;
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        socket.sendCallRelease(callId);
+        teardown('offer-failed');
+        return;
+      }
 
       // Guard against a peer that never answers — friendship gate may silently reject the invite
       // without the server ever sending call.end, leaving the caller stuck on "Calling…".
@@ -432,15 +446,36 @@ export function useCall(opts: UseCallOptions): UseCallResult {
     [socket],
   );
 
-  const onCallSignalFrame = useCallback((frame: IncomingCallSignalFrame) => {
-    const sig = sigRef.current;
-    if (!sig) {
-      // Signaling not yet set up (e.g., accept() still in progress) — buffer for flush.
-      pendingFramesRef.current.push(frame);
-      return;
-    }
-    void sig.receiveFrame(frame);
-  }, []);
+  const onCallSignalFrame = useCallback(
+    (frame: IncomingCallSignalFrame) => {
+      const sig = sigRef.current;
+      if (sig) {
+        void sig.receiveFrame(frame);
+        return;
+      }
+      if (ringRef.current?.callId === frame.callId) {
+        // In ringing phase for this call — buffer for flush once acceptCall sets up sig.
+        pendingFramesRef.current.push(frame);
+        return;
+      }
+      // Not joining this call (declined, busy, or a different call is active). Decrypt and
+      // discard to advance the MLS ratchet — without this, multi-device users whose secondary
+      // device did not answer would diverge from the answering device's ratchet and fail to
+      // decrypt subsequent chat messages from the caller.
+      const conversation = liveGroups.current.get(frame.conversationId);
+      if (conversation) {
+        void (async () => {
+          try {
+            await conversation.decryptAuthenticated(fromBase64(frame.envelope.ciphertext));
+            await saveGroupState(frame.conversationId);
+          } catch {
+            // Decryption failure is expected for frames already consumed by the answering device.
+          }
+        })();
+      }
+    },
+    [liveGroups, saveGroupState],
+  );
 
   const onCallEnd = useCallback(
     (event: IncomingCallEnd) => {
