@@ -162,8 +162,9 @@ export function useCall(opts: UseCallOptions): UseCallResult {
           break;
         }
         case 'call.accept': {
-          // Caller receives answer.
+          // Caller receives answer — peer accepted, cancel the no-answer guard.
           if (!pc) return;
+          clearOutboundRingTimer();
           await pc.acceptAnswer(signal.sdp);
           break;
         }
@@ -184,7 +185,7 @@ export function useCall(opts: UseCallOptions): UseCallResult {
           break;
       }
     },
-    [teardown],
+    [clearOutboundRingTimer, teardown],
   );
 
   // Build a peer connection and signaling channel for a given callId + conversationId.
