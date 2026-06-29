@@ -25,6 +25,14 @@ export function CallOverlay() {
     useChatContext();
   const acceptedRef = useRef(false);
 
+  // Reset accept guard whenever we leave ringing — otherwise a second incoming call
+  // would find acceptedRef=true and silently ignore the Accept tap.
+  useEffect(() => {
+    if (callPhase.type !== 'ringing') {
+      acceptedRef.current = false;
+    }
+  }, [callPhase.type]);
+
   if (callPhase.type === 'idle') return null;
 
   const callerName =
@@ -47,7 +55,7 @@ export function CallOverlay() {
 
   return (
     <div
-      className={`fixed inset-0 z-[70] flex items-center justify-center ${modalBackdropEnterMotion}`}
+      className={`fixed inset-0 z-[70] flex items-center justify-center ${modalBackdropEnterMotion} ${callPhase.type === 'active' ? 'pointer-events-none' : ''}`}
     >
       {/* Backdrop — not rendered for active (bottom strip only) */}
       {callPhase.type !== 'active' && (
@@ -182,7 +190,7 @@ function ActiveStrip({
   const elapsed = useElapsedSeconds(startedAt);
 
   return (
-    <div className="absolute bottom-20 left-1/2 z-10 flex -translate-x-1/2 items-center gap-4 rounded-2xl border border-white/10 bg-[#12121a]/95 px-5 py-3 shadow-2xl backdrop-blur-xl">
+    <div className="pointer-events-auto absolute bottom-20 left-1/2 z-10 flex -translate-x-1/2 items-center gap-4 rounded-2xl border border-white/10 bg-[#12121a]/95 px-5 py-3 shadow-2xl backdrop-blur-xl">
       <div className="min-w-0">
         <p className="truncate text-sm font-medium">{peerName}</p>
         <p className="text-xs tabular-nums text-white/50">{elapsed}</p>

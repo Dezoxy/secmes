@@ -246,6 +246,8 @@ export function useCall(opts: UseCallOptions): UseCallResult {
 
       const ok = await setupCall(callId, conversationId);
       if (!ok) {
+        // Peer is already ringing — release the call server-side before teardown.
+        socket.sendCallRelease(callId);
         teardown('setup-failed');
         return;
       }
@@ -258,7 +260,7 @@ export function useCall(opts: UseCallOptions): UseCallResult {
         relayOnly: true,
       });
     },
-    [clearEndedTimer, setupCall, teardown],
+    [clearEndedTimer, setupCall, socket, teardown],
   );
 
   const acceptCall = useCallback(async () => {
