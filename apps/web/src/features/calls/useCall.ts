@@ -253,10 +253,12 @@ export function useCall(opts: UseCallOptions): UseCallResult {
       const ok = await setupCall(callId, conversationId);
       if (!ok || callGenRef.current !== gen) {
         // Either setup failed or hangUp fired while awaiting TURN/media (gen mismatch).
-        // Peer is already ringing — release server-side, clean up any partial PC.
+        // Peer is already ringing — release server-side, clean up any partial PC + stream.
         pcRef.current?.close();
         pcRef.current = null;
         sigRef.current = null;
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
         socket.sendCallRelease(callId);
         if (callGenRef.current === gen) teardown('setup-failed');
         return;
@@ -277,10 +279,22 @@ export function useCall(opts: UseCallOptions): UseCallResult {
     const ring = ringRef.current;
     if (!ring) return;
     const { callId, conversationId } = ring;
+    const gen = callGenRef.current;
     setCallPhase({ type: 'negotiating', callId, conversationId });
-    await setupCall(callId, conversationId);
+    const ok = await setupCall(callId, conversationId);
+    if (!ok || callGenRef.current !== gen) {
+      // Setup failed or hangUp fired during TURN/media await — clean up partial PC + stream.
+      pcRef.current?.close();
+      pcRef.current = null;
+      sigRef.current = null;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      socket.sendCallRelease(callId);
+      if (callGenRef.current === gen) teardown('setup-failed');
+      return;
+    }
     // The 'call.invite' signal will arrive via onCallSignalFrame and be routed through handleSignal.
-  }, [setupCall]);
+  }, [setupCall, socket, teardown]);
 
   const declineCall = useCallback(() => {
     const ring = ringRef.current;

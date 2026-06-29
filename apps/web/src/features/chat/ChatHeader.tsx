@@ -124,7 +124,7 @@ export function ChatHeader({
   onVerify,
   onAddMember,
 }: ChatHeaderProps) {
-  const { startCall, callPhase, convToPeerId } = useChatContext();
+  const { startCall, callPhase, convToPeerId, connectionStatus } = useChatContext();
   const [menuOpen, setMenuOpen] = useState(false);
   const [activePanel, setActivePanel] = useState<HeaderPanel | null>(null);
   const [muted, setMuted] = useState(() => isConversationMuted(conversation.id));
@@ -281,7 +281,11 @@ export function ChatHeader({
                   void startCall(conversation.id, peerUserId);
                 }
               }}
-              disabled={callPhase.type !== 'idle' || conversation.type !== 'direct'}
+              disabled={
+                callPhase.type !== 'idle' ||
+                conversation.type !== 'direct' ||
+                connectionStatus !== 'connected'
+              }
               size="lg"
               className={`rounded-xl hover:bg-[#1a1a26] ${
                 callPhase.type === 'active' ||
