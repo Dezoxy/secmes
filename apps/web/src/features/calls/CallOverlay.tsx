@@ -65,7 +65,7 @@ export function CallOverlay() {
       {/* ── Ringing ── */}
       {callPhase.type === 'ringing' && (
         <div
-          className={`relative z-10 flex h-full w-full flex-col items-center justify-between pb-16 pt-24 ${modalPanelEnterMotion}`}
+          className={`relative z-10 flex h-full w-full flex-col items-center justify-between overflow-y-auto py-8 ${modalPanelEnterMotion}`}
         >
           <div className="flex flex-col items-center gap-6">
             <Avatar
@@ -113,7 +113,7 @@ export function CallOverlay() {
       {/* ── Calling (outbound, waiting for peer) ── */}
       {callPhase.type === 'calling' && (
         <div
-          className={`relative z-10 flex h-full w-full flex-col items-center justify-between pb-16 pt-24 ${modalPanelEnterMotion}`}
+          className={`relative z-10 flex h-full w-full flex-col items-center justify-between overflow-y-auto py-8 ${modalPanelEnterMotion}`}
         >
           <div className="flex flex-col items-center gap-6">
             <Avatar
