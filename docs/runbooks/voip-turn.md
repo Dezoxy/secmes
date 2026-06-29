@@ -22,8 +22,10 @@ Common failure modes:
 | Symptom in logs | Likely cause | Fix |
 |---|---|---|
 | `FATAL: could not resolve external-ip` | IMDS unreachable and `ARGUS_TURN_EXTERNAL_IP` unset | Set the env var (see below) |
+| `FATAL: could not resolve a valid private-ip` | `hostname -i` returned nothing/loopback and `ARGUS_TURN_PRIVATE_IP` unset | Set `ARGUS_TURN_PRIVATE_IP=<vm-private-ip>` in the deploy env, restart |
 | `secret file not found` or `permission denied` on `/run/secrets/turn_shared_secret` | Secret not provisioned / Key Vault fetch failed | Re-run `argus-secrets.service` |
 | `certificate file not found` | TLS cert/key secret missing | Re-run `argus-secrets.service` |
+| Calls connect then die ~1 s; `channel bind: error 403 (Forbidden IP)` | Same-server relay peer-ACL not allowing the VM's own private IP | Confirm the entrypoint logged `peer-ACL: allow private <ip> …`; if not, set `ARGUS_TURN_PRIVATE_IP` and restart (see [Verify same-server relay](#verify-same-server-relay)) |
 | Exit immediately, no log | Corrupt combined config on tmpfs | Force-recreate (see below) |
 
 ---
@@ -100,9 +102,35 @@ docker compose -f /opt/argus/compose.prod.yaml exec prometheus \
 
 ---
 
+## Verify same-server relay
+
+Relay-only V1 needs both call legs to relay through this one coturn, which requires the
+`--allowed-peer-ip=<own-private-ip>` exception (see `voip-turn.md` §3.1). To confirm it works
+end-to-end (this is what actually breaks a call even when the healthcheck is green):
+
+```bash
+# Mint a credential from the live secret and run a same-server client-to-client relay.
+docker exec coturn sh -c 'S=$(cat /run/secrets/turn_shared_secret); \
+  turnutils_uclient -y -W "$S" -u relaycheck -n 6 -m 1 $(hostname -i | awk "{print \$1}")'
+# PASS signal: NO "channel bind: error 403 (Forbidden IP)" line — the ACL permits the hairpin.
+# NOTE: run on-box, the media path loops to our own public IP, which AWS does not hairpin back, so
+# tot_recv_msgs may be 0 even on a healthy relay. That is a test-only artifact — real external
+# clients enter via the public IP normally. The 403's absence is the authoritative check here;
+# end-to-end media is confirmed by an actual phone-to-phone call (see relay-port tcpdump below).
+
+# Confirm the entrypoint resolved and applied the peer-ACL flags:
+docker logs coturn 2>&1 | grep -E 'peer-ACL: allow private'
+# Expected: peer-ACL: allow private <private-ip> (same-server relay), deny public <public-ip> (self-loopback)
+```
+
+If you see the 403, the relay is up but no relay-only call can connect. Check that
+`ARGUS_TURN_PRIVATE_IP` (or `hostname -i`) yields the VM's real private IP, then restart coturn.
+
+---
+
 ## Notes
 
 - coturn runs as `nobody` (uid 65534), `cap_drop: ALL`, `read_only: true`. Never restart it as root.
 - The combined config (turnserver.conf + static-auth-secret) is written to a tmpfs `/var/tmp/turnserver-combined.conf` by the entrypoint; it is lost on container restart — this is intentional (secret never persists to disk).
-- The prometheus metrics endpoint (9641) is host-local only; not in the NSG. The `ArgusCoturnDown` alert fires on scrape failure, not on an external health check.
+- The prometheus metrics endpoint binds `0.0.0.0:9641` (coturn 4.6.2 has no localhost-bind option under `network_mode: host`); it is kept off the internet by the NSG/SG (9641 is never opened), and being TCP it is unreachable via the UDP relay. The `ArgusCoturnDown` alert fires on scrape failure, not on an external health check. Tightening the bind is a tracked follow-up (`voip-turn.md` §3.1).
 - TLS cert renewal: `caddy` sends a SIGHUP to the `coturn` container by name after cert rotation — coturn reloads the cert file without dropping existing sessions.
