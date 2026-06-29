@@ -129,6 +129,14 @@ export function createCallSignaling(opts: CallSignalingOptions): CallSignaling {
       // Loopback guard: should not happen in V1 (server echoes only to the peer), but fail-closed.
       if (senderIdentity === localIdentity) return;
 
+      // Sender binding: the outer `frame.senderUserId` (unverified) must match the MLS-authenticated
+      // `senderIdentity` (format "userId:deviceUuid"). Without this, a malicious relay could spoof
+      // a different userId in the outer header, polluting or blocking the replay-guard HW map.
+      if (!senderIdentity.startsWith(`${frame.senderUserId}:`)) {
+        onError?.(new Error('call signal sender binding failed'));
+        return;
+      }
+
       // Advance the high-water AFTER successful decryption so a failed decrypt doesn't lock out
       // a valid retransmit of the same seq (though the ratchet already advanced — a retransmit
       // would fail decryption anyway, making this ordering moot but consistent).

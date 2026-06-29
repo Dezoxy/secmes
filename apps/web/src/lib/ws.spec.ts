@@ -596,6 +596,26 @@ describe('createMessageSocket', () => {
       sock.close();
     });
 
+    it('sendCallSignal is a no-op when OPEN but not yet authenticated', async () => {
+      const sock = createMessageSocket({
+        url: 'wss://host/ws',
+        token: async () => 't',
+        onMessage: () => {},
+        WebSocketImpl: Impl,
+      });
+      last().open(); // socket is OPEN but no 'ready' event yet → not authed
+      await flush();
+      sock.sendCallSignal({
+        callId: 'c',
+        conversationId: 'cv',
+        msgSeq: 0,
+        envelope: { ciphertext: 'AA==', alg: 'MLS_1.0', epoch: 0 },
+      });
+      const callSignals = parsed(last()).filter((f) => f.event === 'call.signal');
+      expect(callSignals).toHaveLength(0);
+      sock.close();
+    });
+
     it('sendCallRelease is a no-op when the socket is not OPEN', async () => {
       const sock = createMessageSocket({
         url: 'wss://host/ws',

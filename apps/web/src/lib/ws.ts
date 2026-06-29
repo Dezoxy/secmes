@@ -457,12 +457,12 @@ export function createMessageSocket(opts: MessageSocketOptions): MessageSocket {
       if (ws && authed) sendSubscribe(ws, conversationId);
     },
     sendCallSignal(frame): void {
-      if (ws && ws.readyState === OPEN) {
+      if (ws && authed && ws.readyState === OPEN) {
         ws.send(JSON.stringify({ event: 'call.signal', data: frame }));
       }
     },
     sendCallRelease(callId: string): void {
-      if (ws && ws.readyState === OPEN) {
+      if (ws && authed && ws.readyState === OPEN) {
         ws.send(JSON.stringify({ event: 'call.release', data: { callId } }));
       }
     },

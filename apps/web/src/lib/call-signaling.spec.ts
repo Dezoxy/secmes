@@ -6,12 +6,14 @@ import type { IncomingCallSignalFrame, MessageSocket } from './ws';
 // ── Fake Conversation ─────────────────────────────────────────────────────────────────────────────
 
 const ENCRYPTED_WIRE = new Uint8Array([1, 2, 3, 4]);
-const PEER_IDENTITY = 'peerUserId:peer-device-uuid';
+// SENDER_USER_ID must be the userId prefix of PEER_IDENTITY (format: "userId:deviceUuid")
+const SENDER_USER_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const PEER_DEVICE_UUID = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const PEER_IDENTITY = `${SENDER_USER_ID}:${PEER_DEVICE_UUID}`;
 const LOCAL_IDENTITY = 'localUserId:local-device-uuid';
 // UUIDs must match [1-8] version nibble and [89abAB] variant nibble
 const CALL_ID = '11111111-1111-1111-8111-111111111111';
 const CONV_ID = '22222222-2222-2222-8222-222222222222';
-const SENDER_USER_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
 function makeFakeConversation({
   encryptResult = ENCRYPTED_WIRE,
@@ -271,6 +273,29 @@ describe('createCallSignaling — receiveFrame()', () => {
     expect(onSignal).not.toHaveBeenCalled();
     // Must drop before decrypt — ratchet must not advance for off-call frames.
     expect(conv.decryptAuthenticated).not.toHaveBeenCalled();
+  });
+
+  it('calls onError when the MLS sender does not match the outer senderUserId', async () => {
+    const onSignal = vi.fn();
+    const onError = vi.fn();
+    // senderIdentity from MLS is a different user than frame.senderUserId
+    const spoofedIdentity = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd:some-device';
+    const conv = makeFakeConversation({
+      decryptResult: { plaintext: signalJson(), senderIdentity: spoofedIdentity },
+    });
+    const sig = createCallSignaling({
+      conversation: conv as never,
+      localIdentity: LOCAL_IDENTITY,
+      callId: CALL_ID,
+      conversationId: CONV_ID,
+      socket: makeFakeSocket(),
+      onSignal,
+      onError,
+    });
+
+    await sig.receiveFrame(makeInboundFrame()); // frame.senderUserId = SENDER_USER_ID; identity mismatch
+    expect(onSignal).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledOnce();
   });
 
   it('calls onError and does not dispatch when MLS decryption fails', async () => {
