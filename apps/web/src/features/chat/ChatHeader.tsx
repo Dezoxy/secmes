@@ -284,7 +284,8 @@ export function ChatHeader({
               disabled={
                 callPhase.type !== 'idle' ||
                 conversation.type !== 'direct' ||
-                connectionStatus !== 'connected'
+                connectionStatus !== 'connected' ||
+                !convToPeerId.get(conversation.id)
               }
               size="lg"
               className={`rounded-xl hover:bg-[#1a1a26] ${

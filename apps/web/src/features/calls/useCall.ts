@@ -99,6 +99,9 @@ export function useCall(opts: UseCallOptions): UseCallResult {
   // the async window between the user tapping the button and the API returning a callId.
   const dialingRef = useRef(false);
 
+  // Mirrors callPhase state so the unmount cleanup can read the current phase without a stale closure.
+  const callPhaseRef = useRef<CallPhase>({ type: 'idle' });
+
   const clearOutboundRingTimer = useCallback(() => {
     if (outboundRingTimerRef.current !== null) {
       clearTimeout(outboundRingTimerRef.current);
@@ -147,17 +150,34 @@ export function useCall(opts: UseCallOptions): UseCallResult {
     [clearEndedTimer, clearKeepaliveInterval, clearOutboundRingTimer],
   );
 
+  // Keep callPhaseRef in sync so the unmount cleanup can read the current phase.
+  useEffect(() => {
+    callPhaseRef.current = callPhase;
+  }, [callPhase]);
+
   // Cleanup on unmount.
   useEffect(
     () => () => {
       clearKeepaliveInterval();
       clearOutboundRingTimer();
       clearEndedTimer();
+      // Notify the peer and release server-side state before tearing down locally so the peer
+      // isn't left in the call UI for up to 90 s waiting for the server inactivity timeout.
+      const phase = callPhaseRef.current;
+      if (
+        phase.type === 'ringing' ||
+        phase.type === 'calling' ||
+        phase.type === 'negotiating' ||
+        phase.type === 'active'
+      ) {
+        void sigRef.current?.send({ type: 'call.hangup', reason: 'hangup' });
+        socket.sendCallRelease(phase.callId);
+      }
       pcRef.current?.close();
       streamRef.current?.getTracks().forEach((t) => t.stop());
       if (audioRef.current) audioRef.current.srcObject = null;
     },
-    [clearEndedTimer, clearKeepaliveInterval, clearOutboundRingTimer],
+    [clearEndedTimer, clearKeepaliveInterval, clearOutboundRingTimer, socket],
   );
 
   // Initialise the audio element once (never rendered in DOM — just played).
