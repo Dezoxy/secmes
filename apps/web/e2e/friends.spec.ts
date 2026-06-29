@@ -304,20 +304,19 @@ test('friend search filters the accepted-friend list', async ({ page }) => {
   await search.fill('ali');
   await expect(page.getByRole('button', { name: /Open conversation with Alice/ })).toBeVisible();
 
-  // query matches no friend → show "send request" CTA (requires onSendFriendRequest, absent without manager)
+  // query matches no friend → the list search stays read-only; connecting happens in the dialog.
   await search.fill('argus-nobody-xxxxxx-zzz');
-  await expect(page.getByText('No accepted friend found for that Argus ID.')).toBeVisible();
+  await expect(page.getByText('No accepted friend found.')).toBeVisible();
 });
 
-test('connect new person button opens the friend search input', async ({ page }) => {
+test('connect new person button opens the friend request dialog', async ({ page }) => {
   await stubFriendsApi(page);
   await page.goto('/__e2e/friends-unavailable');
 
   await page.getByRole('button', { name: 'Connect new person' }).click();
 
-  const search = page.getByRole('textbox', { name: 'Search friends or enter Argus ID' });
-  await expect(search).toBeVisible();
-  await expect(search).toBeFocused();
+  await expect(page.getByRole('dialog', { name: 'Connect new person' })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Person Argus ID' })).toBeVisible();
 });
 
 test('accepted friend can be removed via the unfriend button', async ({ page }) => {
@@ -361,9 +360,7 @@ const LOOKUP_STUB = {
   avatarSeed: null,
 };
 
-test('send-friend-request flow: lookup-then-confirm (authenticated) / "no match" hint (demo)', async ({
-  page,
-}) => {
+test('connect person dialog: lookup-then-confirm friend request', async ({ page }) => {
   await stubFriendsApi(page);
 
   // Stub GET /users/lookup — required by phase-1 of the two-phase send flow.
@@ -377,51 +374,25 @@ test('send-friend-request flow: lookup-then-confirm (authenticated) / "no match"
     });
   });
 
-  let requestBody: string | null = null;
-  await page.route('**/api/friends/requests', (route) => {
-    if (route.request().method() !== 'POST') {
-      void route.continue();
-      return;
-    }
-    requestBody = route.request().postData();
-    void route.fulfill({
-      status: 202,
-      contentType: 'application/json',
-      body: JSON.stringify({ status: 'accepted' }),
-    });
-  });
+  await page.goto('/__e2e/friends-unavailable');
+  await page.getByRole('button', { name: 'Connect new person' }).click();
+  const argusIdInput = page.getByRole('textbox', { name: 'Person Argus ID' });
+  const lookupButton = page.getByRole('button', { name: 'Look up' });
 
-  await page.goto('/chat');
-  await page.getByRole('link', { name: 'Friends' }).click();
-  // Search is collapsed by default — open it before interacting with the textbox.
-  await page.getByRole('button', { name: 'Reveal friend search' }).click();
-  const search = page.getByRole('textbox', { name: 'Search friends or enter Argus ID' });
-  await search.fill(VALID_SEND_ID);
+  // Phase 1a: format validation error (bad input → no lookup call).
+  await argusIdInput.fill('hello');
+  await lookupButton.click();
+  await expect(page.getByText('Invalid argus ID')).toBeVisible();
+  expect(lookedUpId).toBeNull();
 
-  // In demo mode onSendFriendRequest is undefined — the button is hidden and the card shows
-  // only the "No accepted friend found" hint. The authenticated branch tests the full two-phase
-  // flow: format-validation → lookup → confirmation card → confirm → "Request sent to [name]".
-  const sendBtn = page.getByRole('button', { name: 'Send friend request' });
-  if (await sendBtn.isVisible()) {
-    // Phase 1a: format validation error (bad input → no lookup call).
-    await search.fill('hello');
-    await sendBtn.click();
-    await expect(page.getByText('Invalid argus ID')).toBeVisible();
-    expect(lookedUpId).toBeNull();
+  // Phase 1b: valid ID → lookup → confirmation card shows user details.
+  await argusIdInput.fill(VALID_SEND_ID);
+  await lookupButton.click();
+  await expect(page.getByText('Send a friend request to:')).toBeVisible();
+  await expect(page.getByText('Dave')).toBeVisible();
+  expect(lookedUpId).toBe(VALID_SEND_ID);
 
-    // Phase 1b: valid ID → lookup → confirmation card shows user details.
-    await search.fill(VALID_SEND_ID);
-    await sendBtn.click();
-    await expect(page.getByText('Send a friend request to:')).toBeVisible();
-    await expect(page.getByText('Dave')).toBeVisible();
-    expect(lookedUpId).toBe(VALID_SEND_ID);
-
-    // Phase 2: confirm → sends the request, green pill with name.
-    await page.getByRole('button', { name: 'Send request' }).click();
-    await expect(page.getByText('Request sent to Dave')).toBeVisible();
-    expect(requestBody).toContain(VALID_SEND_ID);
-  } else {
-    // Demo mode (always runs in CI) — card shows "No accepted friend found" hint.
-    await expect(page.getByText('No accepted friend found for that Argus ID.')).toBeVisible();
-  }
+  // Phase 2: confirm → sends the request, green pill with name.
+  await page.getByRole('button', { name: 'Send request' }).click();
+  await expect(page.getByText('Request sent to Dave')).toBeVisible();
 });
