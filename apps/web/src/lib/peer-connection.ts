@@ -3,33 +3,34 @@
 // iceTransportPolicy:'relay' — forced by the server-returned TurnConfig; peer IPs never exposed in V1.
 // Caller is impolite, callee is polite under perfect negotiation (V1.1 mid-call renegotiation).
 
+import type { IceCandidate, Sdp } from '@argus/contracts';
 import type { TurnConfig } from './turn-credentials';
 
 /** Callbacks from the live RTCPeerConnection to the call state machine. */
 export interface PeerConnectionCallbacks {
   onConnectionStateChange: (state: RTCPeerConnectionState) => void;
   /** Trickled ICE candidate ready to send to the peer (includes the end-of-candidates sentinel `''`). */
-  onIceCandidate: (candidate: RTCIceCandidateInit) => void;
+  onIceCandidate: (candidate: IceCandidate) => void;
   onRemoteTrack: (track: MediaStreamTrack, streams: readonly MediaStream[]) => void;
 }
 
 /** Handle to the live peer connection. All SDP methods are async; ICE trickles via callbacks. */
 export interface ArgusPC {
-  /** Caller side: create and set the local SDP offer. Returns the init dict to encrypt and send. */
-  createOffer(): Promise<RTCSessionDescriptionInit>;
+  /** Caller side: create and set the local SDP offer. Returns the offer to encrypt and send. */
+  createOffer(): Promise<Sdp>;
   /** Callee side: set the remote offer and create + set the local SDP answer. Returns the answer. */
-  acceptOffer(offer: RTCSessionDescriptionInit): Promise<RTCSessionDescriptionInit>;
+  acceptOffer(offer: Sdp): Promise<Sdp>;
   /** Caller side: set the callee's SDP answer as the remote description. */
-  acceptAnswer(answer: RTCSessionDescriptionInit): Promise<void>;
+  acceptAnswer(answer: Sdp): Promise<void>;
   /** Apply a trickled ICE candidate received from the peer. */
-  addIceCandidate(candidate: RTCIceCandidateInit): Promise<void>;
+  addIceCandidate(candidate: IceCandidate): Promise<void>;
   /** Add a local audio track from getUserMedia to the connection. */
   addTrack(track: MediaStreamTrack, stream: MediaStream): RTCRtpSender;
   /**
    * ICE-restart: mint a fresh offer with iceRestart:true.
    * V1.1 reconnect path (P3-ICE). Wired here so P1-SIG can call it; reconnect state machine is later.
    */
-  startIceRestart(): Promise<RTCSessionDescriptionInit>;
+  startIceRestart(): Promise<Sdp>;
   close(): void;
 }
 
@@ -54,9 +55,11 @@ export function createPeerConnection(
 
   pc.addEventListener('icecandidate', (ev: RTCPeerConnectionIceEvent) => {
     if (ev.candidate) {
-      callbacks.onIceCandidate(ev.candidate.toJSON());
+      // ev.candidate.candidate is always a non-undefined string on a real candidate event.
+      const init = ev.candidate.toJSON();
+      callbacks.onIceCandidate({ ...init, candidate: init.candidate ?? '' });
     } else {
-      // End-of-candidates sentinel — the RTCIceCandidateInit shape allows `candidate: ''`.
+      // End-of-candidates sentinel — empty string per spec.
       callbacks.onIceCandidate({ candidate: '' });
     }
   });
@@ -68,7 +71,7 @@ export function createPeerConnection(
   // ICE candidates can arrive before the remote description is set (trickle ICE race).
   // Buffer them and flush once setRemoteDescription is called.
   let remoteDescSet = false;
-  const pendingCandidates: RTCIceCandidateInit[] = [];
+  const pendingCandidates: IceCandidate[] = [];
 
   async function flushPendingCandidates(): Promise<void> {
     for (const c of pendingCandidates.splice(0)) {
@@ -77,28 +80,30 @@ export function createPeerConnection(
   }
 
   return {
-    async createOffer(): Promise<RTCSessionDescriptionInit> {
+    async createOffer(): Promise<Sdp> {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      return { type: offer.type, sdp: offer.sdp ?? '' };
+      // pc.createOffer() always returns type:'offer' — assert to satisfy the contract.
+      return { type: offer.type as 'offer', sdp: offer.sdp ?? '' };
     },
 
-    async acceptOffer(offer: RTCSessionDescriptionInit): Promise<RTCSessionDescriptionInit> {
+    async acceptOffer(offer: Sdp): Promise<Sdp> {
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       remoteDescSet = true;
       await flushPendingCandidates();
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      return { type: answer.type, sdp: answer.sdp ?? '' };
+      // pc.createAnswer() always returns type:'answer' — assert to satisfy the contract.
+      return { type: answer.type as 'answer', sdp: answer.sdp ?? '' };
     },
 
-    async acceptAnswer(answer: RTCSessionDescriptionInit): Promise<void> {
+    async acceptAnswer(answer: Sdp): Promise<void> {
       await pc.setRemoteDescription(new RTCSessionDescription(answer));
       remoteDescSet = true;
       await flushPendingCandidates();
     },
 
-    async addIceCandidate(candidate: RTCIceCandidateInit): Promise<void> {
+    async addIceCandidate(candidate: IceCandidate): Promise<void> {
       if (!remoteDescSet) {
         pendingCandidates.push(candidate);
         return;
@@ -111,10 +116,10 @@ export function createPeerConnection(
       return pc.addTrack(track, stream);
     },
 
-    async startIceRestart(): Promise<RTCSessionDescriptionInit> {
+    async startIceRestart(): Promise<Sdp> {
       const offer = await pc.createOffer({ iceRestart: true });
       await pc.setLocalDescription(offer);
-      return { type: offer.type, sdp: offer.sdp ?? '' };
+      return { type: offer.type as 'offer', sdp: offer.sdp ?? '' };
     },
 
     close(): void {

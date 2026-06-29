@@ -1,0 +1,537 @@
+// Call state machine hook.
+// Owns the full lifecycle: idle → ringing/calling → negotiating → active → ended → idle.
+//
+// SECURITY invariants:
+// - TURN credentials are ephemeral: fetched once per call, passed directly to createPeerConnection,
+//   never cached in state, never logged.
+// - SDP/ICE travel as MLS ciphertext (via createCallSignaling). The server is crypto-blind to call content.
+// - iceTransportPolicy:'relay' is enforced by the server-returned TurnConfig — never overridden here.
+// - Ratchet state is persisted (saveGroupState) after every encrypt/decrypt — matches the messaging path.
+// - All signal parsing and sender-binding checks are handled inside createCallSignaling.receiveFrame().
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { Conversation as MlsGroup } from '@argus/crypto';
+import type { CallSignal } from '@argus/contracts';
+import { inviteToCall } from '../../lib/api';
+import { fromBase64 } from '../../lib/base64';
+import { createCallSignaling } from '../../lib/call-signaling';
+import { getAudioStream } from '../../lib/media-devices';
+import { createPeerConnection, type ArgusPC } from '../../lib/peer-connection';
+import { loadTurnConfig } from '../../lib/turn-credentials';
+import type {
+  IncomingCallEnd,
+  IncomingCallRing,
+  IncomingCallSignalFrame,
+  MessageSocket,
+} from '../../lib/ws';
+import type { CallSignaling } from '../../lib/call-signaling';
+
+export type CallPhase =
+  | { type: 'idle' }
+  | { type: 'ringing'; callId: string; conversationId: string; callerUserId: string }
+  | { type: 'calling'; callId: string; conversationId: string; peerUserId: string }
+  | { type: 'negotiating'; callId: string; conversationId: string }
+  | { type: 'active'; callId: string; conversationId: string; startedAt: number }
+  | { type: 'ended'; reason: string };
+
+export interface UseCallOptions {
+  /** Stable MessageSocket shim that always proxies to the live socket. */
+  socket: MessageSocket;
+  /** Live MLS groups, keyed by conversationId. Needed for conversation.encrypt/decrypt. */
+  liveGroups: React.MutableRefObject<Map<string, MlsGroup>>;
+  /** Local MLS identity string: "${userId}:${deviceId}". Null before device is provisioned. */
+  localIdentity: string | null;
+  /** Persist ratchet state for a conversation after encrypt/decrypt — same path as messaging. */
+  saveGroupState: (conversationId: string) => Promise<void>;
+  /** Maps conversationId → peerUserId. Used to resolve peer name on incoming ring. */
+  convToPeerId: Map<string, string>;
+}
+
+export interface UseCallResult {
+  callPhase: CallPhase;
+  micMuted: boolean;
+  /** WS callback — wire into useLiveConversations. */
+  onCallRing: (event: IncomingCallRing) => void;
+  /** WS callback — wire into useLiveConversations. */
+  onCallSignalFrame: (frame: IncomingCallSignalFrame) => void;
+  /** WS callback — wire into useLiveConversations. */
+  onCallEnd: (event: IncomingCallEnd) => void;
+  startCall: (conversationId: string, peerUserId: string) => Promise<void>;
+  acceptCall: () => Promise<void>;
+  declineCall: () => void;
+  hangUp: () => void;
+  toggleMic: () => void;
+}
+
+export function useCall(opts: UseCallOptions): UseCallResult {
+  const { socket, liveGroups, localIdentity, saveGroupState } = opts;
+
+  const [callPhase, setCallPhase] = useState<CallPhase>({ type: 'idle' });
+  const [micMuted, setMicMuted] = useState(false);
+
+  // Live call refs — recreated per call, torn down on hangup/end.
+  const pcRef = useRef<ArgusPC | null>(null);
+  const sigRef = useRef<CallSignaling | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Pending ring metadata — stored when phase becomes 'ringing', consumed by acceptCall.
+  const ringRef = useRef<IncomingCallRing | null>(null);
+
+  // Signal frames that arrive before sigRef is ready (race: ring arrives, acceptCall sets up sig).
+  const pendingFramesRef = useRef<IncomingCallSignalFrame[]>([]);
+
+  // Timeout handle for 'ended' → 'idle' auto-dismiss.
+  const endedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Generation counter: incremented by teardown so startCall can detect a hangup that fired
+  // while setupCall was awaiting loadTurnConfig()/getAudioStream() (the async setup window).
+  const callGenRef = useRef(0);
+
+  // Client-side outbound ring timeout — clears if the peer accepts/declines/or teardown fires.
+  const outboundRingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Active-call keepalive — sends call.keepalive every 60 s to reset the gateway's
+  // 90 s inactivity authz timer; started on 'connected', stopped by teardown.
+  const keepaliveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Set synchronously before inviteToCall; prevents a second startCall from racing in during
+  // the async window between the user tapping the button and the API returning a callId.
+  const dialingRef = useRef(false);
+
+  // Mirrors callPhase state so the unmount cleanup can read the current phase without a stale closure.
+  const callPhaseRef = useRef<CallPhase>({ type: 'idle' });
+
+  const clearOutboundRingTimer = useCallback(() => {
+    if (outboundRingTimerRef.current !== null) {
+      clearTimeout(outboundRingTimerRef.current);
+      outboundRingTimerRef.current = null;
+    }
+  }, []);
+
+  const clearKeepaliveInterval = useCallback(() => {
+    if (keepaliveIntervalRef.current !== null) {
+      clearInterval(keepaliveIntervalRef.current);
+      keepaliveIntervalRef.current = null;
+    }
+  }, []);
+
+  const clearEndedTimer = useCallback(() => {
+    if (endedTimerRef.current !== null) {
+      clearTimeout(endedTimerRef.current);
+      endedTimerRef.current = null;
+    }
+  }, []);
+
+  // Shared teardown: close PC, stop stream, null refs, schedule idle.
+  const teardown = useCallback(
+    (reason: string) => {
+      dialingRef.current = false;
+      callGenRef.current++;
+      clearKeepaliveInterval();
+      clearOutboundRingTimer();
+      clearEndedTimer();
+      pcRef.current?.close();
+      pcRef.current = null;
+      sigRef.current = null;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      if (audioRef.current) {
+        audioRef.current.srcObject = null;
+      }
+      pendingFramesRef.current = [];
+      setMicMuted(false);
+      setCallPhase({ type: 'ended', reason });
+      endedTimerRef.current = setTimeout(() => {
+        setCallPhase({ type: 'idle' });
+        ringRef.current = null;
+      }, 2000);
+    },
+    [clearEndedTimer, clearKeepaliveInterval, clearOutboundRingTimer],
+  );
+
+  // Keep callPhaseRef in sync so the unmount cleanup can read the current phase.
+  useEffect(() => {
+    callPhaseRef.current = callPhase;
+  }, [callPhase]);
+
+  // Cleanup on unmount.
+  useEffect(
+    () => () => {
+      clearKeepaliveInterval();
+      clearOutboundRingTimer();
+      clearEndedTimer();
+      // Notify the peer and release server-side state before tearing down locally so the peer
+      // isn't left in the call UI for up to 90 s waiting for the server inactivity timeout.
+      const phase = callPhaseRef.current;
+      if (
+        phase.type === 'ringing' ||
+        phase.type === 'calling' ||
+        phase.type === 'negotiating' ||
+        phase.type === 'active'
+      ) {
+        void sigRef.current?.send({ type: 'call.hangup', reason: 'hangup' });
+        socket.sendCallRelease(phase.callId);
+      }
+      pcRef.current?.close();
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      if (audioRef.current) audioRef.current.srcObject = null;
+    },
+    [clearEndedTimer, clearKeepaliveInterval, clearOutboundRingTimer, socket],
+  );
+
+  // Initialise the audio element once (never rendered in DOM — just played).
+  if (!audioRef.current) {
+    audioRef.current = new Audio();
+    audioRef.current.autoplay = true;
+  }
+
+  // Handle a fully-decrypted, authenticated CallSignal from the signaling channel.
+  const handleSignal = useCallback(
+    async (signal: CallSignal) => {
+      const pc = pcRef.current;
+      const sig = sigRef.current;
+
+      switch (signal.type) {
+        case 'call.invite': {
+          // Callee receives offer → create answer. Phase remains 'negotiating' until PC connects.
+          if (!pc || !sig) return;
+          const answer = await pc.acceptOffer(signal.sdp);
+          await sig.send({ type: 'call.accept', sdp: answer });
+          break;
+        }
+        case 'call.accept': {
+          // Caller receives answer — peer accepted, cancel the no-answer guard.
+          if (!pc) return;
+          clearOutboundRingTimer();
+          await pc.acceptAnswer(signal.sdp);
+          break;
+        }
+        case 'call.ice': {
+          if (!pc) return;
+          await pc.addIceCandidate(signal.candidate);
+          break;
+        }
+        case 'call.decline':
+        case 'call.cancel':
+        case 'call.busy':
+          teardown(signal.type);
+          break;
+        case 'call.hangup':
+          teardown('hangup');
+          break;
+        case 'call.keepalive':
+          break;
+        default:
+          break;
+      }
+    },
+    [clearOutboundRingTimer, teardown],
+  );
+
+  // Build a peer connection and signaling channel for a given callId + conversationId.
+  const setupCall = useCallback(
+    async (callId: string, conversationId: string): Promise<boolean> => {
+      const identity = localIdentity;
+      if (!identity) return false;
+
+      const conversation = liveGroups.current.get(conversationId);
+      if (!conversation) return false;
+
+      // Sequential: fetch TURN first so getUserMedia is never called if credentials fail —
+      // this prevents a mic-track leak when loadTurnConfig() rejects after getUserMedia resolved.
+      const config = await loadTurnConfig().catch(() => null);
+      if (!config) return false;
+      const stream = await getAudioStream().catch(() => null);
+      if (!stream) return false;
+      streamRef.current = stream;
+
+      // Any synchronous or async failure beyond this point must stop the acquired mic stream.
+      try {
+        const pc = createPeerConnection(config, {
+          onConnectionStateChange: (state) => {
+            if (state === 'connected') {
+              setCallPhase({
+                type: 'active',
+                callId,
+                conversationId,
+                startedAt: performance.now(),
+              });
+              // Send keepalive every 60 s to reset the gateway's 90 s inactivity authz timer.
+              keepaliveIntervalRef.current = setInterval(() => {
+                void sigRef.current?.send({ type: 'call.keepalive' });
+              }, 60_000);
+            } else if (state === 'failed' || state === 'disconnected') {
+              // Notify the peer before tearing down — without this the remote side stays
+              // in active-call UI until the server inactivity timer fires.
+              void sigRef.current?.send({ type: 'call.hangup', reason: 'failed' });
+              socket.sendCallRelease(callId);
+              teardown(state);
+            }
+          },
+          onIceCandidate: (candidate) => {
+            void sigRef.current?.send({ type: 'call.ice', candidate });
+          },
+          onRemoteTrack: (track) => {
+            if (audioRef.current) {
+              audioRef.current.srcObject = new MediaStream([track]);
+              void audioRef.current.play().catch(() => {});
+            }
+          },
+        });
+
+        for (const track of stream.getAudioTracks()) {
+          pc.addTrack(track, stream);
+        }
+        pcRef.current = pc;
+
+        const sig = createCallSignaling({
+          conversation,
+          localIdentity: identity,
+          callId,
+          conversationId,
+          socket,
+          onSignal: (s) => {
+            void handleSignal(s);
+          },
+          onError: (err) => {
+            // Log only err.message — never err/err.stack/the frame; message is metadata-only
+            // (epoch, leaf index, wire-format descriptor). No SDP/ICE/key material reaches the log.
+            // eslint-disable-next-line no-console
+            console.warn('call signal error', err.message);
+          },
+          saveState: () => saveGroupState(conversationId),
+        });
+        sigRef.current = sig;
+
+        // Flush any frames that arrived before signaling was ready.
+        const pending = pendingFramesRef.current.splice(0);
+        for (const frame of pending) {
+          await sig.receiveFrame(frame);
+        }
+      } catch {
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        return false;
+      }
+
+      return true;
+    },
+    [handleSignal, liveGroups, localIdentity, saveGroupState, socket, teardown],
+  );
+
+  const startCall = useCallback(
+    async (conversationId: string, peerUserId: string) => {
+      // Double-invite guard: prevents racing calls from a rapid double-tap while the invite
+      // API is in flight (callPhase is still 'idle' until inviteToCall returns a callId).
+      if (callPhase.type !== 'idle' || dialingRef.current) return;
+      dialingRef.current = true;
+      clearEndedTimer();
+      const gen = ++callGenRef.current;
+      // Allocate a server-minted callId BEFORE creating the PC (need it for signaling).
+      let callId: string;
+      try {
+        ({ callId } = await inviteToCall(peerUserId, { conversationId, media: 'audio' }));
+      } catch {
+        dialingRef.current = false;
+        return;
+      }
+
+      setCallPhase({ type: 'calling', callId, conversationId, peerUserId });
+
+      const ok = await setupCall(callId, conversationId);
+      dialingRef.current = false;
+      if (!ok || callGenRef.current !== gen) {
+        // Either setup failed or hangUp fired while awaiting TURN/media (gen mismatch).
+        // Peer is already ringing — release server-side, clean up any partial PC + stream.
+        pcRef.current?.close();
+        pcRef.current = null;
+        sigRef.current = null;
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        socket.sendCallRelease(callId);
+        if (callGenRef.current === gen) teardown('setup-failed');
+        return;
+      }
+
+      // If offer creation or the invite send fails, clean up — caller is stuck with PC/stream
+      // open and the callee ringing until server timeout.
+      try {
+        const offer = await pcRef.current!.createOffer();
+        await sigRef.current!.send({
+          type: 'call.invite',
+          sdp: offer,
+          media: { audio: true, video: false },
+          relayOnly: true,
+        });
+      } catch {
+        pcRef.current?.close();
+        pcRef.current = null;
+        sigRef.current = null;
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        socket.sendCallRelease(callId);
+        teardown('offer-failed');
+        return;
+      }
+
+      // Guard against a peer that never answers — friendship gate may silently reject the invite
+      // without the server ever sending call.end, leaving the caller stuck on "Calling…".
+      outboundRingTimerRef.current = setTimeout(() => {
+        outboundRingTimerRef.current = null;
+        socket.sendCallRelease(callId);
+        teardown('no-answer');
+      }, 30_000);
+    },
+    [callPhase.type, clearEndedTimer, clearOutboundRingTimer, setupCall, socket, teardown],
+  );
+
+  const acceptCall = useCallback(async () => {
+    const ring = ringRef.current;
+    if (!ring) return;
+    const { callId, conversationId } = ring;
+    const gen = callGenRef.current;
+    setCallPhase({ type: 'negotiating', callId, conversationId });
+    const ok = await setupCall(callId, conversationId);
+    if (!ok || callGenRef.current !== gen) {
+      // Setup failed or hangUp fired during TURN/media await — clean up partial PC + stream.
+      pcRef.current?.close();
+      pcRef.current = null;
+      sigRef.current = null;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      socket.sendCallRelease(callId);
+      if (callGenRef.current === gen) teardown('setup-failed');
+      return;
+    }
+    // The 'call.invite' signal will arrive via onCallSignalFrame and be routed through handleSignal.
+  }, [setupCall, socket, teardown]);
+
+  const declineCall = useCallback(() => {
+    const ring = ringRef.current;
+    if (!ring) return;
+    // sigRef is null on the ringing path (signaling set up only on acceptCall) — the decline signal
+    // is silently skipped; sendCallRelease is the authoritative termination signal for the server.
+    void sigRef.current?.send({ type: 'call.decline', reason: 'declined' });
+    socket.sendCallRelease(ring.callId);
+    teardown('declined');
+  }, [socket, teardown]);
+
+  const hangUp = useCallback(() => {
+    const phase = callPhase;
+    const callId =
+      phase.type === 'calling' ||
+      phase.type === 'negotiating' ||
+      phase.type === 'active' ||
+      phase.type === 'ringing'
+        ? phase.callId
+        : null;
+
+    void sigRef.current?.send({ type: 'call.hangup', reason: 'hangup' });
+    if (callId) socket.sendCallRelease(callId);
+    teardown('hangup');
+  }, [callPhase, socket, teardown]);
+
+  const toggleMic = useCallback(() => {
+    const tracks = streamRef.current?.getAudioTracks() ?? [];
+    const next = !micMuted;
+    for (const track of tracks) {
+      track.enabled = !next;
+    }
+    setMicMuted(next);
+  }, [micMuted]);
+
+  // ── WS callbacks ─────────────────────────────────────────────────────────────────────────────
+
+  const onCallRing = useCallback(
+    (event: IncomingCallRing) => {
+      // Release rejected rings immediately — without this the caller waits for the server's
+      // inactivity timeout (30–45 s) before learning we're busy.
+      let ignored = false;
+      setCallPhase((prev) => {
+        if (prev.type !== 'idle') {
+          ignored = true;
+          return prev;
+        }
+        ringRef.current = event;
+        return {
+          type: 'ringing',
+          callId: event.callId,
+          conversationId: event.conversationId,
+          callerUserId: event.callerUserId,
+        };
+      });
+      if (ignored) socket.sendCallRelease(event.callId);
+    },
+    [socket],
+  );
+
+  const onCallSignalFrame = useCallback(
+    (frame: IncomingCallSignalFrame) => {
+      const sig = sigRef.current;
+      const phase = callPhaseRef.current;
+
+      // Route to the active signaling channel ONLY when the frame is for the current call.
+      // If sigRef is set but the frame is for a different callId (race: busy release not yet
+      // processed by gateway), fall through to decrypt-and-discard — receiveFrame's fast-reject
+      // path skips decryption, which would leave the ratchet behind.
+      if (sig) {
+        const inCurrentCall =
+          (phase.type === 'calling' || phase.type === 'negotiating' || phase.type === 'active') &&
+          phase.callId === frame.callId;
+        if (inCurrentCall) {
+          void sig.receiveFrame(frame);
+          return;
+        }
+        // Different call — fall through to decrypt-and-discard.
+      } else if (
+        (phase.type === 'ringing' || phase.type === 'negotiating') &&
+        ringRef.current?.callId === frame.callId
+      ) {
+        // No sig yet: either in ringing phase (haven't accepted) or in negotiating phase while
+        // acceptCall is awaiting TURN/getUserMedia. Buffer for flush when sig is ready.
+        pendingFramesRef.current.push(frame);
+        return;
+      }
+
+      // Not joining this call — decrypt and discard to advance the MLS ratchet so
+      // secondary devices that did not answer stay in sync with the answering device.
+      const conversation = liveGroups.current.get(frame.conversationId);
+      if (conversation) {
+        void (async () => {
+          try {
+            await conversation.decryptAuthenticated(fromBase64(frame.envelope.ciphertext));
+            await saveGroupState(frame.conversationId);
+          } catch {
+            // Expected: frames may already be consumed by the answering device.
+          }
+        })();
+      }
+    },
+    [liveGroups, saveGroupState],
+  );
+
+  const onCallEnd = useCallback(
+    (event: IncomingCallEnd) => {
+      // Server-initiated end (timeout / peer-gone) — no outbound hangup signal needed.
+      const phase = callPhase;
+      if (phase.type !== 'idle' && phase.type !== 'ended' && phase.callId === event.callId) {
+        teardown(event.reason);
+      }
+    },
+    [callPhase, teardown],
+  );
+
+  return {
+    callPhase,
+    micMuted,
+    onCallRing,
+    onCallSignalFrame,
+    onCallEnd,
+    startCall,
+    acceptCall,
+    declineCall,
+    hangUp,
+    toggleMic,
+  };
+}

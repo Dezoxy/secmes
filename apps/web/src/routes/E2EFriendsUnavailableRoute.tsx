@@ -3,6 +3,7 @@ import FriendsScreen from '../features/friends/FriendsScreen';
 import { ChatContext, type ChatContextValue } from '../features/chat/ChatContext';
 import { currentUser, generatedAvatar, type Conversation } from '../features/chat/seed';
 import type { Friend, MeBound } from '../lib/api';
+import type { CallPhase } from '../features/calls/useCall';
 
 function isFriend(value: unknown): value is Friend {
   if (!value || typeof value !== 'object') return false;
@@ -91,6 +92,13 @@ export default function E2EFriendsUnavailableRoute() {
       privacySettingsVersion: 0,
       persistStartedConversation: () => undefined,
       persistGroupCreated: () => undefined,
+      callPhase: { type: 'idle' } satisfies CallPhase,
+      micMuted: false,
+      startCall: async () => undefined,
+      acceptCall: async () => undefined,
+      declineCall: () => undefined,
+      hangUp: () => undefined,
+      toggleMic: () => undefined,
     }),
     [friends, friendsError, friendsLoaded, refreshFriends],
   );

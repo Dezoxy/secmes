@@ -1,4 +1,4 @@
-import {
+import React, {
   createContext,
   useCallback,
   useContext,
@@ -33,6 +33,7 @@ import type { MessagingDeps } from '../../lib/messaging';
 import type { StoredMessage } from '../../lib/keystore';
 import type { DecryptedMessage } from '../../lib/messaging';
 import type { MessageSocketStatus } from '../../lib/ws';
+import { useCall, type CallPhase } from '../calls/useCall';
 import { useAuth } from '../auth/AuthContext';
 import { demoMode } from '../../lib/auth';
 import { useDevice } from '../device/DeviceContext';
@@ -155,6 +156,14 @@ export interface ChatContextValue {
   // Conversation creation helpers (shared core logic; screens wrap with local state)
   persistStartedConversation: (session: ConversationSession, peer: UserLookupResult) => void;
   persistGroupCreated: (session: GroupConversationSession) => void;
+  // VoIP call state (P1-UI)
+  callPhase: CallPhase;
+  micMuted: boolean;
+  startCall: (conversationId: string, peerUserId: string) => Promise<void>;
+  acceptCall: () => Promise<void>;
+  declineCall: () => void;
+  hangUp: () => void;
+  toggleMic: () => void;
 }
 
 export const ChatContext = createContext<ChatContextValue | null>(null);
@@ -362,46 +371,93 @@ export function ChatProvider({ children }: ChatProviderProps) {
     await refreshFriends({ force: true });
   }, [refreshFriends]);
 
-  const { liveIds, liveGroups, addLive, connectionStatus, refoldPeerReceiptWatermarks } =
-    useLiveConversations({
-      device,
-      pool,
-      deviceId,
-      messagingDeps,
-      selfUserId: profile?.userId,
-      currentUserProfile,
-      mergeIncoming,
-      backfillInto,
-      setConversations,
-      onEnrollmentPending: useCallback((id: string) => setPendingEnrollmentId(id), []),
-      onEnrollmentApproved: markDeviceTrusted,
-      onPeerKeyChanged: useCallback(
-        (_peerUserId: string, conversationId: string, newNumbers: string[]) => {
-          setNumbersByConv((prev) => ({ ...prev, [conversationId]: newNumbers[0] ?? '' }));
-          setVerifiedByConv((prev) => {
-            const next = { ...prev };
-            delete next[conversationId];
-            return next;
-          });
-          setPeerKeyChangedConvId(conversationId);
-        },
-        [],
-      ),
-      onPeerVerified: useCallback((conversationId: string, safetyNumber: string) => {
-        setVerifiedByConv((prev) => ({ ...prev, [conversationId]: safetyNumber }));
-      }, []),
-      onSafetyNumberResolved: useCallback((conversationId: string, safetyNumber: string) => {
-        setNumbersByConv((prev) => ({ ...prev, [conversationId]: safetyNumber }));
-      }, []),
-      onSyncLost: useCallback((conversationId: string) => {
-        setConversations((prev) =>
-          prev.map((c) => (c.id === conversationId ? { ...c, recovery: 'sync-lost' as const } : c)),
-        );
-      }, []),
-      onFriendRequest: useCallback(() => {
-        void refreshFriendsAfterChange();
-      }, [refreshFriendsAfterChange]),
-    });
+  // VoIP callback refs — break the circular dependency between useLiveConversations (which provides
+  // liveGroups + callSocket) and useCall (which provides onCallRing/Signal/End). The stable useCallbacks
+  // below delegate to these refs; the refs are updated each render to the latest useCall result.
+  const callHandlersRef = useRef<{
+    onCallRing: ReturnType<typeof useCall>['onCallRing'];
+    onCallSignalFrame: ReturnType<typeof useCall>['onCallSignalFrame'];
+    onCallEnd: ReturnType<typeof useCall>['onCallEnd'];
+  } | null>(null);
+
+  const {
+    liveIds,
+    liveGroups,
+    addLive,
+    connectionStatus,
+    refoldPeerReceiptWatermarks,
+    callSocket,
+  } = useLiveConversations({
+    device,
+    pool,
+    deviceId,
+    messagingDeps,
+    selfUserId: profile?.userId,
+    currentUserProfile,
+    mergeIncoming,
+    backfillInto,
+    setConversations,
+    onEnrollmentPending: useCallback((id: string) => setPendingEnrollmentId(id), []),
+    onEnrollmentApproved: markDeviceTrusted,
+    onPeerKeyChanged: useCallback(
+      (_peerUserId: string, conversationId: string, newNumbers: string[]) => {
+        setNumbersByConv((prev) => ({ ...prev, [conversationId]: newNumbers[0] ?? '' }));
+        setVerifiedByConv((prev) => {
+          const next = { ...prev };
+          delete next[conversationId];
+          return next;
+        });
+        setPeerKeyChangedConvId(conversationId);
+      },
+      [],
+    ),
+    onPeerVerified: useCallback((conversationId: string, safetyNumber: string) => {
+      setVerifiedByConv((prev) => ({ ...prev, [conversationId]: safetyNumber }));
+    }, []),
+    onSafetyNumberResolved: useCallback((conversationId: string, safetyNumber: string) => {
+      setNumbersByConv((prev) => ({ ...prev, [conversationId]: safetyNumber }));
+    }, []),
+    onSyncLost: useCallback((conversationId: string) => {
+      setConversations((prev) =>
+        prev.map((c) => (c.id === conversationId ? { ...c, recovery: 'sync-lost' as const } : c)),
+      );
+    }, []),
+    onFriendRequest: useCallback(() => {
+      void refreshFriendsAfterChange();
+    }, [refreshFriendsAfterChange]),
+    // Stable delegates that forward to the ref-tracked useCall handlers (set below after useCall).
+    onCallRing: useCallback((event) => callHandlersRef.current?.onCallRing(event), []),
+    onCallSignalFrame: useCallback(
+      (frame) => callHandlersRef.current?.onCallSignalFrame(frame),
+      [],
+    ),
+    onCallEnd: useCallback((event) => callHandlersRef.current?.onCallEnd(event), []),
+  });
+
+  const call = useCall({
+    socket: callSocket,
+    liveGroups: liveGroups as React.MutableRefObject<Map<string, MlsGroup>>,
+    localIdentity: profile?.userId && deviceId ? `${profile.userId}:${deviceId}` : null,
+    saveGroupState: async (convId) => {
+      if (!messagingDeps) return;
+      const group = liveGroups.current.get(convId);
+      if (!group) return;
+      await messagingDeps.keystore.saveConversationState(
+        messagingDeps.device,
+        convId,
+        group,
+        messagingDeps.sessionKey,
+      );
+    },
+    convToPeerId,
+  });
+
+  // Update handler refs each render so the stable socket callbacks always reach the latest useCall result.
+  callHandlersRef.current = {
+    onCallRing: call.onCallRing,
+    onCallSignalFrame: call.onCallSignalFrame,
+    onCallEnd: call.onCallEnd,
+  };
 
   useConversationHistoryRehydration({
     messagingDeps,
@@ -739,6 +795,13 @@ export function ChatProvider({ children }: ChatProviderProps) {
     privacySettingsVersion,
     persistStartedConversation,
     persistGroupCreated,
+    callPhase: call.callPhase,
+    micMuted: call.micMuted,
+    startCall: call.startCall,
+    acceptCall: call.acceptCall,
+    declineCall: call.declineCall,
+    hangUp: call.hangUp,
+    toggleMic: call.toggleMic,
   };
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

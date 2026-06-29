@@ -112,7 +112,7 @@ describe('createPeerConnection', () => {
 
   it('acceptOffer sets both descriptions and returns an answer', async () => {
     const apc = createPeerConnection(TURN_CONFIG, makeCallbacks());
-    const offer: RTCSessionDescriptionInit = { type: 'offer', sdp: 'v=0\r\noffer' };
+    const offer = { type: 'offer' as const, sdp: 'v=0\r\noffer' };
     const answer = await apc.acceptOffer(offer);
     const pc = FakePC.instances[0]!;
     expect(pc.remoteDescription?.type).toBe('offer');
@@ -122,7 +122,7 @@ describe('createPeerConnection', () => {
 
   it('acceptAnswer sets the remote description', async () => {
     const apc = createPeerConnection(TURN_CONFIG, makeCallbacks());
-    const answer: RTCSessionDescriptionInit = { type: 'answer', sdp: 'v=0\r\nanswer' };
+    const answer = { type: 'answer' as const, sdp: 'v=0\r\nanswer' };
     await apc.acceptAnswer(answer);
     const pc = FakePC.instances[0]!;
     expect(pc.remoteDescription?.type).toBe('answer');
@@ -183,7 +183,7 @@ describe('createPeerConnection', () => {
     await apc.addIceCandidate(candidate); // remote desc not set yet — should buffer
     expect(addCandidateSpy).not.toHaveBeenCalled();
 
-    const answer: RTCSessionDescriptionInit = { type: 'answer', sdp: 'v=0\r\nanswer' };
+    const answer = { type: 'answer' as const, sdp: 'v=0\r\nanswer' };
     await apc.acceptAnswer(answer); // sets remote desc → should flush the buffered candidate
     expect(addCandidateSpy).toHaveBeenCalledOnce();
   });
@@ -197,7 +197,7 @@ describe('createPeerConnection', () => {
     await apc.addIceCandidate(candidate); // buffered before remote desc
     expect(addCandidateSpy).not.toHaveBeenCalled();
 
-    const offer: RTCSessionDescriptionInit = { type: 'offer', sdp: 'v=0\r\noffer' };
+    const offer = { type: 'offer' as const, sdp: 'v=0\r\noffer' };
     await apc.acceptOffer(offer); // sets remote desc → flush
     expect(addCandidateSpy).toHaveBeenCalledOnce();
   });
@@ -207,7 +207,7 @@ describe('createPeerConnection', () => {
     const pc = FakePC.instances[0]!;
     const addCandidateSpy = vi.spyOn(pc, 'addIceCandidate');
 
-    const answer: RTCSessionDescriptionInit = { type: 'answer', sdp: 'v=0\r\nanswer' };
+    const answer = { type: 'answer' as const, sdp: 'v=0\r\nanswer' };
     await apc.acceptAnswer(answer); // remote desc now set
 
     const candidate = { candidate: 'candidate:1 1 udp 1 192.0.2.3 50002 typ host' };
