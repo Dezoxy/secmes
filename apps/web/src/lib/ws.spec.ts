@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createMessageSocket,
   defaultWsUrl,
+  type IncomingCallEnd,
+  type IncomingCallSignalFrame,
   type IncomingMessage,
   type MessageSocketStatus,
 } from './ws';
@@ -338,5 +340,292 @@ describe('createMessageSocket', () => {
     const count = FakeWebSocket.instances.length;
     await new Promise((r) => setTimeout(r, 10));
     expect(FakeWebSocket.instances).toHaveLength(count); // no new socket after close()
+  });
+
+  // ── Call frame handling ───────────────────────────────────────────────────────────────────────────
+
+  describe('call.ring inbound frame', () => {
+    const RING_DATA = {
+      callId: 'c1111111-1111-1111-1111-111111111111',
+      conversationId: 'c2222222-2222-2222-2222-222222222222',
+      callerUserId: 'c3333333-3333-3333-3333-333333333333',
+      media: 'audio' as const, // server sends the string literal 'audio', not a media object
+    };
+
+    it('calls onCallRing with the full ring payload after auth', async () => {
+      const onCallRing = vi.fn();
+      const sock = createMessageSocket({
+        url: 'wss://host/ws',
+        token: async () => 't',
+        onMessage: () => {},
+        onCallRing,
+        WebSocketImpl: Impl,
+      });
+      last().open();
+      await flush();
+      last().deliver({ event: 'ready', data: {} });
+      last().deliver({ event: 'call.ring', data: RING_DATA });
+      expect(onCallRing).toHaveBeenCalledOnce();
+      expect(onCallRing.mock.calls[0]![0]).toMatchObject(RING_DATA);
+      sock.close();
+    });
+
+    it('drops call.ring before auth (pre-ready)', async () => {
+      const onCallRing = vi.fn();
+      const sock = createMessageSocket({
+        url: 'wss://host/ws',
+        token: async () => 't',
+        onMessage: () => {},
+        onCallRing,
+        WebSocketImpl: Impl,
+      });
+      last().open();
+      await flush();
+      // deliver BEFORE ready — no auth yet
+      last().deliver({ event: 'call.ring', data: RING_DATA });
+      expect(onCallRing).not.toHaveBeenCalled();
+      sock.close();
+    });
+
+    it('drops a malformed call.ring (missing callerUserId)', async () => {
+      const onCallRing = vi.fn();
+      const sock = createMessageSocket({
+        url: 'wss://host/ws',
+        token: async () => 't',
+        onMessage: () => {},
+        onCallRing,
+        WebSocketImpl: Impl,
+      });
+      last().open();
+      await flush();
+      last().deliver({ event: 'ready', data: {} });
+      last().deliver({
+        event: 'call.ring',
+        data: { callId: 'x', conversationId: 'y', media: 'audio' /* missing callerUserId */ },
+      });
+      expect(onCallRing).not.toHaveBeenCalled();
+      sock.close();
+    });
+  });
+
+  describe('call.signal inbound frame', () => {
+    const SIGNAL_DATA: IncomingCallSignalFrame = {
+      callId: 'c1111111-1111-1111-1111-111111111111',
+      conversationId: 'c2222222-2222-2222-2222-222222222222',
+      msgSeq: 3,
+      senderUserId: 'c4444444-4444-4444-4444-444444444444',
+      deliverySeq: 7,
+      envelope: { ciphertext: 'AQIDBA==', alg: 'MLS_1.0', epoch: 0 },
+    };
+
+    it('calls onCallSignalFrame with the full frame after auth', async () => {
+      const onCallSignalFrame = vi.fn();
+      const sock = createMessageSocket({
+        url: 'wss://host/ws',
+        token: async () => 't',
+        onMessage: () => {},
+        onCallSignalFrame,
+        WebSocketImpl: Impl,
+      });
+      last().open();
+      await flush();
+      last().deliver({ event: 'ready', data: {} });
+      last().deliver({ event: 'call.signal', data: SIGNAL_DATA });
+      expect(onCallSignalFrame).toHaveBeenCalledOnce();
+      const received = onCallSignalFrame.mock.calls[0]![0] as IncomingCallSignalFrame;
+      expect(received.callId).toBe(SIGNAL_DATA.callId);
+      expect(received.msgSeq).toBe(3);
+      expect(received.senderUserId).toBe(SIGNAL_DATA.senderUserId);
+      expect(received.envelope.ciphertext).toBe('AQIDBA==');
+      sock.close();
+    });
+
+    it('drops call.signal before auth', async () => {
+      const onCallSignalFrame = vi.fn();
+      const sock = createMessageSocket({
+        url: 'wss://host/ws',
+        token: async () => 't',
+        onMessage: () => {},
+        onCallSignalFrame,
+        WebSocketImpl: Impl,
+      });
+      last().open();
+      await flush();
+      last().deliver({ event: 'call.signal', data: SIGNAL_DATA });
+      expect(onCallSignalFrame).not.toHaveBeenCalled();
+      sock.close();
+    });
+
+    it('drops a malformed call.signal (msgSeq not a number)', async () => {
+      const onCallSignalFrame = vi.fn();
+      const sock = createMessageSocket({
+        url: 'wss://host/ws',
+        token: async () => 't',
+        onMessage: () => {},
+        onCallSignalFrame,
+        WebSocketImpl: Impl,
+      });
+      last().open();
+      await flush();
+      last().deliver({ event: 'ready', data: {} });
+      last().deliver({ event: 'call.signal', data: { ...SIGNAL_DATA, msgSeq: 'oops' } });
+      expect(onCallSignalFrame).not.toHaveBeenCalled();
+      sock.close();
+    });
+  });
+
+  describe('call.end inbound frame', () => {
+    const END_DATA: IncomingCallEnd = {
+      callId: 'c1111111-1111-1111-1111-111111111111',
+      conversationId: 'c2222222-2222-2222-2222-222222222222',
+      reason: 'timeout',
+    };
+
+    it('calls onCallEnd with the full payload after auth', async () => {
+      const onCallEnd = vi.fn();
+      const sock = createMessageSocket({
+        url: 'wss://host/ws',
+        token: async () => 't',
+        onMessage: () => {},
+        onCallEnd,
+        WebSocketImpl: Impl,
+      });
+      last().open();
+      await flush();
+      last().deliver({ event: 'ready', data: {} });
+      last().deliver({ event: 'call.end', data: END_DATA });
+      expect(onCallEnd).toHaveBeenCalledOnce();
+      expect(onCallEnd.mock.calls[0]![0]).toMatchObject(END_DATA);
+      sock.close();
+    });
+
+    it('drops call.end before auth', async () => {
+      const onCallEnd = vi.fn();
+      const sock = createMessageSocket({
+        url: 'wss://host/ws',
+        token: async () => 't',
+        onMessage: () => {},
+        onCallEnd,
+        WebSocketImpl: Impl,
+      });
+      last().open();
+      await flush();
+      last().deliver({ event: 'call.end', data: END_DATA });
+      expect(onCallEnd).not.toHaveBeenCalled();
+      sock.close();
+    });
+
+    it('drops call.end with unknown reason', async () => {
+      const onCallEnd = vi.fn();
+      const sock = createMessageSocket({
+        url: 'wss://host/ws',
+        token: async () => 't',
+        onMessage: () => {},
+        onCallEnd,
+        WebSocketImpl: Impl,
+      });
+      last().open();
+      await flush();
+      last().deliver({ event: 'ready', data: {} });
+      last().deliver({ event: 'call.end', data: { ...END_DATA, reason: 'network-error' } });
+      expect(onCallEnd).not.toHaveBeenCalled();
+      sock.close();
+    });
+  });
+
+  describe('sendCallSignal / sendCallRelease', () => {
+    it('sendCallSignal emits the correct WS frame when OPEN', async () => {
+      const sock = createMessageSocket({
+        url: 'wss://host/ws',
+        token: async () => 't',
+        onMessage: () => {},
+        WebSocketImpl: Impl,
+      });
+      last().open();
+      await flush();
+      last().deliver({ event: 'ready', data: {} });
+
+      const frame = {
+        callId: 'call-1',
+        conversationId: 'conv-1',
+        msgSeq: 0,
+        envelope: { ciphertext: 'AQIDBA==', alg: 'MLS_1.0', epoch: 0 },
+      };
+      sock.sendCallSignal(frame);
+
+      const sent = parsed(last()).filter((f) => f.event === 'call.signal');
+      expect(sent).toHaveLength(1);
+      expect(sent[0]!.data).toEqual(frame);
+      sock.close();
+    });
+
+    it('sendCallRelease emits the correct WS frame when OPEN', async () => {
+      const sock = createMessageSocket({
+        url: 'wss://host/ws',
+        token: async () => 't',
+        onMessage: () => {},
+        WebSocketImpl: Impl,
+      });
+      last().open();
+      await flush();
+      last().deliver({ event: 'ready', data: {} });
+
+      sock.sendCallRelease('call-42');
+
+      const sent = parsed(last()).filter((f) => f.event === 'call.release');
+      expect(sent).toHaveLength(1);
+      expect(sent[0]!.data).toEqual({ callId: 'call-42' });
+      sock.close();
+    });
+
+    it('sendCallSignal is a no-op when the socket is not OPEN', async () => {
+      const sock = createMessageSocket({
+        url: 'wss://host/ws',
+        token: async () => 't',
+        onMessage: () => {},
+        WebSocketImpl: Impl,
+      });
+      // Do NOT open — socket starts in CONNECTING (readyState 0)
+      sock.sendCallSignal({
+        callId: 'c',
+        conversationId: 'cv',
+        msgSeq: 0,
+        envelope: { ciphertext: 'AA==', alg: 'MLS_1.0', epoch: 0 },
+      });
+      expect(last().sent).toHaveLength(0); // nothing sent while not OPEN
+      sock.close();
+    });
+
+    it('sendCallSignal is a no-op when OPEN but not yet authenticated', async () => {
+      const sock = createMessageSocket({
+        url: 'wss://host/ws',
+        token: async () => 't',
+        onMessage: () => {},
+        WebSocketImpl: Impl,
+      });
+      last().open(); // socket is OPEN but no 'ready' event yet → not authed
+      await flush();
+      sock.sendCallSignal({
+        callId: 'c',
+        conversationId: 'cv',
+        msgSeq: 0,
+        envelope: { ciphertext: 'AA==', alg: 'MLS_1.0', epoch: 0 },
+      });
+      const callSignals = parsed(last()).filter((f) => f.event === 'call.signal');
+      expect(callSignals).toHaveLength(0);
+      sock.close();
+    });
+
+    it('sendCallRelease is a no-op when the socket is not OPEN', async () => {
+      const sock = createMessageSocket({
+        url: 'wss://host/ws',
+        token: async () => 't',
+        onMessage: () => {},
+        WebSocketImpl: Impl,
+      });
+      sock.sendCallRelease('call-99');
+      expect(last().sent).toHaveLength(0);
+      sock.close();
+    });
   });
 });
