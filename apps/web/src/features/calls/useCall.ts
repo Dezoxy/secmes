@@ -94,6 +94,10 @@ export function useCall(opts: UseCallOptions): UseCallResult {
   // 90 s inactivity authz timer; started on 'connected', stopped by teardown.
   const keepaliveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Set synchronously before inviteToCall; prevents a second startCall from racing in during
+  // the async window between the user tapping the button and the API returning a callId.
+  const dialingRef = useRef(false);
+
   const clearOutboundRingTimer = useCallback(() => {
     if (outboundRingTimerRef.current !== null) {
       clearTimeout(outboundRingTimerRef.current);
@@ -118,6 +122,7 @@ export function useCall(opts: UseCallOptions): UseCallResult {
   // Shared teardown: close PC, stop stream, null refs, schedule idle.
   const teardown = useCallback(
     (reason: string) => {
+      dialingRef.current = false;
       callGenRef.current++;
       clearKeepaliveInterval();
       clearOutboundRingTimer();
@@ -284,6 +289,10 @@ export function useCall(opts: UseCallOptions): UseCallResult {
 
   const startCall = useCallback(
     async (conversationId: string, peerUserId: string) => {
+      // Double-invite guard: prevents racing calls from a rapid double-tap while the invite
+      // API is in flight (callPhase is still 'idle' until inviteToCall returns a callId).
+      if (callPhase.type !== 'idle' || dialingRef.current) return;
+      dialingRef.current = true;
       clearEndedTimer();
       const gen = ++callGenRef.current;
       // Allocate a server-minted callId BEFORE creating the PC (need it for signaling).
@@ -292,6 +301,7 @@ export function useCall(opts: UseCallOptions): UseCallResult {
       setCallPhase({ type: 'calling', callId, conversationId, peerUserId });
 
       const ok = await setupCall(callId, conversationId);
+      dialingRef.current = false;
       if (!ok || callGenRef.current !== gen) {
         // Either setup failed or hangUp fired while awaiting TURN/media (gen mismatch).
         // Peer is already ringing — release server-side, clean up any partial PC + stream.
@@ -321,7 +331,7 @@ export function useCall(opts: UseCallOptions): UseCallResult {
         teardown('no-answer');
       }, 30_000);
     },
-    [clearEndedTimer, clearOutboundRingTimer, setupCall, socket, teardown],
+    [callPhase.type, clearEndedTimer, clearOutboundRingTimer, setupCall, socket, teardown],
   );
 
   const acceptCall = useCallback(async () => {
@@ -381,19 +391,28 @@ export function useCall(opts: UseCallOptions): UseCallResult {
 
   // ── WS callbacks ─────────────────────────────────────────────────────────────────────────────
 
-  const onCallRing = useCallback((event: IncomingCallRing) => {
-    // Ignore rings when already in a call — caller will get 'busy' from the server-side timeout.
-    setCallPhase((prev) => {
-      if (prev.type !== 'idle') return prev;
-      ringRef.current = event;
-      return {
-        type: 'ringing',
-        callId: event.callId,
-        conversationId: event.conversationId,
-        callerUserId: event.callerUserId,
-      };
-    });
-  }, []);
+  const onCallRing = useCallback(
+    (event: IncomingCallRing) => {
+      // Release rejected rings immediately — without this the caller waits for the server's
+      // inactivity timeout (30–45 s) before learning we're busy.
+      let ignored = false;
+      setCallPhase((prev) => {
+        if (prev.type !== 'idle') {
+          ignored = true;
+          return prev;
+        }
+        ringRef.current = event;
+        return {
+          type: 'ringing',
+          callId: event.callId,
+          conversationId: event.conversationId,
+          callerUserId: event.callerUserId,
+        };
+      });
+      if (ignored) socket.sendCallRelease(event.callId);
+    },
+    [socket],
+  );
 
   const onCallSignalFrame = useCallback((frame: IncomingCallSignalFrame) => {
     const sig = sigRef.current;
