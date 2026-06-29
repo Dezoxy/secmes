@@ -16,11 +16,23 @@ const TYPE_GROUP = {
   feat: { rank: 0, label: 'New' },
   fix: { rank: 1, label: 'Fixes' },
   perf: { rank: 1, label: 'Fixes' },
+  change: { rank: 2, label: 'Changes' },
 };
 
-const GROUP_ORDER = ['New', 'Fixes'];
+const GROUP_ORDER = ['New', 'Fixes', 'Changes'];
 
 const MAX_ITEMS = 12;
+const NOISE_TYPES = new Set([
+  'build',
+  'chore',
+  'ci',
+  'docs',
+  'refactor',
+  'release',
+  'revert',
+  'style',
+  'test',
+]);
 
 /**
  * Capitalize the first character only, trimming surrounding whitespace. Acronyms like B2/CORS mid-line are
@@ -56,6 +68,26 @@ export function parseCommitSubject(subject) {
   return { type, scope: scope ?? null, summary: cleaned, pr: pr ?? null };
 }
 
+function parseSquashFallbackSubject(subject) {
+  const line = (subject ?? '').trim();
+  if (!line || line.startsWith('Merge ')) return null;
+
+  // Drop typed housekeeping commits even when the type is not user-facing.
+  // eslint-disable-next-line security/detect-unsafe-regex
+  const typed = /^(\w+)(?:\([^)]+\))?!?:\s*(.+)$/.exec(line);
+  if (typed) {
+    const [, type] = typed;
+    if (NOISE_TYPES.has(type)) return null;
+  }
+
+  if (/^(?:bump|revert)\b/i.test(line)) return null;
+
+  // Strip the squash PR suffix GitHub adds to merge commit titles.
+  const cleaned = line.replace(/\s*\(#\d+\)\s*$/, '').trim();
+  if (!cleaned) return null;
+  return { type: 'change', scope: null, summary: cleaned, pr: null };
+}
+
 /**
  * Build a single release entry from a tag's commit subjects. Returns null when nothing user-facing remains
  * (so empty/chore-only releases don't produce a blank card).
@@ -64,7 +96,7 @@ export function parseCommitSubject(subject) {
  */
 export function buildReleaseEntry({ version, date, subjects }) {
   const parsed = (subjects ?? [])
-    .map(parseCommitSubject)
+    .map((subject) => parseCommitSubject(subject) ?? parseSquashFallbackSubject(subject))
     .filter((c) => c !== null)
     // feat before fix; stable within a group (input is newest-first from git log).
     .sort((a, b) => TYPE_GROUP[a.type].rank - TYPE_GROUP[b.type].rank);
