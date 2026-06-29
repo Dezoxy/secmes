@@ -31,9 +31,9 @@ export interface CallSignalingOptions {
   onSignal: (signal: CallSignal) => void;
   onError?: (err: Error) => void;
   /**
-   * Called after `conversation.encrypt()` and BEFORE the ciphertext is sent.
-   * Must persist the advanced ratchet state to durable storage (same contract as chat messaging)
-   * so a crash/reload cannot reuse an already-consumed MLS generation.
+   * Called after both `conversation.encrypt()` (outbound) and `conversation.decryptAuthenticated()`
+   * (inbound) to persist the advanced ratchet state to durable storage. Crash-recovery contract:
+   * a reload must never replay an already-consumed MLS generation in either direction.
    * Leave unset only in tests.
    */
   saveState?: () => Promise<void>;
@@ -125,6 +125,8 @@ export function createCallSignaling(opts: CallSignalingOptions): CallSignaling {
         onError?.(err instanceof Error ? err : new Error(String(err)));
         return;
       }
+      // Persist the ratchet advance from inbound decrypt — same crash-recovery contract as encrypt.
+      await saveState?.();
 
       // Loopback guard: should not happen in V1 (server echoes only to the peer), but fail-closed.
       if (senderIdentity === localIdentity) return;
@@ -150,10 +152,11 @@ export function createCallSignaling(opts: CallSignalingOptions): CallSignaling {
         return;
       }
 
-      // Authoritative replay check on the authenticated inner sequence.
-      // The pre-decrypt check (above) uses the unverified outer `frame.msgSeq` as a fast-reject;
-      // this check uses `parsed.data.msgSeq` so a spoofed high outer value cannot poison the HW.
-      if (hw !== undefined && parsed.data.msgSeq <= hw) return;
+      // Re-read the current HW to guard against concurrent receiveFrame calls — `hw` captured
+      // at the top of this function could be stale if another frame decrypted and advanced the
+      // map during an await. The authoritative guard uses the authenticated inner sequence.
+      const currentHw = inSeqHW.get(frame.senderUserId);
+      if (currentHw !== undefined && parsed.data.msgSeq <= currentHw) return;
 
       // Advance the HW with the authenticated inner sequence — prevents a spoofed outer msgSeq from
       // blocking future frames by falsely inflating the high-water mark.

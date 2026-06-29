@@ -194,6 +194,25 @@ describe('createCallSignaling — send()', () => {
 });
 
 describe('createCallSignaling — receiveFrame()', () => {
+  it('calls saveState after inbound decrypt to persist ratchet state', async () => {
+    const saveState = vi.fn().mockResolvedValue(undefined);
+    const conv = makeFakeConversation({
+      decryptResult: { plaintext: signalJson(), senderIdentity: PEER_IDENTITY },
+    });
+    const sig = createCallSignaling({
+      conversation: conv as never,
+      localIdentity: LOCAL_IDENTITY,
+      callId: CALL_ID,
+      conversationId: CONV_ID,
+      socket: makeFakeSocket(),
+      onSignal: vi.fn(),
+      saveState,
+    });
+
+    await sig.receiveFrame(makeInboundFrame());
+    expect(saveState).toHaveBeenCalledOnce();
+  });
+
   it('dispatches a valid inbound signal to onSignal', async () => {
     const onSignal = vi.fn();
     const conv = makeFakeConversation({
