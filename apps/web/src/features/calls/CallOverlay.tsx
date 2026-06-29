@@ -65,39 +65,47 @@ export function CallOverlay() {
       {/* ── Ringing ── */}
       {callPhase.type === 'ringing' && (
         <div
-          className={`relative z-10 flex flex-col items-center gap-6 rounded-3xl border border-white/5 bg-[#12121a] px-10 py-10 shadow-2xl ${modalPanelEnterMotion}`}
+          className={`relative z-10 flex h-full w-full flex-col items-center justify-between overflow-y-auto py-8 ${modalPanelEnterMotion}`}
         >
-          <Avatar
-            name={callerName ?? ''}
-            src={callerUserId ? dicebearAvatar(callerUserId) : undefined}
-            size="xl"
-            shape="circle"
-          />
-          <div className="text-center">
-            <p className="text-lg font-semibold">{callerName}</p>
-            <p className="mt-1 text-sm text-white/50">Incoming voice call</p>
+          <div className="flex flex-col items-center gap-6">
+            <Avatar
+              name={callerName ?? ''}
+              src={callerUserId ? dicebearAvatar(callerUserId) : undefined}
+              size="xl"
+              shape="circle"
+            />
+            <div className="text-center">
+              <p className="text-2xl font-semibold">{callerName}</p>
+              <p className="mt-2 text-sm text-white/50">Incoming voice call</p>
+            </div>
           </div>
-          <div className="flex gap-8">
-            <button
-              onClick={() => {
-                if (acceptedRef.current) return;
-                acceptedRef.current = true;
-                void acceptCall().catch(() => {
-                  acceptedRef.current = false;
-                });
-              }}
-              className="flex h-16 w-16 items-center justify-center rounded-full bg-green-500 shadow-lg transition-opacity hover:opacity-90 active:scale-95"
-              aria-label="Accept call"
-            >
-              <Phone className="h-7 w-7" />
-            </button>
-            <button
-              onClick={declineCall}
-              className="flex h-16 w-16 items-center justify-center rounded-full bg-red-500 shadow-lg transition-opacity hover:opacity-90 active:scale-95"
-              aria-label="Decline call"
-            >
-              <PhoneOff className="h-7 w-7" />
-            </button>
+          <div className="flex gap-16">
+            <div className="flex flex-col items-center gap-3">
+              <button
+                onClick={declineCall}
+                className="flex h-16 w-16 items-center justify-center rounded-full bg-red-500 shadow-lg transition-opacity hover:opacity-90 active:scale-95"
+                aria-label="Decline call"
+              >
+                <PhoneOff className="h-7 w-7" />
+              </button>
+              <span className="text-xs text-white/40">Decline</span>
+            </div>
+            <div className="flex flex-col items-center gap-3">
+              <button
+                onClick={() => {
+                  if (acceptedRef.current) return;
+                  acceptedRef.current = true;
+                  void acceptCall().catch(() => {
+                    acceptedRef.current = false;
+                  });
+                }}
+                className="flex h-16 w-16 items-center justify-center rounded-full bg-green-500 shadow-lg transition-opacity hover:opacity-90 active:scale-95"
+                aria-label="Accept call"
+              >
+                <Phone className="h-7 w-7" />
+              </button>
+              <span className="text-xs text-white/40">Accept</span>
+            </div>
           </div>
         </div>
       )}
@@ -105,32 +113,37 @@ export function CallOverlay() {
       {/* ── Calling (outbound, waiting for peer) ── */}
       {callPhase.type === 'calling' && (
         <div
-          className={`relative z-10 flex flex-col items-center gap-6 rounded-3xl border border-white/5 bg-[#12121a] px-10 py-10 shadow-2xl ${modalPanelEnterMotion}`}
+          className={`relative z-10 flex h-full w-full flex-col items-center justify-between overflow-y-auto py-8 ${modalPanelEnterMotion}`}
         >
-          <Avatar
-            name={callerName ?? ''}
-            src={callerUserId ? dicebearAvatar(callerUserId) : undefined}
-            size="xl"
-            shape="circle"
-          />
-          <div className="text-center">
-            <p className="text-lg font-semibold">{callerName}</p>
-            <p className="mt-1 text-sm text-white/50">Calling…</p>
+          <div className="flex flex-col items-center gap-6">
+            <Avatar
+              name={callerName ?? ''}
+              src={callerUserId ? dicebearAvatar(callerUserId) : undefined}
+              size="xl"
+              shape="circle"
+            />
+            <div className="text-center">
+              <p className="text-2xl font-semibold">{callerName}</p>
+              <p className="mt-2 text-sm text-white/50">Calling…</p>
+            </div>
           </div>
-          <button
-            onClick={hangUp}
-            className="flex h-16 w-16 items-center justify-center rounded-full bg-red-500 shadow-lg transition-opacity hover:opacity-90 active:scale-95"
-            aria-label="Cancel call"
-          >
-            <X className="h-7 w-7" />
-          </button>
+          <div className="flex flex-col items-center gap-3">
+            <button
+              onClick={hangUp}
+              className="flex h-16 w-16 items-center justify-center rounded-full bg-red-500 shadow-lg transition-opacity hover:opacity-90 active:scale-95"
+              aria-label="Cancel call"
+            >
+              <X className="h-7 w-7" />
+            </button>
+            <span className="text-xs text-white/40">Cancel</span>
+          </div>
         </div>
       )}
 
       {/* ── Negotiating (connecting) ── */}
       {callPhase.type === 'negotiating' && (
         <div
-          className={`relative z-10 flex flex-col items-center gap-4 rounded-3xl border border-white/5 bg-[#12121a] px-10 py-10 shadow-2xl ${modalPanelEnterMotion}`}
+          className={`relative z-10 flex h-full w-full flex-col items-center justify-center gap-6 ${modalPanelEnterMotion}`}
         >
           <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/20 border-t-white" />
           <p className="text-sm text-white/60">Connecting…</p>
