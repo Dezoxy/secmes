@@ -96,6 +96,15 @@ import {
   type FriendRequestBox,
   type PrivacySettings,
   type UpdatePrivacySettings,
+  TurnCredentialsResponseSchema,
+  CreateCallResponseSchema,
+  CallSettingsResponseSchema,
+  UpdateCallSettingsRequestSchema,
+  type TurnCredentialsResponse,
+  type CreateCallRequest,
+  type CreateCallResponse,
+  type CallSettingsResponse,
+  type UpdateCallSettingsRequest,
 } from '@argus/contracts';
 import { type ApiResult, requestJson, requestStatus, unwrapApiResult } from './api-client';
 
@@ -1024,5 +1033,60 @@ export async function cancelFriendRequest(requestId: string): Promise<void> {
 export async function unfriend(userId: string): Promise<void> {
   unwrapApiResult(
     await requestStatus({ path: `/friends/${encodeURIComponent(userId)}`, method: 'DELETE' }),
+  );
+}
+
+// ── Calls ──────────────────────────────────────────────────────────────────────────────────────────
+
+/** Fetch ephemeral TURN credentials for one call attempt (POST /calls/turn-credentials → 200). */
+export async function fetchTurnCredentials(): Promise<TurnCredentialsResponse> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/calls/turn-credentials',
+      method: 'POST',
+      body: {},
+      responseSchema: TurnCredentialsResponseSchema,
+    }),
+  );
+}
+
+/**
+ * Initiate a 1:1 audio call (POST /calls/:friendUserId/invite → 202).
+ * Always returns `{ callId }` regardless of gate outcome — no oracle.
+ */
+export async function inviteToCall(
+  friendUserId: string,
+  body: CreateCallRequest,
+): Promise<CreateCallResponse> {
+  return unwrapApiResult(
+    await requestJson({
+      path: `/calls/${encodeURIComponent(friendUserId)}/invite`,
+      method: 'POST',
+      body,
+      expectedStatuses: [202],
+      responseSchema: CreateCallResponseSchema,
+    }),
+  );
+}
+
+/** Get the caller's relay-only preference (GET /calls/settings → 200). */
+export async function getCallSettings(): Promise<CallSettingsResponse> {
+  return unwrapApiResult(
+    await requestJson({ path: '/calls/settings', responseSchema: CallSettingsResponseSchema }),
+  );
+}
+
+/** Update the caller's relay-only preference (PUT /calls/settings → 200). */
+export async function updateCallSettings(
+  body: UpdateCallSettingsRequest,
+): Promise<CallSettingsResponse> {
+  return unwrapApiResult(
+    await requestJson({
+      path: '/calls/settings',
+      method: 'PUT',
+      body,
+      requestSchema: UpdateCallSettingsRequestSchema,
+      responseSchema: CallSettingsResponseSchema,
+    }),
   );
 }

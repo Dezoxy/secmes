@@ -88,6 +88,22 @@ export interface MessageSocketOptions {
    */
   onRemoved?: (conversationId: string) => void;
   /**
+   * An incoming call ring from the peer. Requires auth (same gate as all other frames).
+   * Ring metadata carries no sensitive content — callerUserId is already visible to the callee as a
+   * conversation member — but the auth check is kept for defence-in-depth consistency.
+   */
+  onCallRing?: (event: IncomingCallRing) => void;
+  /**
+   * An encrypted call-signal frame fanned out by the gateway. The ciphertext is opaque here — the
+   * call-signaling layer decrypts and authenticates it via `Conversation.decryptAuthenticated()`.
+   */
+  onCallSignalFrame?: (frame: IncomingCallSignalFrame) => void;
+  /**
+   * The server terminated the call (ring timeout or peer disconnected). The call state machine should
+   * move to `ended`.
+   */
+  onCallEnd?: (event: IncomingCallEnd) => void;
+  /**
    * Another device of this user registered a pending enrollment request (B2). D1 should prompt the
    * user to approve or reject via the enrollment panel.
    */
@@ -105,9 +121,50 @@ export interface MessageSocketOptions {
   reconnect?: { baseMs?: number; maxMs?: number };
 }
 
+/** A ring pushed by the gateway to the callee's socket(s). */
+export interface IncomingCallRing {
+  callId: string;
+  conversationId: string;
+  callerUserId: string;
+  media: { audio: boolean; video: boolean };
+}
+
+/** An encrypted signal frame fanned out by the gateway to the call participants. */
+export interface IncomingCallSignalFrame {
+  callId: string;
+  conversationId: string;
+  msgSeq: number;
+  senderUserId: string;
+  deliverySeq: number;
+  envelope: { ciphertext: string };
+}
+
+/** Server-initiated call termination (ring timeout or peer disconnected). */
+export interface IncomingCallEnd {
+  callId: string;
+  conversationId: string;
+  reason: 'timeout' | 'peer-gone';
+}
+
 export interface MessageSocket {
   /** Track + subscribe a conversation (idempotent). Sent now if authenticated, else on the next (re)connect. */
   subscribe(conversationId: string): void;
+  /**
+   * Fire-and-forget: send an encrypted call-signal envelope to the gateway.
+   * The gateway validates the outer callId + msgSeq; the inner ciphertext is opaque.
+   * No-op if the socket is not currently OPEN.
+   */
+  sendCallSignal(frame: {
+    callId: string;
+    conversationId: string;
+    msgSeq: number;
+    envelope: { ciphertext: string };
+  }): void;
+  /**
+   * Release a call on the server (clears the authz map entry, ends the call for the peer).
+   * Fire-and-forget. No-op if socket not OPEN.
+   */
+  sendCallRelease(callId: string): void;
   /** Tear down: stop reconnecting and close the socket. */
   close(): void;
 }
@@ -264,6 +321,68 @@ export function createMessageSocket(opts: MessageSocketOptions): MessageSocket {
       opts.onFriendRequest?.();
       return;
     }
+    if (frame.event === 'call.ring') {
+      if (!authed) return;
+      const d = frame.data as Partial<IncomingCallRing> | null;
+      if (
+        d &&
+        typeof d.callId === 'string' &&
+        typeof d.conversationId === 'string' &&
+        typeof d.callerUserId === 'string' &&
+        d.media &&
+        typeof (d.media as Record<string, unknown>).audio === 'boolean' &&
+        typeof (d.media as Record<string, unknown>).video === 'boolean'
+      ) {
+        opts.onCallRing?.({
+          callId: d.callId,
+          conversationId: d.conversationId,
+          callerUserId: d.callerUserId,
+          media: { audio: d.media.audio, video: d.media.video },
+        });
+      }
+      return;
+    }
+    if (frame.event === 'call.signal') {
+      if (!authed) return;
+      const d = frame.data as Partial<IncomingCallSignalFrame> | null;
+      if (
+        d &&
+        typeof d.callId === 'string' &&
+        typeof d.conversationId === 'string' &&
+        typeof d.msgSeq === 'number' &&
+        typeof d.senderUserId === 'string' &&
+        typeof d.deliverySeq === 'number' &&
+        d.envelope &&
+        typeof (d.envelope as Record<string, unknown>).ciphertext === 'string'
+      ) {
+        opts.onCallSignalFrame?.({
+          callId: d.callId,
+          conversationId: d.conversationId,
+          msgSeq: d.msgSeq,
+          senderUserId: d.senderUserId,
+          deliverySeq: d.deliverySeq,
+          envelope: { ciphertext: (d.envelope as { ciphertext: string }).ciphertext },
+        });
+      }
+      return;
+    }
+    if (frame.event === 'call.end') {
+      if (!authed) return;
+      const d = frame.data as Partial<IncomingCallEnd> | null;
+      if (
+        d &&
+        typeof d.callId === 'string' &&
+        typeof d.conversationId === 'string' &&
+        (d.reason === 'timeout' || d.reason === 'peer-gone')
+      ) {
+        opts.onCallEnd?.({
+          callId: d.callId,
+          conversationId: d.conversationId,
+          reason: d.reason,
+        });
+      }
+      return;
+    }
     // 'error' frames need no client action (membership/authz is server-enforced; the keys gate content).
   };
 
@@ -333,6 +452,16 @@ export function createMessageSocket(opts: MessageSocketOptions): MessageSocket {
     subscribe(conversationId: string): void {
       subs.add(conversationId);
       if (ws && authed) sendSubscribe(ws, conversationId);
+    },
+    sendCallSignal(frame): void {
+      if (ws && ws.readyState === OPEN) {
+        ws.send(JSON.stringify({ event: 'call.signal', data: frame }));
+      }
+    },
+    sendCallRelease(callId: string): void {
+      if (ws && ws.readyState === OPEN) {
+        ws.send(JSON.stringify({ event: 'call.release', data: { callId } }));
+      }
     },
     close(): void {
       closed = true;
