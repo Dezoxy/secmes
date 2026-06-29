@@ -26,6 +26,8 @@ const NOISE_TYPES = new Set([
   'build',
   'chore',
   'ci',
+  'dependencies',
+  'deps',
   'docs',
   'refactor',
   'release',

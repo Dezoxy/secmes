@@ -92,6 +92,8 @@ describe('buildReleaseEntry', () => {
         'docs: mark runtime health plan merged',
         'ci(security): pin actions',
         'chore(deps): bump zod (#1)',
+        'deps: bump react (#2)',
+        'dependencies: update vite (#3)',
         'Revert "fix: add stale release note"',
       ],
     });
