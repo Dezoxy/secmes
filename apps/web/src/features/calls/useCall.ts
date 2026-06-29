@@ -90,10 +90,21 @@ export function useCall(opts: UseCallOptions): UseCallResult {
   // Client-side outbound ring timeout — clears if the peer accepts/declines/or teardown fires.
   const outboundRingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Active-call keepalive — sends call.keepalive every 60 s to reset the gateway's
+  // 90 s inactivity authz timer; started on 'connected', stopped by teardown.
+  const keepaliveIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const clearOutboundRingTimer = useCallback(() => {
     if (outboundRingTimerRef.current !== null) {
       clearTimeout(outboundRingTimerRef.current);
       outboundRingTimerRef.current = null;
+    }
+  }, []);
+
+  const clearKeepaliveInterval = useCallback(() => {
+    if (keepaliveIntervalRef.current !== null) {
+      clearInterval(keepaliveIntervalRef.current);
+      keepaliveIntervalRef.current = null;
     }
   }, []);
 
@@ -108,6 +119,7 @@ export function useCall(opts: UseCallOptions): UseCallResult {
   const teardown = useCallback(
     (reason: string) => {
       callGenRef.current++;
+      clearKeepaliveInterval();
       clearOutboundRingTimer();
       clearEndedTimer();
       pcRef.current?.close();
@@ -126,19 +138,20 @@ export function useCall(opts: UseCallOptions): UseCallResult {
         ringRef.current = null;
       }, 2000);
     },
-    [clearEndedTimer, clearOutboundRingTimer],
+    [clearEndedTimer, clearKeepaliveInterval, clearOutboundRingTimer],
   );
 
   // Cleanup on unmount.
   useEffect(
     () => () => {
+      clearKeepaliveInterval();
       clearOutboundRingTimer();
       clearEndedTimer();
       pcRef.current?.close();
       streamRef.current?.getTracks().forEach((t) => t.stop());
       if (audioRef.current) audioRef.current.srcObject = null;
     },
-    [clearEndedTimer, clearOutboundRingTimer],
+    [clearEndedTimer, clearKeepaliveInterval, clearOutboundRingTimer],
   );
 
   // Initialise the audio element once (never rendered in DOM — just played).
@@ -181,6 +194,8 @@ export function useCall(opts: UseCallOptions): UseCallResult {
         case 'call.hangup':
           teardown('hangup');
           break;
+        case 'call.keepalive':
+          break;
         default:
           break;
       }
@@ -197,21 +212,27 @@ export function useCall(opts: UseCallOptions): UseCallResult {
       const conversation = liveGroups.current.get(conversationId);
       if (!conversation) return false;
 
-      let config: Awaited<ReturnType<typeof loadTurnConfig>>;
-      let stream: MediaStream;
-      try {
-        [config, stream] = await Promise.all([loadTurnConfig(), getAudioStream()]);
-      } catch {
-        // TURN credential fetch or getUserMedia rejected — return false so callers release + teardown.
-        return false;
-      }
+      // Sequential: fetch TURN first so getUserMedia is never called if credentials fail —
+      // this prevents a mic-track leak when loadTurnConfig() rejects after getUserMedia resolved.
+      const config = await loadTurnConfig().catch(() => null);
+      if (!config) return false;
+      const stream = await getAudioStream().catch(() => null);
+      if (!stream) return false;
       streamRef.current = stream;
 
       const pc = createPeerConnection(config, {
         onConnectionStateChange: (state) => {
           if (state === 'connected') {
             setCallPhase({ type: 'active', callId, conversationId, startedAt: performance.now() });
+            // Send keepalive every 60 s to reset the gateway's 90 s inactivity authz timer.
+            keepaliveIntervalRef.current = setInterval(() => {
+              void sigRef.current?.send({ type: 'call.keepalive' });
+            }, 60_000);
           } else if (state === 'failed' || state === 'disconnected') {
+            // Notify the peer before tearing down — without this the remote side stays
+            // in active-call UI until the server inactivity timer fires.
+            void sigRef.current?.send({ type: 'call.hangup', reason: 'failed' });
+            socket.sendCallRelease(callId);
             teardown(state);
           }
         },
@@ -258,7 +279,7 @@ export function useCall(opts: UseCallOptions): UseCallResult {
 
       return true;
     },
-    [handleSignal, liveGroups, localIdentity, saveGroupState, socket],
+    [handleSignal, liveGroups, localIdentity, saveGroupState, socket, teardown],
   );
 
   const startCall = useCallback(

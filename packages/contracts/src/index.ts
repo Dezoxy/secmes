@@ -868,6 +868,8 @@ export const CallSignalSchema = z.discriminatedUnion('type', [
     media: CallMediaSchema,
     iceRestart: z.boolean().default(false),
   }),
+  // ── In-call keepalive ── sent every ~60 s to reset the gateway's inactivity authz timer.
+  z.object({ ...callSignalBase, type: z.literal('call.keepalive') }),
   // ── Teardown ──
   z.object({
     ...callSignalBase,
