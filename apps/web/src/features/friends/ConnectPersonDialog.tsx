@@ -135,6 +135,7 @@ export function ConnectPersonDialog({
               setLookupResult(null);
               setSentDisplayName(null);
               inFlightLookup.current = null;
+              setLooking(false);
             }}
             onKeyDown={(event) => {
               if (event.key === 'Enter') handleLookup();

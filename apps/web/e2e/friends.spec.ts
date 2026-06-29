@@ -396,3 +396,33 @@ test('connect person dialog: lookup-then-confirm friend request', async ({ page 
   await page.getByRole('button', { name: 'Send request' }).click();
   await expect(page.getByText('Request sent to Dave')).toBeVisible();
 });
+
+test('connect person dialog recovers when the Argus ID changes during lookup', async ({ page }) => {
+  await stubFriendsApi(page);
+
+  let releaseLookup: (() => void) | null = null;
+  await page.route('**/api/users/lookup**', async (route) => {
+    await new Promise<void>((resolve) => {
+      releaseLookup = resolve;
+    });
+    void route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(null),
+    });
+  });
+
+  await page.goto('/__e2e/friends-unavailable');
+  await page.getByRole('button', { name: 'Connect new person' }).click();
+  const argusIdInput = page.getByRole('textbox', { name: 'Person Argus ID' });
+  const lookupButton = page.getByRole('button', { name: 'Look up' });
+
+  await argusIdInput.fill(VALID_SEND_ID);
+  await lookupButton.click();
+  await expect(page.getByRole('button', { name: '...' })).toBeDisabled();
+
+  await argusIdInput.fill('argus-bcdefghjkmnpqrst-test');
+  await expect(lookupButton).toBeEnabled();
+
+  releaseLookup?.();
+});
