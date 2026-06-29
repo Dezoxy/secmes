@@ -225,61 +225,73 @@ export function useCall(opts: UseCallOptions): UseCallResult {
       if (!stream) return false;
       streamRef.current = stream;
 
-      const pc = createPeerConnection(config, {
-        onConnectionStateChange: (state) => {
-          if (state === 'connected') {
-            setCallPhase({ type: 'active', callId, conversationId, startedAt: performance.now() });
-            // Send keepalive every 60 s to reset the gateway's 90 s inactivity authz timer.
-            keepaliveIntervalRef.current = setInterval(() => {
-              void sigRef.current?.send({ type: 'call.keepalive' });
-            }, 60_000);
-          } else if (state === 'failed' || state === 'disconnected') {
-            // Notify the peer before tearing down — without this the remote side stays
-            // in active-call UI until the server inactivity timer fires.
-            void sigRef.current?.send({ type: 'call.hangup', reason: 'failed' });
-            socket.sendCallRelease(callId);
-            teardown(state);
-          }
-        },
-        onIceCandidate: (candidate) => {
-          void sigRef.current?.send({ type: 'call.ice', candidate });
-        },
-        onRemoteTrack: (track) => {
-          if (audioRef.current) {
-            audioRef.current.srcObject = new MediaStream([track]);
-            void audioRef.current.play().catch(() => {});
-          }
-        },
-      });
+      // Any synchronous or async failure beyond this point must stop the acquired mic stream.
+      try {
+        const pc = createPeerConnection(config, {
+          onConnectionStateChange: (state) => {
+            if (state === 'connected') {
+              setCallPhase({
+                type: 'active',
+                callId,
+                conversationId,
+                startedAt: performance.now(),
+              });
+              // Send keepalive every 60 s to reset the gateway's 90 s inactivity authz timer.
+              keepaliveIntervalRef.current = setInterval(() => {
+                void sigRef.current?.send({ type: 'call.keepalive' });
+              }, 60_000);
+            } else if (state === 'failed' || state === 'disconnected') {
+              // Notify the peer before tearing down — without this the remote side stays
+              // in active-call UI until the server inactivity timer fires.
+              void sigRef.current?.send({ type: 'call.hangup', reason: 'failed' });
+              socket.sendCallRelease(callId);
+              teardown(state);
+            }
+          },
+          onIceCandidate: (candidate) => {
+            void sigRef.current?.send({ type: 'call.ice', candidate });
+          },
+          onRemoteTrack: (track) => {
+            if (audioRef.current) {
+              audioRef.current.srcObject = new MediaStream([track]);
+              void audioRef.current.play().catch(() => {});
+            }
+          },
+        });
 
-      for (const track of stream.getAudioTracks()) {
-        pc.addTrack(track, stream);
-      }
-      pcRef.current = pc;
+        for (const track of stream.getAudioTracks()) {
+          pc.addTrack(track, stream);
+        }
+        pcRef.current = pc;
 
-      const sig = createCallSignaling({
-        conversation,
-        localIdentity: identity,
-        callId,
-        conversationId,
-        socket,
-        onSignal: (s) => {
-          void handleSignal(s);
-        },
-        onError: (err) => {
-          // Log only err.message — never err/err.stack/the frame; message is metadata-only
-          // (epoch, leaf index, wire-format descriptor). No SDP/ICE/key material reaches the log.
-          // eslint-disable-next-line no-console
-          console.warn('call signal error', err.message);
-        },
-        saveState: () => saveGroupState(conversationId),
-      });
-      sigRef.current = sig;
+        const sig = createCallSignaling({
+          conversation,
+          localIdentity: identity,
+          callId,
+          conversationId,
+          socket,
+          onSignal: (s) => {
+            void handleSignal(s);
+          },
+          onError: (err) => {
+            // Log only err.message — never err/err.stack/the frame; message is metadata-only
+            // (epoch, leaf index, wire-format descriptor). No SDP/ICE/key material reaches the log.
+            // eslint-disable-next-line no-console
+            console.warn('call signal error', err.message);
+          },
+          saveState: () => saveGroupState(conversationId),
+        });
+        sigRef.current = sig;
 
-      // Flush any frames that arrived before signaling was ready.
-      const pending = pendingFramesRef.current.splice(0);
-      for (const frame of pending) {
-        await sig.receiveFrame(frame);
+        // Flush any frames that arrived before signaling was ready.
+        const pending = pendingFramesRef.current.splice(0);
+        for (const frame of pending) {
+          await sig.receiveFrame(frame);
+        }
+      } catch {
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        return false;
       }
 
       return true;
@@ -296,7 +308,13 @@ export function useCall(opts: UseCallOptions): UseCallResult {
       clearEndedTimer();
       const gen = ++callGenRef.current;
       // Allocate a server-minted callId BEFORE creating the PC (need it for signaling).
-      const { callId } = await inviteToCall(peerUserId, { conversationId, media: 'audio' });
+      let callId: string;
+      try {
+        ({ callId } = await inviteToCall(peerUserId, { conversationId, media: 'audio' }));
+      } catch {
+        dialingRef.current = false;
+        return;
+      }
 
       setCallPhase({ type: 'calling', callId, conversationId, peerUserId });
 
