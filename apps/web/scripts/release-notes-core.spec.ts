@@ -82,6 +82,30 @@ describe('buildReleaseEntry', () => {
     expect(buildReleaseEntry({ version: 'v1', date: 'd', subjects: [] })).toBeNull();
   });
 
+  it('keeps meaningful squash titles as Changes while dropping conventional noise', () => {
+    const entry = buildReleaseEntry({
+      version: 'v1',
+      date: 'd',
+      subjects: [
+        'Add friends connect dialog',
+        'fix loki rules bind refresh (#446)',
+        'docs: mark runtime health plan merged',
+        'ci(security): pin actions',
+        'chore(deps): bump zod (#1)',
+        'deps: bump react (#2)',
+        'dependencies: update vite (#3)',
+        'Revert "fix: add stale release note"',
+      ],
+    });
+
+    expect(entry?.groups).toEqual([
+      {
+        label: 'Changes',
+        items: ['Add friends connect dialog', 'Fix loki rules bind refresh'],
+      },
+    ]);
+  });
+
   it('caps at 12 items and carries the overflow as a neutral note, not inside a group', () => {
     const subjects = Array.from({ length: 15 }, (_, i) => `feat: item ${i}`);
     const entry = buildReleaseEntry({ version: 'v1', date: 'd', subjects });
