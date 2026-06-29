@@ -349,7 +349,7 @@ describe('createMessageSocket', () => {
       callId: 'c1111111-1111-1111-1111-111111111111',
       conversationId: 'c2222222-2222-2222-2222-222222222222',
       callerUserId: 'c3333333-3333-3333-3333-333333333333',
-      media: { audio: true, video: false },
+      media: 'audio' as const, // server sends the string literal 'audio', not a media object
     };
 
     it('calls onCallRing with the full ring payload after auth', async () => {
@@ -401,7 +401,7 @@ describe('createMessageSocket', () => {
       last().deliver({ event: 'ready', data: {} });
       last().deliver({
         event: 'call.ring',
-        data: { callId: 'x', conversationId: 'y', media: { audio: true, video: false } },
+        data: { callId: 'x', conversationId: 'y', media: 'audio' /* missing callerUserId */ },
       });
       expect(onCallRing).not.toHaveBeenCalled();
       sock.close();
@@ -415,7 +415,7 @@ describe('createMessageSocket', () => {
       msgSeq: 3,
       senderUserId: 'c4444444-4444-4444-4444-444444444444',
       deliverySeq: 7,
-      envelope: { ciphertext: 'AQIDBA==' },
+      envelope: { ciphertext: 'AQIDBA==', alg: 'MLS_1.0', epoch: 0 },
     };
 
     it('calls onCallSignalFrame with the full frame after auth', async () => {
@@ -549,7 +549,7 @@ describe('createMessageSocket', () => {
         callId: 'call-1',
         conversationId: 'conv-1',
         msgSeq: 0,
-        envelope: { ciphertext: 'AQIDBA==' },
+        envelope: { ciphertext: 'AQIDBA==', alg: 'MLS_1.0', epoch: 0 },
       };
       sock.sendCallSignal(frame);
 
@@ -590,7 +590,7 @@ describe('createMessageSocket', () => {
         callId: 'c',
         conversationId: 'cv',
         msgSeq: 0,
-        envelope: { ciphertext: 'AA==' },
+        envelope: { ciphertext: 'AA==', alg: 'MLS_1.0', epoch: 0 },
       });
       expect(last().sent).toHaveLength(0); // nothing sent while not OPEN
       sock.close();

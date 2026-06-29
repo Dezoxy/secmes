@@ -16,6 +16,9 @@ import type { Conversation } from '@argus/crypto';
 import { fromBase64, toBase64 } from './base64';
 import type { IncomingCallSignalFrame, MessageSocket } from './ws';
 
+/** Wire algorithm tag — must match the server's CipherEnvelopeSchema `alg` field. */
+const WIRE_ALG = 'MLS_1.0';
+
 export type { IncomingCallSignalFrame };
 
 export interface CallSignalingOptions {
@@ -27,6 +30,13 @@ export interface CallSignalingOptions {
   socket: MessageSocket;
   onSignal: (signal: CallSignal) => void;
   onError?: (err: Error) => void;
+  /**
+   * Called after `conversation.encrypt()` and BEFORE the ciphertext is sent.
+   * Must persist the advanced ratchet state to durable storage (same contract as chat messaging)
+   * so a crash/reload cannot reuse an already-consumed MLS generation.
+   * Leave unset only in tests.
+   */
+  saveState?: () => Promise<void>;
 }
 
 export interface CallSignaling {
@@ -51,7 +61,16 @@ function mintNonce(): string {
 }
 
 export function createCallSignaling(opts: CallSignalingOptions): CallSignaling {
-  const { conversation, localIdentity, callId, conversationId, socket, onSignal, onError } = opts;
+  const {
+    conversation,
+    localIdentity,
+    callId,
+    conversationId,
+    socket,
+    onSignal,
+    onError,
+    saveState,
+  } = opts;
   let outSeq = 0;
   // Per-sender high-water mark: msgSeq values already seen from that sender.
   // A frame is dropped if its msgSeq <= the stored high-water.
@@ -74,8 +93,16 @@ export function createCallSignaling(opts: CallSignalingOptions): CallSignaling {
       CallSignalSchema.parse(signal);
 
       const wire = await conversation.encrypt(JSON.stringify(signal));
+      // Persist the advanced ratchet BEFORE the ciphertext leaves the device (crash/nonce-reuse guard).
+      await saveState?.();
       const ciphertext = toBase64(wire);
-      socket.sendCallSignal({ callId, conversationId, msgSeq: seq, envelope: { ciphertext } });
+      const epoch = conversation.epoch;
+      socket.sendCallSignal({
+        callId,
+        conversationId,
+        msgSeq: seq,
+        envelope: { ciphertext, alg: WIRE_ALG, epoch },
+      });
     },
 
     async receiveFrame(frame) {

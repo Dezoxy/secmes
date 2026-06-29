@@ -126,7 +126,8 @@ export interface IncomingCallRing {
   callId: string;
   conversationId: string;
   callerUserId: string;
-  media: { audio: boolean; video: boolean };
+  /** V1: always 'audio'. Server sends the string literal, not a media object. */
+  media: 'audio';
 }
 
 /** An encrypted signal frame fanned out by the gateway to the call participants. */
@@ -136,7 +137,7 @@ export interface IncomingCallSignalFrame {
   msgSeq: number;
   senderUserId: string;
   deliverySeq: number;
-  envelope: { ciphertext: string };
+  envelope: { ciphertext: string; alg: string; epoch: number };
 }
 
 /** Server-initiated call termination (ring timeout or peer disconnected). */
@@ -151,14 +152,15 @@ export interface MessageSocket {
   subscribe(conversationId: string): void;
   /**
    * Fire-and-forget: send an encrypted call-signal envelope to the gateway.
-   * The gateway validates the outer callId + msgSeq; the inner ciphertext is opaque.
+   * The gateway validates the outer callId + msgSeq; `envelope` must match `CipherEnvelopeSchema`
+   * (`ciphertext` + `alg` + `epoch`) — the gateway silently drops frames that fail validation.
    * No-op if the socket is not currently OPEN.
    */
   sendCallSignal(frame: {
     callId: string;
     conversationId: string;
     msgSeq: number;
-    envelope: { ciphertext: string };
+    envelope: { ciphertext: string; alg: string; epoch: number };
   }): void;
   /**
    * Release a call on the server (clears the authz map entry, ends the call for the peer).
@@ -329,15 +331,13 @@ export function createMessageSocket(opts: MessageSocketOptions): MessageSocket {
         typeof d.callId === 'string' &&
         typeof d.conversationId === 'string' &&
         typeof d.callerUserId === 'string' &&
-        d.media &&
-        typeof (d.media as Record<string, unknown>).audio === 'boolean' &&
-        typeof (d.media as Record<string, unknown>).video === 'boolean'
+        d.media === 'audio'
       ) {
         opts.onCallRing?.({
           callId: d.callId,
           conversationId: d.conversationId,
           callerUserId: d.callerUserId,
-          media: { audio: d.media.audio, video: d.media.video },
+          media: 'audio',
         });
       }
       return;
@@ -353,15 +353,18 @@ export function createMessageSocket(opts: MessageSocketOptions): MessageSocket {
         typeof d.senderUserId === 'string' &&
         typeof d.deliverySeq === 'number' &&
         d.envelope &&
-        typeof (d.envelope as Record<string, unknown>).ciphertext === 'string'
+        typeof (d.envelope as Record<string, unknown>).ciphertext === 'string' &&
+        typeof (d.envelope as Record<string, unknown>).alg === 'string' &&
+        typeof (d.envelope as Record<string, unknown>).epoch === 'number'
       ) {
+        const env = d.envelope as { ciphertext: string; alg: string; epoch: number };
         opts.onCallSignalFrame?.({
           callId: d.callId,
           conversationId: d.conversationId,
           msgSeq: d.msgSeq,
           senderUserId: d.senderUserId,
           deliverySeq: d.deliverySeq,
-          envelope: { ciphertext: (d.envelope as { ciphertext: string }).ciphertext },
+          envelope: { ciphertext: env.ciphertext, alg: env.alg, epoch: env.epoch },
         });
       }
       return;

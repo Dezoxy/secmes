@@ -17,12 +17,15 @@ function makeFakeConversation({
   encryptResult = ENCRYPTED_WIRE,
   decryptResult = { plaintext: '', senderIdentity: PEER_IDENTITY },
   decryptError,
+  epoch = 0,
 }: {
   encryptResult?: Uint8Array;
   decryptResult?: { plaintext: string; senderIdentity: string };
   decryptError?: Error;
+  epoch?: number;
 } = {}) {
   return {
+    epoch,
     encrypt: vi.fn().mockResolvedValue(encryptResult),
     decryptAuthenticated: decryptError
       ? vi.fn().mockRejectedValue(decryptError)
@@ -61,7 +64,7 @@ function makeInboundFrame(
     msgSeq: 0,
     senderUserId: SENDER_USER_ID,
     deliverySeq: 1,
-    envelope: { ciphertext: 'AQIDBA==' }, // base64 of [1,2,3,4]
+    envelope: { ciphertext: 'AQIDBA==', alg: 'MLS_1.0', epoch: 0 }, // base64 of [1,2,3,4]
     ...overrides,
   };
 }
@@ -104,6 +107,43 @@ describe('createCallSignaling — send()', () => {
     expect(frame.msgSeq).toBe(0);
     expect(typeof frame.envelope.ciphertext).toBe('string');
     expect(frame.envelope.ciphertext.length).toBeGreaterThan(0);
+    expect(frame.envelope.alg).toBe('MLS_1.0');
+    expect(typeof frame.envelope.epoch).toBe('number');
+  });
+
+  it('calls saveState after encrypt and before send', async () => {
+    const order: string[] = [];
+    const conv = {
+      epoch: 3,
+      encrypt: vi.fn().mockImplementation(async () => {
+        order.push('encrypt');
+        return ENCRYPTED_WIRE;
+      }),
+    };
+    const saveState = vi.fn().mockImplementation(async () => {
+      order.push('saveState');
+    });
+    const socket = makeFakeSocket();
+    const origSend = socket.sendCallSignal as ReturnType<typeof vi.fn>;
+    origSend.mockImplementation((...args: unknown[]) => {
+      order.push('send');
+      return (socket as { sent: unknown[] }).sent.push({ event: 'call.signal', data: args[0] });
+    });
+
+    const sig = createCallSignaling({
+      conversation: conv as never,
+      localIdentity: LOCAL_IDENTITY,
+      callId: CALL_ID,
+      conversationId: CONV_ID,
+      socket,
+      onSignal: vi.fn(),
+      saveState,
+    });
+
+    await sig.send(ACCEPT_PAYLOAD);
+
+    expect(saveState).toHaveBeenCalledOnce();
+    expect(order).toEqual(['encrypt', 'saveState', 'send']);
   });
 
   it('increments msgSeq on each send', async () => {
