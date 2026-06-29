@@ -6,6 +6,8 @@ COMPOSE_FILE="$ROOT/compose.prod.yaml"
 ALLOY_CONFIG="$ROOT/infra/stack/observability/alloy/config.alloy"
 DASHBOARD_DIR="$ROOT/infra/stack/observability/grafana/dashboards"
 LOGS_DASHBOARD="$DASHBOARD_DIR/argus-logs.json"
+LOKI_CONFIG="$ROOT/infra/stack/observability/loki/loki-config.yml"
+LOKI_RULES_DIR="$ROOT/infra/stack/observability/loki/rules"
 DEPLOY_SH="$ROOT/infra/stack/deploy/deploy.sh"
 
 fail() {
@@ -20,9 +22,18 @@ require_file() {
   fi
 }
 
+require_dir() {
+  local path="$1"
+  if [ ! -d "$path" ]; then
+    fail "Missing required observability guard input directory: $path"
+  fi
+}
+
 require_file "$COMPOSE_FILE"
 require_file "$ALLOY_CONFIG"
 require_file "$LOGS_DASHBOARD"
+require_file "$LOKI_CONFIG"
+require_dir "$LOKI_RULES_DIR"
 require_file "$DEPLOY_SH"
 
 compose_config="$(docker compose -f "$COMPOSE_FILE" config --format json)"
@@ -74,6 +85,11 @@ grep -Eq 'service_name[[:space:]]*=[[:space:]]*"service"' "$ALLOY_CONFIG" ||
 loki_image="$(jq -r '.services.loki.image // ""' <<<"$compose_config")"
 if [[ "$loki_image" =~ (^|/)grafana/loki:3\.5\.0(@sha256:[[:alnum:]]+)?$ ]]; then
   fail "Loki 3.5.0 has a known structured-metadata accounting bug that spams negative structured metadata errors; use 3.5.1 or newer."
+fi
+grep -Eq 'directory:[[:space:]]*/etc/loki/rules' "$LOKI_CONFIG" ||
+  fail "Loki ruler must read checked-in rule files from /etc/loki/rules."
+if ! find "$LOKI_RULES_DIR" -mindepth 2 -maxdepth 2 -type f -name '*.yml' -print -quit | grep -q .; then
+  fail "Loki ruler must have at least one checked-in rules/*/*.yml file."
 fi
 if grep -Eq 'docker\.sock|/var/run/docker\.sock' "$ALLOY_CONFIG"; then
   fail "Alloy log enrichment must not use the Docker socket."
@@ -165,5 +181,13 @@ grep -Fq '/etc/grafana/provisioning/dashboards/provider.yml' "$DEPLOY_SH" ||
   fail "deploy.sh must require Grafana to see its dashboard provider file."
 grep -Fq -- '--force-recreate --no-deps grafana' "$DEPLOY_SH" ||
   fail "deploy.sh must force-recreate Grafana when refreshed bind mounts are not visible."
+grep -Fq 'ensure_loki_rules_visible' "$DEPLOY_SH" ||
+  fail "deploy.sh must verify Loki rule visibility inside the container after rollout."
+grep -Fq "docker cp \"\$cid:/etc/loki/rules/.\"" "$DEPLOY_SH" ||
+  fail "deploy.sh must inspect Loki's container-side rules mount without requiring a shell in the Loki image."
+grep -Fq "find \"\$tmp\" -mindepth 2 -maxdepth 2 -type f -name \"*.yml\"" "$DEPLOY_SH" ||
+  fail "deploy.sh must require Loki to see at least one tenant-scoped rule YAML file."
+grep -Fq -- '--force-recreate --no-deps loki' "$DEPLOY_SH" ||
+  fail "deploy.sh must force-recreate Loki when refreshed rule mounts are not visible."
 
 echo "observability log label guard OK"

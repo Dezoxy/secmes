@@ -183,6 +183,35 @@ _grafana_applied_hash=""
 _grafana_new_hash=""
 _grafana_dashboards_dir=""
 _grafana_provisioning_dir=""
+_loki_rules_dir="$APP_DIR/infra/stack/observability/loki/rules"
+if [ ! -d "$_loki_rules_dir" ]; then
+  log "FATAL: missing Loki rules directory after staging: $_loki_rules_dir"
+  exit 1
+fi
+if ! find "$_loki_rules_dir" -mindepth 2 -maxdepth 2 -type f -name '*.yml' -print -quit | grep -q .; then
+  log "FATAL: no Loki rule YAML files staged in $_loki_rules_dir"
+  exit 1
+fi
+_loki_applied_hash_file="$APP_DIR/.loki-config-applied.sha256"
+_loki_applied_hash=""
+if [ -f "$_loki_applied_hash_file" ]; then
+  _loki_applied_hash="$(cat "$_loki_applied_hash_file")"
+fi
+LOKI_CONF_CHANGED=1
+_loki_new_hash="$(
+  find "$APP_DIR/infra/stack/observability/loki" -type f -print0 |
+    sort -z |
+    xargs -0 sha256sum |
+    sha256sum |
+    cut -d' ' -f1
+)"
+LOKI_CONF_HASH="$_loki_new_hash"
+if [ -n "$_loki_applied_hash" ] && [ "$_loki_applied_hash" = "$LOKI_CONF_HASH" ]; then
+  LOKI_CONF_CHANGED=0
+fi
+_loki_applied_hash=""
+_loki_new_hash=""
+_loki_rules_dir=""
 # GlitchTip entrypoint wrapper — bind-mounted read-only into the glitchtip + glitchtip-worker containers.
 # Contains NO secrets (reads them from Docker-secret files at runtime); world-executable so the container
 # user can exec it regardless of uid.
@@ -697,6 +726,11 @@ if [ "${GRAFANA_CONF_CHANGED:-1}" = 1 ]; then
   docker compose -f "$COMPOSE" up -d --force-recreate --no-deps grafana
   printf '%s\n' "$GRAFANA_CONF_HASH" >"$_grafana_applied_hash_file"
 fi
+if [ "${LOKI_CONF_CHANGED:-1}" = 1 ]; then
+  log "loki config or rules changed; force-recreating loki so the refreshed bind mount is loaded"
+  docker compose -f "$COMPOSE" up -d --force-recreate --no-deps loki
+  printf '%s\n' "$LOKI_CONF_HASH" >"$_loki_applied_hash_file"
+fi
 # The api reads REDIS_URL_FILE ONCE at module construction and holds a persistent ioredis connection. On a
 # redis password ROTATION the `up -d` above won't recreate the api when the image/config is unchanged (a
 # same-IMAGE_TAG/secret-only redeploy) — it would keep authenticating with the OLD password against the
@@ -799,6 +833,32 @@ ensure_grafana_dashboards_visible() {
   fi
   printf '%s\n' "$GRAFANA_CONF_HASH" >"$_grafana_applied_hash_file"
 }
+loki_rules_visible() {
+  local cid status tmp
+  cid="$(docker compose -f "$COMPOSE" ps -q loki 2>/dev/null || true)"
+  [ -n "$cid" ] || return 1
+  tmp="$(mktemp -d)"
+  status=1
+  if docker cp "$cid:/etc/loki/rules/." "$tmp/" >/dev/null 2>&1 &&
+    find "$tmp" -mindepth 2 -maxdepth 2 -type f -name "*.yml" -print -quit | grep -q .; then
+    status=0
+  fi
+  rm -rf "$tmp"
+  return "$status"
+}
+ensure_loki_rules_visible() {
+  if loki_rules_visible; then
+    return 0
+  fi
+  log "loki cannot see staged ruler rules; force-recreating loki to refresh bind mounts"
+  docker compose -f "$COMPOSE" up -d --force-recreate --no-deps loki
+  wait_running loki
+  if ! loki_rules_visible; then
+    log "FATAL: loki still cannot see /etc/loki/rules/*/*.yml"
+    return 1
+  fi
+  printf '%s\n' "$LOKI_CONF_HASH" >"$_loki_applied_hash_file"
+}
 log "waiting for the rollout to become healthy (api, caddy, coturn, glitchtip) + the tunnel"
 wait_healthy api
 wait_healthy caddy
@@ -816,6 +876,7 @@ ensure_grafana_dashboards_visible
 # Centralized logs (checkpoint 47b): same posture — Loki + Alloy have no shell for a CMD healthcheck, so gate
 # on running + not-crash-looping (catches a bad config mount / missing log dir / image pull).
 wait_running loki
+ensure_loki_rules_visible
 # Alloy WAL-lock recovery: a stale WAL lock in the alloy-data volume causes alloy to crash-loop on
 # startup. Detect via wait_running's own restart-count failure path (the authoritative signal), so
 # a pre-flight State.Restarting sample can't race the brief window between restarts. If wait_running
