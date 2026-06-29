@@ -249,9 +249,9 @@ describe('createCallSignaling — receiveFrame()', () => {
     expect(onSignal).not.toHaveBeenCalled();
   });
 
-  it('drops a cross-call frame (signal.callId !== our callId)', async () => {
+  it('drops a cross-call frame before decrypting (outer frame.callId !== our callId)', async () => {
     const onSignal = vi.fn();
-    const wrongCallId = '99999999-9999-1999-9999-999999999999';
+    const wrongCallId = '99999999-9999-1999-8999-999999999999';
     const conv = makeFakeConversation({
       decryptResult: {
         plaintext: signalJson({ callId: wrongCallId }),
@@ -267,8 +267,10 @@ describe('createCallSignaling — receiveFrame()', () => {
       onSignal,
     });
 
-    await sig.receiveFrame(makeInboundFrame());
+    await sig.receiveFrame(makeInboundFrame({ callId: wrongCallId }));
     expect(onSignal).not.toHaveBeenCalled();
+    // Must drop before decrypt — ratchet must not advance for off-call frames.
+    expect(conv.decryptAuthenticated).not.toHaveBeenCalled();
   });
 
   it('calls onError and does not dispatch when MLS decryption fails', async () => {

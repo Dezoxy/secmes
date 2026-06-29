@@ -111,6 +111,11 @@ export function createCallSignaling(opts: CallSignalingOptions): CallSignaling {
       const hw = inSeqHW.get(frame.senderUserId);
       if (hw !== undefined && frame.msgSeq <= hw) return; // replay or reorder — drop silently
 
+      // Outer callId fast-reject: drop frames obviously destined for a different call BEFORE
+      // decrypting, to avoid wasting a ratchet generation. The authenticated inner callId check
+      // below is the authoritative guard — this is defence-in-depth using the unverified outer field.
+      if (frame.callId !== callId) return;
+
       let plaintext: string;
       let senderIdentity: string;
       try {
