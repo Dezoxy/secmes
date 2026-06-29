@@ -469,19 +469,33 @@ export function useCall(opts: UseCallOptions): UseCallResult {
   const onCallSignalFrame = useCallback(
     (frame: IncomingCallSignalFrame) => {
       const sig = sigRef.current;
+      const phase = callPhaseRef.current;
+
+      // Route to the active signaling channel ONLY when the frame is for the current call.
+      // If sigRef is set but the frame is for a different callId (race: busy release not yet
+      // processed by gateway), fall through to decrypt-and-discard — receiveFrame's fast-reject
+      // path skips decryption, which would leave the ratchet behind.
       if (sig) {
-        void sig.receiveFrame(frame);
-        return;
-      }
-      if (ringRef.current?.callId === frame.callId) {
-        // In ringing phase for this call — buffer for flush once acceptCall sets up sig.
+        const inCurrentCall =
+          (phase.type === 'calling' || phase.type === 'negotiating' || phase.type === 'active') &&
+          phase.callId === frame.callId;
+        if (inCurrentCall) {
+          void sig.receiveFrame(frame);
+          return;
+        }
+        // Different call — fall through to decrypt-and-discard.
+      } else if (
+        (phase.type === 'ringing' || phase.type === 'negotiating') &&
+        ringRef.current?.callId === frame.callId
+      ) {
+        // No sig yet: either in ringing phase (haven't accepted) or in negotiating phase while
+        // acceptCall is awaiting TURN/getUserMedia. Buffer for flush when sig is ready.
         pendingFramesRef.current.push(frame);
         return;
       }
-      // Not joining this call (declined, busy, or a different call is active). Decrypt and
-      // discard to advance the MLS ratchet — without this, multi-device users whose secondary
-      // device did not answer would diverge from the answering device's ratchet and fail to
-      // decrypt subsequent chat messages from the caller.
+
+      // Not joining this call — decrypt and discard to advance the MLS ratchet so
+      // secondary devices that did not answer stay in sync with the answering device.
       const conversation = liveGroups.current.get(frame.conversationId);
       if (conversation) {
         void (async () => {
@@ -489,7 +503,7 @@ export function useCall(opts: UseCallOptions): UseCallResult {
             await conversation.decryptAuthenticated(fromBase64(frame.envelope.ciphertext));
             await saveGroupState(frame.conversationId);
           } catch {
-            // Decryption failure is expected for frames already consumed by the answering device.
+            // Expected: frames may already be consumed by the answering device.
           }
         })();
       }
