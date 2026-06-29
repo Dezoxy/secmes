@@ -238,8 +238,9 @@ export default function FriendsScreen() {
         onTouchEndCapture={handleSidebarTouchEndCapture}
       >
         <div className="argus-mobile-tab-header argus-mobile-tab-title-header relative shrink-0 bg-[#0f0f16]/80 backdrop-blur-xl p-4 lg:bg-[#12121a]/80">
-          <div className="text-center">
-            <div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="h-8 w-8 shrink-0" aria-hidden="true" />
+            <div className="min-w-0 flex-1 text-center">
               <h1 className="text-xl font-bold tracking-wider">
                 <span className="bg-gradient-to-r from-[var(--argus-brand-400)] to-[var(--argus-brand-600)] bg-clip-text text-transparent">
                   FRIENDS
@@ -251,6 +252,20 @@ export default function FriendsScreen() {
                   : 'Friends not loaded'}
               </p>
             </div>
+            {canMutate ? (
+              <button
+                type="button"
+                onClick={focusSearch}
+                className="flex shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] p-2 text-white/70 transition-colors hover:border-purple-500/30 hover:bg-purple-500/10 hover:text-purple-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60"
+                aria-label="Connect new person"
+                aria-expanded={searchOpen}
+                aria-controls="friend-search-panel"
+              >
+                <UserPlus className="h-4 w-4" />
+              </button>
+            ) : (
+              <div className="h-8 w-8 shrink-0" aria-hidden="true" />
+            )}
           </div>
 
           {/* Search input — slides in when open */}
