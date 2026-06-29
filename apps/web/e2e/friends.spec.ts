@@ -309,6 +309,17 @@ test('friend search filters the accepted-friend list', async ({ page }) => {
   await expect(page.getByText('No accepted friend found for that Argus ID.')).toBeVisible();
 });
 
+test('connect new person button opens the friend search input', async ({ page }) => {
+  await stubFriendsApi(page);
+  await page.goto('/__e2e/friends-unavailable');
+
+  await page.getByRole('button', { name: 'Connect new person' }).click();
+
+  const search = page.getByRole('textbox', { name: 'Search friends or enter Argus ID' });
+  await expect(search).toBeVisible();
+  await expect(search).toBeFocused();
+});
+
 test('accepted friend can be removed via the unfriend button', async ({ page }) => {
   // Register DELETE stub FIRST so stubFriendsApi's GET handlers (registered after) take LIFO priority.
   let deleteUrl: string | null = null;
