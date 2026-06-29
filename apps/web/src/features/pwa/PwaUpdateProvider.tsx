@@ -6,6 +6,7 @@ import {
   type PwaUpdateContextValue,
   type PwaUpdateStatus,
 } from './PwaUpdateContext';
+import { showPwaUpdateNotification } from './pwa-update-notification';
 
 const SW_UPDATE_FETCH_HEADERS = {
   'cache-control': 'no-cache',
@@ -30,6 +31,7 @@ export function PwaUpdateProvider({ children }: PwaUpdateProviderProps) {
   const [dismissed, setDismissed] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const newVersionFetched = useRef(false);
+  const updateNotificationShown = useRef(false);
 
   const checkForWaitingUpdate = useCallback(async (options?: { silent?: boolean }) => {
     if (!supportsServiceWorkers()) {
@@ -130,17 +132,27 @@ export function PwaUpdateProvider({ children }: PwaUpdateProviderProps) {
     fetch('/version.json', { cache: 'no-store' })
       .then((res) => res.json())
       .then((data: unknown) => {
+        let nextVersion: string | null = null;
         if (
           data &&
           typeof data === 'object' &&
           'version' in data &&
           typeof (data as { version: unknown }).version === 'string'
         ) {
-          setNewVersion((data as { version: string }).version);
+          nextVersion = (data as { version: string }).version;
+          setNewVersion(nextVersion);
+        }
+        if (!updateNotificationShown.current) {
+          updateNotificationShown.current = true;
+          void showPwaUpdateNotification(registration.current, nextVersion);
         }
       })
       .catch(() => {
         newVersionFetched.current = false;
+        if (!updateNotificationShown.current) {
+          updateNotificationShown.current = true;
+          void showPwaUpdateNotification(registration.current, null);
+        }
       });
   }, [status]);
 

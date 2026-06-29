@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, UserMinus, UserPlus, Users, Check, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { lookupUserByArgusId, type Friend, type UserLookupResult } from '../../lib/api';
+import type { Friend } from '../../lib/api';
 import { useChatContext } from '../chat/ChatContext';
 import { Avatar, Button, EmptyState } from '../ui';
 import { dicebearAvatar } from '../../lib/dicebear';
-
-const ARGUS_ID_RE = /^argus-[abcdefghjkmnpqrstuvwxyz23456789]{16}-[a-z]+$/;
+import { ConnectPersonDialog } from './ConnectPersonDialog';
 
 function friendDisplayName(friend: Friend): string {
   return friend.displayName ?? friend.argusId;
@@ -53,16 +52,10 @@ export default function FriendsScreen() {
   }, [refreshFriends]);
 
   const [friendQuery, setFriendQuery] = useState('');
-  const [sendingRequest, setSendingRequest] = useState(false);
-  const [sentArgusId, setSentArgusId] = useState<string | null>(null);
-  const [sendRequestError, setSendRequestError] = useState<string | null>(null);
-  const [lookingUp, setLookingUp] = useState(false);
-  const [lookupResult, setLookupResult] = useState<UserLookupResult | null>(null);
-  const [sentDisplayName, setSentDisplayName] = useState<string | null>(null);
   const [confirmingUnfriendId, setConfirmingUnfriendId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchFocused, setSearchFocused] = useState(false);
-  const infightLookupQuery = useRef<string | null>(null);
+  const [connectOpen, setConnectOpen] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const touchStartY = useRef<number | null>(null);
@@ -76,9 +69,6 @@ export default function FriendsScreen() {
     setSearchFocused(false);
     setSearchOpen(false);
     setFriendQuery('');
-    setLookupResult(null);
-    setSendRequestError(null);
-    infightLookupQuery.current = null;
   };
 
   const hideSearchIfIdle = () => {
@@ -163,8 +153,6 @@ export default function FriendsScreen() {
   const friendsUnavailable = friendsError && !friendsLoaded && friends.length === 0;
   const showEmptyFriends = friends.length === 0 && (friendsLoaded || !canMutate);
   const showFriendRequestAction = trimmedFriendQuery.length > 0 && filteredFriends.length === 0;
-  const pendingForQuery =
-    sentArgusId !== null && sentArgusId.toLowerCase() === trimmedFriendQuery.toLowerCase();
 
   const findExistingConversation = (userId: string): string | null =>
     conversations.find((c) => c.type === 'direct' && c.participants.some((p) => p.id === userId))
@@ -176,51 +164,6 @@ export default function FriendsScreen() {
       navigate('/chat', { state: { selectedId: existingId } });
     } else {
       navigate('/chat', { state: { startArgusId: friend.argusId } });
-    }
-  };
-
-  const handleSendRequest = async () => {
-    if (!trimmedFriendQuery || lookingUp || sendingRequest) return;
-    setSendRequestError(null);
-    if (!ARGUS_ID_RE.test(trimmedFriendQuery)) {
-      setSendRequestError('Invalid argus ID — paste the exact ID from their profile.');
-      return;
-    }
-    const querySnapshot = trimmedFriendQuery;
-    infightLookupQuery.current = querySnapshot;
-    setLookingUp(true);
-    try {
-      const result = await lookupUserByArgusId(querySnapshot);
-      if (infightLookupQuery.current !== querySnapshot) return;
-      if (!result) {
-        setSendRequestError('No user found with that argus-id.');
-      } else {
-        setLookupResult(result);
-      }
-    } catch {
-      if (infightLookupQuery.current === querySnapshot) {
-        setSendRequestError('Lookup failed. Check the id and try again.');
-      }
-    } finally {
-      setLookingUp(false);
-    }
-  };
-
-  const handleConfirmSend = async () => {
-    if (!lookupResult || sendingRequest) return;
-    setSendingRequest(true);
-    setSendRequestError(null);
-    const { argusId: canonicalId, displayName: resolvedName } = lookupResult;
-    const displayName = resolvedName ?? canonicalId;
-    try {
-      await handleSendFriendRequest(canonicalId);
-      setSentArgusId(canonicalId);
-      setSentDisplayName(displayName);
-      setLookupResult(null);
-    } catch {
-      setSendRequestError('Could not send request. Try again in a moment.');
-    } finally {
-      setSendingRequest(false);
     }
   };
 
@@ -255,11 +198,9 @@ export default function FriendsScreen() {
             {canMutate ? (
               <button
                 type="button"
-                onClick={focusSearch}
+                onClick={() => setConnectOpen(true)}
                 className="flex shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04] p-2 text-white/70 transition-colors hover:border-purple-500/30 hover:bg-purple-500/10 hover:text-purple-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60"
                 aria-label="Connect new person"
-                aria-expanded={searchOpen}
-                aria-controls="friend-search-panel"
               >
                 <UserPlus className="h-4 w-4" />
               </button>
@@ -290,9 +231,6 @@ export default function FriendsScreen() {
                 value={friendQuery}
                 onChange={(event) => {
                   setFriendQuery(event.target.value);
-                  setSendRequestError(null);
-                  setLookupResult(null);
-                  infightLookupQuery.current = null;
                 }}
                 onWheel={handleSearchWheel}
                 onTouchStart={handleSearchTouchStart}
@@ -449,80 +387,8 @@ export default function FriendsScreen() {
 
           {showFriendRequestAction && (
             <div className="mx-2 rounded-xl border border-white/5 bg-white/[0.03] p-3">
-              {pendingForQuery ? (
-                <p className="rounded-lg border border-emerald-400/20 bg-emerald-500/[0.08] px-3 py-2 text-sm font-medium text-emerald-200">
-                  Request sent{sentDisplayName ? ` to ${sentDisplayName}` : ''}
-                </p>
-              ) : lookupResult ? (
-                <>
-                  <p className="text-sm font-medium text-white/85">Send a friend request to:</p>
-                  <div className="mt-2 flex items-center gap-3">
-                    <Avatar
-                      src={dicebearAvatar(lookupResult.userId)}
-                      name={lookupResult.displayName ?? lookupResult.argusId}
-                      size="md"
-                      shape="circle"
-                      className="shrink-0 ring-2 ring-white/5"
-                    />
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-white/90">
-                        {lookupResult.displayName ?? lookupResult.argusId}
-                      </p>
-                      <p className="truncate font-mono text-xs text-white/45">
-                        {lookupResult.argusId}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="mt-3 flex gap-2">
-                    <Button
-                      onClick={() => void handleConfirmSend()}
-                      disabled={sendingRequest}
-                      variant="subtle"
-                      size="md"
-                      className="flex-1"
-                    >
-                      <UserPlus className="h-4 w-4" />
-                      {sendingRequest ? 'Sending…' : 'Send request'}
-                    </Button>
-                    <button
-                      type="button"
-                      onClick={() => setLookupResult(null)}
-                      disabled={sendingRequest}
-                      aria-label="Cancel"
-                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-white/5 bg-white/[0.04] text-white/50 transition-colors hover:bg-white/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                  {sendRequestError && (
-                    <p className="mt-2 text-xs text-red-400">{sendRequestError}</p>
-                  )}
-                </>
-              ) : (
-                <>
-                  <p className="text-sm font-medium text-white/85">
-                    No accepted friend found for that Argus ID.
-                  </p>
-                  <p className="mt-1 truncate font-mono text-xs text-white/45">
-                    {trimmedFriendQuery}
-                  </p>
-                  {canMutate && (
-                    <Button
-                      onClick={() => void handleSendRequest()}
-                      disabled={lookingUp || sendingRequest}
-                      variant="subtle"
-                      size="md"
-                      className="mt-3 w-full"
-                    >
-                      <UserPlus className="h-4 w-4" />
-                      {lookingUp ? 'Looking up…' : 'Send friend request'}
-                    </Button>
-                  )}
-                  {sendRequestError && (
-                    <p className="mt-2 text-xs text-red-400">{sendRequestError}</p>
-                  )}
-                </>
-              )}
+              <p className="text-sm font-medium text-white/85">No accepted friend found.</p>
+              <p className="mt-1 truncate font-mono text-xs text-white/45">{trimmedFriendQuery}</p>
             </div>
           )}
 
@@ -600,6 +466,13 @@ export default function FriendsScreen() {
           )}
         </div>
       </div>
+      {connectOpen && canMutate && (
+        <ConnectPersonDialog
+          friends={friends}
+          onSendFriendRequest={handleSendFriendRequest}
+          onClose={() => setConnectOpen(false)}
+        />
+      )}
     </div>
   );
 }
