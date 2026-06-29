@@ -46,11 +46,18 @@ test('mobile layout hides nav when entering a group conversation', async ({ page
   await expect(page.getByRole('navigation', { name: 'Main navigation' })).toBeVisible();
 });
 
-test('voice and video call buttons show coming soon toast', async ({ page }) => {
+test('video call button still shows coming soon toast (V1 audio-only)', async ({ page }) => {
   await page.goto('/chat');
 
-  await page.getByRole('button', { name: 'Start voice call' }).click();
+  await page.getByRole('button', { name: 'Start video call' }).click();
   await expect(page.getByText('Voice and video calls are coming soon')).toBeVisible();
+});
+
+test('voice call button is present in a direct conversation header', async ({ page }) => {
+  await page.goto('/chat');
+
+  const phoneButton = page.getByRole('button', { name: 'Start voice call' });
+  await expect(phoneButton).toBeVisible();
 });
 
 test('group member picker shows suggested friends and supports cancel then confirm', async ({

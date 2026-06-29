@@ -47,6 +47,7 @@ import {
   syncMuteStateToCache,
   unmuteConversation,
 } from '../settings/conversation-mute';
+import { useChatContext } from './ChatContext';
 
 interface ChatHeaderProps {
   conversation: Conversation;
@@ -123,6 +124,7 @@ export function ChatHeader({
   onVerify,
   onAddMember,
 }: ChatHeaderProps) {
+  const { startCall, callPhase, convToPeerId } = useChatContext();
   const [menuOpen, setMenuOpen] = useState(false);
   const [activePanel, setActivePanel] = useState<HeaderPanel | null>(null);
   const [muted, setMuted] = useState(() => isConversationMuted(conversation.id));
@@ -273,9 +275,21 @@ export function ChatHeader({
 
           <div className="flex items-center gap-1">
             <IconButton
-              onClick={handleComingSoon}
+              onClick={() => {
+                const peerUserId = convToPeerId.get(conversation.id);
+                if (peerUserId && callPhase.type === 'idle') {
+                  void startCall(conversation.id, peerUserId);
+                }
+              }}
+              disabled={callPhase.type !== 'idle' || conversation.type !== 'direct'}
               size="lg"
-              className="rounded-xl text-white/40 hover:bg-[#1a1a26] hover:text-white/70"
+              className={`rounded-xl hover:bg-[#1a1a26] ${
+                callPhase.type === 'active' ||
+                callPhase.type === 'calling' ||
+                callPhase.type === 'negotiating'
+                  ? 'text-green-400'
+                  : 'text-white/40 hover:text-white/70'
+              }`}
               aria-label="Start voice call"
             >
               <Phone className="h-5 w-5" />

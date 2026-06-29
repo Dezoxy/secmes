@@ -4,6 +4,7 @@ import { BottomNav, TAB_PATHS } from '../features/ui/BottomNav';
 import { useSwipeTabs } from '../features/ui/useSwipeTabs';
 import { NavVisibilityContext } from './NavVisibilityContext';
 import { UpdateOverlay } from '../features/pwa/UpdateOverlay';
+import { CallOverlay } from '../features/calls/CallOverlay';
 
 const TAB_ANIM_MS = 280;
 
@@ -103,6 +104,7 @@ export default function AppShell() {
       </div>
       {navVisible && <BottomNav onNavigate={animatedNavigateTo} />}
       <UpdateOverlay />
+      <CallOverlay />
     </div>
   );
 }

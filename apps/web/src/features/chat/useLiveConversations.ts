@@ -19,6 +19,9 @@ import {
 } from '../../lib/messaging';
 import {
   createMessageSocket,
+  type IncomingCallEnd,
+  type IncomingCallRing,
+  type IncomingCallSignalFrame,
   type IncomingReceipt,
   type MessageSocket,
   type MessageSocketStatus,
@@ -124,6 +127,12 @@ interface UseLiveConversationsOptions {
   onEnrollmentApproved?: (enrollmentId: string) => void;
   /** Called when a new incoming friend request arrived — caller should refresh incoming requests. */
   onFriendRequest?: () => void;
+  /** VoIP: incoming call ring from the gateway. */
+  onCallRing?: (event: IncomingCallRing) => void;
+  /** VoIP: encrypted signal frame forwarded from the gateway. */
+  onCallSignalFrame?: (frame: IncomingCallSignalFrame) => void;
+  /** VoIP: server-initiated call end (timeout or peer disconnected). */
+  onCallEnd?: (event: IncomingCallEnd) => void;
   /**
    * Called when a joined conversation's peer safety numbers differ from the stored verified set —
    * the peer has a new cryptographic identity (reinstall or device replacement). The UI should
@@ -159,6 +168,8 @@ interface UseLiveConversationsResult {
   addLive: (conversationId: string, conversation: MlsGroup) => void;
   connectionStatus: MessageSocketStatus;
   refoldPeerReceiptWatermarks: () => void;
+  /** Stable shim that proxies call-related socket methods to the live socket. Pass to useCall. */
+  callSocket: MessageSocket;
 }
 
 export function liveConversationShell(conversationId: string, selfUser: User): Conversation {
@@ -270,6 +281,9 @@ export function useLiveConversations({
   onEnrollmentPending,
   onEnrollmentApproved,
   onFriendRequest,
+  onCallRing,
+  onCallSignalFrame,
+  onCallEnd,
   onPeerKeyChanged,
   onPeerVerified,
   onSafetyNumberResolved,
@@ -279,6 +293,14 @@ export function useLiveConversations({
   const [connectionStatus, setConnectionStatus] = useState<MessageSocketStatus>('offline');
   const liveGroups = useRef(new Map<string, MlsGroup>());
   const socketRef = useRef<MessageSocket | null>(null);
+  // Stable shim: always proxies to the live socket so useCall can hold a stable reference even
+  // across WebSocket reconnects (where socketRef.current is swapped to a new instance).
+  const callSocketRef = useRef<MessageSocket>({
+    subscribe: (id) => socketRef.current?.subscribe(id),
+    sendCallSignal: (frame) => socketRef.current?.sendCallSignal(frame),
+    sendCallRelease: (callId) => socketRef.current?.sendCallRelease(callId),
+    close: () => socketRef.current?.close(),
+  });
   const joinRanRef = useRef(false);
   // Serialize drains: joinPendingConversations is idempotent but must not run CONCURRENTLY with itself
   // (two drains could race the same one-time private). A nudge that lands mid-drain queues exactly one
@@ -796,6 +818,9 @@ export function useLiveConversations({
       onFriendRequest: () => {
         onFriendRequest?.();
       },
+      onCallRing,
+      onCallSignalFrame,
+      onCallEnd,
       // A membership commit was posted: drain to exactly this commit (epoch+1 ceiling) so the group
       // advances to epoch+1 but no further. An unbounded drain would consume forward-secret keys for
       // messages still in-flight at epoch+1, making them permanently undecryptable on arrival.
@@ -852,5 +877,12 @@ export function useLiveConversations({
     selfUserId,
   ]);
 
-  return { liveIds, liveGroups, addLive, connectionStatus, refoldPeerReceiptWatermarks };
+  return {
+    liveIds,
+    liveGroups,
+    addLive,
+    connectionStatus,
+    refoldPeerReceiptWatermarks,
+    callSocket: callSocketRef.current,
+  };
 }

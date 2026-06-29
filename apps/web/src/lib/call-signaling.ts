@@ -39,12 +39,24 @@ export interface CallSignalingOptions {
   saveState?: () => Promise<void>;
 }
 
+/**
+ * Distributive Omit: applies Omit per union member, preserving variant-specific fields.
+ * `Omit<A | B, K>` collapses to only shared keys; this form gives `Omit<A,K> | Omit<B,K>`.
+ */
+type DistributiveOmit<T, K extends PropertyKey> = T extends T ? Omit<T, K> : never;
+
+/** The payload shape accepted by `CallSignaling.send()` — all per-call metadata stripped. */
+export type CallSignalPayload = DistributiveOmit<
+  CallSignal,
+  'callId' | 'msgSeq' | 'nonce' | 'sentAt'
+>;
+
 export interface CallSignaling {
   /**
    * Encrypt a call signal and fire-and-forget it over the WebSocket.
    * `callId`, `msgSeq`, `nonce`, and `sentAt` are added automatically.
    */
-  send(payload: Omit<CallSignal, 'callId' | 'msgSeq' | 'nonce' | 'sentAt'>): Promise<void>;
+  send(payload: CallSignalPayload): Promise<void>;
   /**
    * Decrypt and authenticate an inbound signal frame from the gateway.
    * Silently drops loopback, replays, cross-call, invalid MLS, and invalid signal shapes.
