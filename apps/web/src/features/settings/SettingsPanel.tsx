@@ -90,14 +90,7 @@ function hasPrivacySettingsPatch(patch: UpdatePrivacySettings): boolean {
 }
 
 type SectionId =
-  | 'security'
-  | 'privacy'
-  | 'notifications'
-  | 'appearance'
-  | 'storage'
-  | 'about'
-  | 'team'
-  | 'admin';
+  'security' | 'privacy' | 'notifications' | 'appearance' | 'storage' | 'about' | 'team' | 'admin';
 
 const baseSections: Array<{ id: SectionId; label: string; icon: LucideIcon }> = [
   { id: 'security', label: 'Security', icon: Shield },

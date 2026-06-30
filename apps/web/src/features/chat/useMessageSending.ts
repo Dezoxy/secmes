@@ -110,15 +110,13 @@ export function useMessageSending({
 
       void (async () => {
         const echo: Attachment[] = await Promise.all(
-          files.map(
-            async (file): Promise<Attachment> => ({
-              id: `att-${crypto.randomUUID()}`,
-              type: file.type.startsWith('image/') ? 'image' : 'file',
-              name: file.name,
-              size: `${(file.size / 1024 / 1024).toFixed(1)} MB`,
-              url: file.type.startsWith('image/') ? await fileToDataUrl(file) : undefined,
-            }),
-          ),
+          files.map(async (file): Promise<Attachment> => ({
+            id: `att-${crypto.randomUUID()}`,
+            type: file.type.startsWith('image/') ? 'image' : 'file',
+            name: file.name,
+            size: `${(file.size / 1024 / 1024).toFixed(1)} MB`,
+            url: file.type.startsWith('image/') ? await fileToDataUrl(file) : undefined,
+          })),
         );
         const message: Message = {
           id,

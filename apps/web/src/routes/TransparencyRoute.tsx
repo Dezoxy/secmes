@@ -11,9 +11,7 @@ interface BundleManifest {
 }
 
 type ManifestState =
-  | { status: 'loading' }
-  | { status: 'ok'; manifest: BundleManifest }
-  | { status: 'error' };
+  { status: 'loading' } | { status: 'ok'; manifest: BundleManifest } | { status: 'error' };
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

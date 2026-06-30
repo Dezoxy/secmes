@@ -184,8 +184,7 @@ export function createOpenApiDocument(app: INestApplication): OpenAPIObject {
   for (const pathItem of Object.values(doc.paths)) {
     for (const method of HTTP_METHODS) {
       const op = (pathItem as Record<string, unknown>)[method] as
-        | { responses?: Record<string, MutableSchema> }
-        | undefined;
+        { responses?: Record<string, MutableSchema> } | undefined;
       if (!op?.responses) continue;
       for (const [code, description] of Object.entries(STD_ERROR_RESPONSES)) {
         const existing = op.responses[code];
