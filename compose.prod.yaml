@@ -309,6 +309,7 @@ services:
     entrypoint: ['/docker-entrypoint.sh']
     environment:
       - ARGUS_TURN_EXTERNAL_IP=${ARGUS_TURN_EXTERNAL_IP:-} # operator/deploy.sh override; bypasses IMDS probing
+      - ARGUS_TURN_PRIVATE_IP=${ARGUS_TURN_PRIVATE_IP:-} # override for the same-server relay peer-ACL; else hostname -i
     user: '65534:65534' # nobody:nogroup — never root
     read_only: true
     tmpfs:
