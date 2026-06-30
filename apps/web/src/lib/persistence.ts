@@ -26,8 +26,7 @@ const BLOCKED_LOCAL_STORAGE_AREAS = new Set([
 export type BrowserStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem' | 'key' | 'length'>;
 
 export type SafeJsonParseResult =
-  | { ok: true; value: unknown }
-  | { ok: false; reason: 'invalid-json' };
+  { ok: true; value: unknown } | { ok: false; reason: 'invalid-json' };
 
 export type StorageReadResult<T> =
   | { status: 'ok'; value: T }

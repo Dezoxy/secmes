@@ -11,11 +11,7 @@ interface ApiSchema<T> {
 }
 
 export type ApiClientErrorKind =
-  | 'request-validation'
-  | 'network'
-  | 'http'
-  | 'invalid-json'
-  | 'response-validation';
+  'request-validation' | 'network' | 'http' | 'invalid-json' | 'response-validation';
 
 export interface ApiClientError {
   kind: ApiClientErrorKind;

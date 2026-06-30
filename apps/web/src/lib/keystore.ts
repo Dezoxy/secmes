@@ -571,8 +571,7 @@ export class DeviceKeystore {
       // is still at epoch N; promoting would strand the device at a phantom epoch. `verifyCommitExists`
       // (passed by the production caller) guards against this by confirming the slot exists on the server.
       const pendingRec = (await this.db.get(PENDING_STORE, rec.conversationId)) as
-        | StoredPendingCommit
-        | undefined;
+        StoredPendingCommit | undefined;
       if (
         pendingRec &&
         pendingRec.identity === identity &&
@@ -996,8 +995,7 @@ export class DeviceKeystore {
    */
   async loadVerifiedPeer(peerUserId: string, sessionKey: CryptoKey): Promise<string[] | null> {
     const rec = (await this.db.get(VERIFIED_PEERS_STORE, peerUserId)) as
-      | StoredVerifiedPeer
-      | undefined;
+      StoredVerifiedPeer | undefined;
     if (!rec) return null;
     try {
       const bytes = await openWithKey(sessionKey, rec.sealed, verifiedPeersAad(peerUserId));

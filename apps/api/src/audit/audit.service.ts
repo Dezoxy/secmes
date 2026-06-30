@@ -41,10 +41,7 @@ export interface PrivacySettingsUpdateMeta {
 }
 
 export type AuditMetadata =
-  | LookupUserMeta
-  | ProfileUpdateMeta
-  | FriendRequestMeta
-  | PrivacySettingsUpdateMeta;
+  LookupUserMeta | ProfileUpdateMeta | FriendRequestMeta | PrivacySettingsUpdateMeta;
 
 export interface AuditEventInput {
   eventType: string;

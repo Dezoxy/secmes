@@ -7,9 +7,7 @@ export interface TelemetryEvent {
 }
 
 export type TelemetryValidationErrorKind =
-  | 'invalid-name'
-  | 'sensitive-metadata'
-  | 'unsupported-metadata';
+  'invalid-name' | 'sensitive-metadata' | 'unsupported-metadata';
 
 export interface TelemetryValidationError {
   kind: TelemetryValidationErrorKind;
@@ -17,8 +15,7 @@ export interface TelemetryValidationError {
 }
 
 export type TelemetryEventResult =
-  | { ok: true; event: TelemetryEvent }
-  | { ok: false; error: TelemetryValidationError };
+  { ok: true; event: TelemetryEvent } | { ok: false; error: TelemetryValidationError };
 
 export type TelemetryMetadataInput = Record<string, unknown>;
 

@@ -42,8 +42,7 @@ interface PrfExtensionOutput {
 }
 
 type CeremonyOptions =
-  | PublicKeyCredentialCreationOptionsJSON
-  | PublicKeyCredentialRequestOptionsJSON;
+  PublicKeyCredentialCreationOptionsJSON | PublicKeyCredentialRequestOptionsJSON;
 
 /**
  * Inject the fixed PRF eval salt (as raw bytes) into the options the server returned, immediately before the

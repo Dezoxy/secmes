@@ -42,9 +42,7 @@ export default function ChatScreen() {
   const setNavVisible = useSetNavVisible();
   const location = useLocation();
   const locationState = location.state as
-    | { selectedId?: string; startArgusId?: string }
-    | null
-    | undefined;
+    { selectedId?: string; startArgusId?: string } | null | undefined;
 
   const {
     conversations,
