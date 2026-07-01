@@ -1,3 +1,12 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+
+# Supply-chain hardening: delay installing newly-published package versions and lock
+# down subdependency/downgrade behavior. NOTE: blockExoticSubdeps and trustPolicy
+# require pnpm >=10.26.0 / >=10.21.0; minimumReleaseAge requires pnpm >=10.16.0. This
+# repo is pinned to pnpm 9.12.0 (see package.json "packageManager"), so pnpm currently
+# ignores these keys — they are inert until pnpm is upgraded (tracked separately).
+blockExoticSubdeps: true
+minimumReleaseAge: 10080 # minutes = 7 days
+trustPolicy: no-downgrade
