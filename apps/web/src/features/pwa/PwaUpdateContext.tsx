@@ -1,12 +1,7 @@
 import { createContext, useContext, type ReactNode } from 'react';
 
 export type PwaUpdateStatus =
-  | 'idle'
-  | 'checking'
-  | 'available'
-  | 'up-to-date'
-  | 'unsupported'
-  | 'error';
+  'idle' | 'checking' | 'available' | 'up-to-date' | 'unsupported' | 'error';
 
 export interface PwaUpdateContextValue {
   canCheckForUpdate: boolean;
