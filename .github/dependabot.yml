@@ -9,6 +9,8 @@ updates:
     schedule:
       interval: 'weekly'
       day: 'monday'
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 8
     labels: ['dependencies']
     commit-message:
@@ -26,6 +28,8 @@ updates:
     schedule:
       interval: 'weekly'
       day: 'monday'
+    cooldown:
+      default-days: 7
     labels: ['dependencies']
     commit-message:
       prefix: 'ci(deps)'
@@ -39,6 +43,8 @@ updates:
     schedule:
       interval: 'weekly'
       day: 'monday'
+    cooldown:
+      default-days: 7
     labels: ['dependencies']
     commit-message:
       prefix: 'chore(infra-deps)'
@@ -49,6 +55,8 @@ updates:
     schedule:
       interval: 'weekly'
       day: 'monday'
+    cooldown:
+      default-days: 7
     labels: ['dependencies']
     commit-message:
       prefix: 'chore(docker-deps)'
@@ -59,6 +67,8 @@ updates:
     schedule:
       interval: 'weekly'
       day: 'monday'
+    cooldown:
+      default-days: 7
     labels: ['dependencies']
     commit-message:
       prefix: 'chore(docker-deps)'
