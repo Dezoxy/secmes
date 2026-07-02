@@ -5,7 +5,7 @@
   "license": "UNLICENSED",
   "packageManager": "pnpm@11.9.0",
   "engines": {
-    "node": "^20.19.0 || ^22.13.0 || >=24"
+    "node": "^22.13.0 || >=24"
   },
   "scripts": {
     "build": "pnpm -r build",
