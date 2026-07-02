@@ -2,11 +2,135 @@ packages:
   - 'apps/*'
   - 'packages/*'
 
-# Supply-chain hardening: delay installing newly-published package versions and lock
-# down subdependency/downgrade behavior. NOTE: blockExoticSubdeps and trustPolicy
-# require pnpm >=10.26.0 / >=10.21.0; minimumReleaseAge requires pnpm >=10.16.0. This
-# repo is pinned to pnpm 9.12.0 (see package.json "packageManager"), so pnpm currently
-# ignores these keys — they are inert until pnpm is upgraded (tracked separately).
+# Moved from package.json's "pnpm.overrides" field — pnpm >=11 no longer reads that field.
+overrides:
+  esbuild: '^0.28.1'
+  js-yaml: '^4.2.0'
+  multer: '^2.2.0'
+  '@opentelemetry/core': '^2.8.0'
+  protobufjs: '^8.6.0'
+
+# Moved from .npmrc's "engine-strict" — pnpm >=11 only reads auth/registry settings from
+# .npmrc, everything else must live here. Fails `pnpm install` outright on an unsupported
+# Node version instead of warning, so the engines.node floor (ESLint 10) is actually enforced.
+engineStrict: true
+
+# Supply-chain hardening: delay installing newly-published package versions, block
+# transitive deps pulled from non-standard sources, and reject packages whose trust
+# evidence (npm provenance) has decreased since an earlier release. Live as of the pnpm
+# 11.9.0 upgrade (was inert under the previous pnpm 9.12.0 pin — these need pnpm
+# >=10.16.0 / >=10.21.0 / >=10.26.0).
 blockExoticSubdeps: true
 minimumReleaseAge: 10080 # minutes = 7 days
 trustPolicy: no-downgrade
+# trustPolicy compares a package's CURRENT release against its entire publish history, not
+# just its current major line — so a still-maintained old major that predates npm's (opt-in,
+# unevenly adopted) provenance feature trips it even though nothing changed. All 3 verified
+# individually against the npm registry during migration; none is an actual compromise:
+trustPolicyExclude:
+  # 4.0.2/4.0.3 (Dec 2024) dropped the provenance that 4.0.0/4.0.1 had — a maintainer CI
+  # change over a year ago, not a takeover (one of the most widely-depended-on packages in
+  # the ecosystem; a compromise wouldn't have gone unnoticed this long). Dev-only,
+  # transitive via @nestjs/cli's file watcher — never ships to production.
+  - 'chokidar@4.0.3'
+  # workbox-build's own declared dependency (`^3.0.0-pre1`, not something we chose) — a
+  # maintained fork of surma/rollup-plugin-off-main-thread, whose original author
+  # deprecated it in favor of GitHub's registry. Build-time only (PWA service worker);
+  # already present before this upgrade, just never checked until trustPolicy went live.
+  - '@trickfilm400/rollup-plugin-off-main-thread@3.0.0-pre1'
+  # 6.3.1 (Jul 2023) predates provenance entirely; only semver's 7.x line ever adopted it.
+  # Owned by the official npm-cli-ops org — as foundational and low-risk as an npm package
+  # gets.
+  - 'semver@6.3.1'
+
+# Populated after `pnpm install` reported which dependencies' lifecycle scripts it skipped
+# (pnpm >=10 blocks build scripts by default unless explicitly allowed).
+allowBuilds:
+  # Transitive dep of @pyroscope/nodejs (apps/api's observability/profiling.ts) — compiles
+  # a real native addon for CPU profiling. Needed.
+  '@datadog/pprof': true
+  # Pure install-time telemetry with no functional purpose for the packages that pull it
+  # in (phones home to the Scarf analytics service) — blocked, consistent with this repo
+  # being privacy-first end-to-end.
+  '@scarf/scarf': false
+  # Resolves/verifies its platform-specific prebuilt N-API binary; devDependency used by
+  # apps/api for fast transforms. Needed.
+  '@swc/core': true
+  esbuild: true
+  # This repo's own git-hooks manager — its postinstall is what runs `lefthook install`
+  # to wire up pre-commit/pre-push. Needed for the hooks to exist at all.
+  lefthook: true
+
+# Kept strict (the default): a missing-old-enough-version is a hard `pnpm install` failure
+# rather than a silent fallback, so any future "nothing old enough exists" case forces a
+# deliberate, reviewed addition here instead of quietly weakening the age gate for
+# everything. The entries below are the packages that were at their current, very recently
+# published version at the time of the pnpm 9->11 upgrade (each already ships in the
+# existing, already-in-production lockfile) — not new adoptions made because of this change.
+minimumReleaseAgeExclude:
+  - '@aws-sdk/checksums@3.1000.9'
+  - '@aws-sdk/client-s3@3.1076.0'
+  - '@aws-sdk/core@3.974.24'
+  - '@aws-sdk/credential-provider-env@3.972.50'
+  - '@aws-sdk/credential-provider-http@3.972.52'
+  - '@aws-sdk/credential-provider-ini@3.972.57'
+  - '@aws-sdk/credential-provider-login@3.972.56'
+  - '@aws-sdk/credential-provider-node@3.972.59'
+  - '@aws-sdk/credential-provider-process@3.972.50'
+  - '@aws-sdk/credential-provider-sso@3.972.56'
+  - '@aws-sdk/credential-provider-web-identity@3.972.56'
+  - '@aws-sdk/middleware-flexible-checksums@3.974.34'
+  - '@aws-sdk/middleware-sdk-s3@3.972.55'
+  - '@aws-sdk/nested-clients@3.997.24'
+  - '@aws-sdk/s3-request-presigner@3.1076.0'
+  - '@aws-sdk/signature-v4-multi-region@3.996.36'
+  - '@aws-sdk/token-providers@3.1076.0'
+  - '@aws-sdk/types@3.973.14'
+  - '@aws-sdk/xml-builder@3.972.32'
+  - '@nestjs/swagger@11.4.5'
+  - '@sentry/core@10.62.0'
+  - '@sentry/node-core@10.62.0'
+  - '@sentry/node@10.62.0'
+  - '@sentry/opentelemetry@10.62.0'
+  - '@sentry/server-utils@10.62.0'
+  - '@smithy/core@3.27.0'
+  - '@smithy/credential-provider-imds@4.4.3'
+  - '@smithy/fetch-http-handler@5.6.0'
+  - '@smithy/node-http-handler@4.9.0'
+  - '@smithy/signature-v4@5.5.3'
+  - '@tailwindcss/node@4.3.2'
+  - '@tailwindcss/oxide-android-arm64@4.3.2'
+  - '@tailwindcss/oxide-darwin-arm64@4.3.2'
+  - '@tailwindcss/oxide-darwin-x64@4.3.2'
+  - '@tailwindcss/oxide-freebsd-x64@4.3.2'
+  - '@tailwindcss/oxide-linux-arm-gnueabihf@4.3.2'
+  - '@tailwindcss/oxide-linux-arm64-gnu@4.3.2'
+  - '@tailwindcss/oxide-linux-arm64-musl@4.3.2'
+  - '@tailwindcss/oxide-linux-x64-gnu@4.3.2'
+  - '@tailwindcss/oxide-linux-x64-musl@4.3.2'
+  - '@tailwindcss/oxide-wasm32-wasi@4.3.2'
+  - '@tailwindcss/oxide-win32-arm64-msvc@4.3.2'
+  - '@tailwindcss/oxide-win32-x64-msvc@4.3.2'
+  - '@tailwindcss/oxide@4.3.2'
+  - '@tailwindcss/vite@4.3.2'
+  - '@types/node@26.0.1'
+  - '@typescript-eslint/eslint-plugin@8.62.1'
+  - '@typescript-eslint/parser@8.62.1'
+  - '@typescript-eslint/project-service@8.62.1'
+  - '@typescript-eslint/scope-manager@8.62.1'
+  - '@typescript-eslint/tsconfig-utils@8.62.1'
+  - '@typescript-eslint/type-utils@8.62.1'
+  - '@typescript-eslint/types@8.62.1'
+  - '@typescript-eslint/typescript-estree@8.62.1'
+  - '@typescript-eslint/utils@8.62.1'
+  - '@typescript-eslint/visitor-keys@8.62.1'
+  - eslint@10.6.0
+  - lucide-react@1.22.0
+  - postcss@8.5.16
+  - prettier@3.9.3
+  - react-router-dom@7.18.1
+  - react-router@7.18.1
+  - stripe@22.3.0
+  - tailwindcss@4.3.2
+  - typescript-eslint@8.62.1
+  - vite@8.1.1
