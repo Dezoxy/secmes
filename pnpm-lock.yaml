@@ -3,6 +3,7 @@ lockfileVersion: '9.0'
 settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
+  injectWorkspacePackages: true
 
 overrides:
   esbuild: ^0.28.1
@@ -8787,7 +8788,7 @@ snapshots:
 
   '@types/pg@8.15.6':
     dependencies:
-      '@types/node': 26.0.0
+      '@types/node': 26.0.1
       pg-protocol: 1.15.0
       pg-types: 2.2.0
 

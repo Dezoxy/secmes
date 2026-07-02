@@ -2,6 +2,14 @@ packages:
   - 'apps/*'
   - 'packages/*'
 
+# pnpm >=10's `pnpm deploy` (apps/api/Dockerfile's --prod deploy step, which produces the
+# self-contained runtime image) now requires this explicitly — without it, deploy refuses
+# to run against a workspace at all (ERR_PNPM_DEPLOY_NONINJECTED_WORKSPACE). This is also
+# the behavior that Dockerfile step already wanted: workspace deps (@argus/crypto) copied
+# in as real files, not symlinked, so they survive the multi-stage COPY into the runtime
+# image — injected packages is precisely that, not a legacy fallback.
+injectWorkspacePackages: true
+
 # Moved from package.json's "pnpm.overrides" field — pnpm >=11 no longer reads that field.
 overrides:
   esbuild: '^0.28.1'
