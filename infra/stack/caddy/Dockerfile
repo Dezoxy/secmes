@@ -13,7 +13,7 @@ ENV CI=true
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 # pnpm via npm, pinned to the repo's packageManager. corepack is unbundled in newer Node base images
 # (node:26 has no corepack → `corepack enable` exits 127), so don't rely on it.
-RUN npm install -g pnpm@9.12.0
+RUN npm install -g pnpm@11.9.0
 WORKDIR /repo
 # Whole-repo copy (a root .dockerignore prunes node_modules/.git/dist) so every workspace manifest the
 # lockfile references is present. Full install (not filtered): the root `prepare` lifecycle builds every

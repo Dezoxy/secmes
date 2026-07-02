@@ -3,9 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "license": "UNLICENSED",
-  "packageManager": "pnpm@9.12.0",
+  "packageManager": "pnpm@11.9.0",
   "engines": {
-    "node": "^20.19.0 || ^22.13.0 || >=24"
+    "node": "^22.13.0 || >=24"
   },
   "scripts": {
     "build": "pnpm -r build",
@@ -19,15 +19,6 @@
     "format:check": "prettier --check .",
     "comment:prepare": "build:packages emits packages/*/dist so consumers (apps/web) can typecheck against the libs' .d.ts — CI typechecks before building and dist is gitignored.",
     "prepare": "lefthook install || true && pnpm run build:packages"
-  },
-  "pnpm": {
-    "overrides": {
-      "esbuild": "^0.28.1",
-      "js-yaml": "^4.2.0",
-      "multer": "^2.2.0",
-      "@opentelemetry/core": "^2.8.0",
-      "protobufjs": "^8.6.0"
-    }
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
