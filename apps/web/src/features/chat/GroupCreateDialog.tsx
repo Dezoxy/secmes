@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { Check, Search, UserPlus, Users, X } from 'lucide-react';
 import type { Conversation as MlsGroup } from '@argus/crypto';
 import { lookupUserByArgusId, type Friend, type UserLookupResult } from '../../lib/api';
@@ -102,34 +103,32 @@ export function GroupCreateDialog({
   );
 
   const handleAddFriend = (friend: Friend): void => {
-    // Same two-layer approach as handleLookup below: an outer best-effort check against the
-    // render-time `selected` closure gives instant UI feedback, while the functional updater is
-    // the authoritative, race-safe guard against a concurrent Argus-ID lookup adding the same
-    // user or pushing the list over capacity between this render and the update committing.
-    if (selected.some((s) => s.userId === friend.userId)) {
-      setConfirmingFriendId(null);
-      return;
-    }
-    if (selected.length >= MAX_GROUP_MEMBERS) {
-      setConfirmingFriendId(null);
-      setLookupError(`Maximum ${MAX_GROUP_MEMBERS} members reached.`);
-      return;
-    }
-    setSelected((prev) =>
-      prev.some((s) => s.userId === friend.userId) || prev.length >= MAX_GROUP_MEMBERS
-        ? prev
-        : [
-            ...prev,
-            {
-              userId: friend.userId,
-              argusId: friend.argusId,
-              displayName: friend.displayName,
-              avatarSeed: friend.avatarSeed,
-            },
-          ],
-    );
+    // flushSync forces the functional updater below to run — and this synchronous call to
+    // return — only once React has actually applied it, so `atCapacity` reliably reflects
+    // what the updater saw even if a concurrent Argus-ID lookup changed `selected` first.
+    // A plain closure flag read right after a bare setSelected(...) can't do this: that updater
+    // only runs later, during React's own render pass, not synchronously at the call site.
+    let atCapacity = false;
+    flushSync(() => {
+      setSelected((prev) => {
+        if (prev.some((s) => s.userId === friend.userId)) return prev;
+        if (prev.length >= MAX_GROUP_MEMBERS) {
+          atCapacity = true;
+          return prev;
+        }
+        return [
+          ...prev,
+          {
+            userId: friend.userId,
+            argusId: friend.argusId,
+            displayName: friend.displayName,
+            avatarSeed: friend.avatarSeed,
+          },
+        ];
+      });
+    });
     setConfirmingFriendId(null);
-    setLookupError(null);
+    setLookupError(atCapacity ? `Maximum ${MAX_GROUP_MEMBERS} members reached.` : null);
   };
 
   const handleLookup = (): void => {

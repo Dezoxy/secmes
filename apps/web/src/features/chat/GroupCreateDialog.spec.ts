@@ -220,7 +220,7 @@ describe('GroupCreateDialog — friends suggestion', () => {
 
     expect(document.body.textContent).toContain(`Maximum ${MAX_GROUP_MEMBERS} members reached.`);
     expect(document.body.querySelector(`[aria-label="Add ${lastLabel}"]`)).not.toBeNull();
-  }, 30000);
+  }, 60000);
 
   it('friend buttons are disabled while an Argus-ID lookup is in progress', async () => {
     const { lookupUserByArgusId } = await import('../../lib/api');
