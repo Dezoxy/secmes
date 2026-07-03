@@ -102,24 +102,22 @@ export function GroupCreateDialog({
   );
 
   const handleAddFriend = (friend: Friend): void => {
-    if (selected.length >= MAX_GROUP_MEMBERS) {
-      setLookupError(`Maximum ${MAX_GROUP_MEMBERS} members reached.`);
-      setConfirmingFriendId(null);
-      return;
-    }
-    setSelected((prev) =>
-      prev.some((u) => u.userId === friend.userId)
-        ? prev
-        : [
-            ...prev,
-            {
-              userId: friend.userId,
-              argusId: friend.argusId,
-              displayName: friend.displayName,
-              avatarSeed: friend.avatarSeed,
-            },
-          ],
-    );
+    setSelected((prev) => {
+      if (prev.some((s) => s.userId === friend.userId)) return prev;
+      if (prev.length >= MAX_GROUP_MEMBERS) {
+        setLookupError(`Maximum ${MAX_GROUP_MEMBERS} members reached.`);
+        return prev;
+      }
+      return [
+        ...prev,
+        {
+          userId: friend.userId,
+          argusId: friend.argusId,
+          displayName: friend.displayName,
+          avatarSeed: friend.avatarSeed,
+        },
+      ];
+    });
     setConfirmingFriendId(null);
     setLookupError(null);
   };
