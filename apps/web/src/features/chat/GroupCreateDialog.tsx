@@ -102,22 +102,32 @@ export function GroupCreateDialog({
   );
 
   const handleAddFriend = (friend: Friend): void => {
-    setSelected((prev) => {
-      if (prev.some((s) => s.userId === friend.userId)) return prev;
-      if (prev.length >= MAX_GROUP_MEMBERS) {
-        setLookupError(`Maximum ${MAX_GROUP_MEMBERS} members reached.`);
-        return prev;
-      }
-      return [
-        ...prev,
-        {
-          userId: friend.userId,
-          argusId: friend.argusId,
-          displayName: friend.displayName,
-          avatarSeed: friend.avatarSeed,
-        },
-      ];
-    });
+    // Same two-layer approach as handleLookup below: an outer best-effort check against the
+    // render-time `selected` closure gives instant UI feedback, while the functional updater is
+    // the authoritative, race-safe guard against a concurrent Argus-ID lookup adding the same
+    // user or pushing the list over capacity between this render and the update committing.
+    if (selected.some((s) => s.userId === friend.userId)) {
+      setConfirmingFriendId(null);
+      return;
+    }
+    if (selected.length >= MAX_GROUP_MEMBERS) {
+      setConfirmingFriendId(null);
+      setLookupError(`Maximum ${MAX_GROUP_MEMBERS} members reached.`);
+      return;
+    }
+    setSelected((prev) =>
+      prev.some((s) => s.userId === friend.userId) || prev.length >= MAX_GROUP_MEMBERS
+        ? prev
+        : [
+            ...prev,
+            {
+              userId: friend.userId,
+              argusId: friend.argusId,
+              displayName: friend.displayName,
+              avatarSeed: friend.avatarSeed,
+            },
+          ],
+    );
     setConfirmingFriendId(null);
     setLookupError(null);
   };
@@ -137,6 +147,9 @@ export function GroupCreateDialog({
           setLookupError('That user is already a member.');
           return;
         }
+        // Best-effort UX check against the closed-over `selected` — may be stale if state changed
+        // while this lookup was in flight. The functional updater below is the actual guard against
+        // a race producing a duplicate or over-capacity entry.
         if (selected.some((u) => u.userId === result.userId)) {
           setLookupError('Already added.');
           return;

@@ -9,6 +9,9 @@ import type { Friend } from '../../lib/api';
 import type { GroupConversationManager } from '../../lib/conversations';
 import type { MessagingDeps } from '../../lib/messaging';
 
+// Mirrors MAX_GROUP_MEMBERS in GroupCreateDialog.tsx.
+const MAX_GROUP_MEMBERS = 31;
+
 // Module-level mock so the lookup test can keep the promise pending.
 vi.mock('../../lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/api')>();
@@ -52,10 +55,15 @@ describe('GroupCreateDialog — friends suggestion', () => {
   let container: HTMLElement;
   let root: Root;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
+
+    // vi.resetAllMocks() (in afterEach) wipes the mockResolvedValue set by vi.mock's factory —
+    // re-establish the default here so tests that don't override it still get a resolved `null`.
+    const { lookupUserByArgusId } = await import('../../lib/api');
+    vi.mocked(lookupUserByArgusId).mockResolvedValue(null);
 
     // jsdom doesn't implement matchMedia; stub it so Modal.tsx doesn't throw.
     Object.defineProperty(window, 'matchMedia', {
@@ -80,7 +88,9 @@ describe('GroupCreateDialog — friends suggestion', () => {
       root.unmount();
     });
     container.remove();
-    vi.restoreAllMocks();
+    // resetAllMocks (not restoreAllMocks) so the vi.mock factory's fn() stays a mock — restoring
+    // would strip its implementation entirely rather than reset it to the default above.
+    vi.resetAllMocks();
   });
 
   function render(opts: {
@@ -170,6 +180,47 @@ describe('GroupCreateDialog — friends suggestion', () => {
     expect(document.body.querySelector('[aria-label="Add Alice"]')).not.toBeNull();
     expect(document.body.textContent).not.toContain(ALICE.argusId);
   });
+
+  it('shows a capacity error and does not add the friend once the group is full', () => {
+    const manyFriends: Friend[] = Array.from({ length: MAX_GROUP_MEMBERS + 1 }, (_, i) => ({
+      userId: `friend-${i}-0000-4000-8000-000000000000`,
+      argusId: `argus-friend-${i}-000000-fill`,
+      displayName: `Friend ${i}`,
+      avatarSeed: null,
+      since: NOW,
+    }));
+
+    render({ friends: manyFriends });
+
+    // These click handlers are synchronous (no promises), so a plain (non-async) act() per
+    // click is enough — avoids 62 needless microtask ticks across the fill loop.
+    for (let i = 0; i < MAX_GROUP_MEMBERS; i++) {
+      const label = `Friend ${i}`;
+      act(() => {
+        (document.body.querySelector(`[aria-label="Add ${label}"]`) as HTMLButtonElement).click();
+      });
+      act(() => {
+        (
+          document.body.querySelector(`[aria-label="Confirm add ${label}"]`) as HTMLButtonElement
+        ).click();
+      });
+    }
+
+    expect(document.body.textContent).toContain(`${MAX_GROUP_MEMBERS}/${MAX_GROUP_MEMBERS} added`);
+
+    const lastLabel = `Friend ${MAX_GROUP_MEMBERS}`;
+    act(() => {
+      (document.body.querySelector(`[aria-label="Add ${lastLabel}"]`) as HTMLButtonElement).click();
+    });
+    act(() => {
+      (
+        document.body.querySelector(`[aria-label="Confirm add ${lastLabel}"]`) as HTMLButtonElement
+      ).click();
+    });
+
+    expect(document.body.textContent).toContain(`Maximum ${MAX_GROUP_MEMBERS} members reached.`);
+    expect(document.body.querySelector(`[aria-label="Add ${lastLabel}"]`)).not.toBeNull();
+  }, 30000);
 
   it('friend buttons are disabled while an Argus-ID lookup is in progress', async () => {
     const { lookupUserByArgusId } = await import('../../lib/api');
