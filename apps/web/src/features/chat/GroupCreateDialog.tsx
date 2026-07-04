@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { Check, Search, UserPlus, Users, X } from 'lucide-react';
 import type { Conversation as MlsGroup } from '@argus/crypto';
 import { lookupUserByArgusId, type Friend, type UserLookupResult } from '../../lib/api';
@@ -102,26 +103,32 @@ export function GroupCreateDialog({
   );
 
   const handleAddFriend = (friend: Friend): void => {
-    if (selected.length >= MAX_GROUP_MEMBERS) {
-      setLookupError(`Maximum ${MAX_GROUP_MEMBERS} members reached.`);
-      setConfirmingFriendId(null);
-      return;
-    }
-    setSelected((prev) =>
-      prev.some((u) => u.userId === friend.userId)
-        ? prev
-        : [
-            ...prev,
-            {
-              userId: friend.userId,
-              argusId: friend.argusId,
-              displayName: friend.displayName,
-              avatarSeed: friend.avatarSeed,
-            },
-          ],
-    );
+    // flushSync forces the functional updater below to run — and this synchronous call to
+    // return — only once React has actually applied it, so `atCapacity` reliably reflects
+    // what the updater saw even if a concurrent Argus-ID lookup changed `selected` first.
+    // A plain closure flag read right after a bare setSelected(...) can't do this: that updater
+    // only runs later, during React's own render pass, not synchronously at the call site.
+    let atCapacity = false;
+    flushSync(() => {
+      setSelected((prev) => {
+        if (prev.some((s) => s.userId === friend.userId)) return prev;
+        if (prev.length >= MAX_GROUP_MEMBERS) {
+          atCapacity = true;
+          return prev;
+        }
+        return [
+          ...prev,
+          {
+            userId: friend.userId,
+            argusId: friend.argusId,
+            displayName: friend.displayName,
+            avatarSeed: friend.avatarSeed,
+          },
+        ];
+      });
+    });
     setConfirmingFriendId(null);
-    setLookupError(null);
+    setLookupError(atCapacity ? `Maximum ${MAX_GROUP_MEMBERS} members reached.` : null);
   };
 
   const handleLookup = (): void => {
@@ -139,6 +146,9 @@ export function GroupCreateDialog({
           setLookupError('That user is already a member.');
           return;
         }
+        // Best-effort UX check against the closed-over `selected` — may be stale if state changed
+        // while this lookup was in flight. The functional updater below is the actual guard against
+        // a race producing a duplicate or over-capacity entry.
         if (selected.some((u) => u.userId === result.userId)) {
           setLookupError('Already added.');
           return;
