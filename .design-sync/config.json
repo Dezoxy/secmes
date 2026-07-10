@@ -1,0 +1,62 @@
+{
+  "projectId": "278be65a-9971-47f3-9d71-6979385d8cde",
+  "pkg": "@argus/web",
+  "globalName": "ArgusDS",
+  "shape": "package",
+  "entry": ".design-sync/synth/entry.tsx",
+  "cssEntry": "styles.compiled.css",
+  "extraEntries": ["react-router-dom", "../../apps/web/src/features/ui/ToastContext.tsx"],
+  "guidelinesGlob": [],
+  "readmeHeader": ".design-sync/conventions.md",
+  "provider": {
+    "component": "MemoryRouter",
+    "props": { "initialEntries": ["/chat"] },
+    "inner": { "component": "ToastProvider" }
+  },
+  "overrides": {
+    "Modal": { "cardMode": "single", "viewport": "420x560" },
+    "ToastProvider": { "cardMode": "single", "viewport": "420x320" },
+    "BottomNav": { "cardMode": "column" },
+    "EmptyState": { "cardMode": "column" },
+    "ErrorState": { "cardMode": "column" },
+    "LoadingState": { "cardMode": "column" },
+    "SettingsRow": { "cardMode": "column" },
+    "V2CommandBar": { "cardMode": "column" }
+  },
+  "componentSrcMap": {
+    "Avatar": "../../apps/web/src/features/ui/Avatar.tsx",
+    "BottomNav": "../../apps/web/src/features/ui/BottomNav.tsx",
+    "Button": "../../apps/web/src/features/ui/Button.tsx",
+    "IconButton": "../../apps/web/src/features/ui/IconButton.tsx",
+    "Modal": "../../apps/web/src/features/ui/Modal.tsx",
+    "SettingsRow": "../../apps/web/src/features/ui/SettingsRow.tsx",
+    "EmptyState": "../../apps/web/src/features/ui/StateBlock.tsx",
+    "ErrorState": "../../apps/web/src/features/ui/StateBlock.tsx",
+    "LoadingState": "../../apps/web/src/features/ui/StateBlock.tsx",
+    "ReconnectBanner": "../../apps/web/src/features/ui/StateBlock.tsx",
+    "StateBlock": "../../apps/web/src/features/ui/StateBlock.tsx",
+    "ToastProvider": "../../apps/web/src/features/ui/ToastProvider.tsx",
+    "V2Badge": "../../apps/web/src/v2/shell/V2Shell.tsx",
+    "V2CommandBar": "../../apps/web/src/v2/shell/V2Shell.tsx",
+    "V2AsidePanel": "../../apps/web/src/v2/shell/V2Shell.tsx",
+    "V2FactRow": "../../apps/web/src/v2/shell/V2Shell.tsx"
+  },
+  "docsMap": {
+    "Avatar": "docs/primitives.md",
+    "BottomNav": "docs/primitives.md",
+    "Button": "docs/primitives.md",
+    "IconButton": "docs/primitives.md",
+    "Modal": "docs/primitives.md",
+    "SettingsRow": "docs/primitives.md",
+    "EmptyState": "docs/primitives.md",
+    "ErrorState": "docs/primitives.md",
+    "LoadingState": "docs/primitives.md",
+    "ReconnectBanner": "docs/primitives.md",
+    "StateBlock": "docs/primitives.md",
+    "ToastProvider": "docs/primitives.md",
+    "V2Badge": "docs/v2-composites.md",
+    "V2CommandBar": "docs/v2-composites.md",
+    "V2AsidePanel": "docs/v2-composites.md",
+    "V2FactRow": "docs/v2-composites.md"
+  }
+}
