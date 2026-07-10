@@ -1,0 +1,9 @@
+/* Static build entry for /design-sync. Real Tailwind v4 entry (`@import`s the app's own
+   index.css so the @theme token scale + :root brand vars travel verbatim — no hand-copying,
+   no drift) plus explicit @source directives for the scoped components' class strings, since
+   this file doesn't live next to them and v4's default auto-detection walks from here. */
+@import '../../apps/web/src/index.css';
+
+@source '../../apps/web/src/features/ui';
+@source '../../apps/web/src/v2/shell/V2Shell.tsx';
+@source '../../apps/web/src/v2/design/tokens.ts';
