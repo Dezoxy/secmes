@@ -7,7 +7,7 @@
 # A root .dockerignore prunes node_modules/.git/secrets from the context.
 
 # ---- build (full workspace) ----
-FROM node:24-alpine AS build
+FROM node:25-alpine AS build
 ENV CI=true
 # pnpm via npm, pinned to the repo's packageManager. corepack is unbundled in newer Node base images,
 # so don't rely on `corepack enable` (keeps this stable across Node base-image bumps).
@@ -23,7 +23,7 @@ RUN pnpm --filter @argus/api build
 RUN pnpm --filter @argus/api --prod deploy /app
 
 # ---- runtime ----
-FROM node:24-alpine AS runtime
+FROM node:25-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 # Patch OS CVEs, add the healthcheck wget, and DROP npm (+npx) from the runtime. The runtime only runs
